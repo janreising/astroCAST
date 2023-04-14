@@ -1,0 +1,12 @@
+[project]
+name = "astroCAST"
+description = "package to analyze calcium flourescence events in astrocytes"
+version = "0.2.0"
+author = "Jan Philipp Reising"
+author_email = "jan.reising@ki.se"
+dependencies = ["numpy"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
