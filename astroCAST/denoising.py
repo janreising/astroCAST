@@ -1,6 +1,8 @@
 import logging
 import os
 import glob
+import random
+from pathlib import Path
 
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 import tensorflow as tf
@@ -18,8 +20,16 @@ from keras import mixed_precision
 import numpy as np
 import h5py as h5
 import tifffile as tiff
+from skimage.transform import resize
+import pandas as pd
 
-class Generator(keras.utils.Sequence):
+# TODO combine generators into one class with combined interface
+
+class FullFrameGenerator(keras.utils.Sequence):
+
+    """ Takes a single .h5 or tiff file and generates preprocessed training batches.
+
+    """
 
     def __init__(self, pre_post_frame, batch_size, steps_per_epoch,
                  file_path, loc=None,
@@ -282,6 +292,281 @@ class Generator(keras.utils.Sequence):
 
         return shuffle_indexes
 
+class SubFrameGenerator(tf.keras.utils.Sequence):
+
+    """ Takes a single or multiple paths to a .h5 file containing video data in (Z, X, Y) format and generates
+        batches of preprocessed data of 'input_size'.
+    """
+
+    def __init__(self, paths,
+                 batch_size,
+                 input_size=(100, 100),
+                 pre_post_frame=5, gap_frames=0, z_steps=0.1, z_select=None,
+                 allowed_rotation=[0], allowed_flip=[-1],
+                 random_offset=False, add_noise=False, drop_frame_probability=None,
+                 extend_z=-1, max_per_file=None,
+                 overlap=None,
+                 shuffle=True, normalize=None,
+                 loc="data/",
+                 output_size=None, cache_results=False):
+
+        if type(paths) != list:
+            paths = [paths]
+        self.paths = paths
+        self.loc = loc
+
+        logging.debug(f"data files: {self.paths}")
+        logging.debug(f"data loc: {self.loc}")
+
+        self.batch_size = batch_size
+        self.input_size = input_size
+        self.output_size = output_size
+
+        if type(pre_post_frame) == int:
+            pre_post_frame = (pre_post_frame, pre_post_frame)
+        self.signal_frames = pre_post_frame
+
+        if type(gap_frames) == int:
+            gap_frames = (gap_frames, gap_frames)
+        self.gap_frames = gap_frames
+
+        self.z_steps = z_steps
+        self.z_select = z_select
+        self.max_per_file = max_per_file
+
+        self.allowed_rotation = allowed_rotation
+        self.allowed_flip = allowed_flip
+
+        self.overlap = overlap  # float
+        self.random_offset = random_offset
+        self.extend_z = extend_z
+        self.add_noise = add_noise
+        self.drop_frame_probability = drop_frame_probability
+
+        assert normalize in [None, "normalize", "center", "standardize"], "normalize argument needs be one of: [None, 'normalize', 'center', 'standardize']"
+        self.normalize = normalize
+
+        self.shuffle = shuffle
+        self.n = None
+
+        # get items
+        self.items = self.generate_items()
+
+        # cache
+        self.cache_results = cache_results
+        self.cache = {}
+
+    def generate_items(self):
+
+        # define size of each predictive field of view (X, Y)
+        iw, ih = self.input_size
+
+        if self.overlap is not None:
+            dw = int(iw * self.overlap)
+            dh = int(ih * self.overlap)
+        else:
+            dw = iw
+            dh = ih
+
+        # define prediction length (Z)
+        if type(self.signal_frames) == int:
+            signal_frames = (self.signal_frames, self.signal_frames)
+        else:
+            signal_frames = self.signal_frames
+
+        if type(self.gap_frames) == int:
+            gap_frames = (self.gap_frames, self.gap_frames)
+        else:
+            gap_frames = self.gap_frames
+
+        stack_len = signal_frames[0] + gap_frames[0] + 1 + gap_frames[1] + signal_frames[1]
+        z_steps = max(1, int(self.z_steps * stack_len))
+
+        # randomize input
+        if self.random_offset:
+            x_start = np.random.randint(0, dw)
+            y_start = np.random.randint(0, dh)
+            z_start = np.random.randint(0, stack_len)
+        else:
+            x_start, y_start, z_start = 0, 0, 0
+
+        allowed_rotation = self.allowed_rotation if self.allowed_rotation is not None else [None]
+        allowed_flip = self.allowed_flip if self.allowed_flip is not None else [None]
+
+        # iterate over possible items
+        idx = 0
+        container = []
+        for file in self.paths:
+
+            if type(file) == str:
+                file = Path(file)
+
+            assert file.is_file(), "can't find: {}".format(file)
+
+            if file.suffix == ".h5":
+                with h5.File(file.as_posix(), "r") as f:
+                    data = f[self.loc]
+                    Z, X, Y = data.shape
+
+            elif file.suffix in (".tiff", ".tif"):
+
+                tif = tiff.TiffFile(file.as_posix())
+                Z = len(tif.pages)
+                X, Y = tif.pages[0].shape
+                tif.close()
+            else:
+                raise NotImplementedError(f"filetype is recognized - please provide .h5, .tif or .tiff instead of: {file}")
+
+            if self.z_select is not None:
+                Z0 = max(0, self.z_select[0])
+                Z1 = min(Z, self.z_select[1])
+            else:
+                Z0, Z1 = 0, Z
+
+            zRange =list(range(Z0 + z_start, Z1 - stack_len - z_start, z_steps))
+            xRange = list(range(x_start, X - iw - x_start, dw))
+            yRange = list(range(y_start, Y - ih - y_start, dh))
+
+            if self.shuffle:
+                random.shuffle(zRange)
+                random.shuffle(xRange)
+                random.shuffle(yRange)
+
+            logging.debug(f"file ZXY ranges:\nzrange: {zRange}\nxrange: {xRange}\nyrange: {yRange}")
+
+            per_file_counter = 0
+            for z0 in zRange:
+                z1 = z0 + stack_len
+
+                for x0 in xRange:
+                    x1 = x0 + iw
+
+                    for y0 in yRange:
+                        y1 = y0 + ih
+
+                        if (self.max_per_file is not None) and (per_file_counter > self.max_per_file):
+                            continue
+
+                        rot = random.choice(allowed_rotation)
+                        flip = random.choice(allowed_flip)
+
+                        if (self.drop_frame_probability is not None) and (np.random.random() <= self.drop_frame_probability):
+                            drop_frame = np.random.randint(0, np.sum(signal_frames))
+                        else:
+                            drop_frame = -1
+
+                        container.append(
+                            {"idx": idx, "path": file, "z0": z0, "z1": z1, "x0": x0, "x1": x1, "y0": y0,
+                             "y1": y1, "rot": rot, "flip": flip,
+                             "noise": self.add_noise, "drop_frame": drop_frame, "extend_z": self.extend_z})
+                        idx += 1
+                        per_file_counter += 1
+
+        items = pd.DataFrame(container)
+        logging.debug(f"items: {items}")
+
+        if self.shuffle:
+            items = items.sample(frac=1).reset_index(drop=True)
+
+        items["batch"] = items.idx / self.batch_size
+        items.batch = items.batch.astype(int)
+
+        self.n = len(items)
+
+        return items
+
+    def on_epoch_end(self):
+
+        # called after each epoch
+        if self.shuffle:
+            if self.random_offset:
+                self.items = self.generate_items()
+            else:
+                self.items = self.items.sample(frac=1).reset_index(drop=True)
+
+    def __getitem__(self, index):
+
+        if index in self.cache.keys():
+            return self.cache[index]
+
+        X = []
+        y = []
+        for _, row in self.items[self.items.batch == index].iterrows():
+
+            if row.path.suffix == ".h5":
+                with h5.File(row.path.as_posix(), "r") as f:
+                    data = f[self.loc][row.z0:row.z1, row.x0:row.x1, row.y0:row.y1]
+
+            elif row.path.suffix in (".tif", ".tiff"):
+                data = tiff.imread(row.path.as_posix(), key=range(row.z0, row.z1))
+                data = data[:, row.x0:row.x1, row.y0:row.y1]
+
+            if row.rot != 0:
+
+                data = np.rollaxis(data, 0, 3)
+                data = np.rot90(data, k=row.rot)
+                data = np.rollaxis(data, 2, 0)
+
+            if row.flip != -1:
+                data = np.flip(data, row.flip)
+
+            if row.noise is not None:
+                data = data + np.random.random(data.shape)*row.noise
+
+            sub = 0
+            div = 1
+            if self.normalize is not None:
+
+                if self.normalize == "normalize":
+                    sub = np.min(data)
+                    data = data - sub
+
+                    div = np.max(data)
+                    data = data / div
+
+                elif self.normalize == "center":
+                    sub = np.mean(data)
+                    data = data - sub
+
+                elif self.normalize == "standardize":
+                    sub = np.mean(data)
+                    data = data - sub
+
+                    div = np.std(data)
+                    data = data / div
+
+            if row.drop_frame != -1:
+                data[row.drop_frame, :, :] = np.zeros(data[0, :, :].shape)
+
+            x_indices = list(range(0, self.signal_frames[0])) + list(range(-self.signal_frames[1], 0))
+            X_ = data[x_indices, :, :]
+            X.append(X_)
+
+            y_idx = self.signal_frames[0] + self.gap_frames[0]
+            Y_ = data[y_idx, :, :]
+
+            if (self.output_size is not None) and (self.output_size != Y_.shape):
+                Y_ = resize(Y_, self.output_size)
+
+            y.append(Y_)
+
+        X = np.stack(X)
+        y = np.stack(y)
+
+        X = np.rollaxis(X, 1, 4)
+
+        if self.cache_results:
+            self.cache[index] = (X, y)
+
+        return (X, y)
+
+        # return (X, y)
+        # X: [batch_size, frames, input_height, input_width]
+        # y: [input_height, input_width]
+
+    def __len__(self):
+        return self.n // self.batch_size
+
 class Network:
 
     def __init__(self, train_generator, val_generator=None, learning_rate=0.0001,
@@ -476,10 +761,10 @@ class DeepInterpolate:
 
         # create data generator
         # TODO add arguments
-        data_generator = Generator(pre_post_frame, batch_size, steps_per_epoch=1,
-                                   file_path=input_file, loc=loc, max_frame_summary_stats=1000,
-                                   start_frame=0, end_frame=-1,
-                                   gap_frames=0, total_samples=-1, randomize=False)
+        data_generator = FullFrameGenerator(pre_post_frame, batch_size, steps_per_epoch=1,
+                                            file_path=input_file, loc=loc, max_frame_summary_stats=1000,
+                                            start_frame=0, end_frame=-1,
+                                            gap_frames=0, total_samples=-1, randomize=False)
 
         # load model
         if os.path.isdir(model):
