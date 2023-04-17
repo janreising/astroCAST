@@ -2,9 +2,18 @@ import logging
 import os
 import glob
 
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
+import tensorflow as tf
+
 import keras
 from tensorflow.keras import backend as K
-from tensorflow.keras.models import load_model
+# from tensorflow.keras.models import load_model
+
+from keras.callbacks import EarlyStopping, ModelCheckpoint
+from keras.layers import Input, Conv2D, MaxPooling2D, UpSampling2D, Concatenate, BatchNormalization
+from keras.models import Model, load_model
+from keras.optimizers import Adam
+from keras import mixed_precision
 
 import numpy as np
 import h5py as h5
@@ -13,9 +22,10 @@ import tifffile as tiff
 class Generator(keras.utils.Sequence):
 
     def __init__(self, pre_post_frame, batch_size, steps_per_epoch,
-                 file_path, loc=None, max_frame_summary_stats=1000,
+                 file_path, loc=None,
+                 max_frame_summary_stats=1000, # TODO superseded
                  start_frame=0, end_frame=-1,
-                 pre_post_omission=0, total_samples=-1, randomize=True):
+                 gap_frames=0, total_samples=-1, randomize=True):
 
         """
 
@@ -24,7 +34,7 @@ class Generator(keras.utils.Sequence):
         :param steps_per_epoch:
         :param start_frame:
         :param end_frame: compatlible with negative frames. -1 is the last
-        :param pre_post_omission:
+        :param gap_frames:
         :param total_samples:
         :param randomize:
         """
@@ -38,7 +48,7 @@ class Generator(keras.utils.Sequence):
         self.steps_per_epoch = steps_per_epoch
         self.start_frame = start_frame
         self.end_frame = end_frame
-        self.pre_post_omission = pre_post_omission
+        self.pre_post_omission = gap_frames
         self.total_samples = total_samples
         self.randomize = randomize
 
@@ -272,6 +282,175 @@ class Generator(keras.utils.Sequence):
 
         return shuffle_indexes
 
+class Network:
+
+    def __init__(self, train_generator, val_generator=None, learning_rate=0.0001,
+                 n_stacks=3, kernel=64, batchNormalize=False,
+                 use_cpu=False):
+
+        if use_cpu:
+            tf.config.set_visible_devices([], 'GPU')
+
+        self.train_gen = train_generator
+        self.val_gen = val_generator
+
+        self.model = self.create_unet(n_stacks=n_stacks, kernel=kernel, batchNormalize=batchNormalize)
+
+        opt = Adam(learning_rate=learning_rate)
+        self.model.compile(optimizer=opt, loss=self.mean_squareroot_error,
+                           # metrics=["val_loss", "loss", self.mean_squareroot_error]
+                           )
+
+    def run(self,
+            batch_size=10, num_epochs = 25,
+            patience=3, min_delta=0.005, monitor="val_loss",
+            save_model=None, load_weights=False,
+            verbose=1):
+
+        if save_model is not None and not save_model.is_dir():
+            print("created save dir at: ", save_model)
+            save_model.mkdir()
+
+        callbacks = [
+            EarlyStopping(monitor=monitor, patience=patience, min_delta=min_delta, verbose=verbose),
+        ]
+
+        if save_model is not None:
+            callbacks.append(
+                ModelCheckpoint(
+                    filepath=save_model.joinpath("model-{epoch:02d}-{val_loss:.2f}.hdf5").as_posix(),
+                    # filepath=save_model.joinpath("model-{epoch:02d}.hdf5").as_posix(),
+                save_weights_only=False,
+                monitor=monitor,
+                mode='min',
+                save_best_only=True,))
+
+            if load_weights:
+                print("loading previous weights!")
+                latest_weights = tf.train.latest_checkpoint(save_model)
+                self.model.load_weights(latest_weights)
+
+        history = self.model.fit(self.train_gen,
+                            batch_size=batch_size,
+                            validation_data=self.val_gen,
+                            epochs=num_epochs,
+                            callbacks=callbacks,
+                            shuffle=False,
+                            verbose=verbose)
+
+        # save model
+        if save_model is not None:
+            self.model.save(save_model.joinpath("model.h5").as_posix())
+
+
+        return history
+
+    def get_vanilla_architecture(self, verbose=1):
+
+        input_img = self.train_gen.__getitem__(0)
+        input_window = Input((input_img[0].shape[1:]))
+
+        # encoder
+        # input = 512 x 512 x number_img_in (wide and thin)
+        conv1 = Conv2D(64, (3, 3), activation="relu", padding="same")(input_window)  # 512 x 512 x 32
+        pool1 = MaxPooling2D(pool_size=(2, 2))(conv1)  # 14 x 14 x 32
+        conv2 = Conv2D(128, (3, 3), activation="relu", padding="same")(
+            pool1
+        )  # 256 x 256 x 64
+        pool2 = MaxPooling2D(pool_size=(2, 2))(conv2)  # 7 x 7 x 64#
+        conv3 = Conv2D(256, (3, 3), activation="relu", padding="same")(
+            pool2
+        )  # 128 x 128 x 128 (small and thick)
+
+        # decoder
+        conv4 = Conv2D(256, (3, 3), activation="relu", padding="same")(
+            conv3
+        )  # 128 x 128 x 128
+        up1 = UpSampling2D((2, 2))(conv4)  # 14 x 14 x 128
+
+        conc_up_1 = Concatenate()([up1, conv2])
+        conv5 = Conv2D(128, (3, 3), activation="relu", padding="same")(
+            conc_up_1
+        )  # 256 x 256 x 64
+        up2 = UpSampling2D((2, 2))(conv5)  # 28 x 28 x 64
+
+        conc_up_2 = Concatenate()([up2, conv1])
+        decoded = Conv2D(1, (3, 3), activation=None, padding="same")(
+            conc_up_2
+        )  # 512 x 512 x 1
+
+        decoder = Model(input_window, decoded)
+
+        if verbose > 0:
+            decoder.summary(line_length=100)
+
+        return decoder
+
+    def create_unet(self, n_stacks=3, kernel=64, batchNormalize=False, verbose=1):
+
+        input_img = self.train_gen.__getitem__(0)
+        input_window = Input((input_img[0].shape[1:]))
+
+        last_layer = input_window
+
+        if batchNormalize:
+            last_layer = BatchNormalization()(last_layer)
+
+        # enocder
+        enc_conv = []
+        for i in range(n_stacks):
+
+            conv = Conv2D(kernel, (3, 3), activation="relu", padding="same")(last_layer)
+            enc_conv.append(conv)
+
+            if i != n_stacks-1:
+                pool = MaxPooling2D(pool_size=(2, 2))(conv)
+
+                kernel = kernel * 2
+                last_layer = pool
+            else:
+
+                last_layer = conv
+
+        # decoder
+        for i in range(n_stacks):
+
+            if i != n_stacks-1:
+
+                conv = Conv2D(kernel, (3, 3), activation="relu", padding="same")(last_layer)
+                up = UpSampling2D((2, 2))(conv)
+                conc = Concatenate()([up, enc_conv[-(i+2)]])
+
+                last_layer = conc
+                kernel = kernel / 2
+            else:
+
+                decoded = Conv2D(1, (3, 3), activation=None, padding="same")(last_layer)
+
+                decoder = Model(input_window, decoded)
+
+        if verbose > 0:
+            decoder.summary(line_length=100)
+
+        return decoder
+
+    @staticmethod
+    def annealed_loss(y_true, y_pred):
+        if not tf.is_tensor(y_pred):
+            y_pred = K.constant(y_pred)
+        y_true = K.cast(y_true, y_pred.dtype)
+        local_power = 4
+        final_loss = K.pow(K.abs(y_pred - y_true) + 0.00000001, local_power)
+        return K.mean(final_loss, axis=-1)
+
+    @staticmethod
+    def mean_squareroot_error(y_true, y_pred):
+        if not tf.is_tensor(y_pred):
+            y_pred = K.constant(y_pred)
+        y_true = K.cast(y_true, y_pred.dtype)
+        return K.mean(K.sqrt(K.abs(y_pred - y_true) + 0.00000001), axis=-1)
+
+
 class DeepInterpolate:
 
     def __init__(self):
@@ -298,9 +477,9 @@ class DeepInterpolate:
         # create data generator
         # TODO add arguments
         data_generator = Generator(pre_post_frame, batch_size, steps_per_epoch=1,
-                 file_path=input_file, loc=loc, max_frame_summary_stats=1000,
-                 start_frame=0, end_frame=-1,
-                 pre_post_omission=0, total_samples=-1, randomize=False)
+                                   file_path=input_file, loc=loc, max_frame_summary_stats=1000,
+                                   start_frame=0, end_frame=-1,
+                                   gap_frames=0, total_samples=-1, randomize=False)
 
         # load model
         if os.path.isdir(model):
