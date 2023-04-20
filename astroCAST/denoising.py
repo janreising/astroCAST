@@ -3,6 +3,9 @@ import os
 import glob
 import random
 from pathlib import Path
+from tqdm import tqdm
+
+from functools import lru_cache
 
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 import tensorflow as tf
@@ -22,6 +25,9 @@ import h5py as h5
 import tifffile as tiff
 from skimage.transform import resize
 import pandas as pd
+
+from scipy.stats import bootstrap, DegenerateDataWarning
+
 
 # TODO combine generators into one class with combined interface
 
@@ -292,6 +298,9 @@ class FullFrameGenerator(keras.utils.Sequence):
 
         return shuffle_indexes
 
+# TODO inference on SubFrameGenerator
+# TODO extending borders Z
+# TODO extending borders X, Y
 class SubFrameGenerator(tf.keras.utils.Sequence):
 
     """ Takes a single or multiple paths to a .h5 file containing video data in (Z, X, Y) format and generates
@@ -304,11 +313,13 @@ class SubFrameGenerator(tf.keras.utils.Sequence):
                  pre_post_frame=5, gap_frames=0, z_steps=0.1, z_select=None,
                  allowed_rotation=[0], allowed_flip=[-1],
                  random_offset=False, add_noise=False, drop_frame_probability=None,
-                 extend_z=-1, max_per_file=None,
-                 overlap=None,
+                 max_per_file=None,
+                 overlap=None, padding=None,
                  shuffle=True, normalize=None,
                  loc="data/",
-                 output_size=None, cache_results=False):
+                 output_size=None, cache_results=False, in_memory=False):
+
+        # z_steps: integer (steps) or float (percentage of stack - signal/gap/1/gap/signal - that is skipped)
 
         if type(paths) != list:
             paths = [paths]
@@ -338,18 +349,29 @@ class SubFrameGenerator(tf.keras.utils.Sequence):
         self.allowed_flip = allowed_flip
 
         self.overlap = overlap  # float
+
+        assert padding in [None, "symmetric", "edge"]
+        assert not (random_offset and (padding is not None)), "cannot use 'padding' and 'random_offset' flag. Please choose one or the other!"
+        self.padding = padding
+
         self.random_offset = random_offset
-        self.extend_z = extend_z
         self.add_noise = add_noise
         self.drop_frame_probability = drop_frame_probability
 
-        assert normalize in [None, "normalize", "center", "standardize"], "normalize argument needs be one of: [None, 'normalize', 'center', 'standardize']"
+        # assert normalize in [None, "normalize", "center", "standardize"], "normalize argument needs be one of: [None, 'normalize', 'center', 'standardize']"
+        assert normalize in [None, "local", "global"], "normalize argument needs be one of: [None, local, global]"
         self.normalize = normalize
+        if self.normalize == "global":
+                self.descr = {}
 
         self.shuffle = shuffle
         self.n = None
 
+        # in memory
+        self.mem_data = {} if in_memory else -1
+
         # get items
+        self.fov_size = None
         self.items = self.generate_items()
 
         # cache
@@ -382,6 +404,8 @@ class SubFrameGenerator(tf.keras.utils.Sequence):
         stack_len = signal_frames[0] + gap_frames[0] + 1 + gap_frames[1] + signal_frames[1]
         z_steps = max(1, int(self.z_steps * stack_len))
 
+        self.fov_size = (stack_len, dw, dh)
+
         # randomize input
         if self.random_offset:
             x_start = np.random.randint(0, dw)
@@ -396,7 +420,9 @@ class SubFrameGenerator(tf.keras.utils.Sequence):
         # iterate over possible items
         idx = 0
         container = []
-        for file in self.paths:
+        for file in tqdm(self.paths, desc="file preprocessing"):
+
+            file_container = []
 
             if type(file) == str:
                 file = Path(file)
@@ -423,16 +449,18 @@ class SubFrameGenerator(tf.keras.utils.Sequence):
             else:
                 Z0, Z1 = 0, Z
 
-            zRange =list(range(Z0 + z_start, Z1 - stack_len - z_start, z_steps))
-            xRange = list(range(x_start, X - iw - x_start, dw))
-            yRange = list(range(y_start, Y - ih - y_start, dh))
+            pad_z0, pad_z1 = (signal_frames[0]+gap_frames[0], signal_frames[1]+gap_frames[1]+1) if self.padding is not None else (0, 0)
+            pad_x1 = iw % X if self.padding else 0
+            pad_y1 = ih % Y if self.padding else 0
+
+            zRange =list(range(Z0 + z_start - pad_z0, Z1 - stack_len - z_start + pad_z1, z_steps))
+            xRange = list(range(x_start, X - iw - x_start + pad_x1, dw))
+            yRange = list(range(y_start, Y - ih - y_start + pad_y1, dh))
 
             if self.shuffle:
                 random.shuffle(zRange)
                 random.shuffle(xRange)
                 random.shuffle(yRange)
-
-            logging.debug(f"file ZXY ranges:\nzrange: {zRange}\nxrange: {xRange}\nyrange: {yRange}")
 
             per_file_counter = 0
             for z0 in zRange:
@@ -444,9 +472,6 @@ class SubFrameGenerator(tf.keras.utils.Sequence):
                     for y0 in yRange:
                         y1 = y0 + ih
 
-                        if (self.max_per_file is not None) and (per_file_counter > self.max_per_file):
-                            continue
-
                         rot = random.choice(allowed_rotation)
                         flip = random.choice(allowed_flip)
 
@@ -454,15 +479,35 @@ class SubFrameGenerator(tf.keras.utils.Sequence):
                             drop_frame = np.random.randint(0, np.sum(signal_frames))
                         else:
                             drop_frame = -1
-
-                        container.append(
+                        file_container.append(
                             {"idx": idx, "path": file, "z0": z0, "z1": z1, "x0": x0, "x1": x1, "y0": y0,
                              "y1": y1, "rot": rot, "flip": flip,
-                             "noise": self.add_noise, "drop_frame": drop_frame, "extend_z": self.extend_z})
+                             "noise": self.add_noise, "drop_frame": drop_frame,
+                             "padding": (
+                                 0 if z0 > 0 else 0 - z0,
+                                 0 if z1 < Z1 else z1 - Z1,
+                                 0 if x1 < X else x1 - X,
+                                 0 if y1 < Y else y1 - Y
+                             )
+                             })
+
                         idx += 1
                         per_file_counter += 1
 
-        items = pd.DataFrame(container)
+            file_container = pd.DataFrame(file_container)
+
+            if self.normalize == "global":
+                if len(file_container) > 1:
+                    self.descr[file] = self._bootstrap_descriptive(file_container)
+                else:
+                    logging.warning(f"found file without eligible items: {file}")
+
+            if self.max_per_file is not None:
+                file_container = file_container.sample(per_file_counter)
+
+            container.append(file_container)
+
+        items = pd.concat(container)
         logging.debug(f"items: {items}")
 
         if self.shuffle:
@@ -481,8 +526,106 @@ class SubFrameGenerator(tf.keras.utils.Sequence):
         if self.shuffle:
             if self.random_offset:
                 self.items = self.generate_items()
+                self.cache = {}
             else:
                 self.items = self.items.sample(frac=1).reset_index(drop=True)
+
+    def _bootstrap_descriptive(self, items, frac=0.01, confidence_level=0.75, n_resamples=5000,
+                               max_confidence_span=0.2, iteration_frac_increase=1.5):
+
+        means = []
+        raws = []
+
+        confidence_span = mean_conf = std_conf = max_confidence_span + 1
+
+        def custom_bootstrap(data):
+
+            try:
+                res = bootstrap((np.array(data),), np.median, n_resamples=n_resamples, axis=0, vectorized=False, confidence_level=confidence_level, method="bca")
+            except:
+                logging.warning("all values are the same. Using np.mean instead of bootstrapping")
+                return np.mean(np.array(data)), 0
+
+            # calculate confidence span
+            ci = res.confidence_interval
+            mean = np.mean((ci.low, ci.high))
+            confidence_span = (ci.high-ci.low)/mean
+
+            return mean, confidence_span
+
+        it = 0
+        while (frac < 1) and confidence_span > max_confidence_span:
+
+            sel_items = items.sample(frac=frac)
+            if len(sel_items) < 1:
+                logging.debug(f"items: {items}")
+                logging.debug(f"sel items: {sel_items}")
+            for _, row in sel_items.iterrows():
+
+                raw = self._load_row(row.path, row.z0, row.z1, row.x0, row.x1, row.y0, row.y1).flatten()
+                raws.append(raw)
+
+                means += [np.nanmedian(raw)]
+
+            mean_, mean_conf = custom_bootstrap(means)
+
+            std_, std_conf = custom_bootstrap([np.std(r-mean_) for r in raws])
+
+            confidence_span = max(mean_conf, std_conf)
+
+            # increase frac
+            frac *= iteration_frac_increase
+            it += 1
+            logging.debug(f"iteration {it} {mean_:.2f}+-{mean_conf:.2f} / {std_:.2f}+-{std_conf:.2f} ")
+
+        if mean_ is None or np.isnan(mean_):
+            logging.warning(f"unable to calculate mean")
+            mean_ = np.nanmean(means)
+
+        if std_ is None or np.isnan(std_):
+            logging.warning(f"unable to calculate std")
+            std_ = np.nanmean([np.std(r-mean_) for r in raws])
+
+        return mean_, std_
+
+    @lru_cache(maxsize=128)
+    def _load_row(self, path, z0, z1, x0, x1, y0, y1, padding=None):
+
+        if padding is not None:
+            pad_z0, pad_z1, pad_x1, pad_y1 = padding
+
+            z0 = z0 + pad_z0
+            z1 = z1 - pad_z1
+            x1 = x1 - pad_x1
+            y1 = y1 - pad_y1
+
+        if type(self.mem_data) == dict:
+
+            # load to memory if necessary
+            if path not in self.mem_data.keys():
+
+                if path.suffix == ".h5":
+                    with h5.File(path.as_posix(), "r") as f:
+                        self.mem_data[path] = f[self.loc][:]
+
+                elif path.suffix in (".tif", ".tiff"):
+                    self.mem_data[path] = tiff.imread(path.as_posix())
+
+            data = self.mem_data[path][z0:z1, x0:x1, y0:y1]
+
+        elif path.suffix == ".h5":
+            with h5.File(path.as_posix(), "r") as f:
+                data = f[self.loc][z0:z1, x0:x1, y0:y1]
+
+        elif path.suffix in (".tif", ".tiff"):
+            data = tiff.imread(path.as_posix(), key=range(z0, z1))
+            data = data[:, x0:x1, y0:y1]
+
+        if (padding is not None) and np.sum((pad_z0, pad_z1, pad_x1, pad_y1)) > 0:
+            data = np.pad(data, ((pad_z0, pad_z1), (0, pad_x1), (0, pad_y1)),
+                          mode=self.padding)
+
+        return data
 
     def __getitem__(self, index):
 
@@ -493,13 +636,10 @@ class SubFrameGenerator(tf.keras.utils.Sequence):
         y = []
         for _, row in self.items[self.items.batch == index].iterrows():
 
-            if row.path.suffix == ".h5":
-                with h5.File(row.path.as_posix(), "r") as f:
-                    data = f[self.loc][row.z0:row.z1, row.x0:row.x1, row.y0:row.y1]
+            data = self._load_row(row.path, row.z0, row.z1, row.x0, row.x1, row.y0, row.y1,
+                                  padding=None if self.padding is None else row.padding)
 
-            elif row.path.suffix in (".tif", ".tiff"):
-                data = tiff.imread(row.path.as_posix(), key=range(row.z0, row.z1))
-                data = data[:, row.x0:row.x1, row.y0:row.y1]
+            assert data.shape == self.fov_size, f"loaded data does not match expected FOV size (fov: {self.fov_size}) vs. (load: {data.shape}"
 
             if row.rot != 0:
 
@@ -513,27 +653,18 @@ class SubFrameGenerator(tf.keras.utils.Sequence):
             if row.noise is not None:
                 data = data + np.random.random(data.shape)*row.noise
 
-            sub = 0
-            div = 1
-            if self.normalize is not None:
+            if self.normalize == "local":
+                sub = np.mean(data)
+                data = data - sub
 
-                if self.normalize == "normalize":
-                    sub = np.min(data)
-                    data = data - sub
+                div = np.std(data)
+                data = data / div
 
-                    div = np.max(data)
-                    data = data / div
+            elif self.normalize == "global":
+                sub, div = self.descr[row.path]
 
-                elif self.normalize == "center":
-                    sub = np.mean(data)
-                    data = data - sub
-
-                elif self.normalize == "standardize":
-                    sub = np.mean(data)
-                    data = data - sub
-
-                    div = np.std(data)
-                    data = data / div
+                data = data - sub
+                data = data / div
 
             if row.drop_frame != -1:
                 data[row.drop_frame, :, :] = np.zeros(data[0, :, :].shape)
@@ -565,12 +696,23 @@ class SubFrameGenerator(tf.keras.utils.Sequence):
         # y: [input_height, input_width]
 
     def __len__(self):
-        return self.n // self.batch_size
+        # return self.n // self.batch_size
+        return len(self.items.batch.unique())
+    def __get_norm_parameters__(self, index):
+
+        files = self.items[self.items.batch == index].path.unique()
+
+        if len(files) == 1:
+            return self.descr[files[0]] if files[0] in self.descr.keys() else (1, 1)
+        elif len(files) > 1:
+            return {f:self.descr[f] if f in self.descr.keys() else (1, 1) for f in files}
+        else:
+            return None
 
 class Network:
 
     def __init__(self, train_generator, val_generator=None, learning_rate=0.0001,
-                 n_stacks=3, kernel=64, batchNormalize=False,
+                 n_stacks=3, kernel=64, batchNormalize=False, loss=None,
                  use_cpu=False):
 
         if use_cpu:
@@ -582,7 +724,8 @@ class Network:
         self.model = self.create_unet(n_stacks=n_stacks, kernel=kernel, batchNormalize=batchNormalize)
 
         opt = Adam(learning_rate=learning_rate)
-        self.model.compile(optimizer=opt, loss=self.mean_squareroot_error,
+        self.model.compile(optimizer=opt,
+                           loss=self.annealed_loss if loss is None else loss,
                            # metrics=["val_loss", "loss", self.mean_squareroot_error]
                            )
 
@@ -601,6 +744,10 @@ class Network:
         ]
 
         if save_model is not None:
+
+            if type(save_model) == str:
+                save_model = Path(save_model)
+
             callbacks.append(
                 ModelCheckpoint(
                     filepath=save_model.joinpath("model-{epoch:02d}-{val_loss:.2f}.hdf5").as_posix(),
@@ -735,7 +882,6 @@ class Network:
         y_true = K.cast(y_true, y_pred.dtype)
         return K.mean(K.sqrt(K.abs(y_pred - y_true) + 0.00000001), axis=-1)
 
-
 class DeepInterpolate:
 
     def __init__(self):
@@ -772,7 +918,8 @@ class DeepInterpolate:
             models.sort(key=lambda x: os.path.getmtime(x))
             model = models[0]
 
-        model = load_model(model, custom_objects={"annealed_loss": self.annealed_loss})
+        model = load_model(model,
+                    custom_objects={"annealed_loss": Network.annealed_loss, "mean_squareroot_error":Network.mean_squareroot_error})
 
         # infer
         num_datasets = len(data_generator)
@@ -817,11 +964,79 @@ class DeepInterpolate:
         elif output.endswith(".tiff") or output.endswith(".tif"):
             tiff.imwrite(output, data=dset_out)
 
-    def annealed_loss(y_true, y_pred):
-        if not K.is_tensor(y_pred):
-            y_pred = K.constant(y_pred)
-        y_true = K.cast(y_true, y_pred.dtype)
-        local_power = 4
-        final_loss = K.pow(K.abs(y_pred - y_true) + 0.00000001, local_power)
-        return K.mean(final_loss, axis=-1)
+        elif output.endswith(".h5"):
+            f.close()
 
+
+
+"""
+from tensorflow import keras
+model = keras.models.load_model('/media/janrei1/data/linnea/model/model-03-0.66.hdf5',
+                               custom_objects={"annealed_loss": Network.annealed_loss, "mean_squareroot_error": Network.mean_squareroot_error})
+                               
+#############################
+
+normalize = "global" #, "standardize"
+input_size = (250, 250)
+
+files = glob.glob("/media/janrei1/data/linnea/czi_astrocytes_day_40_42/20221115_glutamate_uncaging_day_40/*/*.h5")[1]
+rec_gen = SubFrameGenerator(paths=files, loc="data/ch0", input_size=input_size, 
+                            padding="symmetric", in_memory=True,
+                            pre_post_frame=5, batch_size=1024, gap_frames=0, allowed_rotation=[0], allowed_flip=[-1], 
+                            max_per_file=None, normalize=normalize, cache_results=False, shuffle=False)
+
+Yp = []
+for i in tqdm(range(len(rec_gen))):
+    x, y = rec_gen[i]
+    Yp.append(model.predict(x))
+
+###############################
+
+items = rec_gen.items 
+
+if "padding" in items.columns:
+    pad_z_max = items.padding.apply(lambda x: x[1]).max()
+    pad_x_max = items.padding.apply(lambda x: x[2]).max()
+    pad_y_max = items.padding.apply(lambda x: x[3]).max()
+else:
+    pad_z_max, pad_x_max, pad_y_max = 0, 0, 0
+    
+rec = np.zeros((items.z1.max()-pad_z_max, items.x1.max()-pad_x_max, items.y1.max()-pad_y_max))
+
+for i in range(len(Yp)):
+    sel = items[items.batch == i]
+    yp = Yp[i]
+    
+    assert len(yp) == len(sel)
+
+    c=0
+    for _, row in sel.iterrows():
+        
+        im = yp[c][:, :, 0]
+
+        pad_z0, pad_z1, pad_x1, pad_y1 = row.padding
+
+        if pad_x1 > 0:
+            im = im[:-pad_x1, :]
+        
+        if pad_y1 > 0:
+            im = im[:, :-pad_y1]
+            
+        rec[row.z0+5, row.x0:row.x1, row.y0:row.y1] = im
+        
+        c+=1
+
+#######################
+
+mean, std = rec_gen.descr[Path(files)]
+display(mean, std)
+
+rec2 = rec.copy()
+rec2 = (rec2 * std) + mean
+
+########################
+
+import tifffile as tiff
+tiff.imwrite("/media/janrei1/data/linnea/del.tiff", data=rec)
+
+"""
