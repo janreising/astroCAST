@@ -1,6 +1,7 @@
 import logging
 import os
 import glob
+import pathlib
 import random
 from pathlib import Path
 from tqdm import tqdm
@@ -37,7 +38,7 @@ class FullFrameGenerator(keras.utils.Sequence):
 
     """
 
-    def __init__(self, pre_post_frame, batch_size, steps_per_epoch,
+    def __init__(self, pre_post_frame, batch_size,
                  file_path, loc=None,
                  max_frame_summary_stats=1000, # TODO superseded
                  start_frame=0, end_frame=-1,
@@ -61,7 +62,7 @@ class FullFrameGenerator(keras.utils.Sequence):
             self.pre_frame, self.post_frame = pre_post_frame
 
         self.batch_size = batch_size
-        self.steps_per_epoch = steps_per_epoch
+        self.steps_per_epoch = 0
         self.start_frame = start_frame
         self.end_frame = end_frame
         self.pre_post_omission = gap_frames
@@ -298,6 +299,86 @@ class FullFrameGenerator(keras.utils.Sequence):
 
         return shuffle_indexes
 
+    def infer(self, model, output=None, batch_size=25,
+              out_loc=None, dtype=np.float, chunk_size=None, rescale=True):
+
+        """
+
+        :param model_path:
+        :param output:
+        :param batch_size:
+        :param out_loc:
+        :param dtype:
+        :param chunk_size:
+        :param rescale: reverse normalization
+        :return:
+        """
+
+        # load model if not provided
+        if type(model) in [str, pathlib.PosixPath]:
+
+            if os.path.isdir(model):
+
+                models = list(filter(os.path.isfile, glob.glob(model + "/*.h5")))
+                models.sort(key=lambda x: os.path.getmtime(x))
+                model_path = models[0]
+                logging.info(f"directory provided. Selected most recent model: {model_path}")
+
+            elif os.path.isfile(model):
+                model_path = model
+
+            model = load_model(model_path,
+                    custom_objects={"annealed_loss": Network.annealed_loss, "mean_squareroot_error":Network.mean_squareroot_error})
+
+        else:
+            assert type(model) == keras.engine.functional.Functional, f"couldn't find 'model'. Please provide keras model, file_path or dire_path instead of {type(model)}"
+
+        # create output array
+        num_datasets = len(self)
+        indiv_shape = self.get_output_size()
+
+        final_shape = [num_datasets * batch_size]
+        first_sample = 0
+
+        final_shape.extend(indiv_shape[:-1])
+
+        if (output is None) or (output.endswith(".tiff")) or (output.endswith(".tiff")):
+            dset_out = np.zeros(tuple(final_shape), dtype=dtype)
+
+        elif output.endswith(".h5"):
+
+            assert out_loc is not None, "when exporting results to .h5 file please provide 'out_loc' flag"
+
+            f = h5.File(output, "a")
+            dset_out = f.create_dataset(out_loc, shape=final_shape, chunks=chunk_size, dtype=dtype)
+
+        for index_dataset in np.arange(0, num_datasets, 1):
+
+            local_data = self[index_dataset]
+            predictions_data = model.predict(local_data[0])
+
+            local_mean, local_std = \
+                self.__get_norm_parameters__(index_dataset)
+            local_size = predictions_data.shape[0]
+
+            corrected_data = predictions_data * local_std + local_mean if rescale else predictions_data
+
+            start = first_sample + index_dataset * batch_size
+            end = first_sample + index_dataset * batch_size \
+                + local_size
+
+            # We squeeze to remove the feature dimension from tensorflow
+            dset_out[start:end, :] = np.squeeze(corrected_data, -1)
+
+        if output is None:
+            return dset_out
+
+        elif output.endswith(".tiff") or output.endswith(".tif"):
+            tiff.imwrite(output, data=dset_out)
+
+        elif output.endswith(".h5"):
+            f.close()
+
 # TODO inference on SubFrameGenerator
 # TODO extending borders Z
 # TODO extending borders X, Y
@@ -319,7 +400,30 @@ class SubFrameGenerator(tf.keras.utils.Sequence):
                  loc="data/",
                  output_size=None, cache_results=False, in_memory=False):
 
-        # z_steps: integer (steps) or float (percentage of stack - signal/gap/1/gap/signal - that is skipped)
+        """
+
+        :param paths:
+        :param batch_size:
+        :param input_size:
+        :param pre_post_frame:
+        :param gap_frames:
+        :param z_steps: integer (steps) or float (percentage of stack - signal/gap/1/gap/signal - that is skipped)
+        :param z_select:
+        :param allowed_rotation:
+        :param allowed_flip:
+        :param random_offset:
+        :param add_noise:
+        :param drop_frame_probability:
+        :param max_per_file:
+        :param overlap:
+        :param padding:
+        :param shuffle:
+        :param normalize:
+        :param loc:
+        :param output_size:
+        :param cache_results:
+        :param in_memory:
+        """
 
         if type(paths) != list:
             paths = [paths]
@@ -462,7 +566,6 @@ class SubFrameGenerator(tf.keras.utils.Sequence):
                 random.shuffle(xRange)
                 random.shuffle(yRange)
 
-            per_file_counter = 0
             for z0 in zRange:
                 z1 = z0 + stack_len
 
@@ -492,7 +595,6 @@ class SubFrameGenerator(tf.keras.utils.Sequence):
                              })
 
                         idx += 1
-                        per_file_counter += 1
 
             file_container = pd.DataFrame(file_container)
 
@@ -503,7 +605,7 @@ class SubFrameGenerator(tf.keras.utils.Sequence):
                     logging.warning(f"found file without eligible items: {file}")
 
             if self.max_per_file is not None:
-                file_container = file_container.sample(per_file_counter)
+                file_container = file_container.sample(self.max_per_file)
 
             container.append(file_container)
 
@@ -513,8 +615,8 @@ class SubFrameGenerator(tf.keras.utils.Sequence):
         if self.shuffle:
             items = items.sample(frac=1).reset_index(drop=True)
 
-        items["batch"] = items.idx / self.batch_size
-        items.batch = items.batch.astype(int)
+        items["batch"] = (np.array(range(len(items))) / self.batch_size)
+        items.batch = items.batch.astype(int) # round down
 
         self.n = len(items)
 
@@ -709,6 +811,103 @@ class SubFrameGenerator(tf.keras.utils.Sequence):
         else:
             return None
 
+    def infer(self, model, output=None, batch_size=25,
+              out_loc=None, dtype=np.float, chunk_size=None, rescale=True):
+
+        """
+
+        :param model_path:
+        :param output:
+        :param batch_size:
+        :param out_loc:
+        :param dtype:
+        :param chunk_size:
+        :param rescale: reverse normalization
+        :return:
+        """
+
+        # load model if not provided
+        if type(model) in [str, pathlib.PosixPath]:
+
+            if os.path.isdir(model):
+
+                models = list(filter(os.path.isfile, glob.glob(model + "/*.h5")))
+                models.sort(key=lambda x: os.path.getmtime(x))
+                model_path = models[0]
+                logging.info(f"directory provided. Selected most recent model: {model_path}")
+
+            elif os.path.isfile(model):
+                model_path = model
+
+            model = load_model(model_path,
+                    custom_objects={"annealed_loss": Network.annealed_loss, "mean_squareroot_error":Network.mean_squareroot_error})
+
+        else:
+            assert type(model) == keras.engine.functional.Functional, f"couldn't find 'model'. Please provide keras model, file_path or dire_path instead of {type(model)}"
+
+        # create output arrays
+        assert len(self.items.path.unique()) < 2, f"inference from multiple files is currently not implemented: {self.items.path.unique()}"
+        items = self.items
+
+        if "padding" in items.columns:
+            pad_z_max = items.padding.apply(lambda x: x[1]).max()
+            pad_x_max = items.padding.apply(lambda x: x[2]).max()
+            pad_y_max = items.padding.apply(lambda x: x[3]).max()
+        else:
+            pad_z_max, pad_x_max, pad_y_max = 0, 0, 0
+
+        output_shape = (items.z1.max()-pad_z_max, items.x1.max()-pad_x_max, items.y1.max()-pad_y_max)
+
+        if output is not None and output.endswith(".h5"):
+
+            assert out_loc is not None, "when exporting results to .h5 file please provide 'out_loc' flag"
+
+            f = h5.File(output, "a")
+            rec = f.create_dataset(out_loc, shape=output_shape, chunks=chunk_size, dtype=dtype)
+        else:
+            rec = np.zeros(output_shape, dtype=dtype)
+
+        # infer frames
+        for batch in tqdm(self.items.batch.unique()):
+
+            x, _ = self[batch] # raw data
+            y = model.predict(x) # denoised data
+
+            x_items = items[items.batch == batch] # meta data
+
+            assert len(x) == len(x_items), f"raw and meta data must have the same length: raw ({len(x)}) vs. meta ({len(x_items)})"
+
+            c=0
+            for _, row in x_items.iterrows():
+
+                im = y[c, :, :, 0]
+
+                pad_z0, pad_z1, pad_x1, pad_y1 = row.padding
+
+                if pad_x1 > 0:
+                    im = im[:-pad_x1, :]
+
+                if pad_y1 > 0:
+                    im = im[:, :-pad_y1]
+
+                if rescale:
+                    mean, std = self.descr[self.items.iloc[0].path]
+                    im = (im * std) + mean
+
+                rec[row.z0+5, row.x0:row.x1, row.y0:row.y1] = im
+
+                c+=1
+
+        if output is None:
+            return rec
+
+        elif output.endswith(".tiff") or output.endswith(".tif"):
+            tiff.imwrite(output, data=rec)
+
+        elif output.endswith(".h5"):
+            f.close()
+
+
 class Network:
 
     def __init__(self, train_generator, val_generator=None, learning_rate=0.0001,
@@ -881,92 +1080,6 @@ class Network:
             y_pred = K.constant(y_pred)
         y_true = K.cast(y_true, y_pred.dtype)
         return K.mean(K.sqrt(K.abs(y_pred - y_true) + 0.00000001), axis=-1)
-
-class DeepInterpolate:
-
-    def __init__(self):
-        print("hello")
-
-    def infer(self, input_file, model, loc=None,
-              output=None, dtype=np.float32, out_loc=None, chunk_size=(1, 1, 1), rescale=True,
-              frames=None, batch_size=1, pre_post_frame=5):
-
-        """
-        :param input_file: tiff file or .h5 file
-        :param model: exported deep neural network for export or if folder newest file is chosen
-        :param loc: optional, if .h5 file is provided
-        :param frames: infer all frames if None, else tuple expected (frame_start, frame_stop)
-        :param batch_size: batch_size for inference; decrease if RAM is limited
-        :param pre_post_frame: number of ommitted frames before and after inference frame
-        :return:
-        """
-
-        # quality control
-        assert os.path.isfile(input_file), "input doesn't exist: "+ input_file
-        assert os.path.isdir(model) or os.path.isfile(model), "model doesn't exist: "+ model
-
-        # create data generator
-        # TODO add arguments
-        data_generator = FullFrameGenerator(pre_post_frame, batch_size, steps_per_epoch=1,
-                                            file_path=input_file, loc=loc, max_frame_summary_stats=1000,
-                                            start_frame=0, end_frame=-1,
-                                            gap_frames=0, total_samples=-1, randomize=False)
-
-        # load model
-        if os.path.isdir(model):
-            models = list(filter(os.path.isfile, glob.glob(model + "/*.h5")))
-            models.sort(key=lambda x: os.path.getmtime(x))
-            model = models[0]
-
-        model = load_model(model,
-                    custom_objects={"annealed_loss": Network.annealed_loss, "mean_squareroot_error":Network.mean_squareroot_error})
-
-        # infer
-        num_datasets = len(data_generator)
-        indiv_shape = data_generator.get_output_size()
-
-        final_shape = [num_datasets * batch_size]
-        first_sample = 0
-
-        final_shape.extend(indiv_shape[:-1])
-
-        if (output is None) or (output.endswith(".tiff")) or (output.endswith(".tiff")):
-            dset_out = np.zeros(tuple(final_shape), dtype=dtype)
-
-        elif output.endswith(".h5"):
-
-            assert out_loc is not None, "when exporting results to .h5 file please provide 'out_loc' flag"
-
-            f = h5.File(output, "a")
-            dset_out = f.create_dataset(out_loc, shape=final_shape, chunks=chunk_size, dtype=dtype)
-
-        for index_dataset in np.arange(0, num_datasets, 1):
-
-            local_data = data_generator[index_dataset]
-            predictions_data = model.predict(local_data[0])
-
-            local_mean, local_std = \
-                data_generator.__get_norm_parameters__(index_dataset)
-            local_size = predictions_data.shape[0]
-
-            corrected_data = predictions_data * local_std + local_mean if rescale else predictions_data
-
-            start = first_sample + index_dataset * batch_size
-            end = first_sample + index_dataset * batch_size \
-                + local_size
-
-            # We squeeze to remove the feature dimension from tensorflow
-            dset_out[start:end, :] = np.squeeze(corrected_data, -1)
-
-        if output is None:
-            return dset_out
-
-        elif output.endswith(".tiff") or output.endswith(".tif"):
-            tiff.imwrite(output, data=dset_out)
-
-        elif output.endswith(".h5"):
-            f.close()
-
 
 
 """
