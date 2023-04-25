@@ -449,7 +449,10 @@ class SubFrameGenerator(tf.keras.utils.Sequence):
         self.z_select = z_select
         self.max_per_file = max_per_file
 
+        if (1 in allowed_rotation) or (3 in allowed_rotation):
+            assert input_size[0] == input_size[1], f"when using 90 or 270 degree rotation (allowed rotation: 1 or 3) the 'input_size' needs to be square. However input size is: {input_size}"
         self.allowed_rotation = allowed_rotation
+
         self.allowed_flip = allowed_flip
 
         self.overlap = overlap  # float
