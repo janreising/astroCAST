@@ -8,26 +8,26 @@ DG_ragged = DummyGenerator(ragged=True)
 
 class Test_FeatureExtraction:
 
-    @pytest.mark.parametrize("typ", ["dataframe", "list", "array"])
+    @pytest.mark.parametrize(("typ", "feature_only"), [("use_dataframe", False), ("use_list", True), ("use_array", True)])
     @pytest.mark.parametrize("ragged", [True, False])
-    def test_input_type(self, typ, ragged):
+    def test_input_type(self, typ, feature_only, ragged):
 
         DG = DG_ragged if ragged else DG_equal
 
-        if typ == "dataframe":
+        if typ == "use_dataframe":
             data = DG.get_dataframe()
 
-        elif typ == "list":
+        elif typ == "use_list":
             data = DG.get_list()
 
-        elif typ == "array":
+        elif typ == "use_array":
             data = DG.get_array()
 
         else:
             raise TypeError
 
         FE = FeatureExtraction()
-        FE.get_features(data=data)
+        FE.get_features(data=data, feature_only=feature_only)
 
     @pytest.mark.parametrize("normalize", [None, "min_max"])
     def test_normalization(self, normalize):
@@ -36,6 +36,7 @@ class Test_FeatureExtraction:
 
         FE = FeatureExtraction()
         FE.get_features(data=data, normalize=normalize)
+
     @pytest.mark.parametrize("padding", [None, "edge"])
     def test_padding(self, padding):
 
@@ -44,4 +45,6 @@ class Test_FeatureExtraction:
         FE = FeatureExtraction()
         FE.get_features(data=data, normalize=padding)
 
-# TODO test local caching
+    def test_local_caching(self):
+        raise NotImplementedError
+
