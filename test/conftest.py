@@ -5,3 +5,6 @@ def pytest_generate_tests(metafunc):
 
     if "pre_post_frame" in metafunc.fixturenames:
         metafunc.parametrize("pre_post_frame", [5, (3, 2)])
+
+    if "normalize" in metafunc.fixturenames:
+        metafunc.parametrize("normalize", [None, "local", "global"])

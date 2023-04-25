@@ -13,10 +13,10 @@ def test_generator_full_frame(file_path, pre_post_frame):
 
         gen.on_epoch_end()
 
-def test_generator_sub_frame(file_path, pre_post_frame):
+def test_generator_sub_frame(file_path, pre_post_frame, normalize):
 
     gen = SubFrameGenerator(paths=file_path, loc="data/ch0", pre_post_frame=pre_post_frame,
-                             input_size=(25, 25), batch_size=25,)
+                             input_size=(25, 25), batch_size=25, normalize=normalize)
 
     for ep in range(2):
         for item in gen:

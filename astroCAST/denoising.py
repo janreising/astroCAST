@@ -29,8 +29,8 @@ import pandas as pd
 
 from scipy.stats import bootstrap, DegenerateDataWarning
 
-
-# TODO combine generators into one class with combined interface
+# TODO write plotting for generators
+# TODO write plotting for network history
 
 class FullFrameGenerator(keras.utils.Sequence):
 
@@ -793,10 +793,6 @@ class SubFrameGenerator(tf.keras.utils.Sequence):
 
         return (X, y)
 
-        # return (X, y)
-        # X: [batch_size, frames, input_height, input_width]
-        # y: [input_height, input_width]
-
     def __len__(self):
         # return self.n // self.batch_size
         return len(self.items.batch.unique())
@@ -1080,76 +1076,3 @@ class Network:
             y_pred = K.constant(y_pred)
         y_true = K.cast(y_true, y_pred.dtype)
         return K.mean(K.sqrt(K.abs(y_pred - y_true) + 0.00000001), axis=-1)
-
-
-"""
-from tensorflow import keras
-model = keras.models.load_model('/media/janrei1/data/linnea/model/model-03-0.66.hdf5',
-                               custom_objects={"annealed_loss": Network.annealed_loss, "mean_squareroot_error": Network.mean_squareroot_error})
-                               
-#############################
-
-normalize = "global" #, "standardize"
-input_size = (250, 250)
-
-files = glob.glob("/media/janrei1/data/linnea/czi_astrocytes_day_40_42/20221115_glutamate_uncaging_day_40/*/*.h5")[1]
-rec_gen = SubFrameGenerator(paths=files, loc="data/ch0", input_size=input_size, 
-                            padding="symmetric", in_memory=True,
-                            pre_post_frame=5, batch_size=1024, gap_frames=0, allowed_rotation=[0], allowed_flip=[-1], 
-                            max_per_file=None, normalize=normalize, cache_results=False, shuffle=False)
-
-Yp = []
-for i in tqdm(range(len(rec_gen))):
-    x, y = rec_gen[i]
-    Yp.append(model.predict(x))
-
-###############################
-
-items = rec_gen.items 
-
-if "padding" in items.columns:
-    pad_z_max = items.padding.apply(lambda x: x[1]).max()
-    pad_x_max = items.padding.apply(lambda x: x[2]).max()
-    pad_y_max = items.padding.apply(lambda x: x[3]).max()
-else:
-    pad_z_max, pad_x_max, pad_y_max = 0, 0, 0
-    
-rec = np.zeros((items.z1.max()-pad_z_max, items.x1.max()-pad_x_max, items.y1.max()-pad_y_max))
-
-for i in range(len(Yp)):
-    sel = items[items.batch == i]
-    yp = Yp[i]
-    
-    assert len(yp) == len(sel)
-
-    c=0
-    for _, row in sel.iterrows():
-        
-        im = yp[c][:, :, 0]
-
-        pad_z0, pad_z1, pad_x1, pad_y1 = row.padding
-
-        if pad_x1 > 0:
-            im = im[:-pad_x1, :]
-        
-        if pad_y1 > 0:
-            im = im[:, :-pad_y1]
-            
-        rec[row.z0+5, row.x0:row.x1, row.y0:row.y1] = im
-        
-        c+=1
-
-#######################
-
-mean, std = rec_gen.descr[Path(files)]
-display(mean, std)
-
-rec2 = rec.copy()
-rec2 = (rec2 * std) + mean
-
-########################
-
-import tifffile as tiff
-tiff.imwrite("/media/janrei1/data/linnea/del.tiff", data=rec)
-
-"""
