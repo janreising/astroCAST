@@ -8,3 +8,9 @@ def pytest_generate_tests(metafunc):
 
     if "normalize" in metafunc.fixturenames:
         metafunc.parametrize("normalize", [None, "local", "global"])
+
+    if "typ" in metafunc.fixturenames:
+        metafunc.parametrize("typ", ["dataframe", "list", "array"])
+
+    if "ragged" in metafunc.fixturenames:
+        metafunc.parametrize("ragged", [True, False])
