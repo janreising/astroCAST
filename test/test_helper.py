@@ -1,8 +1,12 @@
+import pytest
+
 from astroCAST.helper import *
 
 def test_local_caching_wrapper():
     raise NotImplementedError
 
+@pytest.mark.parametrize("typ", ["dataframe", "list", "array"])
+@pytest.mark.parametrize("ragged", [True, False])
 def test_dummy_generator(typ, ragged):
 
         num_rows = 5
@@ -20,7 +24,7 @@ def test_dummy_generator(typ, ragged):
             data = DG.get_array()
             assert data.shape[0] == num_rows
 
-class TestNormalization:
+class Test_Normalization:
 
     def test_min_max(self):
 

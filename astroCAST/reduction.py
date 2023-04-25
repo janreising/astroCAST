@@ -14,7 +14,16 @@ class FeatureExtraction:
 
         self.lc_path = cache_path
 
-    def convert_to_tsfresh(self, df, enforced_min=10, min_max_normalize=True):
+    def get_features(self, data, normalize=None, padding=None, n_jobs=-1, feature_only=False):
+
+        # calculate features for long traces
+        logging.info("converting dataset to tsfresh format ...")
+
+        if normalize is not None:
+            raise NotImplementedError
+
+        if padding is not None:
+            raise NotImplementedError
 
         ids, times, dim_0s = [], [], []
         for id_, row in tqdm(df.iterrows(), total=len(df)):
@@ -41,17 +50,11 @@ class FeatureExtraction:
             times = times + list(range(len(trace)))
             dim_0s = dim_0s + list(trace)
 
-        return pd.DataFrame({"id":ids, "time":times, "dim_0":dim_0s})
-
-    def get_features(self, data, feature_only=False):
-
-        # calculate features for long traces
-        logging.info("creating tsfresh dataset ...")
-
-        X = self.convert_to_tsfresh(data)
+        X = pd.DataFrame({"id":ids, "time":times, "dim_0":dim_0s})
 
         logging.info("extracting features")
-        features = tsfresh.extract_features(X, column_id="id", column_sort="time", disable_progressbar=False, n_jobs=12)
+        features = tsfresh.extract_features(X, column_id="id", column_sort="time", disable_progressbar=False,
+                                            n_jobs=n_jobs) # TODO dynamic
         features.index = data.index
 
         if feature_only:

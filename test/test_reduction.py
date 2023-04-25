@@ -1,5 +1,3 @@
-import numpy as np
-import pandas as pd
 import pytest
 
 from astroCAST.reduction import *
@@ -10,7 +8,9 @@ DG_ragged = DummyGenerator(ragged=True)
 
 class Test_FeatureExtraction:
 
-    def test_one(self, typ, ragged):
+    @pytest.mark.parametrize("typ", ["dataframe", "list", "array"])
+    @pytest.mark.parametrize("ragged", [True, False])
+    def test_input_type(self, typ, ragged):
 
         DG = DG_ragged if ragged else DG_equal
 
@@ -27,6 +27,21 @@ class Test_FeatureExtraction:
             raise TypeError
 
         FE = FeatureExtraction()
-        features = FE.get_features(data=data)
+        FE.get_features(data=data)
+
+    @pytest.mark.parametrize("normalize", [None, "min_max"])
+    def test_normalization(self, normalize):
+
+        data = DG_ragged.get_dataframe()
+
+        FE = FeatureExtraction()
+        FE.get_features(data=data, normalize=normalize)
+    @pytest.mark.parametrize("padding", [None, "edge"])
+    def test_padding(self, padding):
+
+        data = DG_ragged.get_dataframe()
+
+        FE = FeatureExtraction()
+        FE.get_features(data=data, normalize=padding)
 
 # TODO test local caching

@@ -1,7 +1,10 @@
+import pytest
+
 from astroCAST.denoising import FullFrameGenerator, SubFrameGenerator
 from astroCAST.denoising import Network
 import os
 
+@pytest.mark.parametrize("pre_post_frame", [5, (3, 2)])
 def test_generator_full_frame(file_path, pre_post_frame):
 
     gen = FullFrameGenerator(file_path=file_path, loc="data/ch0", pre_post_frame=pre_post_frame,
@@ -13,6 +16,8 @@ def test_generator_full_frame(file_path, pre_post_frame):
 
         gen.on_epoch_end()
 
+@pytest.mark.parametrize("normalize", [None, "local", "global"])
+@pytest.mark.parametrize("pre_post_frame", [5, (3, 2)])
 def test_generator_sub_frame(file_path, pre_post_frame, normalize):
 
     gen = SubFrameGenerator(paths=file_path, loc="data/ch0", pre_post_frame=pre_post_frame,
