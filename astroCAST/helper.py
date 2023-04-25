@@ -200,3 +200,105 @@ def wrapper_local_cache(f):
         return result
 
     return inner_function
+
+class DummyGenerator():
+
+    def __init__(self, num_rows=25, trace_length=12, ragged=False):
+
+        self.data = self.get_data(num_rows=num_rows, trace_length=trace_length, ragged=ragged)
+
+    def get_data(self, num_rows, trace_length, ragged):
+
+        if ragged:
+            data = [np.random.random(size=trace_length+np.random.randint(low=-trace_length+1, high=trace_length-1)) for _ in range(num_rows)]
+        else:
+            data = np.random.random(size=(num_rows, trace_length))
+
+        return data
+
+    def get_dataframe(self):
+
+        data = self.data
+
+        if type(data) == list:
+            df = pd.DataFrame(dict(trace=data))
+
+        elif type(data) == np.ndarray:
+            df = pd.DataFrame(dict(trace=data.tolist()))
+        else:
+            raise TypeError
+
+        # create dz, z0 and z1
+        df["dz"] = df.trace.apply(lambda x: len(x))
+
+        dz_sum = int(df.dz.sum()/2)
+        df["z0"] = [np.random.randint(low=0, high=dz_sum) for _ in range(len(df))]
+        df["z1"] = df.z0 + df.dz
+
+        # create fake index
+        df["idx"] = df.index
+
+        return df
+
+    def get_list(self):
+
+        data = self.data
+
+        if type(data) == list:
+            return data
+
+        elif type(data) == np.ndarray:
+            return data.tolist()
+
+        else:
+            raise TypeError
+
+    def get_array(self):
+
+        data = self.data
+
+        if type(data) == list:
+            return np.array(data, dtype='object')
+
+        elif type(data) == np.ndarray:
+            return data
+
+        else:
+            raise TypeError
+
+class Normalization:
+
+    # TODO parallelization
+    # TODO dataframe, 2D numpy, list
+    def __init__(self):
+        pass
+
+    @staticmethod
+    def min_max(arr:np.ndarray) -> np.ndarray:
+
+        """ subtract minimum and divide by new maximum
+
+        :returns array between 0 and 1
+        """
+
+        arr = arr - np.min(arr)
+
+        new_max = np.max(np.abs(arr))
+        arr = arr / new_max if new_max != 0 else arr
+
+        return arr
+
+    @staticmethod
+    def start_max(arr:np.ndarray) -> np.ndarray:
+
+        """ subtract start value and divide by new maximum
+
+        :returns array between 0 and 1
+        """
+
+        arr = arr - arr[0]
+
+        new_max = np.max(np.abs(arr))
+        arr = arr / new_max if new_max != 0 else arr
+
+        return arr
