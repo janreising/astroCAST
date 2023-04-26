@@ -24,18 +24,36 @@ def test_dummy_generator(typ, ragged):
             data = DG.get_array()
             assert data.shape[0] == num_rows
 
+@pytest.mark.parametrize("approach", ["min_max", "sub0_max", "standardize"])
+@pytest.mark.parametrize("num_rows", [1, 10])
+@pytest.mark.parametrize("ragged", [False, True])
 class Test_Normalization:
 
-    def test_min_max(self):
+    def test_list(self, num_rows, approach, ragged):
 
-        norm = Normalization()
+        DG = DummyGenerator(num_rows=num_rows, ragged=ragged)
+        data = DG.get_list()
 
-        for _ in range(10):
-            norm.min_max(np.random.random(size=(10)))
+        norm = Normalization(data, approach)
+        norm.run()
 
-    def test_start_max(self):
+    def test_dataframe(self, num_rows, approach, ragged):
 
-        norm = Normalization()
+        DG = DummyGenerator(num_rows=num_rows, ragged=ragged)
+        data = DG.get_dataframe()
 
-        for _ in range(10):
-            norm.start_max(np.random.random(size=(10)))
+        norm = Normalization(data.trace, approach)
+        norm.run()
+
+    def test_array(self, num_rows, approach, ragged):
+
+        DG = DummyGenerator(num_rows=num_rows, ragged=ragged)
+        data = DG.get_array()
+
+        norm = Normalization(data, approach)
+        norm.run()
+
+class Test_Padding:
+
+    def test_0(self):
+        raise NotImplementedError

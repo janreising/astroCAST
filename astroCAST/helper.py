@@ -4,6 +4,7 @@ import logging
 import pickle
 from collections import OrderedDict
 from pathlib import Path
+import awkward as ak
 
 import numpy as np
 import pandas as pd
@@ -269,36 +270,107 @@ class DummyGenerator():
 class Normalization:
 
     # TODO parallelization
-    # TODO dataframe, 2D numpy, list
-    def __init__(self):
-        pass
+    def __init__(self, data, approach):
+
+        # check if ragged and convert to appropriate type
+        ragged = False
+        if isinstance(data, list):
+
+            last_len = len(data[0])
+            for dat in data[1:]:
+                cur_len = len(dat)
+
+                if cur_len != last_len:
+                    ragged = True
+                    self.data = ak.Array(data)
+                    self.library = ak
+                    break
+
+                last_len = cur_len
+
+            if not ragged:
+                self.data = np.array(data)
+                self.library = np
+
+        elif isinstance(data, pd.Series):
+
+            if len(data.apply(lambda x: len(x)).unique()) > 1:
+                self.data = ak.Array(data.tolist())
+                self.library = ak
+            else:
+                self.data = np.array(data.tolist())
+                self.library = np
+
+        elif isinstance(data, np.ndarray):
+
+            if isinstance(data.dtype, object):
+                last_len = len(data[0, :])
+                for i in range(1, data.shape[0]):
+                    cur_len = len(data[i, :])
+
+                    if cur_len != last_len:
+                        ragged = True
+                        self.data = ak.Array(data)
+                        self.library = ak
+                        break
+
+                    last_len = cur_len
+
+                if not ragged:
+                    self.data = np.array(data)
+                    self.library = np
+
+            else:
+                self.data = data
+                self.library = np
+        else:
+            raise TypeError(f"datatype not recognized: {type(data)}")
+
+        # choose normalization approach
+        func = getattr(self, approach, lambda: None)
+        if func is not None:
+            self.func = func
+        else:
+            raise AttributeError(f"please provide a valid approach instead of {approach}")
+
+    def run(self):
+        return self.func(self.data, self.library)
 
     @staticmethod
-    def min_max(arr:np.ndarray) -> np.ndarray:
+    def min_max(arr, library):
 
         """ subtract minimum and divide by new maximum
 
         :returns array between 0 and 1
         """
 
-        arr = arr - np.min(arr)
+        arr = arr - np.expand_dims(library.min(arr, axis=1), 1)
+        arr = arr / np.expand_dims(library.max(np.abs(arr), axis=1), 1)
 
-        new_max = np.max(np.abs(arr))
-        arr = arr / new_max if new_max != 0 else arr
-
-        return arr
+        return arr.tolist()
 
     @staticmethod
-    def start_max(arr:np.ndarray) -> np.ndarray:
+    def sub0_max(arr, library):
 
         """ subtract start value and divide by new maximum
 
         :returns array between 0 and 1
         """
 
-        arr = arr - arr[0]
+        arr = arr - np.expand_dims(arr[:, 0], 1)
+        arr = arr / np.expand_dims(library.max(np.abs(arr), axis=1), 1)
 
-        new_max = np.max(np.abs(arr))
-        arr = arr / new_max if new_max != 0 else arr
+        return arr.tolist()
 
-        return arr
+    @staticmethod
+    def standardize(arr, library):
+
+        """ subtract minimum and divide by new maximum
+
+        :returns array between 0 and 1
+        """
+
+        arr = arr - np.expand_dims(library.mean(arr, axis=1), 1)
+        arr = arr / np.expand_dims(library.std(np.abs(arr), axis=1), 1)
+
+        return arr.tolist()
