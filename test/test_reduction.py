@@ -48,3 +48,55 @@ class Test_FeatureExtraction:
     def test_local_caching(self):
         raise NotImplementedError
 
+class Test_CNN:
+
+    def test_training(self):
+
+        DG = DummyGenerator(num_rows=11, trace_length=16, ragged=False)
+        data = DG.get_array()
+
+        cnn = CNN()
+        cnn.train(data, epochs=2)
+
+    def test_training_modified(self):
+
+        DG = DummyGenerator(num_rows=11, trace_length=16, ragged=False)
+        data = DG.get_array()
+
+        cnn = CNN()
+        cnn.train(data, epochs=2, dropout=0.1, regularize_latent=0.01)
+
+    def test_embeding(self):
+        DG = DummyGenerator(num_rows=11, trace_length=16, ragged=False)
+        data = DG.get_array()
+
+        cnn = CNN()
+        _, X_test, _, _ = cnn.train(data, epochs=2)
+
+        Y_test = cnn.embed(X_test)
+
+    def test_plotting(self):
+
+        DG = DummyGenerator(num_rows=11, trace_length=16, ragged=False)
+        data = DG.get_array()
+
+        cnn = CNN()
+        hist, X_test, Y_test, MSE = cnn.train(data, epochs=1)
+
+        cnn.plot_history()
+        cnn.plot_examples(X_test, Y_test)
+
+    def test_save_load(self):
+
+        path = ""
+
+        DG = DummyGenerator(num_rows=11, trace_length=16, ragged=False)
+        data = DG.get_array()
+
+        cnn = CNN()
+        hist, X_test, Y_test, MSE = cnn.train(data, epochs=1)
+        cnn.save_model(path)
+
+        cnn_naive = CNN()
+        cnn_naive.load_model(path)
+        cnn_naive.predict(X_test)
