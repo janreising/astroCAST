@@ -86,17 +86,49 @@ class Test_CNN:
         cnn.plot_history()
         cnn.plot_examples(X_test, Y_test)
 
-    def test_save_load(self):
-
-        path = ""
+    def test_save_load(self, tmp_path):
 
         DG = DummyGenerator(num_rows=11, trace_length=16, ragged=False)
         data = DG.get_array()
 
         cnn = CNN()
         hist, X_test, Y_test, MSE = cnn.train(data, epochs=1)
-        cnn.save_model(path)
+        cnn.save_model(tmp_path)
 
         cnn_naive = CNN()
-        cnn_naive.load_model(path)
-        cnn_naive.predict(X_test)
+        cnn_naive.load_model(tmp_path)
+        cnn_naive.embed(X_test)
+
+class Test_UMAP:
+
+    def test_training(self):
+
+        data = np.random.random(size=(12, 25))
+
+        um = UMAP()
+        embedded = um.train(data)
+
+    def test_plotting(self):
+
+        data = np.random.random(size=(12, 25))
+
+        um = UMAP()
+        embedded = um.train(data)
+
+        um.plot()
+
+    def test_save_load(self, tmp_path):
+
+        data = np.random.random(size=(12, 25))
+
+        um = UMAP()
+        embedded = um.train(data)
+
+        um.save(tmp_path)
+
+        um = UMAP()
+        um.load(tmp_path)
+        embedded = um.embed(data)
+
+
+

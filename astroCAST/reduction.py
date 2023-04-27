@@ -1,17 +1,21 @@
 import logging
 import multiprocessing
+import pickle
+from pathlib import Path
 
+import keras.models
 import numpy as np
 import pandas as pd
+import umap
+import umap.plot
 from keras import Input, Model
 from keras.callbacks import EarlyStopping
 from keras.layers import Dropout, Conv1D, MaxPooling1D, UpSampling1D, ActivityRegularization
 from keras.losses import mean_squared_error
 from matplotlib import pyplot as plt
+import seaborn as sns
 from tqdm import tqdm
 import tsfresh
-
-from astroCAST.helper import wrapper_local_cache
 
 class FeatureExtraction:
 
@@ -85,6 +89,60 @@ class FeatureExtraction:
         else:
             features.index = data.index
             return pd.concat([data, features], axis=1)
+
+class UMAP:
+    def __init__(self, n_neighbors=30, min_dist=0, n_components=2, metric="euclidean",):
+        self.reducer = umap.UMAP(n_neighbors=n_neighbors, min_dist=min_dist, n_components=n_components, metric=metric)
+
+    def train(self, data):
+        return self.reducer.fit_transform(data)
+
+    def embed(self, data):
+        return self.reducer.transform(data)
+
+    def plot(self, data=None, ax=None, labels=None):
+
+        if ax is None:
+            fig, ax = plt.subplots(1, 1, figsize=(10, 10))
+
+        if data is None:
+            umap.plot.points(self.reducer, labels=labels, ax=ax)
+
+        else:
+
+            if labels is not None:
+
+                palette = sns.color_palette("husl", len(np.unique(labels)))
+                ax.scatter(data[:, 0], data[:, 1], alpha=0.1, s=1,
+                           color=[palette[v] for v in labels])
+
+            else:
+                ax.scatter(data[:, 0], data[:, 1], alpha=0.1, s=1)
+
+    def save(self, path):
+
+        if isinstance(path, str):
+            path = Path(path)
+
+        if path.is_dir():
+            path = path.with_name("umap.p")
+            logging.info(f"saving umap to {path}")
+
+        assert not path.is_file(), f"file already exists: {path}"
+        pickle.dump(self.reducer, open(path, "wb"))
+
+    def load(self, path):
+
+        if isinstance(path, str):
+            path = Path(path)
+
+        if path.is_dir():
+            path = path.with_name("umap.p")
+            logging.info(f"loading umap from {path}")
+
+        assert path.is_file(), f"can't find umap: {path}"
+        self.reducer = pickle.load(open(path, "rb"))
+
 
 class CNN:
 
@@ -178,6 +236,8 @@ class CNN:
         latent = self.encoder.predict(data)
         latent = np.reshape(latent, (latent.shape[0], int(latent.shape[1]*latent.shape[2])))
 
+        latent = np.squeeze(latent)
+
         return latent
 
     def plot_history(self, history=None, figsize=(4, 2)):
@@ -237,3 +297,45 @@ class CNN:
 
             axx[0, 0].set_ylabel("IN/OUT", fontweight=600)
             axx[1, 0].set_ylabel("error", fontweight=600)
+
+    def save_model(self, path, model=None):
+
+        if model is None:
+            assert self.encoder is not None, "please provide a 'model' or train a new one 'train()'"
+
+        if isinstance(path, str):
+            path = Path(path)
+
+        encoder_path = path if path.suffix == ".h5" else path.joinpath("encoder.h5")
+        assert not encoder_path.is_file(), f"output file exists. Please delete or provide different path: {encoder_path}"
+        self.encoder.save(encoder_path.as_posix())
+        logging.info(f"saved encoder model to {encoder_path}")
+
+        autoencoder_path = path if path.suffix == ".h5" else path.joinpath("autoencoder.h5")
+        assert not autoencoder_path.is_file(), f"output file exists. Please delete or provide different path: {autoencoder_path}"
+        self.encoder.save(autoencoder_path.as_posix())
+        logging.info(f"saved autoencoder model to {autoencoder_path}")
+
+    def load_model(self, path, loading_encoder=True):
+
+        if isinstance(path, str):
+            path = Path(path)
+
+        if loading_encoder:
+            model_path = path if path.suffix == ".h5" else path.joinpath("encoder.h5")
+            assert model_path.is_file(), f"Can't find model: {model_path}"
+            self.encoder = keras.models.load_model(model_path.as_posix())
+
+        else:
+            model_path = path if path.suffix == ".h5" else path.joinpath("autoencoder.h5")
+            assert model_path.is_file(), f"Can't find model: {model_path}"
+            self.encoder = keras.models.load_model(model_path.as_posix())
+            self.autoencoder = keras.models.load_model(model_path.as_posix())
+
+class Barycenter_OR_TIMECLUSTERING:
+    def __init__(self):
+        pass
+
+class ClusterTree:
+    def __init__(self):
+        pass
