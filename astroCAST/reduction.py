@@ -14,6 +14,7 @@ from keras.layers import Dropout, Conv1D, MaxPooling1D, UpSampling1D, ActivityRe
 from keras.losses import mean_squared_error
 from matplotlib import pyplot as plt
 import seaborn as sns
+from scipy.cluster import hierarchy
 from tqdm import tqdm
 import tsfresh
 
@@ -142,7 +143,6 @@ class UMAP:
 
         assert path.is_file(), f"can't find umap: {path}"
         self.reducer = pickle.load(open(path, "rb"))
-
 
 class CNN:
 
@@ -336,6 +336,50 @@ class Barycenter_OR_TIMECLUSTERING:
     def __init__(self):
         pass
 
-class ClusterTree:
-    def __init__(self):
-        pass
+class ClusterTree():
+
+    """ converts linkage matrix to searchable tree"""
+
+    def __init__(self, Z):
+        self.tree = hierarchy.to_tree(Z)
+
+    def get_node(self, id_):
+        return self.search(self.tree, id_)
+
+    def get_leaves(self, tree):
+
+        if tree.is_leaf():
+            return [tree.id]
+
+        left = self.get_leaves(tree.get_left())
+        right = self.get_leaves(tree.get_right())
+
+        return left + right
+
+    def get_count(self, tree):
+
+        if tree.is_leaf():
+            return 1
+
+        left = self.get_count(tree.get_left())
+        right = self.get_count(tree.get_right())
+
+        return left + right
+
+    def search(self, tree, id_):
+
+        if tree is None:
+            return None
+
+        if tree.id == id_:
+            return tree
+
+        left = self.search(tree.get_left(), id_)
+        if left is not None:
+            return left
+
+        right = self.search(tree.get_right(), id_)
+        if right is not None:
+            return right
+
+        return None

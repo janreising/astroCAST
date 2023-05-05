@@ -22,7 +22,7 @@ def wrapper_local_cache(f):
 
     def hash_from_ndarray(v):
         h = xxhash.xxh64()
-        h.update(v)
+        h.update(v.flatten())
 
         return h.intdigest()
 
@@ -178,20 +178,20 @@ def wrapper_local_cache(f):
                 result = load_value(files[0])
 
                 if result is None:
-                    logging.INFO("error during loading. recacalculating value", 0)
+                    logging.info("error during loading. recacalculating value")
                     return f(*args, **kwargs)
 
-                logging.INFO(f"loaded result of {f.__name__} from file", 1)
+                logging.info(f"loaded result of {f.__name__} from file")
 
             else:
 
                 result = f(*args, **kwargs)
 
                 if len(files) > 0:
-                    logging.INFO(f"multiple saves found. files should be deleted: {files}", 0)
+                    logging.info(f"multiple saves found. files should be deleted: {files}")
 
                 # save result
-                logging.INFO(f"saving to: {cache_path}", 2)
+                logging.info(f"saving to: {cache_path}")
                 save_value(cache_path, result)
 
         else:
