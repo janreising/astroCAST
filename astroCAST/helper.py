@@ -12,7 +12,6 @@ import xxhash
 
 
 def wrapper_local_cache(f):
-
     """ Wrapper that creates a local save of the function call based on a hash of the arguments
     expects a function from a class with 'lc_path'::pathlib.Path and 'local_cache':bool attribute
 
@@ -107,17 +106,17 @@ def wrapper_local_cache(f):
         # convert pandas
         if isinstance(value, pd.Series) or isinstance(value, pd.DataFrame):
             # value.to_csv(path+".csv", )
-            with open(path+".p", "wb") as f:
-                    pickle.dump(value, f)
+            with open(path + ".p", "wb") as f:
+                pickle.dump(value, f)
 
         elif isinstance(value, np.ndarray) or isinstance(value, float) or isinstance(value, int):
-            np.save(path+".npy", value)
+            np.save(path + ".npy", value)
 
         else:
 
             try:
                 # last saving attempt
-                with open(path+".p", "wb") as f:
+                with open(path + ".p", "wb") as f:
                     pickle.dump(value, f)
             except:
                 print("saving failed because datatype is unknown: ", type(value))
@@ -126,7 +125,6 @@ def wrapper_local_cache(f):
         return True
 
     def load_value(path):
-
 
         # convert file path
         if isinstance(path, Path):
@@ -169,7 +167,7 @@ def wrapper_local_cache(f):
             # print("\tcache_path: ", cache_path)
 
             # find file with regex matching from hash_value
-            files = glob.glob(cache_path.as_posix()+".*")
+            files = glob.glob(cache_path.as_posix() + ".*")
             # print("\tfiles: ", files)
 
             # exists
@@ -202,18 +200,25 @@ def wrapper_local_cache(f):
 
     return inner_function
 
-class DummyGenerator():
 
-    def __init__(self, num_rows=25, trace_length=12, ragged=False):
+class DummyGenerator:
 
-        self.data = self.get_data(num_rows=num_rows, trace_length=trace_length, ragged=ragged)
+    def __init__(self, num_rows=25, trace_length=12, ragged=False, offset=0):
 
-    def get_data(self, num_rows, trace_length, ragged):
+        self.data = self.get_data(num_rows=num_rows, trace_length=trace_length, ragged=ragged, offset=offset)
+
+    @staticmethod
+    def get_data(num_rows, trace_length, ragged, offset):
+
+        if isinstance(ragged, str):
+            ragged = True if ragged == "ragged" else False
 
         if ragged:
-            data = [np.random.random(size=trace_length+np.random.randint(low=-trace_length+1, high=trace_length-1)) for _ in range(num_rows)]
+            data = [np.random.random(
+                size=trace_length + np.random.randint(low=-trace_length + 1, high=trace_length - 1)) + offset for _ in
+                    range(num_rows)]
         else:
-            data = np.random.random(size=(num_rows, trace_length))
+            data = np.random.random(size=(num_rows, trace_length)) + offset
 
         return data
 
@@ -232,8 +237,8 @@ class DummyGenerator():
         # create dz, z0 and z1
         df["dz"] = df.trace.apply(lambda x: len(x))
 
-        dz_sum = int(df.dz.sum()/2)
-        df["z0"] = [np.random.randint(low=0, high=dz_sum) for _ in range(len(df))]
+        dz_sum = int(df.dz.sum() / 2)
+        df["z0"] = [np.random.randint(low=0, high=max(dz_sum, 1)) for _ in range(len(df))]
         df["z1"] = df.z0 + df.dz
 
         # create fake index
@@ -267,10 +272,13 @@ class DummyGenerator():
         else:
             raise TypeError
 
+
 class Normalization:
 
-    # TODO parallelization
-    def __init__(self, data, approach):
+    def __init__(self, data, inplace=True):
+
+        if not inplace:
+            data = data.copy()
 
         # check if ragged and convert to appropriate type
         ragged = False
@@ -283,94 +291,217 @@ class Normalization:
                 if cur_len != last_len:
                     ragged = True
                     self.data = ak.Array(data)
-                    self.library = ak
                     break
 
                 last_len = cur_len
 
             if not ragged:
                 self.data = np.array(data)
-                self.library = np
 
         elif isinstance(data, pd.Series):
 
             if len(data.apply(lambda x: len(x)).unique()) > 1:
                 self.data = ak.Array(data.tolist())
-                self.library = ak
             else:
                 self.data = np.array(data.tolist())
-                self.library = np
 
         elif isinstance(data, np.ndarray):
 
             if isinstance(data.dtype, object):
-                last_len = len(data[0, :])
+                last_len = len(data[0])
                 for i in range(1, data.shape[0]):
-                    cur_len = len(data[i, :])
+                    cur_len = len(data[i])
 
                     if cur_len != last_len:
                         ragged = True
-                        self.data = ak.Array(data)
-                        self.library = ak
+                        self.data = ak.Array(data.tolist())
                         break
 
                     last_len = cur_len
 
                 if not ragged:
-                    self.data = np.array(data)
-                    self.library = np
+                    self.data = np.array(data, dtype=type(data[0][0]))
 
             else:
                 self.data = data
-                self.library = np
         else:
             raise TypeError(f"datatype not recognized: {type(data)}")
 
-        # choose normalization approach
-        func = getattr(self, approach, lambda: None)
-        if func is not None:
-            self.func = func
+    def run(self, instructions):
+
+        assert isinstance(instructions,
+                          dict), "please provide 'instructions' as {0: 'func_name'} or {0: ['func_name', params]}"
+
+        data = self.data
+
+        keys = np.sort(list(instructions.keys()))
+        for key in keys:
+
+            instruct = instructions[key]
+            if isinstance(instruct, str):
+                func = self.__getattribute__(instruct)
+                data = func(data)
+
+            elif isinstance(instruct, list):
+                func, param = instruct
+                func = self.__getattribute__(func)
+
+                data = func(data, **param)
+
+        return data
+
+    def min_max(self):
+
+        instructions = {
+            0: ["subtract", {"mode": "min"}],
+            1: ["divide", {"mode": "max_abs"}]
+        }
+        return self.run(instructions)
+
+    @staticmethod
+    def get_value(data, mode, population_wide):
+
+        axis = None if population_wide else 1
+
+        mode_options = {
+            "first": lambda x: np.mean(x[:, 0]) if population_wide else x[:, 0],
+            "mean": lambda x: np.mean(x, axis=axis),
+            "min": lambda x: np.min(x, axis=axis),
+            "min_abs": lambda x: np.min(np.abs(x), axis=axis),
+            "max": lambda x: np.max(x, axis=axis),
+            "max_abs": lambda x: np.max(np.abs(x), axis=axis),
+            "std": lambda x: np.std(x, axis=axis)
+        }
+        assert mode in mode_options.keys(), f"please provide valid mode: {mode_options.keys()}"
+
+        logging.warning(f"data: {data}")
+        logging.warning(f"type: {type(data)}")
+        # logging.warning(f"shape: {data.shape}")
+        # logging.warning(f"std: {np.std(data, axis=axis)}")
+
+        ret = mode_options[mode](data)
+        return ret if population_wide else ret[:, None]  # broadcasting for downstream calculation
+
+    def subtract(self, data, mode="min", population_wide=False):
+        return data - self.get_value(data, mode, population_wide)
+
+    def divide(self, data, mode="max", population_wide=False):
+
+        divisor = self.get_value(data, mode, population_wide)
+        print("type: ", type(data))
+
+        # deal with ZeroDivisonError
+        if population_wide and divisor == 0:
+            logging.warning("Encountered '0' in divisor, returning data untouched.")
+            return data
+
         else:
-            raise AttributeError(f"please provide a valid approach instead of {approach}")
+            idx = np.where(divisor == 0)[0]
+            print("idx: ", idx)
+            if len(idx) > 0:
+                logging.warning("Encountered '0' in divisor, returning those rows untouched.")
 
-    def run(self):
-        return self.func(self.data, self.library)
+                if isinstance(data, ak.Array):
 
-    @staticmethod
-    def min_max(arr, library):
+                    # recreate array, since modifications cannot be done inplace
+                    data = ak.Array([data[i] / divisor[i] if i not in idx else data[i] for i in range(len(data))])
 
-        """ subtract minimum and divide by new maximum
+                else:
+                    mask = np.ones(len(data), bool)
+                    mask[idx] = 0
 
-        :returns array between 0 and 1
-        """
+                    print("divisor_mask: ", divisor[mask])
+                    data[mask, :] = data[mask, :] / divisor[mask]
 
-        arr = arr - np.expand_dims(library.min(arr, axis=1), 1)
-        arr = arr / np.expand_dims(library.max(np.abs(arr), axis=1), 1)
+                return data
 
-        return arr.tolist()
-
-    @staticmethod
-    def sub0_max(arr, library):
-
-        """ subtract start value and divide by new maximum
-
-        :returns array between 0 and 1
-        """
-
-        arr = arr - np.expand_dims(arr[:, 0], 1)
-        arr = arr / np.expand_dims(library.max(np.abs(arr), axis=1), 1)
-
-        return arr.tolist()
+            else:
+                return data / divisor
 
     @staticmethod
-    def standardize(arr, library):
+    def enforce_length(data, min_length=None, pad_mode="edge", max_length=None):
 
-        """ subtract minimum and divide by new maximum
+        if min_length is None and max_length is None:
+            return data
 
-        :returns array between 0 and 1
-        """
+        if isinstance(data, np.ndarray):
 
-        arr = arr - np.expand_dims(library.mean(arr, axis=1), 1)
-        arr = arr / np.expand_dims(library.std(np.abs(arr), axis=1), 1)
+            logging.warning(data.shape)
+            if min_length is not None and data.shape[1] < min_length:
+                data = np.pad(data, pad_width=min_length - data.shape[1], mode=pad_mode)
+                data = data[:, :min_length]
 
-        return arr.tolist()
+            elif max_length is not None and data.shape[1] > max_length:
+                data = data[:, :max_length]
+
+            return data
+
+        elif isinstance(data, ak.Array):
+
+            if min_length is not None and max_length is None:
+                data = ak.pad_none(data, min_length)
+
+            elif max_length is not None and min_length is None:
+                data = data[:, :max_length]
+
+            else:
+                assert max_length == min_length, "when providing 'max_length' and 'min_length', both have to be equal"
+                data = ak.pad_none(data, max_length, clip=True)
+
+        else:
+            raise TypeError(f"datatype {type(data)} not recognized.")
+
+        return data
+
+    @staticmethod
+    def impute_nan(data, fixed_value=None):
+
+        if isinstance(data, np.ndarray):
+
+            if fixed_value is not None:
+                return np.nan_to_num(data, copy=True, nan=fixed_value)
+
+            else:
+
+                for r in range(data.shape[0]):
+                    trace = data[r, :]
+
+                    mask = np.isnan(trace)
+                    logging.debug(f"mask: {mask}")
+                    trace[mask] = np.interp(np.flatnonzero(mask), np.flatnonzero(~mask), trace[~mask])
+
+                    data[r, :] = trace
+
+        elif isinstance(data, ak.Array):
+
+            if fixed_value is not None:
+                data = ak.fill_none(data, fixed_value)  # this does not deal with np.nan
+
+            container = []
+            for r in range(len(data)):
+
+                trace = data[r].to_numpy(allow_missing=True)
+
+                mask = np.isnan(trace)
+                if fixed_value is not None:
+                    trace[mask] = fixed_value
+                else:
+                    trace = np.interp(np.flatnonzero(mask), np.flatnonzero(~mask), trace[~mask])
+
+                container.append(trace)
+
+            data = ak.Array(container)
+
+        else:
+            raise TypeError("please provide np.ndarray or ak.Array")
+
+        return data
+
+    @staticmethod
+    def diff(data):
+
+        if isinstance(data, ak.Array):
+            return ak.Array([np.diff(data[i]) for i in range(len(data))])
+
+        else:
+            return np.diff(data, axis=1)
