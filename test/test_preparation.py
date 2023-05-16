@@ -5,6 +5,7 @@ from pathlib import Path
 import dask
 import numpy as np
 import pytest
+import tifffile
 
 from astroCAST.preparation import *
 
@@ -121,7 +122,8 @@ class Test_Input:
         assert names == names_sorted, "sorting did not work"
 
     @pytest.mark.parametrize("num_files", [1, 12])
-    def test_convert_single_tiff_series(self, num_files):
+    @pytest.mark.parametrize("in_memory", [True, False])
+    def test_convert_single_tiff_series(self, num_files, in_memory):
 
         with tempfile.TemporaryDirectory() as dir:
             tmpdir = Path(dir)
@@ -142,7 +144,7 @@ class Test_Input:
             inp = Input()
 
             tmpdir = list(tmpdir.glob("*"))[0] if num_files == 1 else tmpdir
-            stack = inp.load_tiff(path=tmpdir, dtype=None, in_memory=True)
+            stack = inp.run(input_path=tmpdir, dtype=None, in_memory=in_memory)
             stack = stack["ch0"]
 
             img_stack = np.squeeze(img_stack)
@@ -152,7 +154,8 @@ class Test_Input:
             assert np.array_equal(img_stack, stack)
 
     @pytest.mark.parametrize("num_channels", [2, 3])
-    def test_convert_multi_channel(self, num_channels):
+    @pytest.mark.parametrize("in_memory", [True, False])
+    def test_convert_multi_channel(self, num_channels, in_memory):
 
         with tempfile.TemporaryDirectory() as dir:
             tmpdir = Path(dir)
@@ -175,7 +178,7 @@ class Test_Input:
 
             # Loaded
             inp = Input()
-            stack = inp.load_tiff(path=tmpdir, channels=num_channels, dtype=None, in_memory=True)
+            stack = inp.run(input_path=tmpdir, channels=num_channels, dtype=None, in_memory=in_memory)
 
             for ch in images.keys():
 
@@ -185,7 +188,137 @@ class Test_Input:
                 assert ref.shape == res.shape
                 assert np.array_equal(ref, res)
 
-    def test_output(self):
+    @pytest.mark.parametrize("num_channels", [1, 2, 3])
+    @pytest.mark.parametrize("subtract_background", ["arr"])
+    @pytest.mark.parametrize("subtract_func", [np.mean, "mean", "std", "min", "max"])
+    def test_subtract(self, num_channels, subtract_background, subtract_func, in_memory=True):
+
+        with tempfile.TemporaryDirectory() as dir:
+            tmpdir = Path(dir)
+            assert tmpdir.is_dir()
+
+            X, Y = 10, 10
+
+            # Reference
+            images = {f"ch{n}":[] for n in range(num_channels)}
+            c=0
+            for n in range(7):
+                for n in range(num_channels):
+
+                    img = np.random.random((1, X, Y))
+                    images[f"ch{n}"].append(img)
+
+                    tifffile.imwrite(tmpdir.joinpath(f"ss_single_{c}.tiff"), img)
+                    c=c+1
+
+            for k in images.keys():
+                images[k] = np.squeeze(np.stack(images[k]))
+
+            if num_channels == 1:
+                subtract_background = np.random.random((X, Y))
+
+            else:
+                subtract_background = "ch0"
+
+            # Loaded
+            inp = Input()
+            stack = inp.run(input_path=tmpdir, channels=num_channels,
+                                  subtract_background=subtract_background, subtract_func=subtract_func,
+                                  dtype=None, in_memory=in_memory)
+
+            # check result
+            func_reduction = {"mean": np.mean, "std": np.std, "min": np.min, "max":np.max}
+
+            if num_channels == 1:
+
+                assert np.array_equal(
+                    stack["ch0"],
+                    images["ch0"] - subtract_background
+                )
+
+            else:
+
+                func = func_reduction[subtract_func] if not callable(subtract_func) else subtract_func
+                background = func(images["ch0"], axis=0)
+
+                for ch in stack.keys():
+
+                    if ch == "ch0":
+                        pass
+
+                    ctrl = images[ch] - background
+                    res = stack[ch]
+
+                    assert ctrl.shape == res.shape, f"dimensions are not equal: {ctrl.shape} vs. {res.shape}"
+                    assert np.allclose(res, ctrl), "values are not equal"
+
+    @pytest.mark.parametrize("rescale", [1, 0.5, 20, (0.5, 0.3), (20, 15)])
+    def test_resize(self, rescale, num_channels=1):
+
+        with tempfile.TemporaryDirectory() as dir:
+            tmpdir = Path(dir)
+            assert tmpdir.is_dir()
+
+            Z, X, Y = 20, 12, 12
+
+            # Reference
+            images = {f"ch{n}":[] for n in range(num_channels)}
+            c=0
+            for n in range(20):
+                for n in range(num_channels):
+
+                    img = np.random.random((1, X, Y))
+                    images[f"ch{n}"].append(img)
+
+                    tifffile.imwrite(tmpdir.joinpath(f"ss_single_{c}.tiff"), img)
+                    c=c+1
+
+            for k in images.keys():
+                images[k] = np.squeeze(np.stack(images[k]))
+
+            inp = Input()
+            stack = inp.run(input_path=tmpdir, channels=num_channels, rescale=rescale,
+                                  subtract_background=None, subtract_func=None,
+                                  dtype=None, in_memory=True)
+
+            res = stack["ch0"]
+
+            if rescale == 1:
+                assert res.shape == (Z, X, Y)
+
+            elif isinstance(rescale, float):
+                assert res.shape == (Z, int(X*rescale), int(Y*rescale))
+
+            elif isinstance(rescale, int):
+                assert res.shape == (Z, rescale, rescale)
+
+            elif isinstance(rescale, tuple):
+                rx, ry = rescale
+
+                if isinstance(rx, int):
+                    assert res.shape == (Z, rx, ry)
+
+                elif isinstance(rx, float):
+
+                    assert res.shape == (Z, int(X*rx), int(Y*ry))
+
+    @pytest.mark.parametrize("output_path", ["out.h5", "out.tdb", "out.tiff"])
+    @pytest.mark.parametrize("chunks", [None, (5, 5, 5)])
+    def test_output(self, output_path, chunks):
+
+        with tempfile.TemporaryDirectory() as dir:
+            tmpdir = Path(dir)
+            assert tmpdir.is_dir()
+
+            output_path = tmpdir.joinpath(output_path)
+
+            data = {0: np.random.random((25, 10, 10))}
+
+            inp = Input()
+            inp.save(output_path, data, chunks=chunks)
+
+    @pytest.mark.parametrize("output_path", ["out.h5", "out.tdb", "out.tiff"])
+    def test_intput_output(self, output_path):
 
         num_files = 25
 
@@ -208,34 +341,35 @@ class Test_Input:
             inp = Input()
 
             tmpdir = list(tmpdir.glob("*"))[0] if num_files == 1 else tmpdir
-            stack = inp.load_tiff(path=tmpdir, dtype=None, in_memory=False)
+            output_path = tmpdir.joinpath(output_path)
 
-            output_path = tmpdir.joinpath("out.h5")
-            inp.save(output_path, stack, prefix="data")
+            inp.run(input_path=tmpdir, output_path=output_path,
+                            dtype=None, in_memory=False, prefix="data")
+
+            assert output_path.is_file() or output_path.is_dir(), f"cannot find output file: {output_path}"
 
             # load back
-            with h5py.File(output_path.as_posix(), "r") as f:
-                res = f["data/ch0"][:]
+            if output_path.suffix == ".h5":
+
+                with h5py.File(output_path.as_posix(), "r") as f:
+                    res = f["data/ch0"][:]
+
+            elif output_path.suffix == ".tiff":
+                res = tifffile.imread(output_path.as_posix())
+
+            elif output_path.suffix == ".tdb":
+                res = tiledb.open(output_path.as_posix())
+
+            else:
+                raise NotImplementedError
 
             res = np.squeeze(res)
 
             assert img_stack.shape == res.shape
             assert np.array_equal(img_stack, res)
 
-"""
+    @pytest.mark.xfail
     def test_convert_czi(self):
+        # TODO I do not know if python can write czi files
         raise NotImplementedError
 
-    def test_compression(self):
-        raise NotImplementedError
-
-    def test_output(self):
-        raise NotImplementedError
-
-    def test_subtract(self):
-        raise NotImplementedError
-
-    def test_summary(self):
-        raise NotImplementedError
-
-"""
