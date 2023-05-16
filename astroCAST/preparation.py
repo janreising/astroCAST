@@ -3,15 +3,217 @@ import logging
 import tempfile
 from pathlib import Path
 
+import dask
 import h5py
 import numpy as np
 import pandas as pd
 import tifffile
 import tiledb
 import dask.array as da
+from dask_image import imread
 from dask.distributed import Client, LocalCluster
+from skimage.transform import resize
+from skimage.util import img_as_uint
 from deprecated import deprecated
 from scipy.ndimage import minimum_filter1d
+
+class Input:
+
+    def __init__(self):
+        pass
+
+    def run(self, instructions):
+
+        self.load()
+        self.save()
+
+
+    @staticmethod
+    def sort_alpha_numerical_names(file_names, sep="_"):
+
+        use_path = True if isinstance(file_names[0], Path) else False
+
+        if use_path:
+            file_names = [f.as_posix() for f in file_names]
+
+        file_names = sorted(file_names, key=lambda x: int(x.split(".")[0].split(sep)[-1]))
+
+        if use_path:
+            file_names = [Path(f) for f in file_names]
+
+        return file_names
+
+    def load_tiff(self, path, channels=1, sep="_",
+                  subtract_background=None, subtract_func="mean",
+                  rescale=None, dtype=np.uint,
+                  in_memory=False):
+
+        path = Path(path) if isinstance(path, str) else path
+        assert isinstance(path, Path), f"please provide a valid data location instead of: {path}"
+
+        assert isinstance(channels, (int, dict))
+
+        # load data
+        if path.is_dir():
+
+            files = [f for f in path.glob("*") if f.suffix in [".tif", ".tiff", ".TIF", ".TIFF"]]
+            assert len(files) > 0, "couldn't find .tiff files. Recognized extension: [tif, tiff, TIF, TIFF]"
+            files = self.sort_alpha_numerical_names(file_names=files, sep=sep)
+
+            # TODO it would be preferable to use the vanilla dask packacge, somehow the import doesn't work!?
+            # stack = da.stack([da.image.imread(f.as_posix(), preprocess=None) for f in files])
+            stack = da.stack([imread.imread(f.as_posix()) for f in files])
+            stack = np.squeeze(stack)
+
+            if len(stack.shape) != 3:
+                raise NotImplementedError(f"dimensions incorrect: {len(stack.shape)}. Currently not implemented for dim != 3D")
+
+        elif path.is_file():
+
+            # TODO delayed loading from TIFF
+            # with tifffile.TiffFile(path) as tif:
+            #     num_frames = len(tif.pages)
+            #     X, Y = tif.pages[0].shape
+            #     dtype = tif.pages[0].dtype
+            #
+            # stack = da.stack([
+            #     da.from_delayed(dask.delayed(tifffile.imread(path, key=i)), shape=(1, X, Y), dtype=dtype)
+            #                     for i in range(num_frames)])
+            # stack = np.squeeze(stack)
+
+            arr = tifffile.imread(path)
+            stack = da.from_array(arr, chunks=(1, -1, -1))
+
+        else: raise FileNotFoundError(f"cannot find directory or file: {path}")
+
+        # ensure 3D shape
+        if len(stack.shape) != 3:
+            raise NotImplementedError(f"dimensions incorrect: {len(stack.shape)}. Currently not implemented for dim != 3D")
+
+        # split into channels
+        num_channels = channels if isinstance(channels, int) else len(len(channels.keys()))
+        assert stack.shape[0] % num_channels == 0, f"cannot divide frames into channel number: {stack.shape[0]} % {num_channels} != 0"
+        channels = channels if isinstance(channels, dict) else {i:f"ch{i}" for i in range(num_channels)}
+
+        data = {}
+        for channel_key in channels.keys():
+            data[channel_key] = stack[channel_key::num_channels, :, :]
+
+        # subtract background
+        if subtract_background is not None:
+
+            if isinstance(subtract_background, np.ndarray):
+                assert subtract_background.shape == stack[0, :, :].shape, f"please provide background as np.ndarray of shape f{stack[0, :, :].shape}"
+
+                for key in data.keys():
+                    data[key] = data[key] - subtract_background
+
+            elif isinstance(subtract_background, str) or callable(subtract_background):
+
+                # select background and delete it
+                background_keys = [k for k in channels.keys() if channels[k] == subtract_background]
+                assert len(background_keys) == 1, f"cannot find channel to subtract or found too many. Choose only one of : {list(channels.values())} "
+                background = data[background_keys[0]]
+                del data[background_keys]
+
+                # reduce dimension
+                if callable(subtract_func):
+                    reducer = subtract_func
+                else:
+                    func_reduction = {"mean": da.mean, "std": da.std, "min": da.min, "max":da.max}
+                    assert subtract_func in func_reduction.keys(), f"cannot find reduction function. Please provide callable function or one of {func_reduction.keys()}"
+                    reducer = func_reduction[subtract_func]
+
+                background = reducer(background, axis=0)
+                assert background.shape == stack[0, :, :].shape, f"incorrect dimension after reduction. expected: f{stack[0, :, :].shape} vs. found: {background.shape}"
+
+                # subtract
+                for k in data.keys():
+                    data[k] = data[k] - background
+
+        # rescale
+        if (rescale is not None) and rescale !=1 and rescale !=1.0:
+
+            # get original size
+            X, Y = data.values[0][0, :, :].shape
+
+            # calculate new size
+            if isinstance(rescale, (int, float)):
+                rescale = (rescale, rescale)
+            assert type(rescale[0]) == type(rescale[1]), f"mixed rescale type not allowed for 'rescale' flag: {type(rescale[0])} vs {type(rescale[1])}"
+            assert len(rescale) == 2, "please provide 'rescale' flag as 2D tuple, list or number"
+
+            if isinstance(rescale[0], int):
+                rX, rY = rescale[0], rescale[1]
+
+            elif isinstance(rescale[0], float):
+                rX, rY = (int(X*rescale[0]), int(Y*rescale[1]))
+
+            else:
+                raise TypeError("'rescale' flag should be of type tuple, list, int or float")
+
+            # apply resizing
+            for k in data.keys():
+                data[k] = data[k].map_blocks(
+                    lambda chunk: resize(chunk, (chunk.shape[0], rX, rY)), anti_aliasing=True)
+
+        # convert to datatype
+        if dtype is not None:
+
+            for k in data.keys():
+
+                if dtype == np.uint:
+                    data[k] = img_as_uint(data[k])
+
+                else:
+                    data[k] = data[k].astype(dtype)
+
+        # load to memory if required; generally not recommended
+        data = dask.compute(data)[0] if in_memory else data
+
+        # return
+        return {channels[i]:data[i] for i in data.keys()}
+
+    @staticmethod
+    def save(path, data, prefix="data", chunks=None, compression=None, dtype=None):
+
+        # cast path
+        if isinstance(path, str): path = Path(path)
+        elif isinstance(path, Path): pass
+        else: raise TypeError("please provide 'path' as str or pathlib.Path data type")
+
+        assert isinstance(data, dict), "please provide data as dict of {name:array}"
+
+        if path.suffix in [".h5", ".hdf5"]:
+
+            for k in data.keys():
+                channel = data[k]
+
+                if isinstance(channel, da.Array):
+                    da.to_hdf5(path, f"{prefix}/{k}", channel, chunks=chunks, compression=compression, shuffle=False, dtype=dtype)
+                    logging.info(f"dataset saved to {path}::{prefix}/{k}")
+
+                elif isinstance(channel, np.ndarray):
+                    with h5py.File(path, "a") as f:
+                        ds = f.create_dataset(f"{prefix}/{k}", shape=channel.shape, chunks=chunks, compression=compression, shuffle=False)
+                        ds[:] = channel
+
+                    logging.info(f"dataset saved to {path}::{prefix}/{k}")
+
+                else: raise TypeError("please provide data as either 'numpy.ndarray' or 'da.array.Array'")
+
+        elif path.suffix == ".tdb":
+            raise NotImplementedError
+
+        elif path.suffix in [".tiff", ".TIFF", ".tif", ".TIF"]:
+
+            for k in data.keys():
+                fpath = path.with_suffix(f".{k}.tiff")
+                tifffile.imwrite(fpath, data=data[k])
+                logging.info(f"saved data to {fpath}")
+
+        else:
+            raise TypeError("please provide output format as .h5, .tdb or .tiff file")
 
 class Delta:
 

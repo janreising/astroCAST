@@ -2,6 +2,7 @@ import logging
 import tempfile
 from pathlib import Path
 
+import dask
 import numpy as np
 import pytest
 
@@ -93,4 +94,148 @@ class Test_Delta:
 
         assert np.allclose(ctrl, res)
 
+    def test_quality_of_dff(self):
+        raise NotImplementedError
 
+    def test_new_dFF_version(self):
+        raise NotImplementedError
+
+class Test_Input:
+
+    @pytest.mark.parametrize("prefix", ["", "00000"])
+    @pytest.mark.parametrize("sep", ["_", "x", "-"])
+    def test_alphanumerical_names(self, prefix, sep):
+
+        names = []
+        for n in range(1000):
+            name = f"img{sep}{prefix}{n}.ext"
+            names.append(name)
+
+        names_shuffled = np.random.shuffle(names.copy())
+
+        assert names != names_shuffled, "randomization did not work"
+
+        inp = Input()
+        names_sorted = inp.sort_alpha_numerical_names(names, sep=sep)
+
+        assert names == names_sorted, "sorting did not work"
+
+    @pytest.mark.parametrize("num_files", [1, 12])
+    def test_convert_single_tiff_series(self, num_files):
+
+        with tempfile.TemporaryDirectory() as dir:
+            tmpdir = Path(dir)
+            assert tmpdir.is_dir()
+
+            # Reference
+            images = []
+            for n in range(num_files):
+                img = np.random.random((1, 10, 10))
+                images.append(img)
+
+                tifffile.imwrite(tmpdir.joinpath(f"ss_single_{n}.tiff"), img)
+
+            img_stack = np.stack(images)
+            img_stack = np.squeeze(img_stack)
+
+            # Loaded
+            inp = Input()
+
+            tmpdir = list(tmpdir.glob("*"))[0] if num_files == 1 else tmpdir
+            stack = inp.load_tiff(path=tmpdir, dtype=None, in_memory=True)
+            stack = stack["ch0"]
+
+            img_stack = np.squeeze(img_stack)
+            stack = np.squeeze(stack)
+
+            assert img_stack.shape == stack.shape
+            assert np.array_equal(img_stack, stack)
+
+    @pytest.mark.parametrize("num_channels", [2, 3])
+    def test_convert_multi_channel(self, num_channels):
+
+        with tempfile.TemporaryDirectory() as dir:
+            tmpdir = Path(dir)
+            assert tmpdir.is_dir()
+
+            # Reference
+            images = {f"ch{n}":[] for n in range(num_channels)}
+            c=0
+            for n in range(7):
+                for n in range(num_channels):
+
+                    img = np.random.random((1, 10, 10))
+                    images[f"ch{n}"].append(img)
+
+                    tifffile.imwrite(tmpdir.joinpath(f"ss_single_{c}.tiff"), img)
+                    c=c+1
+
+            for k in images.keys():
+                images[k] = np.squeeze(np.stack(images[k]))
+
+            # Loaded
+            inp = Input()
+            stack = inp.load_tiff(path=tmpdir, channels=num_channels, dtype=None, in_memory=True)
+
+            for ch in images.keys():
+
+                ref = np.squeeze(images[ch])
+                res = np.squeeze(stack[ch])
+
+                assert ref.shape == res.shape
+                assert np.array_equal(ref, res)
+
+    def test_output(self):
+
+        num_files = 25
+
+        with tempfile.TemporaryDirectory() as dir:
+            tmpdir = Path(dir)
+            assert tmpdir.is_dir()
+
+            # Reference
+            images = []
+            for n in range(num_files):
+                img = np.random.random((1, 10, 10))
+                images.append(img)
+
+                tifffile.imwrite(tmpdir.joinpath(f"ss_single_{n}.tiff"), img)
+
+            img_stack = np.stack(images)
+            img_stack = np.squeeze(img_stack)
+
+            # Loaded
+            inp = Input()
+
+            tmpdir = list(tmpdir.glob("*"))[0] if num_files == 1 else tmpdir
+            stack = inp.load_tiff(path=tmpdir, dtype=None, in_memory=False)
+
+            output_path = tmpdir.joinpath("out.h5")
+            inp.save(output_path, stack, prefix="data")
+
+            # load back
+            with h5py.File(output_path.as_posix(), "r") as f:
+                res = f["data/ch0"][:]
+
+            res = np.squeeze(res)
+
+            assert img_stack.shape == res.shape
+            assert np.array_equal(img_stack, res)
+
+"""
+    def test_convert_czi(self):
+        raise NotImplementedError
+
+    def test_compression(self):
+        raise NotImplementedError
+
+    def test_output(self):
+        raise NotImplementedError
+
+    def test_subtract(self):
+        raise NotImplementedError
+
+    def test_summary(self):
+        raise NotImplementedError
+
+"""
