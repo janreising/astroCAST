@@ -6,6 +6,9 @@ from astroCAST.helper import *
 def test_local_caching_wrapper():
     raise NotImplementedError
 
+def test_get_data_dimensions():
+    raise NotImplementedError
+
 @pytest.mark.parametrize("typ", ["dataframe", "list", "array"])
 @pytest.mark.parametrize("ragged", ["equal", "ragged"])
 @pytest.mark.parametrize("num_rows", [1, 10])
