@@ -373,3 +373,65 @@ class Test_Input:
         # TODO I do not know if python can write czi files
         raise NotImplementedError
 
+class Test_IO:
+
+    def test_(self):
+        raise NotImplementedError
+
+class Test_MotionCorrection:
+
+    @pytest.mark.parametrize("input_type", ["array", ".h5", ".tdb", ".tiff"])
+    def test_random(self, input_type, shape=(100, 100, 100)):
+
+        data = np.random.random(shape)
+        h5_loc = None
+
+        with tempfile.TemporaryDirectory() as dir:
+            tmpdir = Path(dir)
+            assert tmpdir.is_dir()
+
+            io = IO()
+
+            if input_type == ".h5":
+
+                h5_loc = "mc/ch0"
+                temp_path = tmpdir.joinpath("test.h5")
+                io.save(temp_path, data={"ch0":data}, prefix="mc")
+
+                data = temp_path
+
+            elif input_type == ".tiff":
+                # data = "testdata/sample_0.tiff"
+
+                temp_path = tmpdir.joinpath("test.tiff")
+                io.save(temp_path, data={"ch0":data})
+
+                data = temp_path
+
+            elif input_type == ".tdb":
+                raise NotImplementedError("Error in IO.save() when saving .tdb")
+
+                temp_path = tmpdir.joinpath("test.tdb")
+                io.save(temp_path, data={"ch0":data})
+
+                data = temp_path
+
+            elif input_type == "array":
+                pass
+
+            else:
+                raise ValueError
+
+            mc = MotionCorrection()
+            mc.run(data, h5_loc=h5_loc, max_shifts=(6, 6))
+
+            data = mc.get_data(output=None, remove_mmap=True)
+            assert type(data) == np.ndarray
+
+    @pytest.mark.xfail
+    def test_real_input(self):
+        raise NotImplementedError
+
+    @pytest.mark.xfail
+    def test_motion_correct_performance(self):
+        raise NotImplementedError

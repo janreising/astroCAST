@@ -1,13 +1,17 @@
 import itertools
 import logging
+import multiprocessing
+import os
 import tempfile
 from pathlib import Path
 
+import caiman.cluster
 import czifile
 import dask
 import h5py
 import numpy as np
 import pandas as pd
+import psutil
 import tifffile
 import tiledb
 import dask.array as da
@@ -17,6 +21,9 @@ from skimage.transform import resize
 from skimage.util import img_as_uint
 from deprecated import deprecated
 from scipy.ndimage import minimum_filter1d
+
+from astroCAST.helper import get_data_dimensions
+
 
 class Input:
 
@@ -54,13 +61,15 @@ class Input:
         assert isinstance(input_path, Path), "please provide 'input_path' as str or input_pathlib.input_path"
         assert input_path.is_file() or input_path.is_dir(), f"cannot find input: {input_path}"
 
+        io = IO()
+
         if input_path.suffix in [".tiff", ".tif", ".TIFF", ".TIF"] or \
                 (input_path.is_dir() and len(
                     [f for f in input_path.glob("*") if f.suffix in [".tif", ".tiff", ".TIF", ".TIFF"]]) > 0):
-            data = self.load_tiff(input_path, sep=sep)
+            data = io.load_tiff(input_path, sep=sep)
 
         elif input_path.suffix in [".czi"]:
-            data = self.load_czi(input_path)
+            data = io.load_czi(input_path)
 
         else:
             raise TypeError(f"File format is not implemented: {input_path.suffix}")
@@ -71,140 +80,7 @@ class Input:
         if output_path is None:
             return data
 
-        self.save(output_path, data, prefix=prefix, chunks=chunks, compression=compression)
-
-    @staticmethod
-    def sort_alpha_numerical_names(file_names, sep="_"):
-        """
-        Sorts a list of file names in alpha-numeric order based on a given separator.
-
-        Args:
-            file_names (list): A list of file names to be sorted.
-            sep (str, optional): Separator used for sorting file names. (default: "_")
-
-        Returns:
-            list: A sorted list of file names.
-
-        Raises:
-            None
-        """
-        # Check if file_names contains Path objects
-        use_path = True if isinstance(file_names[0], Path) else False
-
-        if use_path:
-            # Convert Path objects to string paths
-            file_names = [f.as_posix() for f in file_names]
-
-        # Sort file names based on the numeric part after the separator
-        file_names = sorted(file_names, key=lambda x: int(x.split(".")[0].split(sep)[-1]))
-
-        if use_path:
-            # Convert string paths back to Path objects
-            file_names = [Path(f) for f in file_names]
-
-        return file_names
-
-    def load_czi(self, path):
-
-        """
-        Loads a CZI file from the specified path and returns the data.
-
-        Args:
-            path (str or pathlib.Path): The path to the CZI file.
-
-        Returns:
-            numpy.ndarray: The loaded data from the CZI file.
-
-        """
-
-        # Convert path to a pathlib.Path object if it's provided as a string
-        path = Path(path) if isinstance(path, str) else path
-
-        # Validate path
-        assert isinstance(path, Path), "please provide 'path' as str or pathlib.Path"
-        assert path.is_file(), f"cannot find file: {path}"
-
-        # Read the CZI file using czifile
-        data = czifile.imread(path.as_posix())
-
-        # Remove single-dimensional entries from the shape of the data
-        data = np.squeeze(data)
-
-        # TODO would be useful to be able to drop non-1D axes. Not sure how to implement this though
-        # if ignore_dimensions is not None:
-        #     ignore_dimensions = list(ignore_dimensions) if isinstance(ignore_dimensions, int) else ignore_dimensions
-        #     assert isinstance(ignore_dimensions, (list, tuple)), "please provide 'ignore_dimensions' as int, list or tuple"
-        #
-        #   for d in ignore_dimensions:
-        #       np.delete(data, axis=k) # not tested that this actually works
-
-        if len(data.shape) != 3:
-            logging.warning(
-                f"the dataset is not 3D but instead: {data.shape}. This will most likely create errors downstream in the pipeline.")
-
-        return data
-
-    def load_tiff(self, path, sep="_"):
-
-        """
-        Loads TIFF image data from the specified path and returns a Dask array.
-
-        Args:
-            path (str or pathlib.Path): The path to the TIFF file or directory containing TIFF files.
-            sep (str): The separator used in sorting the filenames (default: "_").
-
-        Returns:
-            dask.array.core.Array: The loaded TIFF data as a Dask array.
-
-        Raises:
-            NotImplementedError: If the dimensions of the TIFF data are not 3D.
-        """
-
-        # Convert path to a pathlib.Path object if it's provided as a string
-        path = Path(path) if isinstance(path, str) else path
-
-        # Validate path
-        assert isinstance(path, Path), f"please provide a valid data location instead of: {path}"
-
-        if path.is_dir():
-            # If the path is a directory, load multiple TIFF files
-
-            # Get a list of TIFF files in the directory
-            files = [f for f in path.glob("*") if f.suffix in [".tif", ".tiff", ".TIF", ".TIFF"]]
-            assert len(files) > 0, "couldn't find .tiff files. Recognized extension: [tif, tiff, TIF, TIFF]"
-
-            # Sort the file names in alphanumeric order
-            files = self.sort_alpha_numerical_names(file_names=files, sep=sep)
-
-            # Read the TIFF files using dask.array and stack them
-            stack = da.stack([imread.imread(f.as_posix()) for f in files])
-            stack = np.squeeze(stack)
-
-            if len(stack.shape) != 3:
-                raise NotImplementedError(f"dimensions incorrect: {len(stack.shape)}. Currently not implemented for dim != 3D")
-
-        elif path.is_file():
-            # If the path is a file, load a single TIFF file
-
-            # TODO: Implement delayed loading from TIFF
-            # with tifffile.TiffFile(path) as tif:
-            #     num_frames = len(tif.pages)
-            #     X, Y = tif.pages[0].shape
-            #     dtype = tif.pages[0].dtype
-            #
-            # stack = da.stack([
-            #     da.from_delayed(dask.delayed(tifffile.imread(path, key=i)), shape=(1, X, Y), dtype=dtype)
-            #                     for i in range(num_frames)])
-            # stack = np.squeeze(stack)
-
-            # Read the TIFF file using tifffile and create a Dask array
-            arr = tifffile.imread(path)
-            stack = da.from_array(arr, chunks=(1, -1, -1))
-
-        else:
-            raise FileNotFoundError(f"cannot find directory or file: {path}")
-
-        return stack
+        io.save(output_path, data, prefix=prefix, chunks=chunks, compression=compression)
 
     @staticmethod
     def subtract_background(data, channels, subtract_background, subtract_func):
@@ -375,8 +251,148 @@ class Input:
         # Rename the channels in the output dictionary
         return {channels[i]: data[i] for i in data.keys()}
 
+class IO:
+
     @staticmethod
-    def save(path, data, prefix="data", chunks=None, compression=None):
+    def _load_czi(path):
+
+        """
+        Loads a CZI file from the specified path and returns the data.
+
+        Args:
+            path (str or pathlib.Path): The path to the CZI file.
+
+        Returns:
+            numpy.ndarray: The loaded data from the CZI file.
+
+        """
+
+        # Convert path to a pathlib.Path object if it's provided as a string
+        path = Path(path) if isinstance(path, str) else path
+
+        # Validate path
+        assert isinstance(path, Path), "please provide 'path' as str or pathlib.Path"
+        assert path.is_file(), f"cannot find file: {path}"
+
+        # Read the CZI file using czifile
+        data = czifile.imread(path.as_posix())
+
+        # Remove single-dimensional entries from the shape of the data
+        data = np.squeeze(data)
+
+        # TODO would be useful to be able to drop non-1D axes. Not sure how to implement this though
+        # if ignore_dimensions is not None:
+        #     ignore_dimensions = list(ignore_dimensions) if isinstance(ignore_dimensions, int) else ignore_dimensions
+        #     assert isinstance(ignore_dimensions, (list, tuple)), "please provide 'ignore_dimensions' as int, list or tuple"
+        #
+        #   for d in ignore_dimensions:
+        #       np.delete(data, axis=k) # not tested that this actually works
+
+        if len(data.shape) != 3:
+            logging.warning(
+                f"the dataset is not 3D but instead: {data.shape}. This will most likely create errors downstream in the pipeline.")
+
+        return data
+
+    @staticmethod
+    def sort_alpha_numerical_names(file_names, sep="_"):
+        """
+        Sorts a list of file names in alpha-numeric order based on a given separator.
+
+        Args:
+            file_names (list): A list of file names to be sorted.
+            sep (str, optional): Separator used for sorting file names. (default: "_")
+
+        Returns:
+            list: A sorted list of file names.
+
+        Raises:
+            None
+        """
+        # Check if file_names contains Path objects
+        use_path = True if isinstance(file_names[0], Path) else False
+
+        if use_path:
+            # Convert Path objects to string paths
+            file_names = [f.as_posix() for f in file_names]
+
+        # Sort file names based on the numeric part after the separator
+        file_names = sorted(file_names, key=lambda x: int(x.split(".")[0].split(sep)[-1]))
+
+        if use_path:
+            # Convert string paths back to Path objects
+            file_names = [Path(f) for f in file_names]
+
+        return file_names
+
+    @staticmethod
+    def load_tiff(path, sep="_"):
+
+        """
+        Loads TIFF image data from the specified path and returns a Dask array.
+
+        Args:
+            path (str or pathlib.Path): The path to the TIFF file or directory containing TIFF files.
+            sep (str): The separator used in sorting the filenames (default: "_").
+
+        Returns:
+            dask.array.core.Array: The loaded TIFF data as a Dask array.
+
+        Raises:
+            NotImplementedError: If the dimensions of the TIFF data are not 3D.
+        """
+
+        # Convert path to a pathlib.Path object if it's provided as a string
+        path = Path(path) if isinstance(path, str) else path
+
+        # Validate path
+        assert isinstance(path, Path), f"please provide a valid data location instead of: {path}"
+
+        if path.is_dir():
+            # If the path is a directory, load multiple TIFF files
+
+            # Get a list of TIFF files in the directory
+            files = [f for f in path.glob("*") if f.suffix in [".tif", ".tiff", ".TIF", ".TIFF"]]
+            assert len(files) > 0, "couldn't find .tiff files. Recognized extension: [tif, tiff, TIF, TIFF]"
+
+            # Sort the file names in alphanumeric order
+            files = IO.sort_alpha_numerical_names(file_names=files, sep=sep)
+
+            # Read the TIFF files using dask.array and stack them
+            stack = da.stack([imread.imread(f.as_posix()) for f in files])
+            stack = np.squeeze(stack)
+
+            if len(stack.shape) != 3:
+                raise NotImplementedError(f"dimensions incorrect: {len(stack.shape)}. Currently not implemented for dim != 3D")
+
+        elif path.is_file():
+            # If the path is a file, load a single TIFF file
+
+            # TODO: Implement delayed loading from TIFF
+            # with tifffile.TiffFile(path) as tif:
+            #     num_frames = len(tif.pages)
+            #     X, Y = tif.pages[0].shape
+            #     dtype = tif.pages[0].dtype
+            #
+            # stack = da.stack([
+            #     da.from_delayed(dask.delayed(tifffile.imread(path, key=i)), shape=(1, X, Y), dtype=dtype)
+            #                     for i in range(num_frames)])
+            # stack = np.squeeze(stack)
+
+            # Read the TIFF file using tifffile and create a Dask array
+            arr = tifffile.imread(path)
+            stack = da.from_array(arr, chunks=(1, -1, -1))
+
+        else:
+            raise FileNotFoundError(f"cannot find directory or file: {path}")
+
+        return stack
+
+    @staticmethod
+    def save(path, data, prefix=None, chunks=None, compression=None):
+
+        # TODO add 'infer' option for chunks and compression
+
         """
         Save data to a specified file format.
 
@@ -420,18 +436,20 @@ class Input:
                 # Save as HDF5 format
 
                 fpath = path
+                loc = f"{prefix}/{k}" if prefix is not None else f"{k}"
+
                 if isinstance(channel, da.Array):
                     # Save Dask array
-                    da.to_hdf5(fpath, f"{prefix}/{k}", channel, chunks=chunks, compression=compression, shuffle=False)
+                    da.to_hdf5(fpath, loc, channel, chunks=chunks, compression=compression, shuffle=False)
 
                 else:
                     # Save NumPy array
                     with h5py.File(fpath, "a") as f:
-                        ds = f.create_dataset(f"{prefix}/{k}", shape=channel.shape, chunks=chunks,
+                        ds = f.create_dataset(loc, shape=channel.shape, chunks=chunks,
                                               compression=compression, shuffle=False, dtype=channel.dtype)
                         ds[:] = channel
 
-                logging.info(f"dataset saved to {fpath}::{prefix}/{k}")
+                logging.info(f"dataset saved to {fpath}::{loc}")
 
             elif path.suffix == ".tdb":
                 # Save as TileDB format
@@ -455,12 +473,284 @@ class Input:
 
         return saved_paths  # Return the list of saved file paths
 
+class MotionCorrection:
+
+    def __init__(self, working_directory=None):
+
+        # is only relevant if provided with a .tdb or np.ndarray
+        # otherwise the .mmap file is created in the same folder
+        # as the input file.
+        self.working_directory = working_directory
+        self.tempdir = None
+
+        self.io = IO()
+
+        # needed if only one dataset in .h5 files. Weird behavior from caiman.MotionCorrection
+        self.dummy_folder_name = "delete_me"
+
+        # cluster setup for caiman
+        self.dview = None
+
+        # mmap location
+        self.mmap_path = None
+
+    def run(self, input_, h5_loc=None, parallel=True,
+            max_shifts=(50, 50), niter_rig=1, splits_rig=14, num_splits_to_process_rig=None,
+            strides=(48, 48), overlaps=(24, 24), pw_rigid=False, splits_els=14,
+            num_splits_to_process_els=None, upsample_factor_grid=4, max_deviation_rigid=3,
+            shifts_opencv=True, nonneg_movie=True, use_cuda=False, border_nan='copy', num_frames_split=80,
+            gSig_filt=(20, 20)):
+
+        """
+
+        adapted from caiman.motion_correction.MotionCorrect:
+
+        max_shifts: tuple
+            maximum allow rigid shift
+
+        niter_rig':int
+            maximum number of iterations rigid motion correction, in general is 1. 0
+            will quickly initialize a template with the first frames
+
+        splits_rig': int
+         for parallelization split the movies in  num_splits chuncks across time
+
+        num_splits_to_process_rig: list,
+            if none all the splits are processed and the movie is saved, otherwise at each iteration
+            num_splits_to_process_rig are considered
+
+        strides: tuple
+            intervals at which patches are laid out for motion correction
+
+        overlaps: tuple
+            overlap between pathes (size of patch strides+overlaps)
+
+        pw_rigig: bool, default: False
+            flag for performing motion correction when calling motion_correct
+
+        splits_els':list
+            for parallelization split the movies in  num_splits chuncks across time
+
+        num_splits_to_process_els: list,
+            if none all the splits are processed and the movie is saved  otherwise at each iteration
+             num_splits_to_process_els are considered
+
+        upsample_factor_grid:int,
+            upsample factor of shifts per patches to avoid smearing when merging patches
+
+        max_deviation_rigid:int
+            maximum deviation allowed for patch with respect to rigid shift
+
+        shifts_opencv: Bool
+            apply shifts fast way (but smoothing results)
+
+        nonneg_movie: boolean
+            make the SAVED movie and template mostly nonnegative by removing min_mov from movie
+
+        use_cuda : bool, optional
+            Use skcuda.fft (if available). Default: False
+
+        border_nan : bool or string, optional
+            Specifies how to deal with borders. (True, False, 'copy', 'min')
+
+        num_frames_split: int, default: 80
+            Number of frames in each batch. Used when cosntructing the options
+            through the params object
+
+        var_name_hdf5: str, default: 'mov'
+            If loading from hdf5, name of the variable to load
+
+         is3D: bool, default: False
+            Flag for 3D motion correction
+
+         indices: tuple(slice), default: (slice(None), slice(None))
+            Use that to apply motion correction only on a part of the FOV
+
+        """
+
+        input_ = self.validate_input(input_, h5_loc=h5_loc, dummy_folder_name=self.dummy_folder_name)
+
+        try:
+
+            if parallel:
+                _, self.dview, _ = caiman.cluster.setup_cluster(
+                                        backend="local", n_processes=multiprocessing.cpu_count(), single_thread=False)
+
+            mc = caiman.motion_correction.MotionCorrect(input_, dview=self.dview, var_name_hdf5=h5_loc,
+                    max_shifts=max_shifts, niter_rig=niter_rig, splits_rig=splits_rig,
+                    num_splits_to_process_rig=num_splits_to_process_rig, strides=strides, overlaps=overlaps,
+                    pw_rigid=pw_rigid, splits_els=splits_els, num_splits_to_process_els=num_splits_to_process_els,
+                    upsample_factor_grid=upsample_factor_grid, max_deviation_rigid=max_deviation_rigid,
+                    shifts_opencv=shifts_opencv, nonneg_movie=nonneg_movie, use_cuda=use_cuda, border_nan=border_nan,
+                    num_frames_split=num_frames_split, gSig_filt=gSig_filt)
+
+            mc.motion_correct(save_movie=True)
+
+        finally:
+
+            if self.dview is not None:
+                caiman.stop_server(dview=self.dview)
+
+        # convert mmap result
+        if len(mc.mmap_file) < 1 or not Path(mc.mmap_file[0]).is_file():
+            raise FileNotFoundError(f"caiman powered motion correction failed unexpectedly. mmap path: {mc.mmap}")
+
+        self.mmap_path = mc.mmap_file[0]
+
+    def validate_input(self, input_, h5_loc, dummy_folder_name="delete_me"):
+
+        if isinstance(input_, (str, Path)):
+
+            input_ = Path(input_) if isinstance(input_, str) else input_
+
+            if not input_.is_file(): raise FileNotFoundError(f"cannot find input_: {input_}")
+
+            if input_.suffix in [".h5", ".hdf5"]:
+
+                if h5_loc is None:
+                    raise ValueError("Please provide 'h5_loc' argument when providing .h5 file as data input.")
+
+                with h5py.File(input_.as_posix(), "a") as f:
+
+                    if h5_loc not in f:
+                        raise ValueError(f"cannot find dataset {h5_loc} in provided .h5 file.")
+
+                    # Motion Correction fails with custom h5_loc names in cases where
+                    # there is only one folder (default behavior incorrect)
+                    if len(f.keys()) < 2:
+                        f.create_group(dummy_folder_name)
+
+                return input_
+
+            elif input_.suffix in [".tiff", ".TIFF", ".tif", ".TIF"]:
+                return input_
+
+            elif input_.suffix in [".tdb"]:
+                raise NotImplementedError
+
+        elif isinstance(input_, (np.ndarray)):
+            logging.warning("caiman.motion_correction requires a .tiff or .h5 file to perform the correction. A temporary .h5 file is created which needs to be deleted later by calling the 'clean_up()' method of this module.")
+
+            if self.working_directory is None:
+                self.working_directory = tempfile.TemporaryDirectory()
+
+            temp_h5_path = Path(self.working_directory.name if isinstance(self.working_directory, tempfile.TemporaryDirectory) else self.working_directory)
+            temp_h5_path = temp_h5_path.joinpath(f"{self.dummy_folder_name}.tiff").as_posix()
+            tifffile.imwrite(temp_h5_path, input_)
+
+            return temp_h5_path
+
+        else:
+            raise ValueError(f"please provide input_ as one of: np.ndarray, str, Path")
+
+    def clean_up(self, input_):
+
+        input_ = Path(input_) if isinstance(input_, str) else input_
+
+        if input_.suffix in [".h5", ".hdf5"]:
+
+                with h5py.File(input_.as_posix(), "a") as f:
+
+                    # delete dummy folder if created earlier; see validation method
+                    if self.dummy_folder_name in f:
+                        del f[self.dummy_folder_name]
+
+        # remove mmap result
+        if Path(self.mmap_path.is_file()):
+            os.remove(self.mmap_path)
+
+        # remove temp .h5 if necessary
+        temp_h5_path = Path(self.working_directory.name if isinstance(self.working_directory, tempfile.TemporaryDirectory) else self.working_directory)
+        temp_h5_path = temp_h5_path.joinpath(f"{self.dummy_folder_name}.h5").as_posix()
+        if temp_h5_path.is_file():
+            os.remove(temp_h5_path.as_posix())
+
+    @staticmethod
+    @deprecated("use caiman's built-in file splitting function instead")
+    def get_frames_per_file(input_, frames_per_file, loc=None):
+
+        if frames_per_file == "auto":
+
+            (Z, X, Y), chunksize, dtype = get_data_dimensions(input_, loc=loc, get_byte_numreturn_dtype=True)
+            byte_num = np.dtype(dtype).itemsize
+            array_size = Z * X * Y * byte_num
+
+            ram_size = psutil.virtual_memory().total
+
+            if ram_size < array_size * 2:
+                logging.warning(f"available RAM ({ram_size}) is smaller than twice the data size ({array_size}. Automatically splitting files into smaller fragments. Might lead to unexpected behavior on the boundary between fragments.")
+                frames_per_file = int (Z  / np.floor(array_size / ram_size) / 2)
+
+        elif isinstance(frames_per_file, int):
+            pass
+
+        elif isinstance(frames_per_file, float):
+            frames_per_file = int(frames_per_file)
+
+        else: raise ValueError(f"Please provide one of these options for 'split_file' flag: None, 'auto', int, float")
+
+        return frames_per_file
+
+    # @staticmethod
+    # def save_mmap(input_, loc=None, frames_per_file=None, working_directory=None):
+    #
+    #     (Z, X, Y), chunksize = get_data_dimensions(input_, loc=loc)
+    #
+    #     if working_directory is None:
+    #         working_directory = input_.parent
+    #
+    #     with tempfile.TemporaryDirectory(dir=working_directory) as temp_dir:
+    #         temp_dir = Path(temp_dir)
+
+
+
+
+
+        return files, dimensions, mmaps
+
+    def get_data(self, output=None, loc=None, prefix="mc/", chunks=None, compression=None, remove_mmap=False):
+
+        if self.mmap_path is None:
+            raise ValueError("mmap_path is None. Please compute motion correction first by using the 'run()' function")
+
+        path = Path(self.mmap_path) if isinstance(self.mmap_path, str) else self.mmap_path
+        if not path.is_file():
+            raise FileNotFoundError(f"could not find mmap file: {path}. Maybe the 'clean_up()' function was called too early?")
+
+        # caiman's mmap naming convention:
+        #   ./{name}_d1_{X}_d2_{Y}_d3_{dim3}_order_{F/C}_frames_{Z}_.mmap
+        name = path.name.split("_")
+        Z, order, Y, X = int(name[-2]), name[-4], int(name[-8]), int(name[-10])
+
+        # TODO order and shape questionable
+        data = np.memmap(path.as_posix(), shape=(Z, Y, X), dtype=np.float32, order="C")
+        # data[start:stop, :, :] = np.swapaxes(mm, 1, 2) # ????
+
+        if output is None:
+            return np.array(data)
+
+        elif isinstance(output, (str, Path)):
+            output = Path(output) if isinstance(output, Path) else output
+
+            data = da.from_array(data, chunks=chunks, compression=compression)
+
+            if output.suffix in [".h5", ".hdf5"] and loc is None:
+                raise ValueError("when saving to .h5 please provide a location to save to instead of 'loc=None'")
+
+            self.io.save(output, data={loc:data}, prefix=prefix, chunks=chunks, compression=compression)
+
+        else:
+            raise ValueError(f"please provide output as None, str or pathlib.Path instead of {path}")
+
+        if remove_mmap:
+            self.clean_up()
+
 class Delta:
 
     def __init__(self, input_, loc=None, in_memory=True, parallel=False, ):
 
         self.input_ = Path(input_) if isinstance(input_, str) else input_
-        self.dim, self.chunksize = self.get_data_dimensions(self.input_, loc=loc)
+        self.dim, self.chunksize = get_data_dimensions(self.input_, loc=loc)
         self.in_memory = in_memory
         self.parallel = parallel
         self.loc = loc
@@ -497,7 +787,7 @@ class Delta:
             path = data[len("tdb:"):]
 
             # get chunk size
-            (Z, X, Y), chunksize = self.get_data_dimensions(path, loc=None)
+            (Z, X, Y), chunksize = get_data_dimensions(path, loc=None)
             assert chunksize is not None
             cz, cx, cy = chunksize
 
@@ -533,81 +823,6 @@ class Delta:
             res[0, :, :] = res[1, :, :]
 
         return res
-
-    @staticmethod
-    def get_data_dimensions(input_, loc=None):
-        """
-        This function takes an input object and returns the shape and chunksize of the data it represents.
-
-        If the input is a numpy ndarray, it returns the shape of the ndarray and None for chunksize.
-
-        If the input is a Path to an HDF5 file (.h5 extension), it reads the data at the specified location
-        and returns the shape of the data and its chunksize. The location should be specified using the 'loc'
-        parameter. If the 'loc' parameter is not provided, the function raises an AssertionError.
-
-        If the input is a Path to a TIFF file (.tiff or .tif extension), it returns the shape and None for chunksize.
-
-        If the input is a Path to a TileDB array (.tdb extension), it returns the shape and chunksize of the
-        TileDB array.
-
-        If the input is of an unrecognized format, the function raises a TypeError.
-
-        Args:
-        - input_: An object representing the data whose dimensions are to be calculated.
-        - loc: A string representing the location of the data in the HDF5 file. This parameter is optional
-          and only applicable when input_ is a Path to an HDF5 file.
-
-        Returns:
-        - A tuple containing two elements:
-          * The shape of the data represented by the input object.
-          * The chunksize of the data represented by the input object. If the data is not chunked,
-            this value will be None.
-        """
-
-        # Check if the input is a numpy ndarray
-        if isinstance(input_, np.ndarray):
-            # Return the shape of the ndarray and None for chunksize
-            return input_.shape, None
-
-        elif isinstance(input_, Path):
-            path = input_
-
-        elif isinstance(input_, str):
-            path = Path(input_)
-
-        else:
-            raise TypeError(f"data type not recognized: {type(input_)}")
-
-        # If the input is a Path to an HDF5 file, check if the file has the .h5 extension
-        if path.suffix == ".h5":
-            # If the 'loc' parameter is not provided, raise an AssertionError
-            assert loc is not None, "please provide a dataset location as 'loc' parameter"
-            # Open the HDF5 file and read the data at the specified location
-            with h5py.File(path.as_posix()) as file:
-                data = file[loc]
-                shape = data.shape
-                chunksize = data.chunks
-
-        # If the input is a Path to a TIFF file, get the shape of the image data
-        elif path.suffix in [".tiff", ".tif"]:
-
-            # Open the TIFF file and read the data dimensions
-            with tifffile.TiffFile(path.as_posix()) as tif:
-                shape = (len(tif.pages), *tif.pages[0].shape)
-                chunksize = None
-
-        # If the input is not a Path to an HDF5 file, check if it is a Path to a TileDB array
-        elif path.suffix == ".tdb":
-            # Open the TileDB array and get its shape and chunksize
-            with tiledb.open(path.as_posix()) as tdb:
-                shape = tdb.shape
-                chunksize = [int(tdb.schema.domain.dim(i).tile) for i in range(tdb.schema.domain.ndim)]
-
-        # If the input is of an unrecognized format, raise a TypeError
-        else:
-            raise TypeError(f"data format not recognized: {type(path)}")
-
-        return shape, chunksize
 
     @staticmethod
     def load_to_memory(path, loc=None):
