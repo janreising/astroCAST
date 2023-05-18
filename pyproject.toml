@@ -4,7 +4,7 @@ description = "package to analyze calcium flourescence events in astrocytes"
 version = "0.2.0"
 author = "Jan Philipp Reising"
 author_email = "jan.reising@ki.se"
-dependencies = ["numpy"]
+dependencies = ["numpy", "dask", "tifffile", "h5py", "json", "tiledb", "scikit-image", "dask-image", "tqdm"]
 
 [build-system]
 requires = ["hatchling"]
