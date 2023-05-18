@@ -585,6 +585,7 @@ class MotionCorrection:
                     num_frames_split=num_frames_split, gSig_filt=gSig_filt)
 
             mc.motion_correct(save_movie=True)
+            self.shifts = mc.shifts_rig
 
         finally:
 
@@ -629,7 +630,7 @@ class MotionCorrection:
                 raise NotImplementedError
 
         elif isinstance(input_, (np.ndarray)):
-            logging.warning("caiman.motion_correction requires a .tiff or .h5 file to perform the correction. A temporary .h5 file is created which needs to be deleted later by calling the 'clean_up()' method of this module.")
+            logging.warning("caiman.motion_correction requires a .tiff or .h5 file to perform the correction. A temporary .tiff file is created which needs to be deleted later by calling the 'clean_up()' method of this module.")
 
             if self.working_directory is None:
                 self.working_directory = tempfile.TemporaryDirectory()

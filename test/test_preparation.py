@@ -401,7 +401,6 @@ class Test_MotionCorrection:
                 data = temp_path
 
             elif input_type == ".tiff":
-                # data = "testdata/sample_0.tiff"
 
                 temp_path = tmpdir.joinpath("test.tiff")
                 io.save(temp_path, data={"ch0":data})
@@ -428,10 +427,41 @@ class Test_MotionCorrection:
             data = mc.get_data(output=None, remove_mmap=True)
             assert type(data) == np.ndarray
 
-    @pytest.mark.xfail
-    def test_real_input(self):
-        raise NotImplementedError
+    @pytest.mark.parametrize("param", [{"input_":"testdata/sample_0.tiff"},
+                                            {"input_":"testdata/sample_0.h5", "h5_loc":"data/ch0"}])
+    def test_real_input(self, param):
+        mc = MotionCorrection()
+        mc.run(**param, max_shifts=(6, 6))
 
-    @pytest.mark.xfail
-    def test_motion_correct_performance(self):
-        raise NotImplementedError
+        data = mc.get_data(output=None, remove_mmap=True)
+        assert type(data) == np.ndarray
+
+    @pytest.mark.parametrize("video_param",
+        [{"speed": 0, "size": (100, 50, 50)}, {"speed": 0.1, "size": (100, 50, 50)},
+         {"speed": 0.01, "size": (1000, 250, 250)}, {"speed": 0.01, "size": (1000, 250, 250)}])
+    def test_motion_correct_performance(self, video_param, dtype=np.uint8):
+
+        motion_speed = video_param["speed"]
+        Z, X, Y = video_param["size"]
+
+        # Generate random structure
+        data = np.zeros((Z, X, Y), dtype=dtype)
+        structure = np.random.randint(low=0, high=255, size=(X, Y), dtype=dtype)
+
+        # Add motion to each frame
+        for t in range(Z):
+            shift = int(t * motion_speed)
+            shifted_structure = np.roll(structure, shift, axis=(0, 1))
+            data[t] = shifted_structure
+
+        mc = MotionCorrection()
+        mc.run(data, h5_loc=None, max_shifts=(int(X/2)-1, int(Y/2)-1))
+
+        data = mc.get_data(output=None, remove_mmap=True)
+        assert type(data) == np.ndarray
+
+        # get average shift per frame
+        mcs = np.array(mc.shifts)[:, 0]
+        mcs = np.mean(np.abs(np.diff(mcs)))
+
+        assert np.allclose(mcs, motion_speed, rtol=5)
