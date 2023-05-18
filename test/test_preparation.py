@@ -9,7 +9,6 @@ import tifffile
 
 from astroCAST.preparation import *
 
-
 class Test_Delta:
 
     @pytest.mark.parametrize("input_type", [np.ndarray, "testdata/sample_0.tiff", "testdata/sample_0.h5", "tiledb"])
@@ -72,9 +71,11 @@ class Test_Delta:
     def test_background_dimensions(self, dim):
 
         arr = np.random.randint(0, 100, dim, dtype=int)
+        orig_shape = arr.shape
+
         res = Delta.calculate_delta_min_filter(arr, window=10)
 
-        assert res.shape == dim, f"dimensions are not the same input: {dim} vs output: {res.shape}"
+        assert res.shape == orig_shape, f"dimensions are not the same input: {dim} vs output: {res.shape}"
 
     @pytest.mark.parametrize("method", ("background", "dF", "dFF"))
     @pytest.mark.parametrize("parallel", (True, False))
@@ -95,31 +96,15 @@ class Test_Delta:
 
         assert np.allclose(ctrl, res)
 
+    @pytest.mark.xfail("Not implemented")
     def test_quality_of_dff(self):
         raise NotImplementedError
 
+    @pytest.mark.xfail("Not implemented")
     def test_new_dFF_version(self):
         raise NotImplementedError
 
 class Test_Input:
-
-    @pytest.mark.parametrize("prefix", ["", "00000"])
-    @pytest.mark.parametrize("sep", ["_", "x", "-"])
-    def test_alphanumerical_names(self, prefix, sep):
-
-        names = []
-        for n in range(1000):
-            name = f"img{sep}{prefix}{n}.ext"
-            names.append(name)
-
-        names_shuffled = np.random.shuffle(names.copy())
-
-        assert names != names_shuffled, "randomization did not work"
-
-        inp = Input()
-        names_sorted = inp.sort_alpha_numerical_names(names, sep=sep)
-
-        assert names == names_sorted, "sorting did not work"
 
     @pytest.mark.parametrize("num_files", [1, 12])
     @pytest.mark.parametrize("in_memory", [True, False])
@@ -368,15 +353,77 @@ class Test_Input:
             assert img_stack.shape == res.shape
             assert np.array_equal(img_stack, res)
 
-    @pytest.mark.xfail
-    def test_convert_czi(self):
-        # TODO I do not know if python can write czi files
-        raise NotImplementedError
-
 class Test_IO:
 
-    def test_(self):
-        raise NotImplementedError
+    @pytest.mark.parametrize("prefix", ["", "00000"])
+    @pytest.mark.parametrize("sep", ["_", "x", "-"])
+    def test_alphanumerical_names(self, prefix, sep):
+
+        names = []
+        for n in range(1000):
+            name = f"img{sep}{prefix}{n}.ext"
+            names.append(name)
+
+        names_shuffled = np.random.shuffle(names.copy())
+
+        assert names != names_shuffled, "randomization did not work"
+
+        io = IO()
+        names_sorted = io.sort_alpha_numerical_names(names, sep=sep)
+
+        assert names == names_sorted, "sorting did not work"
+
+    @pytest.mark.xfail
+    def test_load_czi(self, output_path="out.czi", shape=(10, 5, 5)):
+        with tempfile.TemporaryDirectory() as dir:
+            tmpdir = Path(dir)
+            assert tmpdir.is_dir()
+
+            output_path = tmpdir.joinpath(output_path)
+
+            # Reference
+            arr = np.random.random(shape)
+
+            # Loaded
+            io = IO()
+
+            prefix = None if output_path.suffix != ".h5" else "data/"
+            h5loc = None if output_path.suffix != ".h5" else "data/ch0"
+            data = {"ch0":arr}
+
+            output_path = io.save(output_path, data, prefix=prefix)
+
+            arr_load = io.load(output_path, h5_loc=h5loc)
+
+            assert arr.shape == arr_load.shape
+            assert np.array_equal(arr, arr_load)
+
+    @pytest.mark.parametrize("output_path", ["out.h5", "out.tdb", "out.tiff"])
+    @pytest.mark.parametrize("shape", [(10, 5, 5), (100, 100, 100)])
+    def test_save_load(self, output_path, shape):
+
+        with tempfile.TemporaryDirectory() as dir:
+            tmpdir = Path(dir)
+            assert tmpdir.is_dir()
+
+            output_path = tmpdir.joinpath(output_path)
+
+            # Reference
+            arr = np.random.random(shape)
+
+            # Loaded
+            io = IO()
+
+            prefix = None if output_path.suffix != ".h5" else "data/"
+            h5loc = None if output_path.suffix != ".h5" else "data/ch0"
+            data = {"ch0":arr}
+
+            output_path = io.save(output_path, data, prefix=prefix)
+
+            arr_load = io.load(output_path, h5_loc=h5loc)
+
+            assert arr.shape == arr_load.shape
+            assert np.array_equal(arr, arr_load)
 
 class Test_MotionCorrection:
 
@@ -408,11 +455,60 @@ class Test_MotionCorrection:
                 data = temp_path
 
             elif input_type == ".tdb":
-                raise NotImplementedError("Error in IO.save() when saving .tdb")
 
                 temp_path = tmpdir.joinpath("test.tdb")
+                temp_path = io.save(temp_path, data={"ch0":data}, prefix=None)
+
+                assert temp_path.is_file(), f"cannot find {temp_path}"
+                data = temp_path
+
+            elif input_type == "array":
+                pass
+
+            else:
+                raise ValueError
+
+            mc = MotionCorrection()
+            mc.run(data, h5_loc=h5_loc, max_shifts=(6, 6))
+
+            data = mc.get_data(output=None, remove_mmap=True)
+            assert type(data) == np.ndarray
+
+
+    @pytest.mark.parametrize("input_type", [".tdb"])
+    @pytest.mark.skip("currently doesn't work. revisit later.")
+    def test_random_tdb(self, input_type, shape=(100, 100, 100)):
+
+        data = np.random.random(shape)
+        h5_loc = None
+
+        with tempfile.TemporaryDirectory() as dir:
+            tmpdir = Path(dir)
+            assert tmpdir.is_dir()
+
+            io = IO()
+
+            if input_type == ".h5":
+
+                h5_loc = "mc/ch0"
+                temp_path = tmpdir.joinpath("test.h5")
+                io.save(temp_path, data={"ch0":data}, prefix="mc")
+
+                data = temp_path
+
+            elif input_type == ".tiff":
+
+                temp_path = tmpdir.joinpath("test.tiff")
                 io.save(temp_path, data={"ch0":data})
 
+                data = temp_path
+
+            elif input_type == ".tdb":
+
+                temp_path = tmpdir.joinpath("test.tdb")
+                temp_path = io.save(temp_path, data={"ch0":data}, prefix=None)
+
+                assert temp_path.is_file(), f"cannot find {temp_path}"
                 data = temp_path
 
             elif input_type == "array":

@@ -273,13 +273,16 @@ def get_data_dimensions(input_, loc=None, return_dtype=False):
         with tiledb.open(path.as_posix()) as tdb:
             shape = tdb.shape
             chunksize = [int(tdb.schema.domain.dim(i).tile) for i in range(tdb.schema.domain.ndim)]
-            dtype = tdb.type
+            dtype = tdb.schema.domain.dtype
 
     # If the input is of an unrecognized format, raise a TypeError
     else:
         raise TypeError(f"data format not recognized: {type(path)}")
 
-    return shape, chunksize if return_dtype else shape, chunksize, dtype
+    if return_dtype:
+        return (shape, chunksize, dtype)
+    else:
+        return (shape, chunksize)
 
 class DummyGenerator:
 
