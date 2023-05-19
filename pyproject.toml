@@ -1,10 +1,13 @@
 [project]
 name = "astroCAST"
 description = "package to analyze calcium flourescence events in astrocytes"
-version = "0.2.0"
-author = "Jan Philipp Reising"
+version = "0.2.1"
+author = ["Jan Philipp Reising", "Ana Cristina González"]
 author_email = "jan.reising@ki.se"
-dependencies = ["numpy", "dask", "tifffile", "h5py", "json", "tiledb", "scikit-image", "dask-image", "tqdm"]
+dependencies = ["awkard", "caiman", "colorcet", "cv2", "czifile", "dask", "dask-image", "datashader", "dtaidistance",
+                "fastcluster", "h5py", "hdbscan", "json", "keras", "matplotlib", "multiprocess", "networkx", "numpy", "pandas",
+                "powerlaw", "psutil", "pytest", "scipy", "seaborn", "SharedArray", "scikit-image", "scikit-learn",
+                "tensorflow", "tifffile", "tiledb", "tqdm", "tsfresh", "tslearn", "umap-learn", "xarray", "xxhash"]
 
 [build-system]
 requires = ["hatchling"]

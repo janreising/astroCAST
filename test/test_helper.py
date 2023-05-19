@@ -2,8 +2,12 @@ import pytest
 
 from astroCAST.helper import *
 
-
+@pytest.mark.xfail
 def test_local_caching_wrapper():
+    raise NotImplementedError
+
+@pytest.mark.xfail
+def test_get_data_dimensions():
     raise NotImplementedError
 
 @pytest.mark.parametrize("typ", ["dataframe", "list", "array"])
