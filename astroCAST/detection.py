@@ -44,7 +44,7 @@ class Detector:
         # quality check arguments
         assert os.path.isfile(input_path) or os.path.isdir(input_path), \
             f"input file does not exist: {input_path}"
-        assert (output is None) or (~ output.isdir()), \
+        assert (output is None) or (~ self.output.is_dir()), \
             f"output file already exists: {output}"
         assert indices is None or indices.shape == (3, 2), \
             "indices must be np.arry of shape (3, 2) -> ((z0, z1), " \
