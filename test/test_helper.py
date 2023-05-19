@@ -263,3 +263,30 @@ class Test_normalization:
             })
 
         assert np.sum(np.isnan(imputed if isinstance(imputed, np.ndarray) else ak.ravel(imputed))) == 0
+
+class Test_EventSim:
+    def test_simulate_default_arguments(self):
+        sim = EventSim()
+
+        shape = (50, 100, 100)
+        event_map, num_events = sim.simulate(shape)
+
+        assert event_map.shape == shape
+        assert num_events >= 0
+
+    def test_simulate_custom_arguments(self):
+        sim = EventSim()
+
+        shape = (25, 50, 50)
+        z_fraction = 0.3
+        xy_fraction = 0.15
+        gap_space = 2
+        gap_time = 2
+        blob_size_fraction = 0.1
+        event_probability = 0.5
+
+        event_map, num_events = sim.simulate(shape, z_fraction, xy_fraction, gap_space, gap_time,
+                                             blob_size_fraction, event_probability)
+
+        assert event_map.shape == shape
+        assert num_events >= 0

@@ -6,6 +6,7 @@ from collections import OrderedDict
 from pathlib import Path
 import awkward as ak
 import h5py
+from skimage.util import img_as_uint
 
 import numpy as np
 import pandas as pd
@@ -355,6 +356,193 @@ class DummyGenerator:
         else:
             raise TypeError
 
+class EventSim:
+
+    def __init__(self):
+        pass
+
+    @staticmethod
+    def split_3d_array_indices(arr, cz, cx, cy):
+        """
+        Split a 3D array into sections based on the given segment lengths.
+
+        Args:
+            arr (numpy.ndarray): The 3D array to split.
+            cz (int): The length of each section along the depth dimension.
+            cx (int): The length of each section along the rows dimension.
+            cy (int): The length of each section along the columns dimension.
+
+        Returns:
+            list: A list of tuples representing the start and end indices for each section.
+                  Each tuple has the format (start_z, end_z, start_x, end_x, start_y, end_y).
+
+        Raises:
+            None
+
+        Note:
+            This function assumes that the segment lengths evenly divide the array dimensions.
+            If the segment lengths do not evenly divide the array dimensions, a warning message is logged.
+        """
+
+        # Get the dimensions of the array
+        depth, rows, cols = arr.shape
+
+        # Define the segment lengths
+        section_size_z = cz
+        section_size_x = cx
+        section_size_y = cy
+
+        # Make sure the segment lengths evenly divide the array dimensions
+        if depth % cz != 0 or rows % cx != 0 or cols % cy != 0:
+            logging.warning("Segment lengths do not evenly divide the array dimensions.")
+
+        # Calculate the number of sections in each dimension
+        num_sections_z = depth // cz
+        num_sections_x = rows // cx
+        num_sections_y = cols // cy
+
+        # Calculate the indices for each section
+        indices = []
+        for i in range(num_sections_z):
+            for j in range(num_sections_x):
+                for k in range(num_sections_y):
+                    start_z = i * section_size_z
+                    end_z = (i + 1) * section_size_z
+                    start_x = j * section_size_x
+                    end_x = (j + 1) * section_size_x
+                    start_y = k * section_size_y
+                    end_y = (k + 1) * section_size_y
+                    indices.append((start_z, end_z, start_x, end_x, start_y, end_y))
+
+        return indices
+
+    @staticmethod
+    def create_random_blob(shape, min_gap=1, blob_size_fraction=0.2, event_num=1):
+        """
+        Generate a random blob of connected shape in a given array.
+
+        Args:
+            shape (tuple): The shape of the array (depth, rows, cols).
+            min_gap (int, optional): The minimum distance of the blob to the edge of the array. Default is 1.
+            blob_size_fraction (float, optional): The average size of the blob as a fraction of the total array size.
+                                                  Default is 0.2.
+            event_num (int, optional): The value to assign to the blob pixels. Default is 1.
+
+        Returns:
+            numpy.ndarray: The array with the generated random blob.
+
+        Raises:
+            None
+        """
+
+        array = np.zeros(shape, dtype=int)
+
+        # Get the dimensions of the array
+        depth, rows, cols = shape
+
+        # Calculate the maximum size of the blob based on the fraction of the total array size
+        max_blob_size = int(blob_size_fraction * (depth * rows * cols))
+
+        # Generate random coordinates for the starting point of the blob
+        start_z = np.random.randint(min_gap, depth - min_gap)
+        start_x = np.random.randint(min_gap, rows - min_gap)
+        start_y = np.random.randint(min_gap, cols - min_gap)
+
+        # Create a queue to store the coordinates of the blob
+        queue = [(start_z, start_x, start_y)]
+
+        # Create a set to keep track of visited coordinates
+        visited = set()
+
+        # Run the blob generation process
+        while queue and len(visited) < max_blob_size:
+            z, x, y = queue.pop(0)
+
+            # Check if the current coordinate is already visited
+            if (z, x, y) in visited:
+                continue
+
+            # Set the current coordinate to event_num in the array
+            array[z, x, y] = event_num
+
+            # Add the current coordinate to the visited set
+            visited.add((z, x, y))
+
+            # Generate random neighbors within the min_gap distance
+            neighbors = [(z + dz, x + dx, y + dy)
+                         for dz in range(-min_gap, min_gap + 1)
+                         for dx in range(-min_gap, min_gap + 1)
+                         for dy in range(-min_gap, min_gap + 1)
+                         if abs(dz) + abs(dx) + abs(dy) <= min_gap
+                         and 0 <= z + dz < depth
+                         and 0 <= x + dx < rows
+                         and 0 <= y + dy < cols]
+
+            # Add the neighbors to the queue
+            queue.extend(neighbors)
+
+        return array
+
+    def simulate(self, shape, z_fraction=0.2, xy_fraction=0.1, gap_space=1, gap_time=1,
+                 blob_size_fraction=0.05, event_probability=0.2):
+
+        """
+        Simulate the generation of random blobs in a 3D array.
+
+        Args:
+            shape (tuple): The shape of the 3D array (depth, rows, cols).
+            z_fraction (float, optional): The fraction of the depth dimension to be covered by the blobs. Default is 0.2.
+            xy_fraction (float, optional): The fraction of the rows and columns dimensions to be covered by the blobs.
+                                           Default is 0.1.
+            gap_space (int, optional): The minimum distance between blobs along the rows and columns. Default is 1.
+            gap_time (int, optional): The minimum distance between blobs along the depth dimension. Default is 1.
+            blob_size_fraction (float, optional): The average size of the blob as a fraction of the total array size.
+                                                  Default is 0.05.
+            event_probability (float, optional): The probability of generating a blob in each section. Default is 0.2.
+
+        Returns:
+            numpy.ndarray: The 3D array with the generated random blobs.
+            int: The number of created events.
+
+        Raises:
+            None
+        """
+
+        # Create empty array
+        event_map = np.zeros(shape, dtype=int)
+        Z, X, Y = shape
+
+        # Get indices for splitting the array into sections
+        indices = self.split_3d_array_indices(event_map, int(Z*z_fraction), int(X*xy_fraction), int(Y*xy_fraction))
+
+        # Fill with blobs
+        num_events = 0
+        for num, ind in enumerate(indices):
+            # Skip section based on event_probability
+            if np.random.random() > event_probability:
+                continue
+
+            z0, z1, x0, x1, y0, y1 = ind
+
+            # Adjust indices to account for gap_time and gap_space
+            z0 += int(gap_time / 2)
+            z1 -= int(gap_time / 2)
+            x0 += int(gap_space / 2)
+            x1 -= int(gap_space / 2)
+            y0 += int(gap_space / 2)
+            y1 -= int(gap_space / 2)
+
+            shape = (z1 - z0, x1 - x0, y1 - y0)
+
+            blob = self.create_random_blob(shape, event_num=num + 1, blob_size_fraction=blob_size_fraction)
+            event_map[z0:z1, x0:x1, y0:y1] = blob
+
+            num_events += 1
+
+        # Convert to TIFF compatible format
+        event_map = img_as_uint(event_map)
+
+        return event_map, num_events
 
 class Normalization:
 
