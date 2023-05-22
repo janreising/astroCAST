@@ -79,7 +79,7 @@ class Detector:
             binary_struct_connectivity (int): Connectivity of binary structuring element.
 
         Returns:
-            None
+            dictionary of events
 
         Notes:
             - The output and intermediate results are stored in the output directory.
@@ -176,7 +176,7 @@ class Detector:
         # calculate features
         #self.vprint("Calculating features", 2)
         logging.info("Calculating features")
-        self.custom_slim_features(time_map, self.input_path, event_map_path,
+        events = self.custom_slim_features(time_map, self.input_path, event_map_path,
                                   split_events = split_events)
 
         #self.vprint("saving features", 2)
@@ -186,6 +186,8 @@ class Detector:
 
         #self.vprint("Run complete! [{}]".format(self.input_path, 1), 1)
         logging.info("Run complete! [{}]".format(self.input_path))
+
+        return events
 
     def _load(self, dataset_name: str = None, use_dask: bool = False, subset = None):
 
@@ -486,6 +488,8 @@ class Detector:
             events.update(np.load(out_path.joinpath(e), allow_pickle = True)[()])
         np.save(combined_path, events)
         shutil.rmtree(out_path)
+
+        return events
 
 def characterize_event(event_id, t0, t1, data_info,
                        event_info, out_path, split_events = True):
