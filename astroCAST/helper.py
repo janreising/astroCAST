@@ -14,6 +14,12 @@ import tifffile
 import tiledb
 import xxhash
 
+def notimplemented(f, msg=""):
+
+    def raise_not_implemented(msg):
+        raise NotImplementedError(msg)
+
+    return raise_not_implemented
 
 def wrapper_local_cache(f):
     """ Wrapper that creates a local save of the function call based on a hash of the arguments

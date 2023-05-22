@@ -1,20 +1,28 @@
 import logging
 from pathlib import Path
-from astroCAST.helper import get_data_dimensions
+
+import dask.array
+import deprecation
+import numpy as np
+import pandas as pd
+from tqdm import tqdm
+
+import astroCAST.detection
+from astroCAST.helper import get_data_dimensions, notimplemented, wrapper_local_cache
 from astroCAST.preparation import IO
 
 
 class Events:
 
-    def __init__(self, event_dir, data_path=None, meta_path=None):
+    def __init__(self, event_dir, data_path=None, meta_path=None, in_memory=False):
 
         # todo multi file
 
         if not Path(event_dir).is_dir():
             raise FileNotFoundError(f"cannot find provided event directory: {event_dir}")
 
-
         if meta_path is not None:
+            logging.debug("I should not be called at all")
             self.get_meta_info(meta_path)
 
         # get data
@@ -37,13 +45,11 @@ class Events:
 
         # align time
 
-    @staticmethod
-    def get_meta_info(meta_path):
+    # @notimplemented("implement meta loading function")
+    def get_meta_info(self, meta_path):
 
         if not Path(meta_path).is_file():
                 raise FileNotFoundError(f"cannot find provided meta file: {meta_path}")
-
-        raise NotImplementedError("implement meta loading function")
 
         self.info = json.load(file)
 
@@ -81,60 +87,205 @@ class Events:
     @staticmethod
     def get_event_map(event_dir, in_memory=False):
 
-        if Path(event_dir).joinpath("event_map.tdb").is_file():
+        """
+        Retrieve the event map from the specified directory.
 
+        Args:
+            event_dir (str): The directory path where the event map is located.
+            in_memory (bool, optional): Specifies whether to load the event map into memory. Defaults to False.
+
+        Returns:
+            tuple: A tuple containing the event map, its shape, and data type.
+
+        """
+
+        # Check if the event map is stored as a directory with 'event_map.tdb' file
+        if Path(event_dir).joinpath("event_map.tdb").is_dir():
             path = Path(event_dir).joinpath("event_map.tdb")
-            shape, dtype = get_data_dimensions(path, return_dtype=True)
+            shape, chunksize, dtype = get_data_dimensions(path, return_dtype=True)
 
+        # Check if the event map is stored as a file with 'event_map.tiff' extension
         elif Path(event_dir).joinpath("event_map.tiff").is_file():
-
             path = Path(event_dir).joinpath("event_map.tiff")
-            shape, dtype = get_data_dimensions(path, return_dtype=True)
+            shape, chunksize, dtype = get_data_dimensions(path, return_dtype=True)
 
         else:
-            logging.warning(f"cannot find 'event_map.tdb' or 'event_map.tiff'. Might lead to problems in downstream processing.")
-            shape, dtype = (None, None, None), None
+
+            # Neither 'event_map.tdb' directory nor 'event_map.tiff' file found
+            logging.warning(f"Cannot find 'event_map.tdb' or 'event_map.tiff'."
+                            f"Consider recreating the file with 'create_event_map()', "
+                            f"otherwise errors downstream might occur'.")
+            shape, chunksize, dtype = (None, None, None), None, None
             event_map = None
 
             return event_map, shape, dtype
 
-        event_map = IO.load(path, lazy=not in_memory)
+        # Load the event map from the specified path
+        io = IO()
+        event_map = io.load(path, lazy=not in_memory)
 
         return event_map, shape, dtype
 
     @staticmethod
-    def get_time_map():
-        raise NotImplementedError("implement get_time_map() function")
+    def create_event_map(events, video_dim, dtype=int, show_progress=True, save_path=None):
+        """
+        Create an event map from the events DataFrame.
 
-        if time_map_path.is_file():
-            self.time_map = np.load(time_map_path.as_posix(), allow_pickle=True)[()]
-            self.e_start = np.argmax(self.time_map, axis=0)  # 1D array of frame number when event occurs
-            self.e_stop = self.time_map.shape[0]-np.argmax(self.time_map[::-1, :], axis=0)  # 1D array last event frame
+        Args:
+            events (DataFrame): The events DataFrame containing the 'mask' column.
+            video_dim (tuple): The dimensions of the video in the format (num_frames, width, height).
+            dtype (type, optional): The data type of the event map. Defaults to int.
+            show_progress (bool, optional): Specifies whether to show a progress bar. Defaults to True.
+            save_path (str, optional): The file path to save the event map. Defaults to None.
 
-    def load_events(self, z_slice=None, index_prefix=None):
+        Returns:
+            ndarray: The created event map.
 
-        events_path = list(self.dir_.glob("events.npy"))[0]
-        raw_events = np.load(events_path, allow_pickle=True)[()]
-        self.vprint("#num events: {}".format(len(raw_events.keys())), urgency=1)
+        Raises:
+            ValueError: If 'mask' column is not present in the events DataFrame.
 
-        events = pd.DataFrame(raw_events).transpose()
+        """
+        num_frames, width, height = video_dim
+        event_map = np.zeros((num_frames, width, height), dtype=dtype)
+
+        if "mask" not in events.columns:
+            raise ValueError("Cannot recreate event_map without 'mask' column in events dataframe.")
+
+        event_id = 1
+
+        # Iterate over each event in the DataFrame
+        iterator = tqdm(events.iterrows(), total=len(events)) if show_progress else events.iterrows()
+        for _, event in iterator:
+            # Extract the mask and reshape it to match event dimensions
+            mask = np.reshape(event["mask"], (event.dz, event.dx, event.dy))
+
+            # Find the indices where the mask is 1
+            indices_z, indices_x, indices_y = np.where(mask == 1)
+
+            # Adjust the indices to match the event_map dimensions
+            indices_z += event.z0
+            indices_x += event.x0
+            indices_y += event.y0
+
+            # Set the corresponding event_id at the calculated indices in event_map
+            event_map[indices_z, indices_x, indices_y] = event_id
+            event_id += 1
+
+        if save_path is not None:
+            # Save the event map to the specified path using IO()
+            io = IO()
+            io.save(save_path, data=event_map)
+
+        return event_map
+
+    # @notimplemented("implement get_time_map()")
+    @staticmethod
+    def get_time_map(event_dir=None, event_map=None, chunk=100):
+        """
+        Creates a binary array representing the time map of events.
+
+        Args:
+            event_dir (Path): The directory containing the event data.
+            event_map (ndarray): The event map data.
+            chunk (int): The chunk size for processing events.
+
+        Returns:
+            Tuple: A tuple containing the time map, events' start frames, and events' end frames.
+                time_map > binary array of size (num_events x num_frames) where 1 denotes an active event
+                events_start_frame > 1D array (num_events x num_frames) of event start
+                events_end_frame > 1D array (num_events x num_frames) of event end
+
+        Raises:
+            ValueError: If neither 'event_dir' nor 'event_map' is provided.
+
+        """
+
+        if event_dir is not None:
+
+            if not event_dir.is_dir():
+                raise FileNotFoundError(f"cannot find event_dir: {event_dir}")
+
+            time_map_path = Path(event_dir).joinpath("time_map.npy")
+            time_map = np.load(time_map_path.as_posix(), allow_pickle=True)[()]
+
+        elif event_map is not None:
+
+            if not isinstance(event_map, (np.ndarray, dask.array.Array)):
+                raise ValueError(f"please provide 'event_map' as np.ndarray or dask.Array")
+
+            time_map = astroCAST.detection.Detector.get_time_map(event_map=event_map, chunk=chunk)
+
+        else:
+            raise ValueError("Please provide either 'event_dir' or 'event_map'.")
+
+        # 1D array (num_events x frames) of event start
+        events_start_frame = np.argmax(time_map, axis=0)
+
+        # 1D array (num_events x frames) of event stop
+        events_end_frame = time_map.shape[0] - np.argmax(time_map[::-1, :], axis=0)
+
+        return time_map, events_start_frame, events_end_frame
+
+    @staticmethod
+    def load_events(event_dir, z_slice=None, index_prefix=None, custom_columns=["area_norm", "cx", "cy"]):
+
+        """
+        Load events from the specified directory and perform optional preprocessing.
+
+        Args:
+            event_dir (str): The directory containing the events.npy file.
+            z_slice (tuple, optional): A tuple specifying the z-slice range to filter events.
+            index_prefix (str, optional): A prefix to add to the event index.
+            custom_columns (list, optional): A list of custom columns to compute for the events DataFrame.
+
+        Returns:
+            DataFrame: The loaded events DataFrame.
+
+        Raises:
+            FileNotFoundError: If 'events.npy' is not found in the specified directory.
+            ValueError: If the custom_columns value is invalid.
+
+        """
+
+        path = Path(event_dir).joinpath("events.npy")
+        if not path.is_file():
+            raise FileNotFoundError(f"Did not find 'events.npy' in {event_dir}")
+
+        events = np.load(path, allow_pickle=True)[()]
+        logging.info(f"Number of events: {len(events)}")
+
+        events = pd.DataFrame(events).transpose()
         events.sort_index(inplace=True)
 
-        # legacy version check
-        if "dz" not in events.columns:
-            warnings.warn("Events dataframe is missing crucial columns. You are probably trying to load a legacy file. We advise to rerun your analysis with the newest version.")
-            events[["dz", "dx", "dy"]] = pd.DataFrame(events["dim"].tolist())
-            # events[["z0", "z1", "x0", "x1", "y0", "y1"]] = pd.DataFrame(events["bbox"].tolist())
-            # print(events.columns)
+        # Dictionary of custom column functions
+        custom_column_functions = {
+            "area_norm": lambda events: events.area / events.dz,
+            # "pix_num_norm": lambda events: events.pix_num / events.dz,
+            "area_footprint": lambda events: events.footprint.apply(sum),
+            "cx": lambda events: events.x0 + events.dx * events["fp_centroid_local-0"],
+            "cy": lambda events: events.y0 + events.dy * events["fp_centroid_local-1"]
+        }
 
-        # calculate extra characteristics
-        events["area_norm"] = events.area / events.dz
-        # events["pix_num_norm"] = events.pix_num / events.dz
-        # events["area_footprint"] = events.footprint.apply(sum)
+        if custom_columns is not None:
 
-        if "cx" not in events.columns:
-            events["cx"] = events.x0 + events.dx * events["fp_centroid_local-0"]
-            events["cy"] = events.y0 + events.dy * events["fp_centroid_local-1"]
+            if isinstance(custom_columns, str):
+                custom_columns = [custom_columns]
+
+            # Compute custom columns for the events DataFrame
+            for custom_column in custom_columns:
+
+                if isinstance(custom_column, dict):
+                    column_name = list(custom_column.keys())[0]
+                    func = custom_column[column_name]
+
+                    events[column_name] = func(events)
+
+                elif custom_column in custom_column_functions.keys():
+                    func = custom_column_functions[custom_column]
+                    events[custom_column] = func(events)
+                else:
+                    raise ValueError(f"Could not find 'custom_columns' value {custom_column}. "
+                                     f"Please provide one of {list(custom_column_functions.keys())} or dict('column_name'=lambda events: ...)")
 
         if index_prefix is not None:
             events.index = ["{}{}".format(index_prefix, i) for i in events.index]
@@ -143,8 +294,6 @@ class Events:
             z0, z1 = z_slice
             events = events[(events.z0 >= z0) & (events.z1 <= z1)]
 
-        # save results
-        self.events = events
         return events
 
 class Footprints:
@@ -309,7 +458,7 @@ class Video:
         return self.img
 
     # @lru_cache(maxsize=None)
-    @local_cache
+    @wrapper_local_cache
     def get_image_project(self, agg_func=np.mean, window=None, window_agg=np.sum, channel="dff", z_slice=None,
                           show_progress=True):
 

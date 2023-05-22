@@ -375,7 +375,8 @@ class Detector:
 
         return event_map  # , event_properties
 
-    def get_time_map(self, event_map, chunk:int = 200):
+    @staticmethod
+    def get_time_map(event_map, chunk:int = 200):
 
         time_map = np.zeros((event_map.shape[0], np.max(event_map) + 1), dtype = np.bool_)
 

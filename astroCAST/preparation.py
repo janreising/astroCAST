@@ -301,7 +301,7 @@ class IO:
 
     """
 
-    def load(self, path, h5_loc=None, sep="_"):
+    def load(self, path, h5_loc=None, sep="_", lazy=False):
 
         """
         Loads data from a specified file or directory.
@@ -319,6 +319,9 @@ class IO:
             FileNotFoundError: If the specified file or folder cannot be found.
 
         """
+
+        if lazy:
+            logging.warning("lazy loading currently not implemented.")
 
         if isinstance(path, str):
             path = Path(path)
