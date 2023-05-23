@@ -5,6 +5,7 @@ import dask.array
 import deprecation
 import numpy as np
 import pandas as pd
+import psutil
 from tqdm import tqdm
 
 import astroCAST.detection
@@ -14,9 +15,11 @@ from astroCAST.preparation import IO
 
 class Events:
 
-    def __init__(self, event_dir, data_path=None, meta_path=None, in_memory=False):
+    def __init__(self, event_dir, data_path=None, meta_path=None, in_memory=False,
+                 z_slice=None, index_prefix=None, custom_columns=["area_norm", "cx", "cy"]):
 
-        # todo multi file
+        if isinstance(event_dir, list):
+            raise NotImplementedError("multi file support not implemented yet.")
 
         if not Path(event_dir).is_dir():
             raise FileNotFoundError(f"cannot find provided event directory: {event_dir}")
@@ -33,56 +36,20 @@ class Events:
         event_map, event_map_shape, event_map_dtype = self.get_event_map(event_dir, in_memory=in_memory) # todo slicing
 
         # create time map
-        # TODO @Ana your module has a function to do this. Maybe we should move that method here
+        time_map, events_start_frame, events_end_frame = self.get_time_map(event_dir)
 
-        # add slicing
-        # self.z_slice = z_slice
-        # if z_slice is not None:
-        #     self.num_frames = z_slice[1] - z_slice[0]
+        # z slicing
+        if z_slice is not None:
+            self.z_slice = z_slice
+            self.num_frames = z_slice[1] - z_slice[0]
+
+            raise NotImplementedError("z_slice not implemented for Events")
 
         # load events
-        # self.load_events(z_slice=self.z_slice, index_prefix=index_prefix)
+        events = self.load_events(event_dir, z_slice=z_slice, index_prefix=index_prefix, custom_columns=custom_columns)
 
         # align time
-
-    # @notimplemented("implement meta loading function")
-    def get_meta_info(self, meta_path):
-
-        if not Path(meta_path).is_file():
-                raise FileNotFoundError(f"cannot find provided meta file: {meta_path}")
-
-        self.info = json.load(file)
-
-        if fix_errors:
-
-            #     if "xii" not in info.keys() or info["xii"] is None:
-            #
-            #     info["xii"] = {
-            #         "sampling_rate": 25,
-            #         "units": "us",
-            #         "channels": ["xii", "camera_timing"],
-            #         "folder": "/A",
-            #         "burst_prominence": 0.02,
-            #         "burst_distance": 20000,
-            #         "camera_prominence": 0.1
-            #     }
-            #
-            #     self.vprint("cannot find 'xii' settings in json config. Assuming values: \n {}".format(info["xii"]), urgency=0)
-            #
-            #
-            # if "alignment" not in info.keys() or info["alignment"] is None:
-            #
-            #     info["alignment"] = {
-            #         "num_channels": len(info["preprocessing"]["channel"]),
-            #         "z_skip": 1,
-            #         "skip_first": 10,
-            #         "skip_last": 11
-            #     }
-            #
-            #     self.vprint("cannot find 'alignment' settings in json config. Assuming values: \n {}".format(info["alignment"]), urgency=0)
-            #
-
-            pass
+        # TODO align time
 
     @staticmethod
     def get_event_map(event_dir, in_memory=False):
@@ -174,7 +141,7 @@ class Events:
         if save_path is not None:
             # Save the event map to the specified path using IO()
             io = IO()
-            io.save(save_path, data=event_map)
+            io.save(save_path, data={"0": event_map.astype(float)})
 
         return event_map
 
@@ -182,7 +149,7 @@ class Events:
     @staticmethod
     def get_time_map(event_dir=None, event_map=None, chunk=100):
         """
-        Creates a binary array representing the time map of events.
+        Creates a binary array representing the duration of events.
 
         Args:
             event_dir (Path): The directory containing the event data.
@@ -191,7 +158,7 @@ class Events:
 
         Returns:
             Tuple: A tuple containing the time map, events' start frames, and events' end frames.
-                time_map > binary array of size (num_events x num_frames) where 1 denotes an active event
+                time_map > binary array (num_events x num_frames) where 1 denotes event is active during that frame
                 events_start_frame > 1D array (num_events x num_frames) of event start
                 events_end_frame > 1D array (num_events x num_frames) of event end
 
@@ -206,7 +173,12 @@ class Events:
                 raise FileNotFoundError(f"cannot find event_dir: {event_dir}")
 
             time_map_path = Path(event_dir).joinpath("time_map.npy")
-            time_map = np.load(time_map_path.as_posix(), allow_pickle=True)[()]
+
+            if time_map_path.is_file():
+                time_map = np.load(time_map_path.as_posix(), allow_pickle=True)[()]
+
+            else:
+                raise ValueError(f"cannot find {time_map_path}. Please provide the event_map argument instead.")
 
         elif event_map is not None:
 
@@ -296,183 +268,122 @@ class Events:
 
         return events
 
-class Footprints:
-
-    def __init__(self):
-        pass
-
-    def get_footprints(self, events=None, dff=None, dtype=np.half, standardize=True):
+    # @wrapper_local_cache
+    @staticmethod
+    def get_extended_events(events, video, dtype=np.half, extend=-1,
+                       normalize=None, lazy=False, show_progress=True,
+                       save_path=None, save_param={}):
 
         """ takes the footprint of each individual event and extends it over the whole z-range
 
         """
 
-        if self.cache and self.footprints is not None:
-            return self.footprints
+        if normalize is not None:
+            # TODO
+            raise NotImplementedError("implement normalize flag")
 
-        # load if possible
-        if self.local_cache:
+        if lazy:
+            # TODO
+            raise NotImplementedError("implement lazy flag")
 
-            cache_path = self.lc_path.joinpath("fp_traces.npy")
+        if extend != -1:
+            # TODO
+            raise NotImplementedError("implement extend flag")
 
-            if cache_path.is_file():
-                self.vprint("loading footprints from: {}".format(cache_path), 2)
-                footprints = np.load(cache_path.as_posix())
-
-                if self.cache:
-                    self.footprints = footprints
-
-                return footprints
-
-        n_events = len(self.events)
-        n_frames = self.num_frames
-        events = events if events is not None else self.events
+        n_events = len(events)
+        n_frames, X, Y = video.shape
 
         arr = np.zeros((n_events, n_frames), dtype=dtype)
-        self.vprint("Proposed shape: ({}, {}) [{:.2f}GB]".format(n_events, n_frames, arr.itemsize*n_events*n_frames*1e-9), 2)
 
-        # load dff
-        if dff is None:
-            dff = self.get_channel()
+        arr_size = arr.itemsize*n_events*n_frames
+        ram_size = psutil.virtual_memory().total
+        if arr_size > 0.9 * ram_size:
+            logging.warning(f"array size ({n_events}, {n_frames}) is larger than 90% RAM size ({arr_size*1e-9:.2f}GB, {arr_size/ram_size*100}%). Consider using smaller dtype or 'lazy=True'")
 
         # extract footprints
         c = 0
-        for i, event in tqdm(events.iterrows(), total=len(events), desc="gathering footprints"):
+        iterator = tqdm(events.iterrows(), total=len(events), desc="gathering footprints") if show_progress else events.iterrows()
+        for i, event in iterator:
 
-            data = dff[:, event.x0:event.x1, event.y0:event.y1]
+            event_trace = video[:, event.x0:event.x1, event.y0:event.y1]
 
             footprint = np.invert(np.reshape(event["footprint"], (event.dx, event.dy)))
-            mask = np.broadcast_to(footprint, data.shape)
+            mask = np.broadcast_to(footprint, event_trace.shape)
 
-            projection = np.ma.masked_array(data=data, mask=mask)
+            projection = np.ma.masked_array(data=event_trace, mask=mask)
             p = np.nanmean(projection, axis=(1, 2))
 
-            if standardize:
-                p = (p-np.mean(p)) / np.std(p)
+            # if standardize:
+            #     p = (p-np.mean(p)) / np.std(p)
 
             arr[c, :] = p
 
             c += 1
 
-        self.footprints = arr
-
-        if self.local_cache:
-            np.save(cache_path.as_posix(), arr)
+        if save_path is not None:
+            io = IO()
+            io.save(path=save_path, data=arr, **save_param)
 
         return arr
 
-    # todo decide whether to move this to a dedicated Correlation Module
-    def get_footprint_correlation(self, footprints=None, dtype=np.single, mmap=False):
 
-        """ correlate the footprints of all events with each other
+class Correlation:
 
-        """
+    # @wrapper_local_cache
+    @staticmethod
+    def get_correlation_matrix(events, dtype=np.single, mmap=False):
 
-        if self.cache and self.corr is not None:
-            return self.corr
+        if mmap:
+            raise NotImplementedError("mmap flag currently not implemented")
 
-        if self.local_cache:
+        if not isinstance(events, (np.ndarray, dask.array.Array, pd.DataFrame)):
+            raise ValueError("please provide events as one of (np.ndarray, dask.array.Array, pd.DataFrame)")
 
-            cache_path = self.lc_path.joinpath("fp_corr.npy")
-            if cache_path.is_file():
-                self.vprint("loading footprint correlation from: {}".format(cache_path), 2)
+        if isinstance(events, pd.DataFrame):
 
-                if not mmap:
-                    corr = np.load(cache_path.as_posix())
-                else:
-                    corr = np.load(cache_path.as_posix(), mmap_mode="r")
+            if "trace" not in events.columns:
+                raise ValueError("events dataframe expected to have trace column")
 
-                if self.cache:
-                    self.corr = corr
+            events = events.trace.values
 
-                return corr
-
-        if footprints is None:
-            footprints = self.get_footprints()
-
-        corr = np.corrcoef(footprints, dtype=dtype)
+        corr = np.corrcoef(events, dtype=dtype)
         corr = np.tril(corr)
-
-        self.corr = corr
-
-        if self.local_cache:
-            np.save(cache_path.as_posix(), corr)
-
-            if mmap:
-                corr = np.load(cache_path.as_posix(), mmap_mode="r")
 
         return corr
 
-
 class Video:
 
-    def __init__(self):
-        pass
+    def __init__(self, data, z_slice=None, h5_loc=None, lazy=False):
 
-    def get_channel(self, channel="dff"):
+        if isinstance(data, (np.ndarray, dask.array.Array)):
+            self.data = data
 
-        if self.cache and (channel in self.channels.keys()):
-            return self.channels[channel]
+            if z_slice is not None:
+                z0, z1 = z_slice
+                self.data = self.data[z0:z1, :, :]
 
-        # guess file locations
-        if channel == "event_map":
-            h5path = self.dir_.joinpath("event_map.h5")
-            tiffpath = self.dir_.joinpath("event_map.tiff")
+        elif isinstance(data, (str, Path)):
+
+            io = IO()
+            self.data = io.load(data, h5_loc=h5_loc, lazy=lazy, z_slice=z_slice)
+
+        self.z_slice = z_slice
+        self.Z, self.X, self.Y = self.data.shape
+
+    def get_data(self, in_memory=False):
+
+        if in_memory and isinstance(self.data, dask.array.Array):
+            return self.data.compute()
 
         else:
-
-            h5path = self.dir_.parent.joinpath("{}.h5".format(self.name_))
-
-            # example: ./22A1x2.dff.ast.tiff
-            typ = self.dir_.suffixes[0].replace(".", "")
-            tiffpath = self.dir_.parent.joinpath("{}.{}.{}.tiff".format(self.name_, channel, typ))
-
-        # load files
-        if tiffpath.is_file():
-            if self.z_slice is None:
-                img = tiff.imread(tiffpath.as_posix())
-            else:
-                img = tiff.imread(tiffpath.as_posix(), key=range(self.z_slice[0], self.z_slice[1]))
-
-        elif h5path.is_file():
-            with h5py.File(h5path.as_posix(), "r") as file:
-                if self.z_slice is None:
-                    img = file[f"{channel}/{typ}"][:]
-                else:
-                    img = file[f"{channel}/{typ}"][self.z_slice[0]:self.z_slice[1], :, :]
-        else:
-            # self.vprint("Couldn't find {} or {}".format(h5path, tiffpath), 0)
-            raise FileNotFoundError("Couldn't find {} or {}".format(h5path, tiffpath), 0)
-
-        if self.cache:
-            self.channels[channel] = img
-
-        return img
-
-    @deprecation.deprecated(details="function label suggests different functonality. Use 'get_channel()' instead")
-    def get_image(self):
-
-        if self.img is None:
-            self.img = da.from_tiledb(self.event_map_.as_posix())
-
-        return self.img
+            return self.data
 
     # @lru_cache(maxsize=None)
-    @wrapper_local_cache
-    def get_image_project(self, agg_func=np.mean, window=None, window_agg=np.sum, channel="dff", z_slice=None,
+    # @wrapper_local_cache
+    def get_image_project(self, agg_func=np.mean, window=None, window_agg=np.sum,
                           show_progress=True):
 
-        img = self.get_channel(channel)
-
-        # select Z axis region
-        if (self.z_slice is not None) or (z_slice is not None):
-
-            if (self.z_slice is not None) and (z_slice is not None):
-                z_slice = (max(self.z_slice[0], z_slice[0]), min(self.z_slice[1], z_slice[1]))
-            elif self.z_slice is not None:
-                z_slice = self.z_slice
-
-            img = img[z_slice[0]:z_slice[1]]
+        img = self.data
 
         # calculate projection
         if window is None:

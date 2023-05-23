@@ -392,7 +392,7 @@ class Detector:
 
         else:
 
-            print("Assuming event_map is in RAM ... ")
+            logging.warning("Assuming event_map is in RAM. Otherwise slow execution.")
             for z in tqdm(range(Z)):
                 time_map[z, np.unique(event_map[z, :, :])] = 1
 

@@ -301,7 +301,7 @@ class IO:
 
     """
 
-    def load(self, path, h5_loc=None, sep="_", lazy=False):
+    def load(self, path, h5_loc=None, sep="_", z_slice=None, lazy=False):
 
         """
         Loads data from a specified file or directory.
@@ -327,27 +327,48 @@ class IO:
             path = Path(path)
 
         if path.suffix in [".tdb"]:
-            return self._load_tdb(path)  # Call private method to load TDB file
+            data =  self._load_tdb(path)  # Call private method to load TDB file
 
         elif path.suffix in [".tif", ".tiff", ".TIF", ".TIFF"]:
-            return self._load_tiff(path, sep)  # Call private method to load TIFF file
+            data =  self._load_tiff(path, sep)  # Call private method to load TIFF file
 
         elif path.suffix in [".czi", ".CZI"]:
-            return self._load_czi(path)  # Call private method to load CZI file
+            data =  self._load_czi(path)  # Call private method to load CZI file
 
-        elif path.suffix in [".h5"]:
-            return self._load_h5(path, h5_loc=h5_loc)  # Call private method to load HDF5 file
+        elif path.suffix in [".h5", ".hdf5", ".H5", ".HDF5"]:
+            data =  self._load_h5(path, h5_loc=h5_loc)  # Call private method to load HDF5 file
 
-        if path.is_dir():
+        elif path.suffix in [".npy", ".NPY"]:
+            data =  self._load_npy(path, lazy=lazy)
+
+        elif path.is_dir():
             # If the path is a directory, load multiple TIFF files
             files = [f for f in path.glob("*") if f.suffix in [".tif", ".tiff", ".TIF", ".TIFF"]]
             if len(files) > 1:
                 raise FileNotFoundError("couldn't find files in folder. Recognized ext: [.tif, .tiff, .TIF, .TIFF]")
 
-            return self._load_tiff(path, sep)  # Call private method to load TIFF files from directory
+            data =  self._load_tiff(path, sep)  # Call private method to load TIFF files from directory
 
         else:
             raise ValueError("unrecognized file format! Choose one of [.tiff, .h5, .tdb, .czi]")
+
+        if z_slice is not None:
+
+            if not isinstance(z_slice, (tuple, list)) or len(z_slice) != 2:
+                raise ValueError("please provide z_slice as tuple or list of (z_start, z_end)")
+
+            z0, z1 = z_slice
+            data = data[z0:z1, :, :]
+
+        return data
+
+    def _load_npy(self, path, lazy=False):
+
+        if lazy:
+            return da.from_npy_stack(path)
+
+        else:
+            return np.load(path.as_posix(), allow_pickle=True)
 
     def _load_tdb(self, path):
 
@@ -534,7 +555,7 @@ class IO:
 
         Args:
             path (str or pathlib.Path): The path to the output file.
-            data (dict): A dictionary containing the data to be saved, with keys as channel names and values as arrays.
+            data (dict or np.ndarray or dask.array.Array): A dictionary containing the data to be saved, with keys as channel names and values as arrays.
             prefix (str): The prefix to be used for naming datasets within the file (applicable only for HDF5 format).
             chunks (tuple or None): The chunk size to be used when saving Dask arrays (applicable only for HDF5 format).
             compression (str or None): The compression method to be used when saving Dask arrays (applicable only for HDF5 format).
@@ -557,9 +578,10 @@ class IO:
         if not isinstance(path, Path):
             raise TypeError("please provide 'path' as str or pathlib.Path data type")
 
-        # Check if the data is a dictionary, otherwise raise an error
-        # TODO maybe worth implementing for straight up np.ndarrays and da.Array
-        if not isinstance(data, dict):
+        # Check if the data is a dictionary or data array, otherwise raise an error
+        if isinstance(data, (np.ndarray, da.Array)):
+            data = {"ch0": data}
+        elif not isinstance(data, dict):
             raise TypeError("please provide data as dict of {channel_name:array}")
 
         saved_paths = []  # Initialize an empty list to store the paths of the saved files
@@ -614,8 +636,21 @@ class IO:
             elif path.suffix in [".czi", ".CZI"]:
                 raise NotImplementedError("currently we are not aware that python can save images in .czi format.")
 
+            elif path.suffix in [".npy", ".NPY"]:
+
+                fpath = path.with_suffix(f".{k}.tiff") if len(data.keys()) > 1 else path
+
+                if isinstance(channel, np.ndarray):
+                    np.save(file=fpath.as_posix(), arr=channel)
+
+                else:
+                    da.to_npy_stack(fpath, x=channel, axis=0)
+
+                saved_paths.append(fpath)
+                logging.info(f"saved data to {fpath}")
+
             else:
-                raise TypeError("please provide output format as .h5, .tdb, or .tiff file")
+                raise TypeError("please provide output format as .h5, .tdb, .npy or .tiff file")
 
         return saved_paths if len(saved_paths) > 1 else saved_paths[0]  # Return the list of saved file paths
 
