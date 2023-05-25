@@ -654,6 +654,70 @@ class IO:
 
         return saved_paths if len(saved_paths) > 1 else saved_paths[0]  # Return the list of saved file paths
 
+    @deprecated("legacy from differeent code versions")
+    # TODO decide to delete or convert to new format
+    def convert_xyz_to_zxy(self, delete_original=True):
+
+        # check if conversion is necessary
+        with h5.File(self.path, "a") as file:
+
+            if len(list(file.keys())) < 2:
+                file.create_dataset("dummy", dtype="i2", shape=(1, 1, 1))
+
+            key0 = list(file[self.loc_in].keys())[0]
+            d1, d2, d3 = file[f"{self.loc_in}{key0}"].shape
+            if d2 == d3:
+                if self.verbose > 1:
+                    print("Expected data shape found (ZXY)")
+                return True
+
+        # convert data
+        with h5.File(self.path, "a") as file:
+            for loc in file[self.loc_in].keys():
+
+                if self.verbose > 0:
+                    print(f"Converting channel {loc} from xyz to zxy")
+
+                # get shape of original data set
+                xyz = file[f"{self.loc_in}{loc}"]
+                X, Y, Z = xyz.shape
+                cx, cy, cz = xyz.chunks
+
+                # create new dataset
+                if f"zxy/{loc}" in file:
+                    del file[f"zxy/{loc}"]
+
+                zxy = file.create_dataset(f"zxy/{loc}", dtype="i2", shape=(Z, X, Y),
+                                          compression="gzip", chunks=(cx, cy, cz), shuffle=True)
+
+                # necessary for downstream processing
+                if "dummy" not in file:
+                    _ = file.create_dataset("dummy", dtype="i2", shape=(1, 1, 1))
+
+                # transform and copy data to new shape
+                for start in self.dtqdm(range(0, Z, cz)):
+
+                    stop = min(start+cz, Z)
+
+                    temp = np.array(xyz[:, :, start:stop])
+                    temp = np.swapaxes(temp, 0, 2)
+                    temp = np.swapaxes(temp, 1, 2)
+
+                    zxy[start:stop, :, :] = temp
+
+        # clean up original data
+        if delete_original:
+            with h5.File(self.path, "a") as file:
+
+                # remove
+                del file[self.loc_in]
+
+                # move
+                file.create_group(self.loc_in.replace("/", ""))
+                for key in file["zxy/"].keys():
+                    file.move(f"zxy/{key}", f"{self.loc_in}{key}")
+                del file["zxy"]
+
 class MotionCorrection:
 
     """

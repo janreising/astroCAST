@@ -462,7 +462,6 @@ class Events:
         else:
             raise ValueError("Please provide either a mapping or a function.")
 
-
 class Correlation:
     """
     A class for computing correlation matrices and histograms.
