@@ -13,6 +13,11 @@ from astroCAST.analysis import *
 from astroCAST.detection import Detector
 from astroCAST.helper import EventSim, DummyGenerator
 
+import matplotlib
+matplotlib.use('Agg')  # Use the Agg backend
+
+import matplotlib.pyplot as plt
+
 
 def create_sim_data(dir, name="sim.h5", h5_loc="dff/ch0", save_active_pixels=False, shape=(50, 100, 100), sim_param={}):
 
@@ -217,6 +222,28 @@ class Test_Events:
             event_dir = create_sim_data(Path(tmpdir), shape=shape)
             events = Events(event_dir, z_slice=z_slice)
 
+    def test_frame_to_time_conversion(self, shape=(50, 100, 100)):
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+
+            # Create dummy data
+            event_dir = create_sim_data(Path(tmpdir), shape=shape)
+
+            # test dictionary mapping
+            frame_to_time_mapping={i:i*2 for i in range(1000)}
+            events = Events(event_dir, frame_to_time_mapping=frame_to_time_mapping)
+            assert "t0" in events.events.columns
+            assert "t1" in events.events.columns
+
+            # test function mapping
+            frame_to_time_function=lambda x: x*2
+            events = Events(event_dir, frame_to_time_function=frame_to_time_function)
+            assert "t0" in events.events.columns
+            assert "t1" in events.events.columns
+
+    def test_load_data(self):
+        raise NotImplementedError("test .get_data() function")
+
     def test_multi_file_support(self, shape=(50, 100, 100)):
 
         with tempfile.TemporaryDirectory() as tmpdir_1:
@@ -227,7 +254,80 @@ class Test_Events:
 
                 events = Events([event_dir_1, event_dir_2])
 
+    @pytest.mark.xfail
+    def test_get_num_events(self, shape=(50, 100, 100)):
+        with tempfile.TemporaryDirectory() as tmpdir:
+
+            # Create dummy data
+            event_dir = create_sim_data(Path(tmpdir), shape=shape)
+            events = Events(event_dir)
+            events.get_num_events()
+    @pytest.mark.xfail
+    def test_get_event_timing(self, shape=(50, 100, 100)):
+        with tempfile.TemporaryDirectory() as tmpdir:
+
+            # Create dummy data
+            event_dir = create_sim_data(Path(tmpdir), shape=shape)
+            events = Events(event_dir)
+            events.get_event_timing()
+    @pytest.mark.xfail
+    def test_set_timings(self, shape=(50, 100, 100)):
+        with tempfile.TemporaryDirectory() as tmpdir:
+
+            # Create dummy data
+            event_dir = create_sim_data(Path(tmpdir), shape=shape)
+            events = Events(event_dir)
+            events.set_timings()
+
+    @pytest.mark.xfail
+    def test_align(self, shape=(50, 100, 100)):
+        with tempfile.TemporaryDirectory() as tmpdir:
+
+            # Create dummy data
+            event_dir = create_sim_data(Path(tmpdir), shape=shape)
+            events = Events(event_dir)
+            events.align()
+
+    @pytest.mark.parametrize("param", [
+        dict(index=None), dict(smooth=5), dict(gradient=True)
+    ])
+    def test_get_average_event_trace(self, param, shape=(50, 100, 100)):
+        with tempfile.TemporaryDirectory() as tmpdir:
+
+            # Create dummy data
+            event_dir = create_sim_data(Path(tmpdir), shape=shape)
+            events = Events(event_dir)
+            avg = events.get_average_event_trace(**param)
+
+            assert np.squeeze(avg.shape) == np.squeeze(np.zeros(shape=(shape[0])).shape)
+
+    def test_to_numpy(self):
+
+        events = Events(event_dir=None)
+
+        df = pd.DataFrame({
+            "z0": [0, 2, 5],
+            "z1": [3, 3, 9],
+            "trace": [
+                np.array([1, 1, 1]), np.array([2]), np.array([3, 3, 3, 3]),
+            ]
+        })
+
+        arr_expected = np.zeros((3, 10))
+        arr_expected[0, 0:3] = 1
+        arr_expected[0, 2:3] = 1
+        arr_expected[0, 5:10] = 1
+
+        arr_out = events.to_numpy(events=df)
+
+        np.allclose(arr_expected, arr_out)
+
 class Test_Correlation:
+
+    def setup_method(self):
+        # Set up any necessary data for the tests
+        self.correlation = Correlation()
+        self.corr_matrix = np.random.rand(100, 100)
 
     @pytest.mark.parametrize("ragged", [True, False])
     @pytest.mark.parametrize("mmap", [True, False])
@@ -254,14 +354,52 @@ class Test_Correlation:
         corr = Correlation()
         c = corr.get_correlation_matrix(events=data, mmap=mmap)
 
+    def test_get_correlation_histogram(self, num_bins=1000):
+        # Test with precomputed correlation matrix
+        counts = self.correlation.get_correlation_histogram(corr=self.corr_matrix, num_bins=num_bins)
+        assert np.equal(len(counts), num_bins)  # Adjust the expected value as per the number of bins
+
+        # Test with events array
+        counts = Correlation().get_correlation_histogram(events=self.corr_matrix, num_bins=num_bins)
+        assert np.equal(len(counts), num_bins)  # Adjust the expected value as per the number of bins
+
+        # Test with event dataframe
+        dg = DummyGenerator()
+        events = dg.get_dataframe()
+        counts = Correlation().get_correlation_histogram(events=events, num_bins=num_bins)
+        assert np.equal(len(counts), num_bins)  # Adjust the expected value as per the number of bins
+
+    def test_plot_correlation_characteristics(self):
+        # Test the plot_correlation_characteristics function
+
+        # auto figure creation
+        result = self.correlation.plot_correlation_characteristics(corr=self.corr_matrix,
+                                                                   perc=[0.01, 0.05, 0.1],
+                                                                   bin_num=20, log_y=True,
+                                                                   figsize=(8, 4))
+        assert isinstance(result, plt.Figure)
+
+        # provided figure
+        fig, axx = plt.subplots(1, 2)
+        logging.warning(f"{axx}, {type(axx)}")
+        result = self.correlation.plot_correlation_characteristics(corr=self.corr_matrix, ax=axx,
+                                                                   perc=[0.01, 0.05, 0.1],
+                                                                   bin_num=20, log_y=True,
+                                                                   figsize=(8, 4))
+        assert isinstance(result, plt.Figure)
+
+    def teardown_method(self):
+        # Clean up after the tests, if necessary
+        plt.close()
+
 class Test_Video:
 
     @pytest.mark.parametrize("lazy", [True, False])
     @pytest.mark.parametrize("z_slice", [None, (10, 40), (10, -1)])
     @pytest.mark.parametrize("input_type", ["numpy", "dask", ".h5", ".tdb", ".tiff"])
     @pytest.mark.parametrize("proj_func", [np.mean, np.min, None])
-    # TODO test window
-    def test_basic_loading(self, input_type, z_slice, lazy, proj_func, shape=(50, 25, 25)):
+    @pytest.mark.parametrize("window", [None, 3])
+    def test_basic_loading(self, input_type, z_slice, lazy, proj_func, window, shape=(50, 25, 25)):
 
         data = np.random.random(size=shape)
 
@@ -315,7 +453,7 @@ class Test_Video:
             # test project
             if proj_func is not None:
                 proj_org = proj_func(original_data, axis=0)
-                proj = vid.get_image_project(agg_func=proj_func)
+                proj = vid.get_image_project(agg_func=proj_func, window=window)
 
                 assert np.allclose(proj_org, proj)
 

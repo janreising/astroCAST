@@ -6,6 +6,7 @@ import deprecation
 import numpy as np
 import pandas as pd
 import psutil
+from matplotlib import pyplot as plt
 from tqdm import tqdm
 
 import astroCAST.detection
@@ -16,12 +17,17 @@ from astroCAST.preparation import IO
 class Events:
 
     def __init__(self, event_dir, data_path=None, meta_path=None, in_memory=False,
-                 z_slice=None, index_prefix=None, custom_columns=["area_norm", "cx", "cy"]):
+                 z_slice=None, index_prefix=None, custom_columns=["area_norm", "cx", "cy"],
+                 frame_to_time_mapping=None, frame_to_time_function=None):
+
+        if event_dir is None:
+            return None
 
         if isinstance(event_dir, list):
             raise NotImplementedError("multi file support not implemented yet.")
 
-        if not Path(event_dir).is_dir():
+        event_dir = Path(event_dir)
+        if not event_dir.is_dir():
             raise FileNotFoundError(f"cannot find provided event directory: {event_dir}")
 
         if meta_path is not None:
@@ -34,22 +40,31 @@ class Events:
 
         # load event map
         event_map, event_map_shape, event_map_dtype = self.get_event_map(event_dir, in_memory=in_memory) # todo slicing
+        self.num_frames, self.X, self.Y = event_map_shape
 
         # create time map
         time_map, events_start_frame, events_end_frame = self.get_time_map(event_dir)
 
-        # z slicing
-        if z_slice is not None:
-            self.z_slice = z_slice
-            self.num_frames = z_slice[1] - z_slice[0]
+        # load events
+        self.events = self.load_events(event_dir, z_slice=z_slice, index_prefix=index_prefix, custom_columns=custom_columns)
 
+        # z slicing
+        self.z_slice = z_slice
+        if z_slice is not None:
+            # self.num_frames = z_slice[1] - z_slice[0] # TODO this actually might create confusion
             raise NotImplementedError("z_slice not implemented for Events")
 
-        # load events
-        events = self.load_events(event_dir, z_slice=z_slice, index_prefix=index_prefix, custom_columns=custom_columns)
-
         # align time
-        # TODO align time
+        if frame_to_time_mapping is not None or frame_to_time_function is not None:
+            self.events.t0 = self.convert_frame_to_time(self.events.z0.tolist(),
+                                                        frame_to_time_mapping=frame_to_time_mapping,
+                                                        frame_to_time_function=frame_to_time_function)
+
+            self.events.t1 = self.convert_frame_to_time(self.events.z1.tolist(),
+                                                        frame_to_time_mapping=frame_to_time_mapping,
+                                                        frame_to_time_function=frame_to_time_function)
+
+            self.events.dt = self.t1 - self.t0
 
     @staticmethod
     def get_event_map(event_dir, in_memory=False):
@@ -326,30 +341,259 @@ class Events:
 
         return arr
 
+    # @wrapper_local_cache
+    def to_numpy(self, events=None, empty_as_nan=True):
 
-class Correlation:
+        """
+        Convert events DataFrame to a numpy array.
+
+        Args:
+            events (pd.DataFrame): The DataFrame containing event data with columns 'z0', 'z1', and 'trace'.
+            empty_as_nan (bool): Flag to represent empty values as NaN.
+
+        Returns:
+            np.ndarray: The resulting numpy array.
+
+        """
+
+        if events is None:
+            events = self.events
+
+        num_frames = events.z1.max() + 1
+        arr = np.zeros((len(events), num_frames))
+
+        for i, (z0, z1, trace) in enumerate(zip(events.z0, events.z1, events.trace)):
+            arr[i, z0:z1] = trace
+
+        # todo this should actually be a mask instead then; np.nan creates weird behavior
+        if empty_as_nan:
+            arr[arr == 0] = np.nan
+
+        return arr
 
     # @wrapper_local_cache
+    def get_average_event_trace(self, events: pd.DataFrame = None, empty_as_nan: bool = True,
+                                agg_func: callable = np.nanmean, index: list = None,
+                                gradient: bool = False, smooth: int = None) -> pd.Series:
+        """
+        Calculate the average event trace.
+
+        Args:
+            events (pd.DataFrame): The DataFrame containing event data.
+            empty_as_nan (bool): Flag to represent empty values as NaN.
+            agg_func (callable): The function to aggregate the event traces.
+            index (list): The index values for the resulting series.
+            gradient (bool): Flag to calculate the gradient of the average trace.
+            smooth (int): The window size for smoothing the average trace.
+
+        Returns:
+            pd.Series: The resulting average event trace.
+
+        Raises:
+            ValueError: If the provided 'agg_func' is not callable.
+
+        """
+
+        # Convert events DataFrame to a numpy array representation
+        arr = self._events_to_numpy(events=events, empty_as_nan=empty_as_nan)
+
+        # Check if agg_func is callable
+        if not callable(agg_func):
+            raise ValueError("Please provide a callable function for the 'agg_func' argument.")
+
+        # Calculate the average event trace using the provided agg_func
+        avg_trace = agg_func(arr, axis=0)
+
+        if index is None:
+            index = range(len(avg_trace))
+
+        if smooth is not None:
+            # Smooth the average trace using rolling mean
+            avg_trace = pd.Series(avg_trace, index=index)
+            avg_trace = avg_trace.rolling(smooth, center=True).mean()
+
+        if gradient:
+            # Calculate the gradient of the average trace
+            avg_trace = np.gradient(avg_trace)
+
+        avg_trace = pd.Series(avg_trace, index=index)
+
+        return avg_trace
+
+    @staticmethod
+    def convert_frame_to_time(z, mapping=None, function=None):
+
+        """
+        Convert frame numbers to absolute time using a mapping or a function.
+
+        Args:
+            z (int or list): Frame number(s) to convert.
+            mapping (dict): Dictionary mapping frame numbers to absolute time.
+            function (callable): Function that converts a frame number to absolute time.
+
+        Returns:
+            float or list: Absolute time corresponding to the frame number(s).
+
+        Raises:
+            ValueError: If neither mapping nor function is provided.
+
+        """
+
+        if mapping is not None:
+
+            if function is not None:
+                logging.warning("function argument ignored, since mapping has priority.")
+
+            if isinstance(z, int):
+                return mapping[z]
+            elif isinstance(z, list):
+                return [mapping[frame] for frame in z]
+            else:
+                raise ValueError("Invalid 'z' value. Expected int or list.")
+
+        elif function is not None:
+            if isinstance(z, int):
+                return function(z)
+            elif isinstance(z, list):
+                return [function(frame) for frame in z]
+            else:
+                raise ValueError("Invalid 'z' value. Expected int or list.")
+
+        else:
+            raise ValueError("Please provide either a mapping or a function.")
+
+
+class Correlation:
+    """
+    A class for computing correlation matrices and histograms.
+    """
+
     @staticmethod
     def get_correlation_matrix(events, dtype=np.single, mmap=False):
+        """
+        Computes the correlation matrix of events.
+
+        Args:
+            events (np.ndarray or dask.array.Array or pd.DataFrame): Input events data.
+            dtype (np.dtype, optional): Data type of the correlation matrix. Defaults to np.single.
+            mmap (bool, optional): Flag indicating whether to use memory-mapped arrays. Defaults to False.
+
+        Returns:
+            np.ndarray: Correlation matrix.
+
+        Raises:
+            ValueError: If events is not one of (np.ndarray, dask.array.Array, pd.DataFrame).
+            ValueError: If events DataFrame does not have a 'trace' column.
+            NotImplementedError: If mmap flag is set to True (currently not implemented).
+        """
 
         if mmap:
-            raise NotImplementedError("mmap flag currently not implemented")
+            raise NotImplementedError("mmap flag is currently not implemented.")
 
-        if not isinstance(events, (np.ndarray, dask.array.Array, pd.DataFrame)):
-            raise ValueError("please provide events as one of (np.ndarray, dask.array.Array, pd.DataFrame)")
+        if not isinstance(events, (np.ndarray, pd.DataFrame)):
+            raise ValueError("Please provide events as one of (np.ndarray, pd.DataFrame).")
 
         if isinstance(events, pd.DataFrame):
-
             if "trace" not in events.columns:
-                raise ValueError("events dataframe expected to have trace column")
+                raise ValueError("Events DataFrame is expected to have a 'trace' column.")
+            events = np.array(events["trace"].tolist())
 
-            events = events.trace.values
-
-        corr = np.corrcoef(events, dtype=dtype)
+        corr = np.corrcoef(events).astype(dtype)
         corr = np.tril(corr)
 
         return corr
+
+    def get_correlation_histogram(self, corr=None, events=None, start=-1, stop=1, num_bins=1000, density=False):
+        """
+        Computes the correlation histogram.
+
+        Args:
+            corr (np.ndarray, optional): Precomputed correlation matrix. If not provided, events will be used.
+            events (np.ndarray or pd.DataFrame, optional): Input events data. Required if corr is not provided.
+            start (float, optional): Start value of the histogram range. Defaults to -1.
+            stop (float, optional): Stop value of the histogram range. Defaults to 1.
+            num_bins (int, optional): Number of histogram bins. Defaults to 1000.
+            density (bool, optional): Flag indicating whether to compute the histogram density. Defaults to False.
+
+        Returns:
+            np.ndarray: Correlation histogram counts.
+
+        Raises:
+            ValueError: If neither corr nor events is provided.
+        """
+
+        if corr is None:
+            if events is None:
+                raise ValueError("Please provide either 'corr' or 'events' flag.")
+            corr = self.get_correlation_matrix(events)
+
+        counts, _ = np.histogram(corr, bins=num_bins, range=(start, stop), density=density)
+
+        return counts
+
+    def plot_correlation_characteristics(self, corr=None, events=None, ax=None,
+                                         perc=[5e-5, 5e-4, 1e-3, 1e-2, 0.05], bin_num=50, log_y=True,
+                                         figsize=(10, 3)):
+        """
+        Plots the correlation characteristics.
+
+        Args:
+            corr (np.ndarray, optional): Precomputed correlation matrix. If not provided, footprint correlation is used.
+            ax (matplotlib.axes.Axes or list of matplotlib.axes.Axes, optional): Subplots axes to plot the figure.
+            perc (list, optional): Percentiles to plot vertical lines on the cumulative plot. Defaults to [5e-5, 5e-4, 1e-3, 1e-2, 0.05].
+            bin_num (int, optional): Number of histogram bins. Defaults to 50.
+            log_y (bool, optional): Flag indicating whether to use log scale on the y-axis. Defaults to True.
+            figsize (tuple, optional): Figure size. Defaults to (10, 3).
+
+        Returns:
+            matplotlib.figure.Figure: Plotted figure.
+
+        Raises:
+            ValueError: If ax is provided but is not a tuple of (ax0, ax1).
+        """
+
+        if corr is None:
+            if events is None:
+                raise ValueError("Please provide either 'corr' or 'events' flag.")
+            corr = self.get_correlation_matrix(events)
+
+        if ax is None:
+            fig, (ax0, ax1) = plt.subplots(1, 2, figsize=figsize)
+        else:
+            if not isinstance(ax, (tuple, list, np.ndarray)) or len(ax) != 2:
+                raise ValueError("'ax' argument expects a tuple/list/np.ndarray of (ax0, ax1)")
+
+            ax0, ax1 = ax
+            fig = ax0.get_figure()
+
+        # Plot histogram
+        bins = ax0.hist(corr.flatten(), bins=bin_num)
+        if log_y:
+            ax0.set_yscale("log")
+        ax0.set_ylabel("Counts")
+        ax0.set_xlabel("Correlation")
+
+        # Plot cumulative distribution
+        counts, xaxis, _ = bins
+        counts = np.flip(counts)
+        xaxis = np.flip(xaxis)
+        cumm = np.cumsum(counts)
+        cumm = cumm / np.sum(counts)
+
+        ax1.plot(xaxis[1:], cumm)
+        if log_y:
+            ax1.set_yscale("log")
+        ax1.invert_xaxis()
+        ax1.set_ylabel("Fraction")
+        ax1.set_xlabel("Correlation")
+
+        # Plot vertical lines at percentiles
+        pos = [np.argmin(abs(cumm - p)) for p in perc]
+        vlines = [xaxis[p] for p in pos]
+        for v in vlines:
+            ax1.axvline(v, color="gray", linestyle="--")
+
+        return fig
 
 class Video:
 
