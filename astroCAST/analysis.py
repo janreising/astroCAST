@@ -1,70 +1,120 @@
 import logging
+from functools import lru_cache
 from pathlib import Path
 
-import dask.array
+import dask.array as da
 import deprecation
 import numpy as np
 import pandas as pd
 import psutil
 from matplotlib import pyplot as plt
+from matplotlib.colors import LinearSegmentedColormap
 from tqdm import tqdm
 
 import astroCAST.detection
-from astroCAST.helper import get_data_dimensions, notimplemented, wrapper_local_cache
+from astroCAST import helper
+from astroCAST.helper import get_data_dimensions, wrapper_local_cache, is_ragged
 from astroCAST.preparation import IO
 
 
 class Events:
 
-    def __init__(self, event_dir, data_path=None, meta_path=None, in_memory=False,
-                 z_slice=None, index_prefix=None, custom_columns=["area_norm", "cx", "cy"],
+    def __init__(self, event_dir, meta_path=None, in_memory=False,
+                 data=None, h5_loc=None,
+                 z_slice=None, index_prefix=None, custom_columns=("area_norm", "cx", "cy"),
                  frame_to_time_mapping=None, frame_to_time_function=None):
 
         if event_dir is None:
             return None
 
-        if isinstance(event_dir, list):
-            raise NotImplementedError("multi file support not implemented yet.")
+        if not isinstance(event_dir, list):
 
-        event_dir = Path(event_dir)
-        if not event_dir.is_dir():
-            raise FileNotFoundError(f"cannot find provided event directory: {event_dir}")
+            event_dir = Path(event_dir)
+            if not event_dir.is_dir():
+                raise FileNotFoundError(f"cannot find provided event directory: {event_dir}")
 
-        if meta_path is not None:
-            logging.debug("I should not be called at all")
-            self.get_meta_info(meta_path)
+            if meta_path is not None:
+                logging.debug("I should not be called at all")
+                self.get_meta_info(meta_path)
 
-        # get data
-        if data_path is not None:
-            self.get_data() # todo slicing
+            # get data
+            if isinstance(data, (str, Path)):
+                self.data = Video(data, z_slice=z_slice, h5_loc=h5_loc, lazy=False)
 
-        # load event map
-        event_map, event_map_shape, event_map_dtype = self.get_event_map(event_dir, in_memory=in_memory) # todo slicing
-        self.num_frames, self.X, self.Y = event_map_shape
+            if isinstance(data, (np.ndarray, da.Array)):
 
-        # create time map
-        time_map, events_start_frame, events_end_frame = self.get_time_map(event_dir)
+                if z_slice is not None:
+                    logging.warning("'data'::array > Please ensure array was not sliced before providing data flag")
 
-        # load events
-        self.events = self.load_events(event_dir, z_slice=z_slice, index_prefix=index_prefix, custom_columns=custom_columns)
+                self.data = Video(data, z_slice=z_slice, lazy=False)
 
-        # z slicing
-        self.z_slice = z_slice
-        if z_slice is not None:
-            # self.num_frames = z_slice[1] - z_slice[0] # TODO this actually might create confusion
-            raise NotImplementedError("z_slice not implemented for Events")
+            elif isinstance(data, Video):
 
-        # align time
-        if frame_to_time_mapping is not None or frame_to_time_function is not None:
-            self.events.t0 = self.convert_frame_to_time(self.events.z0.tolist(),
-                                                        frame_to_time_mapping=frame_to_time_mapping,
-                                                        frame_to_time_function=frame_to_time_function)
+                if z_slice is not None:
+                    logging.warning("'data'::Video > Slice manually during Video object initialization")
 
-            self.events.t1 = self.convert_frame_to_time(self.events.z1.tolist(),
-                                                        frame_to_time_mapping=frame_to_time_mapping,
-                                                        frame_to_time_function=frame_to_time_function)
+                self.data = data
 
-            self.events.dt = self.t1 - self.t0
+            else:
+                self.data = data
+
+            # load event map
+            event_map, event_map_shape, event_map_dtype = self.get_event_map(event_dir, in_memory=in_memory) # todo slicing
+            self.num_frames, self.X, self.Y = event_map_shape
+
+            # create time map
+            time_map, events_start_frame, events_end_frame = self.get_time_map(event_dir)
+
+            # load events
+            self.events = self.load_events(event_dir, z_slice=z_slice, index_prefix=index_prefix, custom_columns=custom_columns)
+
+            # z slicing
+            self.z_slice = z_slice
+            if z_slice is not None:
+                z_min, z_max = z_slice
+                self.events = self.events[(self.events.z0 >= z_min) & (self.events.z1 <= z_max)]
+
+                # TODO how does this effect:
+                #   - time_map, events_start_frame, events_end_frame
+                #   - data
+                #   - indices in the self.events dataframe
+
+            self.z_range = (self.events.z0.min(), self.events.z1.max())
+
+            # align time
+            if frame_to_time_mapping is not None or frame_to_time_function is not None:
+                self.events["t0"] = self.convert_frame_to_time(self.events.z0.tolist(),
+                                                            mapping=frame_to_time_mapping,
+                                                            function=frame_to_time_function)
+
+                self.events["t1"] = self.convert_frame_to_time(self.events.z1.tolist(),
+                                                            mapping=frame_to_time_mapping,
+                                                            function=frame_to_time_function)
+
+                self.events.dt = self.events.t1 - self.events.t0
+
+        else:
+            # multi file support
+
+            event_objects = []
+            for i in range(len(event_dir)):
+
+                event = Events(event_dir[i],
+                               meta_path=None if meta_path is None else meta_path[i],
+                               data=None if data is None else data[i],
+                               h5_loc=None if h5_loc is None else h5_loc[i],
+                               z_slice=None if z_slice is None else z_slice[i],
+                               in_memory=in_memory,
+                               index_prefix=f"{i}x",
+                               custom_columns=custom_columns,
+                               frame_to_time_mapping=frame_to_time_mapping,
+                               frame_to_time_function=frame_to_time_function)
+
+                event_objects.append(event)
+
+            self.event_objects = event_objects
+            self.events = pd.concat([ev.events for ev in event_objects])
+            self.z_slice = z_slice
 
     @staticmethod
     def get_event_map(event_dir, in_memory=False):
@@ -197,8 +247,8 @@ class Events:
 
         elif event_map is not None:
 
-            if not isinstance(event_map, (np.ndarray, dask.array.Array)):
-                raise ValueError(f"please provide 'event_map' as np.ndarray or dask.Array")
+            if not isinstance(event_map, (np.ndarray, da.Array)):
+                raise ValueError(f"please provide 'event_map' as np.ndarray or da")
 
             time_map = astroCAST.detection.Detector.get_time_map(event_map=event_map, chunk=chunk)
 
@@ -286,29 +336,29 @@ class Events:
     # @wrapper_local_cache
     @staticmethod
     def get_extended_events(events, video, dtype=np.half, extend=-1,
-                       normalize=None, lazy=False, show_progress=True,
-                       save_path=None, save_param={}):
+                       normalization_instructions=None, show_progress=True,
+                       memmap_path=None, save_path=None, save_param={}):
 
         """ takes the footprint of each individual event and extends it over the whole z-range
 
+        example standardizing:
+
+        normalization_instructions =
+            0: ["subtract", {"mode": "mean"}],
+            1: ["divide", {"mode": "std"}]
+        }
+
         """
-
-        if normalize is not None:
-            # TODO
-            raise NotImplementedError("implement normalize flag")
-
-        if lazy:
-            # TODO
-            raise NotImplementedError("implement lazy flag")
-
-        if extend != -1:
-            # TODO
-            raise NotImplementedError("implement extend flag")
 
         n_events = len(events)
         n_frames, X, Y = video.shape
 
-        arr = np.zeros((n_events, n_frames), dtype=dtype)
+        # create array to save events in
+        if memmap_path:
+            memmap_path = Path(memmap_path).with_suffix(f".dtype_{np.dtype(dtype).name}_shape_{n_events}x{n_frames}.mmap")
+            arr = np.memmap(memmap_path.as_posix(), dtype=dtype, mode='w+', shape=(n_events, n_frames))
+        else:
+            arr = np.zeros((n_events, n_frames), dtype=dtype)
 
         arr_size = arr.itemsize*n_events*n_frames
         ram_size = psutil.virtual_memory().total
@@ -320,22 +370,47 @@ class Events:
         iterator = tqdm(events.iterrows(), total=len(events), desc="gathering footprints") if show_progress else events.iterrows()
         for i, event in iterator:
 
-            event_trace = video[:, event.x0:event.x1, event.y0:event.y1]
+            # get z extend
+            if extend == -1:
+                z0, z1 = 0, n_frames
+            elif isinstance(extend, (int)):
+                dz0 = dz1 = extend
+                z0, z1 = max(0, event.z0-dz0), min(event.z1+dz1, n_frames)
+            elif isinstance(extend, (list, tuple)):
 
+                if len(extend) != 2:
+                    raise ValueError("provide 'extend' flag as int or tuple (ext_left, ext_right")
+
+                dz0, dz1 = extend
+
+                dz0 = n_frames if dz0 == -1 else dz0
+                dz1 = n_frames if dz1 == -1 else dz1
+
+                z0, z1 = max(0, event.z0-dz0), min(event.z1+dz1, n_frames)
+            else:
+                raise ValueError("provide 'extend' flag as int or tuple (ext_left, ext_right")
+
+            # extract requested volume
+            event_trace = video[z0:z1, event.x0:event.x1, event.y0:event.y1]
+
+            # select event pixel
             footprint = np.invert(np.reshape(event["footprint"], (event.dx, event.dy)))
             mask = np.broadcast_to(footprint, event_trace.shape)
 
+            # project to trace
             projection = np.ma.masked_array(data=event_trace, mask=mask)
             p = np.nanmean(projection, axis=(1, 2))
 
-            # if standardize:
-            #     p = (p-np.mean(p)) / np.std(p)
+            if normalization_instructions is not None:
+                norm = helper.Normalization(data=p, inplace=True)
+                norm.run(normalization_instructions)
 
-            arr[c, :] = p
-
+            arr[c, z0:z1] = p
             c += 1
 
-        if save_path is not None:
+        # TODO add trimming of empty left and right borders
+
+        if save_path is not None and memmap_path is None:
             io = IO()
             io.save(path=save_path, data=arr, **save_param)
 
@@ -395,7 +470,7 @@ class Events:
         """
 
         # Convert events DataFrame to a numpy array representation
-        arr = self._events_to_numpy(events=events, empty_as_nan=empty_as_nan)
+        arr = self.to_numpy(events=events, empty_as_nan=empty_as_nan)
 
         # Check if agg_func is callable
         if not callable(agg_func):
@@ -467,13 +542,14 @@ class Correlation:
     A class for computing correlation matrices and histograms.
     """
 
+    # @wrapper_local_cache
     @staticmethod
-    def get_correlation_matrix(events, dtype=np.single, mmap=False):
+    def get_correlation_matrix(events, dtype=np.single):
         """
         Computes the correlation matrix of events.
 
         Args:
-            events (np.ndarray or dask.array.Array or pd.DataFrame): Input events data.
+            events (np.ndarray or da.Array or pd.DataFrame): Input events data.
             dtype (np.dtype, optional): Data type of the correlation matrix. Defaults to np.single.
             mmap (bool, optional): Flag indicating whether to use memory-mapped arrays. Defaults to False.
 
@@ -481,24 +557,37 @@ class Correlation:
             np.ndarray: Correlation matrix.
 
         Raises:
-            ValueError: If events is not one of (np.ndarray, dask.array.Array, pd.DataFrame).
+            ValueError: If events is not one of (np.ndarray, da.Array, pd.DataFrame).
             ValueError: If events DataFrame does not have a 'trace' column.
-            NotImplementedError: If mmap flag is set to True (currently not implemented).
         """
 
-        if mmap:
-            raise NotImplementedError("mmap flag is currently not implemented.")
-
-        if not isinstance(events, (np.ndarray, pd.DataFrame)):
-            raise ValueError("Please provide events as one of (np.ndarray, pd.DataFrame).")
+        if not isinstance(events, (np.ndarray, pd.DataFrame, da.Array)):
+            raise ValueError(f"Please provide events as one of (np.ndarray, pd.DataFrame) instead of {type(events)}.")
 
         if isinstance(events, pd.DataFrame):
             if "trace" not in events.columns:
                 raise ValueError("Events DataFrame is expected to have a 'trace' column.")
             events = np.array(events["trace"].tolist())
 
-        corr = np.corrcoef(events).astype(dtype)
-        corr = np.tril(corr)
+        if is_ragged(events):
+
+            logging.warning(f"Events are ragged (unequal length), default to slow correlation calculation.")
+
+            N = len(events)
+            corr = np.zeros((N, N), dtype=dtype)
+            for x in range(N):
+                for y in range(N):
+
+                    if corr[y, x] == 0:
+                        c = np.correlate(events[x], events[y], mode="valid") # todo is this the correct mode?
+                        c = np.max(c)
+                        corr[x, y] = c
+
+                    else:
+                        corr[x, y] = corr[y, x]
+        else:
+            corr = np.corrcoef(events).astype(dtype)
+            corr = np.tril(corr)
 
         return corr
 
@@ -594,11 +683,165 @@ class Correlation:
 
         return fig
 
+    def plot_compare_correlated_events(self, corr, events, event_ids=None,
+                                   event_index_range=(0, -1), z_range=None,
+                                   corr_mask=None, corr_range=None,
+                                   ev0_color="blue", ev1_color="red", ev_alpha=0.5, spine_linewidth=3,
+                                   ax=None, figsize=(20, 3), title=None):
+        """
+        Plot and compare correlated events.
+
+        Args:
+            corr (np.ndarray): Correlation matrix.
+            events (pd.DataFrame or np.ndarray): Events data.
+            event_ids (tuple, optional): Tuple of event IDs to plot.
+            event_index_range (tuple, optional): Range of event indices to consider.
+            z_range (tuple, optional): Range of z values to plot.
+            corr_mask (np.ndarray, optional): Correlation mask.
+            corr_range (tuple, optional): Range of correlations to consider.
+            ev0_color (str, optional): Color for the first event plot.
+            ev1_color (str, optional): Color for the second event plot.
+            ev_alpha (float, optional): Alpha value for event plots.
+            spine_linewidth (float, optional): Linewidth for spines.
+            ax (matplotlib.axes.Axes, optional): Axes object to plot on.
+            figsize (tuple, optional): Figure size.
+            title (str, optional): Plot title.
+
+        Returns:
+            matplotlib.figure.Figure: The generated figure.
+        """
+        if ax is None:
+            fig, ax = plt.subplots(1, 1, figsize=figsize)
+        else:
+            fig = ax.get_figure()
+
+        # Validate event_index_range
+        if not isinstance(event_index_range, (tuple, list)) or len(event_index_range) != 2:
+            raise ValueError("Please provide event_index_range as a tuple of (start, stop)")
+
+        # Convert events to numpy array if it is a DataFrame
+        if isinstance(events, pd.DataFrame):
+            if "trace" not in events.columns:
+                raise ValueError("'events' dataframe is expected to have a 'trace' column.")
+
+            events = np.array(events.trace.tolist())
+
+        ind_min, ind_max = event_index_range
+        if ind_max == -1:
+            ind_max = len(events)
+
+        # Choose events
+        if event_ids is None:
+            # Randomly choose two events if corr_mask and corr_range are not provided
+            if corr_mask is None and corr_range is None:
+                ev0, ev1 = np.random.randint(ind_min, ind_max, size=2)
+
+            # Choose events based on corr_mask
+            elif corr_mask is not None:
+                # Warn if corr_range is provided and ignore it
+                if corr_range is not None:
+                    logging.warning("Prioritizing 'corr_mask'; ignoring 'corr_range' argument.")
+
+                if isinstance(corr_mask, (list, tuple)):
+                    corr_mask = np.array(corr_mask)
+
+                    if corr_mask.shape[0] != 2:
+                        raise ValueError(f"corr_mask should have a shape of (2xN) instead of {corr_mask.shape}")
+
+                rand_index = np.random.randint(0, corr_mask.shape[1])
+                ev0, ev1 = corr_mask[:, rand_index]
+
+            # Choose events based on corr_range
+            elif corr_range is not None:
+                # Validate corr_range
+                if len(corr_range) != 2:
+                    raise ValueError("Please provide corr_range as a tuple of (min_corr, max_corr)")
+
+                corr_min, corr_max = corr_range
+
+                # Create corr_mask based on corr_range
+                corr_mask = np.array(np.where(np.logical_and(corr >= corr_min, corr <= corr_max)))
+                logging.warning("Thresholding the correlation array may take a long time. Consider precalculating the 'corr_mask' with eg. 'np.where(np.logical_and(corr >= corr_min, corr <= corr_max))'")
+
+                rand_index = np.random.randint(0, corr_mask.shape[1])
+                ev0, ev1 = corr_mask[:, rand_index]
+
+        else:
+            ev0, ev1 = event_ids
+
+        if isinstance(ev0, np.ndarray):
+            ev0 = ev0[0]
+            ev1 = ev1[0]
+
+        # Choose z range
+        trace_0 = np.squeeze(events[ev0]).astype(float)
+        trace_1 = np.squeeze(events[ev1]).astype(float)
+
+        if isinstance(trace_0, da.Array):
+            trace_0 = trace_0.compute()
+            trace_1 = trace_1.compute()
+
+        if z_range is not None:
+            z0, z1 = z_range
+
+            if (z0 > len(trace_0)) or (z0 > len(trace_1)):
+                raise ValueError(f"Left bound z0 larger than event length: {z0} > {len(trace_0)} or {len(trace_1)}")
+
+            trace_0 = trace_0[z0: min(z1, len(trace_0))]
+            trace_1 = trace_1[z0: min(z1, len(trace_1))]
+
+        ax.plot(trace_0, color=ev0_color, alpha=ev_alpha)
+        ax.plot(trace_1, color=ev1_color, alpha=ev_alpha)
+
+        if title is None:
+            if isinstance(ev0, np.ndarray):
+                ev0 = ev0[0]
+                ev1 = ev1[0]
+            ax.set_title("{:,d} x {:,d} > corr: {:.4f}".format(ev0, ev1, corr[ev0, ev1]))
+
+        def correlation_color_map(colors=None):
+            """
+            Create a correlation color map.
+
+            Args:
+                colors (list, optional): List of colors.
+
+            Returns:
+                function: Color map function.
+            """
+            if colors is None:
+                neg_color = (0, "#ff0000")
+                neu_color = (0.5, "#ffffff")
+                pos_color = (1, "#0a700e")
+
+                colors = [neg_color, neu_color, pos_color]
+
+            cm = LinearSegmentedColormap.from_list("Custom", colors, N=200)
+
+            def lsc(v):
+                assert np.abs(v) <= 1, "Value must be between -1 and 1: {}".format(v)
+
+                if v == 0:
+                    return cm(100)
+                if v < 0:
+                    return cm(100 - int(abs(v) * 100))
+                elif v > 0:
+                    return cm(int(v * 100 + 100))
+
+            return lsc
+
+        lsc = correlation_color_map()
+        for spine in ax.spines.values():
+            spine.set_edgecolor(lsc(corr[ev0, ev1]))
+            spine.set_linewidth(spine_linewidth)
+
+        return fig
+
 class Video:
 
     def __init__(self, data, z_slice=None, h5_loc=None, lazy=False):
 
-        if isinstance(data, (np.ndarray, dask.array.Array)):
+        if isinstance(data, (np.ndarray, da.Array)):
             self.data = data
 
             if z_slice is not None:
@@ -615,7 +858,7 @@ class Video:
 
     def get_data(self, in_memory=False):
 
-        if in_memory and isinstance(self.data, dask.array.Array):
+        if in_memory and isinstance(self.data, da.Array):
             return self.data.compute()
 
         else:
