@@ -398,7 +398,7 @@ class Test_IO:
             assert arr.shape == arr_load.shape
             assert np.array_equal(arr, arr_load)
 
-    @pytest.mark.parametrize("output_path", ["out.h5", "out.tdb", "out.tiff"])
+    @pytest.mark.parametrize("output_path", ["out.h5", "out.tdb", "out.tiff", "out.npy"])
     @pytest.mark.parametrize("shape", [(10, 5, 5), (100, 100, 100)])
     def test_save_load(self, output_path, shape):
 
@@ -424,6 +424,36 @@ class Test_IO:
 
             assert arr.shape == arr_load.shape
             assert np.array_equal(arr, arr_load)
+
+    @pytest.mark.parametrize("output_path", ["out.h5", "out.tdb", "out.tiff", "out.npy"])
+    @pytest.mark.parametrize("shape", [(10, 5, 5), (100, 100, 100)])
+    def test_z_slice(self, output_path, shape, z_slice=(2, 8)):
+
+        with tempfile.TemporaryDirectory() as dir:
+            tmpdir = Path(dir)
+            assert tmpdir.is_dir()
+
+            output_path = tmpdir.joinpath(output_path)
+
+            # Reference
+            arr = np.random.random(shape)
+
+            z0, z1 = z_slice
+            original_array = arr[z0:z1, :, :]
+
+            # Loaded
+            io = IO()
+
+            prefix = None if output_path.suffix != ".h5" else "data/"
+            h5loc = None if output_path.suffix != ".h5" else "data/ch0"
+            data = {"ch0":arr}
+
+            output_path = io.save(output_path, data, prefix=prefix)
+
+            arr_load = io.load(output_path, h5_loc=h5loc, z_slice=z_slice)
+
+            assert original_array.shape == arr_load.shape
+            assert np.array_equal(original_array, arr_load)
 
 class Test_MotionCorrection:
 

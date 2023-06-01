@@ -10,24 +10,33 @@ def test_local_caching_wrapper():
 def test_get_data_dimensions():
     raise NotImplementedError
 
-@pytest.mark.parametrize("typ", ["dataframe", "list", "array"])
+@pytest.mark.parametrize("typ", ["pandas", "list", "numpy", "dask"])
 @pytest.mark.parametrize("ragged", ["equal", "ragged"])
 @pytest.mark.parametrize("num_rows", [1, 10])
 def test_dummy_generator(num_rows, typ, ragged):
 
         DG = DummyGenerator(num_rows=num_rows, ragged=ragged)
+        data = DG.get_by_name(typ)
 
-        if typ == "dataframe":
-            data = DG.get_dataframe()
-            assert len(data) == num_rows
+        assert len(data) == num_rows
 
-        elif typ == "list":
-            data = DG.get_list()
-            assert len(data) == num_rows
+        # TODO needed?
+        # if typ in ["numpy", "dask"]:
+        #     assert data.shape[0] == num_rows
 
-        elif typ == "array":
-            data = DG.get_array()
-            assert data.shape[0] == num_rows
+@pytest.mark.parametrize("typ", ["pandas", "list", "numpy", "dask"])
+@pytest.mark.parametrize("ragged", ["equal", "ragged"])
+def test_is_ragged(typ, ragged, num_rows=10):
+    DG = DummyGenerator(num_rows=num_rows, ragged=ragged)
+    data = DG.get_by_name(typ)
+
+    if typ == "pandas":
+        data = data.trace
+
+    logging.warning(f"type: {type(data)}")
+
+    ragged = True if ragged == "ragged" else False
+    assert is_ragged(data) == ragged
 
 @pytest.mark.parametrize("num_rows", [1, 10])
 @pytest.mark.parametrize("ragged", ["equal", "ragged"])
@@ -210,7 +219,7 @@ class Test_normalization:
     def test_enforced_length(num_rows, ragged, min_length, max_length):
 
         if (min_length is not None) and (max_length is not None) and (min_length != max_length):
-            return True
+            return None
 
         DG = DummyGenerator(num_rows=num_rows, ragged=ragged)
         data = DG.get_array()

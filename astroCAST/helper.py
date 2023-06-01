@@ -5,6 +5,7 @@ import pickle
 from collections import OrderedDict
 from pathlib import Path
 import awkward as ak
+import dask.array as da
 import h5py
 from skimage.util import img_as_uint
 
@@ -14,6 +15,12 @@ import tifffile
 import tiledb
 import xxhash
 
+def notimplemented(f, msg=""):
+
+    def raise_not_implemented(msg):
+        raise NotImplementedError(msg)
+
+    return raise_not_implemented
 
 def wrapper_local_cache(f):
     """ Wrapper that creates a local save of the function call based on a hash of the arguments
@@ -204,7 +211,6 @@ def wrapper_local_cache(f):
 
     return inner_function
 
-# TODO update docstring for byte_num
 def get_data_dimensions(input_, loc=None, return_dtype=False):
     """
     This function takes an input object and returns the shape and chunksize of the data it represents.
@@ -355,6 +361,42 @@ class DummyGenerator:
 
         else:
             raise TypeError
+
+    def get_dask(self, chunks=None):
+
+        data = self.get_array()
+
+        if isinstance(data.dtype, object):
+
+            if chunks is None:
+
+                if len(data.shape) == 1:
+                    chunks=(1)
+                elif len(data.shape) == 2:
+                    chunks = (1, -1)
+                else:
+                    raise ValueError("unable to infer chunks for da. Please provide 'chunks' flag.")
+
+                chunks = (1, -1) if chunks is None else chunks
+                return da.from_array(data, chunks=chunks)
+
+        else:
+            return da.from_array(data, chunks="auto")
+
+
+    def get_by_name(self, name, param={}):
+
+        options = {
+            "numpy": self.get_array(**param),
+            "dask": self.get_dask(**param),
+            "list": self.get_list(**param),
+            "pandas": self.get_dataframe(**param)
+        }
+
+        if name not in options.keys():
+            raise ValueError(f"unknown attribute: {name}")
+
+        return options[name]
 
 class EventSim:
 
@@ -544,16 +586,16 @@ class EventSim:
 
         return event_map, num_events
 
-class Normalization:
+def is_ragged(data):
 
-    def __init__(self, data, inplace=True):
+    # check if ragged and convert to appropriate type
+    ragged = False
+    if isinstance(data, list):
 
-        if not inplace:
-            data = data.copy()
+        if not isinstance(data[0], (list, np.ndarray)):
+            ragged = False
 
-        # check if ragged and convert to appropriate type
-        ragged = False
-        if isinstance(data, list):
+        else:
 
             last_len = len(data[0])
             for dat in data[1:]:
@@ -561,42 +603,60 @@ class Normalization:
 
                 if cur_len != last_len:
                     ragged = True
-                    self.data = ak.Array(data)
                     break
 
                 last_len = cur_len
 
-            if not ragged:
-                self.data = np.array(data)
+    elif isinstance(data, pd.Series):
 
-        elif isinstance(data, pd.Series):
+        if len(data.apply(lambda x: len(x)).unique()) > 1:
+            ragged = True
 
-            if len(data.apply(lambda x: len(x)).unique()) > 1:
-                self.data = ak.Array(data.tolist())
-            else:
-                self.data = np.array(data.tolist())
+    elif isinstance(data, (np.ndarray, da.Array)):
 
-        elif isinstance(data, np.ndarray):
+        if isinstance(data.dtype, object) and isinstance(data[0], (np.ndarray, da.Array)):
 
-            if isinstance(data.dtype, object):
-                last_len = len(data[0])
-                for i in range(1, data.shape[0]):
-                    cur_len = len(data[i])
+            item0 = data[0] if isinstance(data[0], np.ndarray) else data[0].compute()
+            last_len = len(item0)
 
-                    if cur_len != last_len:
-                        ragged = True
-                        self.data = ak.Array(data.tolist())
-                        break
+            for i in range(1, data.shape[0]):
 
-                    last_len = cur_len
+                item = data[i]
+                item = data[i] if isinstance(data[i], np.ndarray) else data[i].compute()
 
-                if not ragged:
-                    self.data = np.array(data, dtype=type(data[0][0]))
+                cur_len = len(item)
 
-            else:
-                self.data = data
-        else:
+                if cur_len != last_len:
+                    ragged = True
+                    break
+
+                last_len = cur_len
+
+    else:
+        raise TypeError(f"datatype not recognized: {type(data)}")
+
+    return ragged
+
+class Normalization:
+
+    def __init__(self, data, inplace=True):
+
+        if not inplace:
+            data = data.copy()
+
+        if not isinstance(data, (list, np.ndarray, pd.Series)):
             raise TypeError(f"datatype not recognized: {type(data)}")
+
+        if isinstance(data, (pd.Series, np.ndarray)):
+            data = data.tolist()
+
+        data = ak.Array(data) if is_ragged(data) else np.array(data)
+
+        # enforce minimum of two dimensions
+        if isinstance(data, np.ndarray) and len(data.shape) < 2:
+            data = [data]
+
+        self.data = data
 
     def run(self, instructions):
 
@@ -726,6 +786,9 @@ class Normalization:
 
     @staticmethod
     def impute_nan(data, fixed_value=None):
+
+        if len(data) == 0:
+            return data
 
         if isinstance(data, np.ndarray):
 

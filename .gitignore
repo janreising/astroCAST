@@ -135,3 +135,6 @@ dmypy.json
 testdata/*
 notebooks/*
 temp_*
+
+# lock files
+dask-worker-space/*.lock
