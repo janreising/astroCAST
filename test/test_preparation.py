@@ -1,11 +1,5 @@
-import logging
-import tempfile
-from pathlib import Path
-
-import dask
-import numpy as np
 import pytest
-import tifffile
+import dask
 
 from astroCAST.preparation import *
 
@@ -96,11 +90,11 @@ class Test_Delta:
 
         assert np.allclose(ctrl, res)
 
-    @pytest.mark.xfail("Not implemented")
+    @pytest.mark.xfail(reason="Not implemented")
     def test_quality_of_dff(self):
         raise NotImplementedError
 
-    @pytest.mark.xfail("Not implemented")
+    @pytest.mark.xfail(reason="Not implemented")
     def test_new_dFF_version(self):
         raise NotImplementedError
 
@@ -455,6 +449,38 @@ class Test_IO:
             assert original_array.shape == arr_load.shape
             assert np.array_equal(original_array, arr_load)
 
+    @pytest.mark.parametrize("output_path", ["out.h5", "out.tdb", "out.tiff", "out.npy"])
+    def test_lazy_load(self, output_path, shape=(100, 100, 100)):
+
+        with tempfile.TemporaryDirectory() as dir:
+            tmpdir = Path(dir)
+            assert tmpdir.is_dir()
+
+            output_path = tmpdir.joinpath(output_path)
+
+            # Reference
+            arr = np.random.random(shape)
+
+            # Saving
+            io = IO()
+
+            prefix = None if output_path.suffix != ".h5" else "data/"
+            h5loc = None if output_path.suffix != ".h5" else "data/ch0"
+            data = {"ch0":arr}
+
+            output_path = io.save(output_path, data, prefix=prefix)
+            logging.warning(output_path)
+
+            # Loading
+            arr_load = io.load(output_path, h5_loc=h5loc, lazy=True)
+
+            assert isinstance(arr_load, (dask.array.Array, dask.array.core.Array)), f"type: {type(arr_load)}"
+            assert arr.shape == arr_load.shape
+            assert np.array_equal(arr, arr_load)
+
+    def test_sequential_tiff(self):
+        raise NotImplementedError
+
 class Test_MotionCorrection:
 
     @pytest.mark.parametrize("input_type", ["array", ".h5", ".tdb", ".tiff"])
@@ -489,7 +515,7 @@ class Test_MotionCorrection:
                 temp_path = tmpdir.joinpath("test.tdb")
                 temp_path = io.save(temp_path, data={"ch0":data}, prefix=None)
 
-                assert temp_path.is_file(), f"cannot find {temp_path}"
+                assert temp_path.is_dir(), f"cannot find {temp_path}"
                 data = temp_path
 
             elif input_type == "array":

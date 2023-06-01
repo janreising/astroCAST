@@ -15,7 +15,7 @@ import psutil
 import tifffile
 import tiledb
 import dask.array as da
-from dask_image import imread
+import dask_image.imread
 from dask.distributed import Client, LocalCluster
 from skimage.transform import resize
 from skimage.util import img_as_uint
@@ -234,13 +234,16 @@ class Input:
 
         # Convert data to a dask array if it's a ndarray, otherwise validate the input type
         stack = da.from_array(data, chunks=(1, -1, -1)) if isinstance(data, np.ndarray) else data
-        if not isinstance(data, da.Array): raise TypeError("Please provide data as np.ndarray or dask.array.Array")
+        if not isinstance(stack, (da.Array, da.core.Array)):
+            raise TypeError(f"Please provide data as np.ndarray or dask.array.Array instead of {type(data)}")
 
         # Check if the data has the correct dimensions
-        if len(stack.shape) != 3: raise NotImplementedError(f"dimensions incorrect: {len(stack.shape)}. Currently not implemented for dim != 3D")
+        if len(stack.shape) != 3:
+            raise NotImplementedError(f"dimensions incorrect: {len(stack.shape)}. Currently not implemented for dim != 3D")
 
         # Validate the channels input and determine the number of channels
-        if not isinstance(channels, (int, dict)): raise ValueError(f"please provide channels as int or dictionary.")
+        if not isinstance(channels, (int, dict)):
+            raise ValueError(f"please provide channels as int or dictionary.")
 
         num_channels = channels if isinstance(channels, int) else len(len(channels.keys()))
 
@@ -250,29 +253,29 @@ class Input:
         channels = channels if isinstance(channels, dict) else {i: f"ch{i}" for i in range(num_channels)}
 
         # Split the data into channels based on the given channel indices or names
-        data = {}
+        prep_data = {}
         for channel_key in channels.keys():
-            data[channel_key] = stack[channel_key::num_channels, :, :]
+            prep_data[channel_key] = stack[channel_key::num_channels, :, :]
 
         # Subtract background if specified
         if subtract_background is not None:
-            data = self.subtract_background(data, channels, subtract_background, subtract_func)
+            prep_data = self.subtract_background(prep_data, channels, subtract_background, subtract_func)
 
-        # Rescale the data if specified
+        # Rescale the prep_data if specified
         if (rescale is not None) and rescale != 1 and rescale != 1.0:
-            self.rescale_data(data, rescale)
+            self.rescale_data(prep_data, rescale)
 
-        # Convert the data type if specified
+        # Convert the prep_data type if specified
         if dtype is not None:
 
-            for k in data.keys():
-                data[k] = img_as_uint(data[k]) if dtype == np.uint else data[k].astype(dtype)
+            for k in prep_data.keys():
+                prep_data[k] = img_as_uint(prep_data[k]) if dtype == np.uint else prep_data[k].astype(dtype)
 
-        # Load the data into memory if requested
-        data = dask.compute(data)[0] if in_memory else data
+        # Load the prep_data into memory if requested
+        prep_data = dask.compute(prep_data)[0] if in_memory else prep_data
 
         # Rename the channels in the output dictionary
-        return {channels[i]: data[i] for i in data.keys()}
+        return {channels[i]: prep_data[i] for i in prep_data.keys()}
 
     def save(self, path, data, prefix=None, chunks=None, compression=None):
 
@@ -291,8 +294,6 @@ class Input:
 
 class IO:
 
-    # TODO implement dask lazy loading
-
     """
     A helper class for input/output operations.
 
@@ -301,7 +302,7 @@ class IO:
 
     """
 
-    def load(self, path, h5_loc=None, sep="_", z_slice=None, lazy=False):
+    def load(self, path, h5_loc=None, sep="_", z_slice=None, lazy=False, chunks="auto"):
 
         """
         Loads data from a specified file or directory.
@@ -320,34 +321,33 @@ class IO:
 
         """
 
-        if lazy:
-            logging.warning("lazy loading currently not implemented.")
-
         if isinstance(path, str):
             path = Path(path)
 
         if path.suffix in [".tdb"]:
-            data =  self._load_tdb(path)  # Call private method to load TDB file
+            data =  self._load_tdb(path, lazy=lazy, chunks=chunks)  # Call private method to load TDB file
 
         elif path.suffix in [".tif", ".tiff", ".TIF", ".TIFF"]:
-            data =  self._load_tiff(path, sep)  # Call private method to load TIFF file
+            data =  self._load_tiff(path, sep, lazy=lazy)  # Call private method to load TIFF file
 
         elif path.suffix in [".czi", ".CZI"]:
-            data =  self._load_czi(path)  # Call private method to load CZI file
+            data =  self._load_czi(path, lazy=lazy)  # Call private method to load CZI file
 
         elif path.suffix in [".h5", ".hdf5", ".H5", ".HDF5"]:
-            data =  self._load_h5(path, h5_loc=h5_loc)  # Call private method to load HDF5 file
+            data =  self._load_h5(path, h5_loc=h5_loc, lazy=lazy, chunks=chunks)  # Call private method to load HDF5 file
 
         elif path.suffix in [".npy", ".NPY"]:
-            data =  self._load_npy(path, lazy=lazy)
+            data =  self._load_npy(path, lazy=lazy, chunks=chunks)
 
         elif path.is_dir():
+
             # If the path is a directory, load multiple TIFF files
             files = [f for f in path.glob("*") if f.suffix in [".tif", ".tiff", ".TIF", ".TIFF"]]
             if len(files) > 1:
                 raise FileNotFoundError("couldn't find files in folder. Recognized ext: [.tif, .tiff, .TIF, .TIFF]")
 
-            data =  self._load_tiff(path, sep)  # Call private method to load TIFF files from directory
+            else:
+                data =  self._load_tiff(path, sep, lazy=lazy)  # Call private method to load TIFF files from directory
 
         else:
             raise ValueError("unrecognized file format! Choose one of [.tiff, .h5, .tdb, .czi]")
@@ -362,15 +362,20 @@ class IO:
 
         return data
 
-    def _load_npy(self, path, lazy=False):
+    def _load_npy(self, path, lazy=False, chunks="auto"):
 
         if lazy:
-            return da.from_npy_stack(path)
+            try:
+                return da.from_npy_stack(path)
+
+            except NotADirectoryError:
+                mmap = np.load(path, mmap_mode="r")
+                return da.from_array(mmap, chunks=chunks)
 
         else:
             return np.load(path.as_posix(), allow_pickle=True)
 
-    def _load_tdb(self, path):
+    def _load_tdb(self, path, lazy=False, chunks="auto"):
 
         """
         Loads data from a TileDB file.
@@ -383,12 +388,18 @@ class IO:
 
         """
 
-        with tiledb.open(path.as_posix(), "r") as tdb:
-            data = tdb[:]  # Read all data from TileDB array
+        if lazy:
+            tdb = tiledb.open(path.as_posix(), "r")
+            data = da.from_array(tdb, chunks=chunks)
+
+        else:
+
+            with tiledb.open(path.as_posix(), "r") as tdb:
+                data = tdb[:]  # Read all data from TileDB array
 
         return data
 
-    def _load_h5(self, path, h5_loc):
+    def _load_h5(self, path, h5_loc, lazy=False, chunks="auto"):
 
         """
         Loads data from an HDF5 file.
@@ -402,13 +413,18 @@ class IO:
 
         """
 
-        with h5py.File(path, "r") as h5:
-            data = h5[h5_loc][:] # Read all data from HDF5 file
+        if lazy:
+            data = h5py.File(path, "r")[h5_loc]
+            data = da.from_array(data, chunks=chunks)
+
+        else:
+            with h5py.File(path, "r") as h5:
+                data = h5[h5_loc][:] # Read all data from HDF5 file
 
         return data
 
     @staticmethod
-    def _load_czi(path):
+    def _load_czi(path, lazy=False):
 
         """
         Loads a CZI file from the specified path and returns the data.
@@ -420,6 +436,9 @@ class IO:
             numpy.ndarray: The loaded data from the CZI file.
 
         """
+
+        if lazy:
+            raise NotImplementedError("currently czi loading is not implemented with lazy loading. Use 'lazy=False'.")
 
         # Convert path to a pathlib.Path object if it's provided as a string
         path = Path(path) if isinstance(path, str) else path
@@ -480,7 +499,7 @@ class IO:
         return file_names
 
     @staticmethod
-    def _load_tiff(path, sep="_"):
+    def _load_tiff(path, sep="_", lazy=False):
 
         """
         Loads TIFF image data from the specified path and returns a Dask array.
@@ -516,7 +535,7 @@ class IO:
             files = IO.sort_alpha_numerical_names(file_names=files, sep=sep)
 
             # Read the TIFF files using dask.array and stack them
-            stack = da.stack([imread.imread(f.as_posix()) for f in files])
+            stack = da.stack([dask_image.imread.imread(f.as_posix()) for f in files])
             stack = np.squeeze(stack)
 
             if len(stack.shape) != 3:
@@ -524,31 +543,18 @@ class IO:
 
         elif path.is_file():
             # If the path is a file, load a single TIFF file
-
-            # TODO: Implement delayed loading from TIFF
-            # with tifffile.TiffFile(path) as tif:
-            #     num_frames = len(tif.pages)
-            #     X, Y = tif.pages[0].shape
-            #     dtype = tif.pages[0].dtype
-            #
-            # stack = da.stack([
-            #     da.from_delayed(dask.delayed(tifffile.imread(path, key=i)), shape=(1, X, Y), dtype=dtype)
-            #                     for i in range(num_frames)])
-            # stack = np.squeeze(stack)
-
-            # Read the TIFF file using tifffile and create a Dask array
-            arr = tifffile.imread(path)
-            stack = da.from_array(arr, chunks=(1, -1, -1))
+            stack = dask_image.imread.imread(path)
 
         else:
             raise FileNotFoundError(f"cannot find directory or file: {path}")
+
+        if not lazy:
+            stack = stack.compute()
 
         return stack
 
     @staticmethod
     def save(path, data, prefix=None, chunks=None, compression=None):
-
-        # TODO add 'infer' option for chunks and compression
 
         """
         Save data to a specified file format.
@@ -638,7 +644,7 @@ class IO:
 
             elif path.suffix in [".npy", ".NPY"]:
 
-                fpath = path.with_suffix(f".{k}.tiff") if len(data.keys()) > 1 else path
+                fpath = path.with_suffix(f".{k}.npy") if len(data.keys()) > 1 else path
 
                 if isinstance(channel, np.ndarray):
                     np.save(file=fpath.as_posix(), arr=channel)
@@ -654,7 +660,7 @@ class IO:
 
         return saved_paths if len(saved_paths) > 1 else saved_paths[0]  # Return the list of saved file paths
 
-    @deprecated("legacy from differeent code versions")
+    @deprecated("legacy from different code versions")
     # TODO decide to delete or convert to new format
     def convert_xyz_to_zxy(self, delete_original=True):
 
@@ -672,7 +678,7 @@ class IO:
                 return True
 
         # convert data
-        with h5.File(self.path, "a") as file:
+        with h5py.File(self.path, "a") as file:
             for loc in file[self.loc_in].keys():
 
                 if self.verbose > 0:
@@ -707,7 +713,7 @@ class IO:
 
         # clean up original data
         if delete_original:
-            with h5.File(self.path, "a") as file:
+            with h5py.File(self.path, "a") as file:
 
                 # remove
                 del file[self.loc_in]
@@ -846,7 +852,7 @@ class MotionCorrection:
 
         """
 
-        input_ = self._validate_input(input_, h5_loc=h5_loc, dummy_folder_name=self.dummy_folder_name)
+        input_ = self._validate_input(input_, h5_loc=h5_loc)
 
         try:
             # Set up cluster if parallel flag is True
