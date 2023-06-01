@@ -10,6 +10,7 @@ import psutil
 from matplotlib import pyplot as plt
 from matplotlib.colors import LinearSegmentedColormap
 from tqdm import tqdm
+import napari
 
 import astroCAST.detection
 from astroCAST import helper
@@ -892,3 +893,6 @@ class Video:
                     proj[x, y] = window_agg(agg) # window aggregate
 
         return proj
+
+    def show(self):
+        return napari.view_image(self.data)
