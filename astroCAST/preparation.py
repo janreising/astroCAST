@@ -659,7 +659,7 @@ class IO:
     def convert_xyz_to_zxy(self, delete_original=True):
 
         # check if conversion is necessary
-        with h5.File(self.path, "a") as file:
+        with h5py.File(self.path, "a") as file:
 
             if len(list(file.keys())) < 2:
                 file.create_dataset("dummy", dtype="i2", shape=(1, 1, 1))
