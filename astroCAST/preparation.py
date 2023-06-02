@@ -1075,9 +1075,9 @@ class MotionCorrection:
             raise FileNotFoundError(f"could not find mmap file: {path}. Maybe the 'clean_up()' function was called too early?")
 
         # caiman's mmap naming convention:
-        #   ./{name}_d1_{X}_d2_{Y}_d3_{dim3}_order_{F/C}_frames_{Z}_.mmap
-        name = path.name.split("_")
-        Z, order, Y, X = int(name[-2]), name[-4], int(name[-8]), int(name[-10])
+        #   ./{name}_d1_{X}_d2_{Y}_d3_{dim3}_order_{F/C}_frames_{Z}.mmap
+        name = path.stem.split("_")
+        Z, order, Y, X = int(name[-1]), str(name[-3]), int(name[-7]), int(name[-9])
 
         # TODO order and shape questionable
         # Read the motion-corrected data from the mmap file as a memory-mapped array
