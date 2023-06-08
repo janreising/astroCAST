@@ -4,6 +4,8 @@ import glob
 import pathlib
 import random
 from pathlib import Path
+from typing import Union
+
 from tqdm import tqdm
 
 from functools import lru_cache
@@ -398,7 +400,7 @@ class SubFrameGenerator(tf.keras.utils.Sequence):
                  overlap=None, padding=None,
                  shuffle=True, normalize=None,
                  loc="data/",
-                 output_size=None, cache_results=False, in_memory=False):
+                 output_size=None, cache_results=False, in_memory=False, save_global_descriptive=True):
 
         if type(paths) != list:
             paths = [paths]
@@ -411,6 +413,7 @@ class SubFrameGenerator(tf.keras.utils.Sequence):
         self.batch_size = batch_size
         self.input_size = input_size
         self.output_size = output_size
+        self.save_global_descriptive = save_global_descriptive
 
         if type(pre_post_frame) == int:
             pre_post_frame = (pre_post_frame, pre_post_frame)
@@ -462,6 +465,7 @@ class SubFrameGenerator(tf.keras.utils.Sequence):
             logging.warning("using caching may lead to memory leaks. Please set to false if you experience Out-Of-Memory errors.")
 
         self.cache = {}
+
 
     def generate_items(self):
 
@@ -581,7 +585,24 @@ class SubFrameGenerator(tf.keras.utils.Sequence):
 
             if self.normalize == "global":
                 if len(file_container) > 1:
-                    self.descr[file] = self._bootstrap_descriptive(file_container)
+
+                    local_save = self.get_local_descriptive(file, h5_loc=self.loc)
+
+                    if local_save is None and not self.save_global_descriptive:
+                        self.descr[file] = self._bootstrap_descriptive(file_container)
+
+                    elif local_save is None:
+
+                        mean, std = self._bootstrap_descriptive(file_container)
+                        self.descr[file] = (mean, std)
+
+                        if self.save_global_descriptive:
+                            self.set_local_descriptive(file, h5_loc=self.loc, mean=mean, std=std)
+
+                    else:
+                        logging.info("loading descriptive statistics from file")
+                        self.descr[file] = local_save
+
                 else:
                     logging.warning(f"found file without eligible items: {file}")
 
@@ -872,20 +893,89 @@ class SubFrameGenerator(tf.keras.utils.Sequence):
         elif output is not None and output.endswith(".h5"):
             f.close()
 
-class Network:
+    @staticmethod
+    def get_local_descriptive(path, h5_loc):
 
+        if path.suffix != ".h5":
+            # local save only implemented for hdf5 files
+            return None
+
+        mean_loc = "/descr/" + h5_loc + "/mean"
+        std_loc = "/descr/" + h5_loc + "/std"
+
+        with h5.File(path.as_posix(), "r") as f:
+
+            if mean_loc in f:
+                mean = f[mean_loc][0]
+            else:
+                return None
+
+            if std_loc in f:
+                std = f[std_loc][0]
+            else:
+                return None
+
+        return mean, std
+
+    @staticmethod
+    def set_local_descriptive(path, h5_loc, mean, std):
+
+        logging.warning("saving results of descriptive")
+
+        if path.suffix != ".h5":
+            # local save only implemented for hdf5 files
+            return False
+
+        mean_loc = "/descr/" + h5_loc + "/mean"
+        std_loc = "/descr/" + h5_loc + "/std"
+
+        with h5.File(path.as_posix(), "a") as f:
+
+            if mean_loc not in f:
+                f.create_dataset(mean_loc, shape=(1), dtype=float, data=mean)
+            else:
+                f[mean_loc] = mean
+
+            if std_loc not in f:
+                f.create_dataset(std_loc, shape=(1), dtype=float, data=std)
+            else:
+                f[std_loc] = std
+
+        return True
+
+class Network:
     def __init__(self, train_generator, val_generator=None, learning_rate=0.0001,
                  n_stacks=3, kernel=64, batchNormalize=False, loss=None,
                  use_cpu=False):
+        """
+        Initializes the Network class.
+
+        Args:
+            train_generator: The generator for training data.
+            val_generator: The generator for validation data.
+            learning_rate (float): The learning rate for the optimizer.
+            n_stacks (int): The number of stacks in the U-Net model.
+            kernel (int): The number of filters in the first layer of the U-Net model.
+            batchNormalize (bool): Whether to apply batch normalization in the U-Net model.
+            loss: The loss function to use. If None, the annealed_loss function will be used.
+            use_cpu (bool): Whether to use the CPU for training (disable GPU).
+
+        Returns:
+            None
+        """
 
         if use_cpu:
+            # Set the visible GPU devices to an empty list to use CPU
             tf.config.set_visible_devices([], 'GPU')
 
+        # Assign the train and validation generators
         self.train_gen = train_generator
         self.val_gen = val_generator
 
+        # Create the U-Net model
         self.model = self.create_unet(n_stacks=n_stacks, kernel=kernel, batchNormalize=batchNormalize)
 
+        # Set the optimizer and compile the model
         opt = Adam(learning_rate=learning_rate)
         self.model.compile(optimizer=opt,
                            loss=self.annealed_loss if loss is None else loss,
@@ -893,52 +983,75 @@ class Network:
                            )
 
     def run(self,
-            batch_size=10, num_epochs = 25,
+            batch_size=10, num_epochs=25,
             patience=3, min_delta=0.005, monitor="val_loss",
             save_model=None, load_weights=False,
             verbose=1):
+        """
+        Trains the model.
+
+        Args:
+            batch_size (int): Number of samples per gradient update.
+            num_epochs (int): Number of epochs to train the model.
+            patience (int): Number of epochs with no improvement after which training will be stopped.
+            min_delta (float): Minimum change in the monitored quantity to qualify as an improvement.
+            monitor (str): Quantity to be monitored during training.
+            save_model (str or pathlib.Path): Directory to save the model and checkpoints.
+            load_weights (bool): Whether to load the previous weights if available.
+            verbose (int): Verbosity mode (0 - silent, 1 - progress bar, 2 - one line per epoch).
+
+        Returns:
+            tf.keras.History: Object containing the training history.
+        """
 
         if save_model is not None and not save_model.is_dir():
-            print("created save dir at: ", save_model)
+            logging.info("Created save dir at: %s", save_model)
             save_model.mkdir()
 
         callbacks = [
+            # Early stopping callback to stop training if no improvement
             EarlyStopping(monitor=monitor, patience=patience, min_delta=min_delta, verbose=verbose),
         ]
 
         if save_model is not None:
-
             if type(save_model) == str:
                 save_model = Path(save_model)
 
+            # Model checkpoint callback to save the best model during training
             callbacks.append(
                 ModelCheckpoint(
                     filepath=save_model.joinpath("model-{epoch:02d}-{val_loss:.2f}.hdf5").as_posix(),
-                    # filepath=save_model.joinpath("model-{epoch:02d}.hdf5").as_posix(),
-                save_weights_only=False,
-                monitor=monitor,
-                mode='min',
-                save_best_only=True,))
+                    save_weights_only=False,
+                    monitor=monitor,
+                    mode='min',
+                    save_best_only=True,
+                )
+            )
 
             if load_weights:
-                print("loading previous weights!")
+                logging.info("Loading previous weights!")
                 latest_weights = tf.train.latest_checkpoint(save_model)
-                self.model.load_weights(latest_weights)
 
-        history = self.model.fit(self.train_gen,
-                            batch_size=batch_size,
-                            validation_data=self.val_gen,
-                            epochs=num_epochs,
-                            callbacks=callbacks,
-                            shuffle=False,
-                            verbose=verbose)
+                if latest_weights is not None:
+                    self.model.load_weights(latest_weights)
 
-        # save model
+        # Start model training
+        history = self.model.fit(
+            self.train_gen,
+            batch_size=batch_size,
+            validation_data=self.val_gen,
+            epochs=num_epochs,
+            callbacks=callbacks,
+            shuffle=False,
+            verbose=verbose,  # Verbosity mode (0 - silent, 1 - progress bar, 2 - one line per epoch)
+        )
+
+        # Save the final model
         if save_model is not None:
             self.model.save(save_model.joinpath("model.h5").as_posix())
 
-
         return history
+
 
     def get_vanilla_architecture(self, verbose=1):
 
@@ -982,36 +1095,50 @@ class Network:
         return decoder
 
     def create_unet(self, n_stacks=3, kernel=64, batchNormalize=False, verbose=1):
+        """
+        Creates a U-Net model.
 
+        Args:
+            n_stacks (int): Number of encoding and decoding stacks.
+            kernel (int): Number of filters in the first convolutional layer.
+            batchNormalize (bool): Whether to apply batch normalization.
+            verbose (int): Verbosity mode (0 - silent, 1 - summary).
+
+        Returns:
+            tf.keras.Model: The U-Net model.
+        """
+
+        # Input
         input_img = self.train_gen.__getitem__(0)
         input_window = Input((input_img[0].shape[1:]))
 
         last_layer = input_window
 
         if batchNormalize:
+            # Apply batch normalization to the input
             last_layer = BatchNormalization()(last_layer)
 
-        # enocder
+        # Encoder
         enc_conv = []
         for i in range(n_stacks):
-
+            # Convolutional layer in the encoder
             conv = Conv2D(kernel, (3, 3), activation="relu", padding="same")(last_layer)
             enc_conv.append(conv)
 
             if i != n_stacks-1:
+                # Max pooling layer in the encoder
                 pool = MaxPooling2D(pool_size=(2, 2))(conv)
 
                 kernel = kernel * 2
                 last_layer = pool
             else:
-
+                # Last convolutional layer in the encoder
                 last_layer = conv
 
-        # decoder
+        # Decoder
         for i in range(n_stacks):
-
             if i != n_stacks-1:
-
+                # Convolutional layer in the decoder
                 conv = Conv2D(kernel, (3, 3), activation="relu", padding="same")(last_layer)
                 up = UpSampling2D((2, 2))(conv)
                 conc = Concatenate()([up, enc_conv[-(i+2)]])
@@ -1019,28 +1146,48 @@ class Network:
                 last_layer = conc
                 kernel = kernel / 2
             else:
-
+                # Last convolutional layer in the decoder
                 decoded = Conv2D(1, (3, 3), activation=None, padding="same")(last_layer)
-
                 decoder = Model(input_window, decoded)
 
         if verbose > 0:
+            # Print model summary
             decoder.summary(line_length=100)
 
         return decoder
 
     @staticmethod
-    def annealed_loss(y_true, y_pred):
+    def annealed_loss(y_true: Union[tf.Tensor, np.ndarray], y_pred: Union[tf.Tensor, np.ndarray]) -> tf.Tensor:
+        """
+        Calculates the annealed loss between the true and predicted values.
+
+        Args:
+            y_true (Union[tf.Tensor, np.ndarray]): The true values.
+            y_pred (Union[tf.Tensor, np.ndarray]): The predicted values.
+
+        Returns:
+            tf.Tensor: The calculated annealed loss.
+        """
         if not tf.is_tensor(y_pred):
             y_pred = K.constant(y_pred)
         y_true = K.cast(y_true, y_pred.dtype)
         local_power = 4
-        final_loss = K.pow(K.abs(y_pred - y_true) + 0.00000001, local_power)
-        return K.mean(final_loss, axis=-1)
+        final_loss = K.pow(K.abs(y_pred - y_true) + 0.00000001, local_power)  # Compute the element-wise absolute difference and apply local power
+        return K.mean(final_loss, axis=-1)  # Compute the mean of the final loss along the last axis
 
     @staticmethod
-    def mean_squareroot_error(y_true, y_pred):
+    def mean_squareroot_error(y_true: Union[tf.Tensor, np.ndarray], y_pred: Union[tf.Tensor, np.ndarray]) -> tf.Tensor:
+        """
+        Calculates the mean square root error between the true and predicted values.
+
+        Args:
+            y_true (Union[tf.Tensor, np.ndarray]): The true values.
+            y_pred (Union[tf.Tensor, np.ndarray]): The predicted values.
+
+        Returns:
+            tf.Tensor: The calculated mean square root error.
+        """
         if not tf.is_tensor(y_pred):
             y_pred = K.constant(y_pred)
         y_true = K.cast(y_true, y_pred.dtype)
-        return K.mean(K.sqrt(K.abs(y_pred - y_true) + 0.00000001), axis=-1)
+        return K.mean(K.sqrt(K.abs(y_pred - y_true) + 0.00000001), axis=-1)  # Compute the element-wise absolute difference, apply square root, and compute mean along the last axis
