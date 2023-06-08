@@ -413,6 +413,7 @@ class SubFrameGenerator(tf.keras.utils.Sequence):
         self.batch_size = batch_size
         self.input_size = input_size
         self.output_size = output_size
+        self.save_global_descriptive = save_global_descriptive
 
         if type(pre_post_frame) == int:
             pre_post_frame = (pre_post_frame, pre_post_frame)
@@ -465,7 +466,6 @@ class SubFrameGenerator(tf.keras.utils.Sequence):
 
         self.cache = {}
 
-        self.save_global_descriptive = save_global_descriptive
 
     def generate_items(self):
 
@@ -588,7 +588,7 @@ class SubFrameGenerator(tf.keras.utils.Sequence):
 
                     local_save = self.get_local_descriptive(file, h5_loc=self.loc)
 
-                    if local_save is None or not self.save_global_descriptive:
+                    if local_save is None and not self.save_global_descriptive:
                         self.descr[file] = self._bootstrap_descriptive(file_container)
 
                     elif local_save is None:
@@ -906,12 +906,12 @@ class SubFrameGenerator(tf.keras.utils.Sequence):
         with h5.File(path.as_posix(), "r") as f:
 
             if mean_loc in f:
-                mean = f[mean_loc]
+                mean = f[mean_loc][0]
             else:
                 return None
 
             if std_loc in f:
-                std = f[std_loc]
+                std = f[std_loc][0]
             else:
                 return None
 
@@ -919,6 +919,8 @@ class SubFrameGenerator(tf.keras.utils.Sequence):
 
     @staticmethod
     def set_local_descriptive(path, h5_loc, mean, std):
+
+        logging.warning("saving results of descriptive")
 
         if path.suffix != ".h5":
             # local save only implemented for hdf5 files
