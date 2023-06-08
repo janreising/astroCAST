@@ -809,7 +809,7 @@ class SubFrameGenerator(tf.keras.utils.Sequence):
             return None
 
     def infer(self, model, output=None,
-              out_loc=None, dtype=np.float, chunk_size=None, rescale=True):
+              out_loc=None, dtype="same", chunk_size=None, rescale=True):
 
         # load model if not provided
         if type(model) in [str, pathlib.PosixPath]:
@@ -844,6 +844,11 @@ class SubFrameGenerator(tf.keras.utils.Sequence):
 
         output_shape = (items.z1.max()-pad_z_max, items.x1.max()-pad_x_max, items.y1.max()-pad_y_max)
 
+        if dtype == "same":
+            x, _ = self[self.items.batch.tolist()[0]] # raw data
+            dtype = x.dtype
+            logging.warning(f"choosing dtype: {dtype}")
+
         if output is not None and output.endswith(".h5"):
 
             assert out_loc is not None, "when exporting results to .h5 file please provide 'out_loc' flag"
@@ -858,6 +863,9 @@ class SubFrameGenerator(tf.keras.utils.Sequence):
 
             x, _ = self[batch] # raw data
             y = model.predict(x) # denoised data
+
+            if dtype != y.dtype:
+                y = y.astype(dtype)
 
             x_items = items[items.batch == batch] # meta data
 
@@ -922,7 +930,7 @@ class SubFrameGenerator(tf.keras.utils.Sequence):
 
         logging.warning("saving results of descriptive")
 
-        if path.suffix != ".h5":
+        if path.suffix != ".h5" or mean is None or std is None:
             # local save only implemented for hdf5 files
             return False
 
