@@ -400,31 +400,6 @@ class SubFrameGenerator(tf.keras.utils.Sequence):
                  loc="data/",
                  output_size=None, cache_results=False, in_memory=False):
 
-        """
-
-        :param paths:
-        :param batch_size:
-        :param input_size:
-        :param pre_post_frame:
-        :param gap_frames:
-        :param z_steps: integer (steps) or float (percentage of stack - signal/gap/1/gap/signal - that is skipped)
-        :param z_select:
-        :param allowed_rotation:
-        :param allowed_flip:
-        :param random_offset:
-        :param add_noise:
-        :param drop_frame_probability:
-        :param max_per_file:
-        :param overlap:
-        :param padding:
-        :param shuffle:
-        :param normalize:
-        :param loc:
-        :param output_size:
-        :param cache_results:
-        :param in_memory:
-        """
-
         if type(paths) != list:
             paths = [paths]
         self.paths = paths
@@ -483,6 +458,9 @@ class SubFrameGenerator(tf.keras.utils.Sequence):
 
         # cache
         self.cache_results = cache_results
+        if cache_results:
+            logging.warning("using caching may lead to memory leaks. Please set to false if you experience Out-Of-Memory errors.")
+
         self.cache = {}
 
     def generate_items(self):
@@ -693,7 +671,6 @@ class SubFrameGenerator(tf.keras.utils.Sequence):
 
         return mean_, std_
 
-    @lru_cache(maxsize=128)
     def _load_row(self, path, z0, z1, x0, x1, y0, y1, padding=None):
 
         if padding is not None:
@@ -810,27 +787,16 @@ class SubFrameGenerator(tf.keras.utils.Sequence):
         else:
             return None
 
-    def infer(self, model, output=None, batch_size=25,
+    def infer(self, model, output=None,
               out_loc=None, dtype=np.float, chunk_size=None, rescale=True):
-
-        """
-
-        :param model_path:
-        :param output:
-        :param batch_size:
-        :param out_loc:
-        :param dtype:
-        :param chunk_size:
-        :param rescale: reverse normalization
-        :return:
-        """
 
         # load model if not provided
         if type(model) in [str, pathlib.PosixPath]:
+            model = Path(model)
 
             if os.path.isdir(model):
 
-                models = list(filter(os.path.isfile, glob.glob(model + "/*.h5")))
+                models = list(model.glob("*.h5"))
                 models.sort(key=lambda x: os.path.getmtime(x))
                 model_path = models[0]
                 logging.info(f"directory provided. Selected most recent model: {model_path}")
@@ -903,9 +869,8 @@ class SubFrameGenerator(tf.keras.utils.Sequence):
         elif output.endswith(".tiff") or output.endswith(".tif"):
             tiff.imwrite(output, data=rec)
 
-        elif output.endswith(".h5"):
+        elif output is not None and output.endswith(".h5"):
             f.close()
-
 
 class Network:
 
