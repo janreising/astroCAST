@@ -25,6 +25,8 @@ from dask.diagnostics import ProgressBar, Profiler, ResourceProfiler
 from tqdm import tqdm
 from multiprocess import shared_memory
 
+from astroCAST.preparation import IO
+
 
 class Detector:
 
@@ -115,9 +117,10 @@ class Detector:
         #resources = ResourceProfiler()
         #resources.register()
         # load data
-        data = self._load(dataset_name = dataset, use_dask = use_dask, subset = subset)
-        self.data = data
+        io = IO()
+        data = io.load(path=self.input_path, h5_loc=dataset, z_slice=subset, lazy=use_dask) # todo: add chunks flag
         self.Z, self.X, self.Y = data.shape
+        self.data = data
         logging.info(f"data: {data}") if use_dask else logging.info(f"data: {data.shape}")
 
         #self.vprint(data if use_dask else data.shape, 2)
@@ -189,54 +192,6 @@ class Detector:
 
         return events
 
-    def _load(self, dataset_name: str = None, use_dask: bool = False, subset = None):
-
-        """ loads data from file
-
-        :param dataset_name: name of the dataset in stored in an hdf file
-        :param in_memory: flag whether to load full dataset in memory or not
-        :return:
-        """
-        # TODO instead of self reference; prob better to explicitly give path as argument
-        if self.input_path.suffix == ".h5":
-
-            assert dataset_name is not None, "'dataset_name' required if providing an hdf file"
-
-            file = h5.File(self.input_path, "r")
-            assert dataset_name in file, "dataset '{}' does not exist in file".format(dataset_name)
-
-            data = da.from_array(file[dataset_name], chunks = 'auto') \
-                if use_dask else file[dataset_name]
-
-        elif self.input_path.suffix in (".tdb", ".delta"):
-
-            data = tiledb.open(self.input_path.as_posix())
-
-            if use_dask:
-                data = da.from_array(data, chunks = 'auto')
-
-        else:
-            logging.error(f"unknown file type: {self.input_path}")
-            #self.vprint(f"unknown file type: {self.input_path}", 0)
-
-        if subset is not None:
-            assert len(subset) == 6, "please provide a subset for all dimensions"
-            z0, z1, x0, x1, y0, y1 = subset
-
-            z0 = z0 if z0 is not None else 0
-            x0 = x0 if x0 is not None else 0
-            y0 = y0 if y0 is not None else 0
-
-            Z, X, Y = data.shape
-            z1 = z1 if z1 is not None else Z
-            x1 = x1 if x1 is not None else X
-            y1 = y1 if y1 is not None else Y
-
-            data = data[z0:z1, x0:x1, y0:y1]
-
-        if not use_dask:
-            data = data[:]
-        return data
     @staticmethod
     def estimate_background(data: np.array, mask_xy: np.array = None) -> float:
 

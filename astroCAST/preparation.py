@@ -853,6 +853,7 @@ class MotionCorrection:
         """
 
         input_ = self._validate_input(input_, h5_loc=h5_loc)
+        self.input_ = input_
 
         try:
             # Set up cluster if parallel flag is True
@@ -946,7 +947,7 @@ class MotionCorrection:
             if self.working_directory is None:
                 self.working_directory = tempfile.TemporaryDirectory()
 
-            temp_h5_path = Path(self.working_directory.name if isinstance(self.working_directory, tempfile.TemporaryDirectory) else self.working_directory)
+            temp_h5_path = Path(self.working_directory.name) if isinstance(self.working_directory, tempfile.TemporaryDirectory) else Path(self.working_directory)
             temp_h5_path = temp_h5_path.joinpath(f"{self.dummy_folder_name}.tiff").as_posix()
             tifffile.imwrite(temp_h5_path, input_)
 
@@ -956,7 +957,7 @@ class MotionCorrection:
             raise ValueError(f"please provide input_ as one of: np.ndarray, str, Path")
 
 
-    def clean_up(self, input_):
+    def clean_up(self):
         """
         Clean up temporary files and resources associated with motion correction.
 
@@ -971,7 +972,7 @@ class MotionCorrection:
 
         """
 
-        input_ = Path(input_) if isinstance(input_, str) else input_
+        input_ = self.input_
 
         if input_.suffix in [".h5", ".hdf5"]:
             # If input is an HDF5 file
@@ -982,14 +983,15 @@ class MotionCorrection:
                     del f[self.dummy_folder_name]
 
         # Remove mmap result
-        if Path(self.mmap_path.is_file()):
+        if Path(self.mmap_path).is_file():
             os.remove(self.mmap_path)
 
         # Remove temp .h5 if necessary
-        temp_h5_path = Path(self.working_directory.name if isinstance(self.working_directory, tempfile.TemporaryDirectory) else self.working_directory)
-        temp_h5_path = temp_h5_path.joinpath(f"{self.dummy_folder_name}.h5").as_posix()
-        if temp_h5_path.is_file():
-            os.remove(temp_h5_path.as_posix())
+        if self.working_directory is not None:
+            temp_h5_path = Path(self.working_directory.name) if isinstance(self.working_directory, tempfile.TemporaryDirectory) else Path(self.working_directory)
+            temp_h5_path = temp_h5_path.joinpath(f"{self.dummy_folder_name}.h5").as_posix()
+            if temp_h5_path.is_file():
+                os.remove(temp_h5_path.as_posix())
 
 
     @staticmethod
@@ -1035,7 +1037,7 @@ class MotionCorrection:
 
         return files, dimensions, mmaps
 
-    def get_data(self, output=None, loc=None, prefix="mc/", chunks=None, compression=None, remove_mmap=False):
+    def save(self, output=None, loc=None, prefix="mc/", chunks=None, compression=None, remove_mmap=False):
 
         """
         Retrieve the motion-corrected data and optionally save it to a file.
@@ -1092,7 +1094,7 @@ class MotionCorrection:
             output = Path(output) if isinstance(output, Path) else output
 
             # Create a dask array from the memory-mapped data with specified chunking and compression
-            data = da.from_array(data, chunks=chunks, compression=compression)
+            data = da.from_array(data, chunks=chunks)
 
             # Check if the output file is an HDF5 file and loc is provided
             if output.suffix in [".h5", ".hdf5"] and loc is None:

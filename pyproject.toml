@@ -4,12 +4,14 @@ description = "package to analyze calcium flourescence events in astrocytes"
 version = "0.2.1"
 author = ["Jan Philipp Reising", "Ana Cristina González"]
 author_email = "jan.reising@ki.se"
-dependencies = ["awkard", "caiman", "colorcet", "cv2", "czifile", "dask", "dask-image", "datashader", "dtaidistance",
-                "fastcluster", "h5py", "hdbscan", "json", "keras", "matplotlib", "multiprocess", "networkx", "numpy", "pandas",
-                "powerlaw", "psutil", "pytest", "scipy", "seaborn", "SharedArray", "scikit-image", "scikit-learn",
-                "tensorflow", "tifffile", "tiledb", "tqdm", "tsfresh", "tslearn", "umap-learn", "xarray", "xxhash"]
+dependencies = ["awkward", "colorcet", "opencv-python", "czifile", "dask", "dask-image", "datashader", "dtaidistance",
+                "fastcluster", "h5py", "hdbscan", "keras", "matplotlib", "multiprocess", "networkx", "pandas", "napari[all]",
+                "powerlaw", "pynwb", "deprecated", "deprecation", "jupyterlab", "peakutils", "holoviews", "psutil", "ipyparallel", "pytest", "scipy", "seaborn", "SharedArray", "scikit-image", "scikit-learn",
+                "tensorflow", "tifffile", "tiledb", "tqdm", "tsfresh", "tslearn", "umap-learn", "xarray", "xxhash", "caiman@git+https://github.com/flatironinstitute/CaImAn", "numpy"]
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
+[tool.hatch.metadata]
+allow-direct-references = true
