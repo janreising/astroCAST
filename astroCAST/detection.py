@@ -550,7 +550,7 @@ def characterize_event(event_id, t0, t1, data_info,
                         print("\t", err)
 
             # contour
-            mask_padded = np.pad(mask_padded, pad_width=((1, 1), (1, 1), (1, 1)), mode="constant", constant_values=0)
+            mask_padded = np.pad(np.invert(mask), pad_width=((1, 1), (1, 1), (1, 1)), mode="constant", constant_values=0)
 
             contours = []
             for cz in range(1, mask_padded.shape[0]-1):
@@ -558,19 +558,21 @@ def characterize_event(event_id, t0, t1, data_info,
                 frame = mask_padded[cz, :, :]
 
                 # find countours in frame
-                contour = find_contours(frame, level=0.9)[0]
+                contour_ = find_contours(frame, level=0.9)
 
-                # create z axis
-                z_column = np.zeros((contour.shape[0], 1))
-                z_column[:] = cz
+                for contour in contour_:
 
-                # add extra dimension for z axis
-                contour = np.append(z_column, contour, axis=1)
+                    # create z axis
+                    z_column = np.zeros((contour.shape[0], 1))
+                    z_column[:] = cz
 
-                # adjust for padding
-                contour = np.subtract(contour, 1)
+                    # add extra dimension for z axis
+                    contour = np.append(z_column, contour, axis=1)
 
-                contours.append(contour)
+                    # adjust for padding
+                    contour = np.subtract(contour, 1)
+
+                    contours.append(contour)
 
             res[event_id_key]["contours"] = contours
 

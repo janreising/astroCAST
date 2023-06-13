@@ -5,7 +5,6 @@ import os
 import tempfile
 from pathlib import Path
 
-import caiman.cluster
 import czifile
 import dask
 import h5py
@@ -851,6 +850,8 @@ class MotionCorrection:
             Use that to apply motion correction only on a part of the FOV
 
         """
+
+        import caiman.cluster
 
         input_ = self._validate_input(input_, h5_loc=h5_loc)
         self.input_ = input_
