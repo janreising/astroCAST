@@ -1171,6 +1171,7 @@ class Delta:
         """
         # Convert the input to a Path object if it is a string
         self.input_ = Path(input_) if isinstance(input_, str) else input_
+        self.res = None
 
         # Get the dimensions and chunk size of the input data
         self.dim, self.chunksize = get_data_dimensions(self.input_, loc=loc)
@@ -1183,7 +1184,6 @@ class Delta:
 
         # The location of the data in the HDF5 file (optional, only applicable for .h5 files)
         self.loc = loc
-
 
     def run(self, method="background", window=None, overwrite_first_frame=True, use_dask=True):
         """
@@ -1272,8 +1272,8 @@ class Delta:
         if overwrite_first_frame:
             res[0] = res[1]
 
+        self.res = res
         return res
-
 
     @staticmethod
     def load_to_memory(path, loc=None):
@@ -1300,36 +1300,10 @@ class Delta:
         io = IO()
         return io.load(path, h5_loc=loc)
 
-    def save_to_tdb(self, arr: np.ndarray) -> str:
-        """
-        Save a numpy ndarray to a TileDB array and return the path to the TileDB array.
+    def save(self, output_path, h5_loc="df", chunks=(-1, "auto", "auto"), compression=None):
 
-        Args:
-        - arr: A numpy ndarray to be saved.
-
-        Returns:
-        - A string representing the path to the TileDB array where the ndarray was saved.
-        """
-
-        # TODO should probably move into IO class
-
-        # Check if the input array is a numpy ndarray
-        assert isinstance(arr, (np.ndarray, da.Array))
-
-        # Convert the numpy ndarray to a dask array for lazy loading and rechunk it
-        if not isinstance(arr, da.Array):
-            arr = da.from_array(arr, chunks=(self.dim))
-
-        data = da.rechunk(arr, chunks=(-1, "auto", "auto"))
-
-        # Create a temporary directory to store the TileDB array
-        tileDBpath = tempfile.mkdtemp(suffix=".tdb")
-
-        # Write the dask array to a TileDB array
-        data.to_tiledb(tileDBpath)
-
-        # Return the path to the TileDB array
-        return f"tdb:{tileDBpath}"
+        io = IO()
+        io.save(output_path, data=self.res, prefix=h5_loc, chunks=chunks, compression=compression)
 
     def prepare_data(self, input_, in_memory=True, shared=True, use_dask=True):
 
