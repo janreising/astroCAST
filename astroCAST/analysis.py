@@ -61,6 +61,7 @@ class Events:
 
             # load event map
             event_map, event_map_shape, event_map_dtype = self.get_event_map(event_dir, in_memory=in_memory) # todo slicing
+            self.event_map = event_map
             self.num_frames, self.X, self.Y = event_map_shape
 
             # create time map
@@ -116,6 +117,12 @@ class Events:
             self.event_objects = event_objects
             self.events = pd.concat([ev.events for ev in event_objects])
             self.z_slice = z_slice
+
+    def __len__(self):
+        return len(self.events)
+
+    def __getitem__(self, item):
+        return self.events.iloc[item]
 
     @staticmethod
     def get_event_map(event_dir, in_memory=False):
@@ -537,6 +544,24 @@ class Events:
 
         else:
             raise ValueError("Please provide either a mapping or a function.")
+
+    def show_event_map(self, video=None, h5_loc=None, z_slice=None, lazy=True):
+
+        viewer = napari.Viewer()
+
+        if video is not None:
+            io = IO()
+            data = io.load(path=video, h5_loc=h5_loc, z_slice=z_slice, lazy=lazy)
+
+            viewer.add_image(data, )
+
+        event_map = self.event_map
+        if z_slice is not None:
+            event_map = event_map[z_slice[0]:z_slice[1], :, :]
+
+        viewer.add_labels(event_map)
+
+        return viewer
 
 class Correlation:
     """

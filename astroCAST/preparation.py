@@ -5,7 +5,6 @@ import os
 import tempfile
 from pathlib import Path
 
-import caiman.cluster
 import czifile
 import dask
 import h5py
@@ -852,6 +851,8 @@ class MotionCorrection:
 
         """
 
+        import caiman.cluster
+
         input_ = self._validate_input(input_, h5_loc=h5_loc)
         self.input_ = input_
 
@@ -1077,9 +1078,9 @@ class MotionCorrection:
             raise FileNotFoundError(f"could not find mmap file: {path}. Maybe the 'clean_up()' function was called too early?")
 
         # caiman's mmap naming convention:
-        #   ./{name}_d1_{X}_d2_{Y}_d3_{dim3}_order_{F/C}_frames_{Z}.mmap
+        #   ./{name}_d1_{X}_d2_{Y}_d3_{dim3}_order_{F/C}_frames_{Z}_.mmap
         name = path.stem.split("_")
-        Z, order, Y, X = int(name[-1]), str(name[-3]), int(name[-7]), int(name[-9])
+        Z, order, Y, X = int(name[-1]), name[-3], int(name[-7]), int(name[-9])
 
         # TODO order and shape questionable
         # Read the motion-corrected data from the mmap file as a memory-mapped array

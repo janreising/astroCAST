@@ -15,7 +15,7 @@ from skimage import measure, morphology  # , segmentation
 from skimage.filters import threshold_triangle, gaussian
 from skimage.feature import peak_local_max
 from skimage.segmentation import watershed
-from skimage.measure import regionprops_table
+from skimage.measure import regionprops_table, find_contours
 from scipy.ndimage import gaussian_filter
 import scipy.ndimage as ndimage
 from dask_image import ndmorph, ndfilters, ndmeasure
@@ -548,6 +548,33 @@ def characterize_event(event_id, t0, t1, data_info,
                     except ValueError as err:
                         print("\t Error in ", event_id_key)
                         print("\t", err)
+
+            # contour
+            mask_padded = np.pad(np.invert(mask), pad_width=((1, 1), (1, 1), (1, 1)), mode="constant", constant_values=0)
+
+            contours = []
+            for cz in range(1, mask_padded.shape[0]-1):
+
+                frame = mask_padded[cz, :, :]
+
+                # find countours in frame
+                contour_ = find_contours(frame, level=0.9)
+
+                for contour in contour_:
+
+                    # create z axis
+                    z_column = np.zeros((contour.shape[0], 1))
+                    z_column[:] = cz
+
+                    # add extra dimension for z axis
+                    contour = np.append(z_column, contour, axis=1)
+
+                    # adjust for padding
+                    contour = np.subtract(contour, 1)
+
+                    contours.append(contour)
+
+            res[event_id_key]["contours"] = contours
 
             # calculate footprint features
             fp = np.invert(np.min(mask, axis = 0))
