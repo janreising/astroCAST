@@ -1,3 +1,4 @@
+import copy
 import logging
 from functools import lru_cache
 from pathlib import Path
@@ -124,6 +125,34 @@ class Events:
 
     def __getitem__(self, item):
         return self.events.iloc[item]
+
+    def copy(self):
+        return copy.deepcopy(self)
+
+    def filter(self, filters={}, inplace=True):
+
+        events = self.events
+        L1 = len(events)
+
+        for column in filters:
+
+            min_, max_ = filters[column]
+
+            if min_ in [-1, None]:
+                min_ = events[column].min() + 1
+
+            if max_ in [-1, None]:
+                max_ = events[column].max() + 1
+
+            events = events[events[column].between(min_, max_, inclusive="both")]
+
+        if inplace:
+            self.events = events
+
+        L2 = len(events)
+        logging.info(f"#events: {L1} > {L2} ({L1/L2*100:.1f}%)")
+
+        return events
 
     @staticmethod
     def get_event_map(event_dir, in_memory=False):
