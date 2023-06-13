@@ -9,6 +9,7 @@ import pandas as pd
 import psutil
 from matplotlib import pyplot as plt
 from matplotlib.colors import LinearSegmentedColormap
+import seaborn as sns
 from tqdm import tqdm
 import napari
 
@@ -563,6 +564,36 @@ class Events:
 
         return viewer
 
+    def get_summary_statistics(self, decimals=2, groupby=None,
+        columns_excluded=('z0', 'z1', 'x0', 'x1', 'y0', 'y1', 'dz', 'dx', 'dy', 'mask', 'contours', 'footprint', 'fp_cx', 'fp_cy', 'trace', 'error',  'cx', 'cy')):
+
+        events = self.events
+
+        # select columns
+        if columns_excluded is not None:
+            cols = [c for c in events.columns if c not in columns_excluded ]
+            ev = events[cols]
+        else:
+            ev = events.copy()
+
+        # cast to numbers
+        ev = ev.astype(float)
+
+        # grouping
+        if groupby is not None:
+            ev = ev.groupby(groupby)
+
+        # calculate summary statistics
+        mean, std = ev.mean(), ev.std()
+
+        # combine mean and std
+        val = mean.round(decimals).astype(str) + u" \u00B1 " + std.round(decimals).astype(str)
+
+        if groupby is not None:
+            val = val.transpose()
+
+        return val
+
 class Correlation:
     """
     A class for computing correlation matrices and histograms.
@@ -921,3 +952,226 @@ class Video:
 
     def show(self):
         return napari.view_image(self.data)
+
+class Plotting:
+
+    def __init__(self, events):
+        self.events = events.events
+
+    @staticmethod
+    def _get_factorials(nr):
+        """
+        Returns the factors of a number.
+
+        Args:
+            nr (int): Number.
+
+        Returns:
+            list: List of factors.
+
+        """
+        i = 2
+        factors = []
+        while i <= nr:
+            if (nr % i) == 0:
+                factors.append(i)
+                nr = nr / i
+            else:
+                i = i + 1
+        return factors
+
+    def _get_square_grid(self, N, figsize=(4, 4), figsize_multiply=4, sharex=False, sharey=False, max_n=5, switch_dim=False):
+        """
+        Returns a square grid of subplots in a matplotlib figure.
+
+        Args:
+            N (int): Number of subplots.
+            figsize (tuple, optional): Figure size in inches. Defaults to (4, 4).
+            figsize_multiply (int, optional): Factor to multiply figsize by when figsize='auto'. Defaults to 4.
+            sharex (bool, optional): Whether to share the x-axis among subplots. Defaults to False.
+            sharey (bool, optional): Whether to share the y-axis among subplots. Defaults to False.
+            max_n (int, optional): Maximum number of subplots per row when there is only one factor. Defaults to 5.
+            switch_dim (bool, optional): Whether to switch the dimensions of the grid. Defaults to False.
+
+        Returns:
+            tuple: A tuple containing the matplotlib figure and a list of axes.
+
+        """
+
+        # Get the factors of N
+        f = self._get_factorials(N)
+
+        if len(f) < 1:
+            # If no factors found, set grid dimensions to 1x1
+            nx = ny = 1
+
+        elif len(f) == 1:
+
+            if f[0] > max_n:
+                # If only one factor and it exceeds max_n, set grid dimensions to ceil(sqrt(N))
+                nx = ny = int(np.ceil(np.sqrt(N)))
+
+            else:
+                # If only one factor and it doesn't exceed max_n, set grid dimensions to that factor x 1
+                nx = f[0]
+                ny = 1
+
+        elif len(f) == 2:
+            # If two factors, set grid dimensions to those factors
+            nx, ny = f
+
+        elif len(f) == 3:
+            # If three factors, set grid dimensions to factor1 x factor2 and factor3
+            nx = f[0] * f[1]
+            ny = f[2]
+
+        elif len(f) == 4:
+            # If four factors, set grid dimensions to factor1 x factor2 and factor3 x factor4
+            nx = f[0] * f[1]
+            ny = f[2] * f[3]
+
+        else:
+            # For more than four factors, set grid dimensions to ceil(sqrt(N))
+            nx = ny = int(np.ceil(np.sqrt(N)))
+
+        if figsize == "auto":
+            # If figsize is set to "auto", calculate figsize based on the dimensions of the grid
+            figsize = (ny * figsize_multiply, nx * figsize_multiply)
+
+        # Switch dimensions if necessary
+        if switch_dim:
+            nx, ny = ny, nx
+
+        # Create the figure and axes grid
+        fig, axx = plt.subplots(nx, ny, figsize=figsize, sharex=sharex, sharey=sharey)
+
+        # Convert axx to a list if N is 1, otherwise flatten the axx array and convert to a list
+        axx = [axx] if N == 1 else list(axx.flatten())
+
+        new_axx = []
+        for i, ax in enumerate(axx):
+            # Remove excess axes if N is less than the total number of axes created
+            if i >= N:
+                fig.delaxes(ax)
+            else:
+                new_axx.append(ax)
+
+        # Adjust the spacing between subplots
+        fig.tight_layout()
+
+        return fig, new_axx
+
+    def _get_random_sample(self, num_samples):
+        """
+        Get a random sample of traces from the events.
+
+        Args:
+            num_samples (int): Number of samples to retrieve.
+
+        Returns:
+            list: List of sampled traces.
+
+        Raises:
+            ValueError: If the events data type is not one of pandas.DataFrame, numpy.ndarray, or list.
+
+        """
+
+        events = self.events
+
+        if num_samples == -1:
+            return events
+
+        if isinstance(events, pd.DataFrame):
+            # If events is a pandas DataFrame, sample num_samples rows and retrieve the trace values
+            sel = events.sample(num_samples)
+            traces = sel.trace.values
+
+        elif isinstance(events, np.ndarray):
+            # If events is a numpy ndarray, generate random indices and retrieve the corresponding trace values
+            idx = np.random.randint(0, len(events), size=num_samples)
+            traces = events[idx, :, 0]
+
+        elif isinstance(events, list):
+            # If events is a list, generate random indices and retrieve the corresponding events
+            idx = np.random.randint(0, len(events), size=num_samples)
+            traces = [events[id_] for id_ in idx]
+
+        else:
+            # If events is neither a pandas DataFrame, numpy ndarray, nor list, raise a ValueError
+            raise ValueError("Please provide one of the following data types: pandas.DataFrame, numpy.ndarray, or list. "
+                             f"Instead of {type(events)}")
+
+        return traces
+
+    # todo clustering
+    def plot_traces(self, num_samples=-1, ax=None, figsize=(5, 5)):
+
+        traces = self._get_random_sample(num_samples=num_samples)
+
+        if ax is None:
+            fig, ax = plt.subplots(1, 1, figsize=figsize)
+        else:
+            fig = ax.get_figure()
+
+        for i, trace in enumerate(traces):
+            ax.plot(trace, label=i)
+
+        plt.tight_layout()
+
+        return fig
+
+    def plot_distribution(self, column, plot_func=sns.violinplot, outlier_deviation=None,
+                          axx=None, figsize=(8, 3), title=None):
+
+        values = self.events[column]
+
+        # filter outliers
+        if outlier_deviation is not None:
+
+            mean, std = values.mean(), values.std()
+
+            df_low = values[values < mean - outlier_deviation * std]
+            df_high = values[values > mean + outlier_deviation * std]
+            df_mid = values[values.between(mean - outlier_deviation * std, mean + outlier_deviation * std)]
+
+            num_panels = 3
+
+        else:
+            df_low = df_high = None
+            df_mid = values
+            num_panels = 1
+
+        # create figure if necessary
+        if axx is None:
+            _, axx = self._get_square_grid(num_panels, figsize=figsize, switch_dim=True)
+
+        # make sure axx can be indexed
+        if not isinstance(axx, list):
+            axx = [axx]
+
+        # plot distribution
+        plot_func(df_mid.values, ax=axx[0])
+        axx[0].set_title(f"Distribution {column}")
+
+        if outlier_deviation is not None:
+
+            # plot outlier number
+            if len(axx) != 3:
+                raise ValueError(f"when providing outlier_deviation, len(axx) is expected to be 3 (not: {len(axx)}")
+
+            count = pd.DataFrame({"count": [len(df_low), len(df_mid), len(df_high)], "type":["low", "mid", "high"]})
+            sns.barplot(data=count, y="count", x="type", ax=axx[1])
+            axx[1].set_title("Outlier count")
+
+            # plot swarm plot
+            sns.swarmplot(data=pd.concat((df_low, df_high)),
+                          marker="x", linewidth=2, color="red", ax=axx[2])
+            axx[2].set_title("Outliers")
+
+        # figure title
+        if title is not None:
+            axx[0].get_figure().suptitle(title)
+
+        plt.tight_layout()
+
+        return axx[0].get_figure()
