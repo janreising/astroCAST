@@ -628,6 +628,7 @@ class Correlation:
     A class for computing correlation matrices and histograms.
     """
 
+    #todo local cache
     # @wrapper_local_cache
     @staticmethod
     def get_correlation_matrix(events, dtype=np.single):
@@ -647,8 +648,11 @@ class Correlation:
             ValueError: If events DataFrame does not have a 'trace' column.
         """
 
-        if not isinstance(events, (np.ndarray, pd.DataFrame, da.Array)):
-            raise ValueError(f"Please provide events as one of (np.ndarray, pd.DataFrame) instead of {type(events)}.")
+        if not isinstance(events, (np.ndarray, pd.DataFrame, da.Array, Events)):
+            raise ValueError(f"Please provide events as one of (np.ndarray, pd.DataFrame, Events) instead of {type(events)}.")
+
+        if isinstance(events, Events):
+            events = events.events
 
         if isinstance(events, pd.DataFrame):
             if "trace" not in events.columns:
@@ -661,12 +665,23 @@ class Correlation:
 
             N = len(events)
             corr = np.zeros((N, N), dtype=dtype)
-            for x in range(N):
+            for x in tqdm(range(N)):
                 for y in range(N):
 
                     if corr[y, x] == 0:
-                        c = np.correlate(events[x], events[y], mode="valid") # todo is this the correct mode?
+
+                        ex = events[x]
+                        ey = events[y]
+
+                        ex = ex - np.mean(ex)
+                        ey = ey - np.mean(ey)
+
+                        c = np.correlate(ex, ey, mode="valid")
+
+                        # ensure result between -1 and 1
                         c = np.max(c)
+                        c = c / (max(len(ex), len(ey) * np.std(ex) * np.std(ey)))
+
                         corr[x, y] = c
 
                     else:
@@ -677,7 +692,7 @@ class Correlation:
 
         return corr
 
-    def get_correlation_histogram(self, corr=None, events=None, start=-1, stop=1, num_bins=1000, density=False):
+    def _get_correlation_histogram(self, corr=None, events=None, start=-1, stop=1, num_bins=1000, density=False):
         """
         Computes the correlation histogram.
 
@@ -779,7 +794,7 @@ class Correlation:
 
         Args:
             corr (np.ndarray): Correlation matrix.
-            events (pd.DataFrame or np.ndarray): Events data.
+            events (pd.DataFrame, np.ndarray or Events): Events data.
             event_ids (tuple, optional): Tuple of event IDs to plot.
             event_index_range (tuple, optional): Range of event indices to consider.
             z_range (tuple, optional): Range of z values to plot.
@@ -800,6 +815,9 @@ class Correlation:
             fig, ax = plt.subplots(1, 1, figsize=figsize)
         else:
             fig = ax.get_figure()
+
+        if isinstance(events, Events):
+            events = events.events
 
         # Validate event_index_range
         if not isinstance(event_index_range, (tuple, list)) or len(event_index_range) != 2:

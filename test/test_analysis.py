@@ -378,17 +378,17 @@ class Test_Correlation:
 
     def test_get_correlation_histogram(self, num_bins=1000):
         # Test with precomputed correlation matrix
-        counts = self.correlation.get_correlation_histogram(corr=self.corr_matrix, num_bins=num_bins)
+        counts = self.correlation._get_correlation_histogram(corr=self.corr_matrix, num_bins=num_bins)
         assert np.equal(len(counts), num_bins)  # Adjust the expected value as per the number of bins
 
         # Test with events array
-        counts = Correlation().get_correlation_histogram(events=self.corr_matrix, num_bins=num_bins)
+        counts = Correlation()._get_correlation_histogram(events=self.corr_matrix, num_bins=num_bins)
         assert np.equal(len(counts), num_bins)  # Adjust the expected value as per the number of bins
 
         # Test with event dataframe
         dg = DummyGenerator()
         events = dg.get_dataframe()
-        counts = Correlation().get_correlation_histogram(events=events, num_bins=num_bins)
+        counts = Correlation()._get_correlation_histogram(events=events, num_bins=num_bins)
         assert np.equal(len(counts), num_bins)  # Adjust the expected value as per the number of bins
 
 
