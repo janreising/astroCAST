@@ -16,141 +16,15 @@ from astroCAST.helper import wrapper_local_cache
 
 class UnbiasedClustering():
 
-    def __init__(self, working_directory:Path, local_cache:bool = True, cache_path:Path = None):
-        
-        if local_cache:
-            assert cache_path is not None, "when enabling caching, please provide a 'local_cache' path" 
-        
-        cache_path = Path(cache_path)
-        if not cache_path.is_dir():
-            cache_path.mkdir()
-        
-        self.wd = Path(working_directory)
-        self.lc_path = cache_path
-        self.local_cache = local_cache
+
 
     #@staticmethod
     #def load_bary(subj):
-    @wrapper_local_cache
-    def load_bary(self, subj):
-        """
-        Load barycenter is a static method of the class UnbiasedClustering. 
-        It Load barycenter data for a given subject.
 
-        Parameters:
-        - subj (Path): The path to the subject directory.
-
-        Returns:
-        - data (dict): A dictionary containing the loaded barycenter data.
-        - "traces" (ndarray): The barycenter traces.
-        - "raw" (ndarray): The raw traces.
-        - "res" (DataFrame): The events data with additional columns "traces" and "raw".
-        - "linkage_matrix" (ndarray): The linkage matrix.
-
-        Raises:
-        - AssertionError: If the barycenters directory is not found for the subject.
-
-        Notes:
-        - This function assumes that the barycenter data files are located in the "cache/barycenters/" directory
-        within the subject directory.
-
-        Example usage:
-        >>> subj_path = Path("path/to/subject")
-        >>> data = UnbiasedClustering.load_bary(subj_path)
-        """
-        #print(self.lc_path) #Delete
-        #sd = subj.joinpath("cache/barycenters/")
-        #assert sd.is_dir(), "cannot find barycenters: {}".format(subj)
-        sd = subj.joinpath(self.lc_path) # TODO implement cache, option when local_cache = False?
-        assert sd.is_dir(), "cannot find barycenters: {}".format(subj)
-
-        data = {}
-
-        traces_path = sd.joinpath("bary_traces.npy")
-        traces = np.load(traces_path.as_posix(), allow_pickle=True)
-        data["traces"] = traces
-
-        raw_path = sd.joinpath("raw_traces.npy")
-        raw = np.load(raw_path.as_posix(), allow_pickle=True)
-        data["raw"] = raw
-
-        df_path = sd.joinpath("events.csv")
-        res = pd.read_csv(df_path.as_posix())
-        res["traces"] = traces
-        res["raw"] = raw
-        data["res"] = res
-
-        z_path = sd.joinpath("linkage_matrix.npy")
-        Z = np.load(z_path.as_posix())
-        data["linkage_matrix"]  = Z
-
-        return data
 
     #@staticmethod
     #def bary_prep(subjects: list, mem_data = None, z_thr = 2, min_cluster_size = 15, load_bary = False,
     #             dtw_parameters = {"penalty": 0, "psi": None}, show_progress = False):
-    def bary_prep(self, subjects: list, mem_data = None, z_thr = 2, min_cluster_size = 15, load_bary = False,
-                 dtw_parameters = {"penalty": 0, "psi": None}, show_progress = False):
-
-        data = {}
-        iterator = tqdm(subjects) if show_progress else subjects
-        for subj_i, (subj, condition) in enumerate(iterator):
-            assert subj.is_dir(), "cannot find folder: {}".format(subj)
-
-            #sd = subj.joinpath("cache/barycenters/")
-            sd = subj.joinpath(self.lc_path) # TODO implement cache, option when local_cache = False?
-            assert sd.is_dir(), "cannot find barycenters: {}".format(subj)
-
-            name = ".".join(subj.name.split(".")[:2])
-            name = os.path.splitext(subj.name)[0]
-
-            # load
-            #data[name] = UnbiasedClustering.load_bary(subj) if mem_data is None else mem_data[name]
-            data[name] = self.load_bary(subj) if mem_data is None else mem_data[name]
-            res = data[name]["res"]
-            res["index"] = res["index"].apply(lambda x: x.replace("0x", f"{subj_i}x")) # convert to unique identifiers
-
-            traces = data[name]["traces"]
-            Z = data[name]["linkage_matrix"]
-
-            if load_bary:
-                bary_path = sd.joinpath("barycenters.npy")
-                barycenters = np.load(bary_path.as_posix(), allow_pickle=True)
-                barycenters["trace_idx"] = barycenters["trace_idx"].apply(
-                    lambda x: [s.replace("0x", f"{subj_i}x") for s in x])
-
-                data[name]["barycenter"] = pd.DataFrame(barycenters[()]).transpose().sort_values("num", ascending=False)
-
-            else:
-
-                # filter
-                cluster_labels = fcluster(Z = Z, t = z_thr, criterion="distance")
-                clusters = pd.Series(cluster_labels).value_counts().sort_index()
-                clusters = clusters[clusters > min_cluster_size]
-
-                # clusters
-                barycenters = {}
-                for i, cl in enumerate(clusters.index):
-
-                    idx_ = np.where(cluster_labels == cl)[0]
-                    sel = [traces[id_] for id_ in idx_]
-
-                    bc = dtw_barycenter.dba_loop(sel, c=None,
-                                                 nb_initial_samples=max(1, int(0.1*len(sel))),
-                                                 max_it=100, thr=1e-5, use_c=True, **dtw_parameters)
-
-                    barycenters[cl] = {"trace_idx":[res["index"][id_] for id_ in idx_], "bc":bc, "num":clusters.iloc[i]}
-
-                barycenters = pd.DataFrame(barycenters).transpose()
-
-                if "num" not in barycenters.columns:
-                    raise KeyError("KeyError: 'num': {}".format(barycenters))
-
-                data[name]["barycenter"] = barycenters.sort_values("num", ascending=False)
-
-            data[name]["condition"] = condition
-
-        return data
 
     #@staticmethod
     #def combine_barycenters(data: dict, z_thr = 2,
