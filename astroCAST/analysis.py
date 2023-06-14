@@ -8,6 +8,7 @@ import deprecation
 import numpy as np
 import pandas as pd
 import psutil
+import xxhash
 from matplotlib import pyplot as plt
 from matplotlib.colors import LinearSegmentedColormap
 import seaborn as sns
@@ -25,7 +26,7 @@ class Events:
     def __init__(self, event_dir, meta_path=None, in_memory=False,
                  data=None, h5_loc=None,
                  z_slice=None, index_prefix=None, custom_columns=("area_norm", "cx", "cy"),
-                 frame_to_time_mapping=None, frame_to_time_function=None):
+                 frame_to_time_mapping=None, frame_to_time_function=None, seed=1):
 
         if event_dir is None:
             return None
@@ -120,11 +121,22 @@ class Events:
             self.events = pd.concat([ev.events for ev in event_objects])
             self.z_slice = z_slice
 
+        self.seed = seed
+
     def __len__(self):
         return len(self.events)
 
     def __getitem__(self, item):
         return self.events.iloc[item]
+
+    def __hash__(self):
+
+        traces = self.events.trace
+
+        hashed_traces = traces.apply(lambda x: xxhash.xxh64_intdigest(x, seed=self.seed))
+        hash_ = xxhash.xxh64_intdigest(hashed_traces.values, seed=self.seed)
+
+        return hash_
 
     def copy(self):
         return copy.deepcopy(self)
