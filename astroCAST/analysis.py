@@ -657,7 +657,9 @@ class Correlation:
         if isinstance(events, pd.DataFrame):
             if "trace" not in events.columns:
                 raise ValueError("Events DataFrame is expected to have a 'trace' column.")
-            events = np.array(events["trace"].tolist())
+
+            events = events["trace"].tolist()
+            events = np.array(events, dtype=object) if is_ragged(events) else np.array(events)
 
         if is_ragged(events):
 
