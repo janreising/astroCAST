@@ -24,7 +24,7 @@ from astroCAST.preparation import IO
 class Events:
 
     def __init__(self, event_dir, meta_path=None, in_memory=False,
-                 data=None, h5_loc=None,
+                 data=None, h5_loc=None, group=None, subject_id=None,
                  z_slice=None, index_prefix=None, custom_columns=("area_norm", "cx", "cy"),
                  frame_to_time_mapping=None, frame_to_time_function=None, seed=1):
 
@@ -98,6 +98,13 @@ class Events:
 
                 self.events.dt = self.events.t1 - self.events.t0
 
+            # add group columns
+            if group is not None:
+                self.events["group"] = group
+
+            if subject_id is not None:
+                self.events["subject_id"] = subject_id
+
         else:
             # multi file support
 
@@ -105,15 +112,16 @@ class Events:
             for i in range(len(event_dir)):
 
                 event = Events(event_dir[i],
-                               meta_path=None if meta_path is None else meta_path[i],
-                               data=None if data is None else data[i],
-                               h5_loc=None if h5_loc is None else h5_loc[i],
-                               z_slice=None if z_slice is None else z_slice[i],
+                               meta_path=meta_path if not isinstance(meta_path, list) else meta_path[i],
+                               data=data if not isinstance(data, list) else data[i],
+                               h5_loc=h5_loc if not isinstance(h5_loc, list) else h5_loc[i],
+                               z_slice=z_slice if not isinstance(z_slice, list) else z_slice[i],
+                               group=group if not isinstance(group, list) else group[i],
                                in_memory=in_memory,
-                               index_prefix=f"{i}x",
+                               index_prefix=f"{i}x", subject_id=i,
                                custom_columns=custom_columns,
-                               frame_to_time_mapping=frame_to_time_mapping,
-                               frame_to_time_function=frame_to_time_function)
+                               frame_to_time_mapping=frame_to_time_mapping if not isinstance(frame_to_time_mapping, list) else frame_to_time_mapping[i],
+                               frame_to_time_function=frame_to_time_function if not isinstance(frame_to_time_function, list) else frame_to_time_function[i])
 
                 event_objects.append(event)
 
