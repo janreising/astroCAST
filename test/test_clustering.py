@@ -40,18 +40,18 @@ class Test_dtw_linkage:
 
         dtw = DTW_Linkage(caching=False)
         DG = DummyGenerator(num_rows=11, trace_length=16, ragged=False)
-        data = DG.get_array()
+        data = DG.get_events()
 
-        dm = dtw.calculate_distance_matrix(data, use_mmap=use_mmap)
+        dm = dtw.calculate_distance_matrix(events=data, use_mmap=use_mmap)
         Z = dtw.calculate_linkage_matrix(dm)
         clusters, cluster_labels = dtw.cluster_linkage_matrix(Z, z_threshold=3)
 
-        barycenters = dtw.calculate_barycenters(clusters, cluster_labels, data)
+        barycenters = dtw.calculate_barycenters(clusters, cluster_labels, events=data)
 
     def test_wrapper_function(self):
         dtw = DTW_Linkage(caching=False)
         DG = DummyGenerator(num_rows=11, trace_length=16, ragged=False)
-        data = DG.get_array()
+        data = DG.get_events()
 
         dm = dtw.get_barycenters(data)
 
@@ -61,7 +61,7 @@ class Test_dtw_linkage:
 
         dtw = DTW_Linkage(caching=False)
         DG = DummyGenerator(num_rows=11, trace_length=16, ragged=False)
-        data = DG.get_array()
+        data = DG.get_events()
 
         dm = dtw.calculate_distance_matrix(data, use_mmap=False)
         Z = dtw.calculate_linkage_matrix(dm)
@@ -79,9 +79,9 @@ class Test_dtw_linkage:
     def test_local_cache(self, tmp_path):
 
         DG = DummyGenerator(num_rows=25, trace_length=16, ragged=False)
-        data = DG.get_array()
+        data = DG.get_events()
 
-        # test calculate_distance_matrix
+        # test calculate **distance** matrix
         dtw = DTW_Linkage(caching=True, local_cache=tmp_path)
         t0 = time.time()
         dtw.calculate_distance_matrix(data, use_mmap=False)
@@ -95,7 +95,7 @@ class Test_dtw_linkage:
 
         assert dt2 < dt, "distance matrix is not cached"
 
-        # test calculate linkage matrix
+        # test calculate **linkage** matrix
         dtw = DTW_Linkage(caching=True, local_cache=tmp_path)
         t0 = time.time()
         dtw.calculate_linkage_matrix(dm)
