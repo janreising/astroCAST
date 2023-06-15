@@ -1,6 +1,7 @@
 import logging
 import pickle
 import tempfile
+from collections import defaultdict
 from pathlib import Path
 
 import awkward
@@ -86,8 +87,8 @@ class DTW_Linkage:
 
         self.cache_path = cache_path
 
-    def get_barycenters(self, events, z_threshold, param_distance_matrix={}, param_linkage_matrix={},
-                        param_clustering={}, param_barycenter={}):
+    def get_barycenters(self, events, z_threshold, default_cluster = -1,
+                        param_distance_matrix={}, param_linkage_matrix={}, param_clustering={}, param_barycenter={}):
 
         distance_matrix = self.calculate_distance_matrix(events, **param_distance_matrix)
         linkage_matrix = self.calculate_linkage_matrix(distance_matrix, **param_linkage_matrix)
@@ -95,7 +96,12 @@ class DTW_Linkage:
         clusters, cluster_labels = self.cluster_linkage_matrix(linkage_matrix, z_threshold, **param_clustering)
         barycenters = self.calculate_barycenters(clusters, cluster_labels, events, **param_barycenter)
 
-        return barycenters
+        # create a lookup table to sort event indices into clusters
+        cluster_lookup_table = defaultdict(lambda: default_cluster)
+        for _, row in barycenters.iterrows():
+            cluster_lookup_table.update({idx_: row.cluster for idx_ in row.trace_idx})
+
+        return barycenters, cluster_lookup_table
 
     @wrapper_local_cache
     def calculate_distance_matrix(self, events, use_mmap=False, block=10000, show_progress=True):
@@ -148,15 +154,14 @@ class DTW_Linkage:
         return Z
 
     @staticmethod
-    def cluster_linkage_matrix(Z, z_threshold, criterion="distance"):
+    def cluster_linkage_matrix(Z, z_threshold, min_cluster_size=1, criterion="distance"):
 
         cluster_labels = fcluster(Z, z_threshold, criterion=criterion)
         clusters = pd.Series(cluster_labels).value_counts().sort_index()
 
-        # TODO do we need to return both of these? or would pd.Series(cluster_labels) be sufficient
-        return clusters, cluster_labels
+        clusters = clusters[clusters >= min_cluster_size]
 
-        #TODO filtering: clusters = clusters[clusters > min_cluster_size]
+        return clusters, cluster_labels
 
     @wrapper_local_cache
     def calculate_barycenters(self, clusters, cluster_labels, events,
@@ -168,7 +173,7 @@ class DTW_Linkage:
         traces = events.events.trace.tolist()
 
         if is_ragged(traces):
-            traces = awkward.array(traces)
+            traces = awkward.Array(traces)
         else:
             traces = np.array(traces)
 
@@ -184,7 +189,7 @@ class DTW_Linkage:
                                          nb_initial_samples=nb_initial_samples,
                                          max_it=max_it, thr=thr, use_c=True, penalty=penalty, psi=psi)
 
-            barycenters[cl] = {"idx":idx_, "bc":bc, "num":clusters.iloc[i]}
+            barycenters[cl] = {"idx":idx_, "bc":bc, "num":clusters.iloc[i], "cluster":cl}
 
         return barycenters
 

@@ -18,19 +18,6 @@ class UnbiasedClustering():
 
 
 
-    #@staticmethod
-    #def load_bary(subj):
-
-
-    #@staticmethod
-    #def bary_prep(subjects: list, mem_data = None, z_thr = 2, min_cluster_size = 15, load_bary = False,
-    #             dtw_parameters = {"penalty": 0, "psi": None}, show_progress = False):
-
-    #@staticmethod
-    #def combine_barycenters(data: dict, z_thr = 2,
-     #                       events = None, barycenters = None, Z = None,
-     #                       add_cluster_to_events:bool = False, default_cluster = -1,
-     #                       verbose = 0) -> tuple[pd.DataFrame, pd.DataFrame, np.ndarray]:
     def combine_barycenters(self, data: dict, z_thr = 2,
                             events = None, barycenters = None, Z = None,
                             add_cluster_to_events:bool = False, default_cluster = -1,
@@ -103,12 +90,7 @@ class UnbiasedClustering():
         barycenters["cluster"] = cluster_labels
 
         if add_cluster_to_events:
-            lut = defaultdict(lambda: default_cluster)
-
-            for _, row in barycenters.iterrows():
-                lut.update({idx_: row.cluster for idx_ in row.trace_idx})
-
-            events["cluster"] = events.idx.map(lut)
+            print("moved to 'get_barycenters'")
 
         if verbose > 0:
             print("\t#events:{:,d}".format(len(events)))
@@ -130,6 +112,8 @@ class UnbiasedClustering():
             np.save(os.path.join(self.wd, "combined_linkage_matrix.npy"), Z)
 
         return events, barycenters, Z
+
+
 
 def parse_subjects(value):
     subjects = []

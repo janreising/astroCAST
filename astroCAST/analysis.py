@@ -146,6 +146,16 @@ class Events:
 
         return hash_
 
+    def add_clustering(self, cluster_lookup_table, column_name="cluster"):
+
+        events = self.events
+
+        if column_name in events.columns:
+            logging.warning(f"column_name ({column_name}) already exists in events table > overwriting column. "
+                            f"Please provide a different column_name if this is not the expected behavior.")
+
+        events.events[column_name] = events.events.idx.map(cluster_lookup_table)
+
     def copy(self):
         return copy.deepcopy(self)
 
