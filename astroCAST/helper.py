@@ -383,6 +383,16 @@ class DummyGenerator:
         else:
             return da.from_array(data, chunks="auto")
 
+    def get_events(self):
+
+        from astroCAST.analysis import Events
+
+        ev = Events(event_dir=None)
+        df = self.get_dataframe()
+
+        ev.events = df
+
+        return ev
 
     def get_by_name(self, name, param={}):
 
@@ -390,7 +400,8 @@ class DummyGenerator:
             "numpy": self.get_array(**param),
             "dask": self.get_dask(**param),
             "list": self.get_list(**param),
-            "pandas": self.get_dataframe(**param)
+            "pandas": self.get_dataframe(**param),
+            "events": self.get_events(**param)
         }
 
         if name not in options.keys():
