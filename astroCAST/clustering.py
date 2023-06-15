@@ -74,64 +74,28 @@ class DTW_Linkage:
 	"max_trace_plot":5, "max_plots":25
 """
 
-    def __init__(self, local_cache=None, caching=True):
+    def __init__(self, cache_path=None):
 
-        if caching:
-            assert local_cache is not None, "when enabling caching, please provide a 'local_cache' path"
+        if cache_path is not None:
 
-            local_cache = Path(local_cache)
-            if not local_cache.is_dir():
-                local_cache.mkdir()
+            if isinstance(cache_path, str):
+                cache_path = Path(cache_path)
 
-        self.lc_path=local_cache
-        self.local_cache = caching
+            if not cache_path.is_dir():
+                cache_path.mkdir()
 
-    def get_barycenters(self, traces, param_distance_matrix=None, param_linkage_matrix=None, param_barycenter=None):
-        raise NotImplementedError
+        self.cache_path = cache_path
 
-    def load_traces(self): # TODO delete
-        traces_path = sd.joinpath("bary_traces.npy")
-        raw_path = sd.joinpath("raw_traces.npy")
-        df_path = sd.joinpath("events.csv")
+    def get_barycenters(self, events, z_threshold, param_distance_matrix={}, param_linkage_matrix={},
+                        param_clustering={}, param_barycenter={}):
 
-        if not traces_path.is_file() or not df_path.is_file() or not raw_path.is_file():
-            # load events
-            print("loading events ...")
-            uc = ra.UnbiasedClustering(wd, cache=False)
-            events = uc.combine_omega_objects([subject])
+        distance_matrix = self.calculate_distance_matrix(events, **param_distance_matrix)
+        linkage_matrix = self.calculate_linkage_matrix(distance_matrix, **param_linkage_matrix)
 
-            # prepare traces
-            print("preparing traces ...")
-            parameters = meta["trace_parameters"]
-            parameters["data"] = events
+        clusters, cluster_labels = self.cluster_linkage_matrix(linkage_matrix, z_threshold, **param_clustering)
+        barycenters = self.calculate_barycenters(clusters, cluster_labels, events, **param_barycenter)
 
-            res = uc.prepare_traces(**parameters, caching=False,
-                                        cache_dir=None, data_dir=Path(meta["data_dir"]), verbose=10)
-            traces = np.array(res.trace.tolist(), dtype=object)
-            raw = np.array(res.raw.tolist(), dtype=object)
-
-            # save dataframe
-            del res["trace"]
-            del res["raw"]
-            res.to_csv(df_path.as_posix(), index=False)
-            del res
-
-            # save traces separately
-            np.save(traces_path.as_posix(), traces)
-            traces = np.load(traces_path.as_posix(), allow_pickle=True)
-
-            np.save(raw_path.as_posix(), raw)
-            raw = np.load(raw_path.as_posix(), allow_pickle=True)
-
-        else:
-
-            traces = np.load(traces_path.as_posix(), allow_pickle=True)
-            # raw = np.load(raw_path.as_posix(), allow_pickle=True)
-
-        if not meta["max_events"] is None:
-            warnings.warn(str("too many events found. Reducing to {}".format(meta["max_events"])))
-            traces = traces[:meta["max_events"]]
-            # raw = raw[:meta["max_events"]]
+        return barycenters
 
     @wrapper_local_cache
     def calculate_distance_matrix(self, events, use_mmap=False, block=10000, show_progress=True):
@@ -149,6 +113,8 @@ class DTW_Linkage:
         if not use_mmap:
             distance_matrix = dtw.distance_matrix_fast(traces,
                         use_pruning=False, parallel=True, compact=True, only_triu=True)
+
+            distance_matrix = np.array(distance_matrix)
 
         else:
 

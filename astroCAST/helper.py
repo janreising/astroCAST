@@ -15,6 +15,9 @@ import tifffile
 import tiledb
 import xxhash
 
+import astroCAST
+
+
 def notimplemented(f, msg=""):
 
     def raise_not_implemented(msg):
@@ -46,14 +49,21 @@ def wrapper_local_cache(f):
             return hash_from_ndarray(df_hash.values)
 
         elif isinstance(arg, dict):
-            return sort(arg)
+            return get_sorted_hash(arg)
+
+        elif isinstance(arg, astroCAST.analysis.Events):
+            return hash(arg)
+
+        elif isinstance(arg, bool):
+            return str(arg)
 
         elif callable(arg):
             return arg.__name__
         else:
+            logging.warning(f"unknown argument type: {type(arg)}")
             return arg
 
-    def sort(kwargs):
+    def get_sorted_hash(kwargs):
         sorted_dict = OrderedDict()
 
         # make sure keys are sorted to get same hash
@@ -66,7 +76,7 @@ def wrapper_local_cache(f):
             value = kwargs[key]
 
             if isinstance(value, dict):
-                sorted_dict[key] = sort(value)
+                sorted_dict[key] = get_sorted_hash(value)
             else:
                 # hash arguments if necessary
                 sorted_dict[key] = hash_arg(value)
@@ -96,7 +106,7 @@ def wrapper_local_cache(f):
 
         name_ = f.__name__
         args_ = [hash_arg(arg) for arg in args[1:]]
-        kwargs_ = sort(kwargs)
+        kwargs_ = get_sorted_hash(kwargs)
 
         hash_string = f"{name_}_"
 
@@ -165,21 +175,13 @@ def wrapper_local_cache(f):
         # what happens if we call it on a function without self??
         self_ = args[0]
 
-        if self_.local_cache:
-
-            # get hash from arguments
-            # hash_value = get_hash_from_args(f, args, kwargs)
-            # print("\thas_value: ", hash_value)
-            # cache_path = self_.lc_path.joinpath(f"{f.__name__}_{hash_value}")
-            # print("\tcache_path: ", cache_path)
+        if self_.cache_path is not None:
 
             hash_string = get_string_from_args(f, args, kwargs)
-            cache_path = self_.lc_path.joinpath(hash_string)
-            # print("\tcache_path: ", cache_path)
+            cache_path = self_.cache_path.joinpath(hash_string)
 
             # find file with regex matching from hash_value
             files = glob.glob(cache_path.as_posix() + ".*")
-            # print("\tfiles: ", files)
 
             # exists
             if len(files) == 1:
@@ -187,7 +189,7 @@ def wrapper_local_cache(f):
                 result = load_value(files[0])
 
                 if result is None:
-                    logging.info("error during loading. recacalculating value")
+                    logging.info("error during loading. recalculating value")
                     return f(*args, **kwargs)
 
                 logging.info(f"loaded result of {f.__name__} from file")
@@ -204,7 +206,6 @@ def wrapper_local_cache(f):
                 save_value(cache_path, result)
 
         else:
-
             result = f(*args, **kwargs)
 
         return result
@@ -391,6 +392,7 @@ class DummyGenerator:
         df = self.get_dataframe()
 
         ev.events = df
+        ev.seed = 1
 
         return ev
 

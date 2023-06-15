@@ -38,7 +38,7 @@ class Test_dtw_linkage:
     @pytest.mark.parametrize("use_mmap", [True, False])
     def test_clustering(self, use_mmap):
 
-        dtw = DTW_Linkage(caching=False)
+        dtw = DTW_Linkage()
         DG = DummyGenerator(num_rows=11, trace_length=16, ragged=False)
         data = DG.get_events()
 
@@ -49,17 +49,17 @@ class Test_dtw_linkage:
         barycenters = dtw.calculate_barycenters(clusters, cluster_labels, events=data)
 
     def test_wrapper_function(self):
-        dtw = DTW_Linkage(caching=False)
+        dtw = DTW_Linkage()
         DG = DummyGenerator(num_rows=11, trace_length=16, ragged=False)
         data = DG.get_events()
 
-        dm = dtw.get_barycenters(data)
+        barycenters = dtw.get_barycenters(data, z_threshold=2)
 
     @pytest.mark.parametrize("z_threshold", [None, 2])
     @pytest.mark.parametrize("min_cluster_size", [None, 10])
     def test_plotting(self, z_threshold, min_cluster_size, tmp_path):
 
-        dtw = DTW_Linkage(caching=False)
+        dtw = DTW_Linkage()
         DG = DummyGenerator(num_rows=11, trace_length=16, ragged=False)
         data = DG.get_events()
 
@@ -76,35 +76,40 @@ class Test_dtw_linkage:
         # test saving
         dtw.plot_cluster_fraction_of_retention(Z, ax=ax, save_path=tmp_path)
 
-    def test_local_cache(self, tmp_path):
+    @pytest.mark.parametrize("use_mmap", [True, False])
+    def test_local_cache(self, use_mmap):
 
-        DG = DummyGenerator(num_rows=25, trace_length=16, ragged=False)
-        data = DG.get_events()
+        with tempfile.TemporaryDirectory() as dir:
+            tmp_path = Path(dir)
+            assert tmp_path.is_dir()
 
-        # test calculate **distance** matrix
-        dtw = DTW_Linkage(caching=True, local_cache=tmp_path)
-        t0 = time.time()
-        dtw.calculate_distance_matrix(data, use_mmap=False)
-        dt = time.time() - t0
-        del dtw
+            DG = DummyGenerator(num_rows=25, trace_length=16, ragged=False)
+            data = DG.get_events()
 
-        dtw = DTW_Linkage(caching=True, local_cache=tmp_path)
-        t0 = time.time()
-        dm = dtw.calculate_distance_matrix(data, use_mmap=False)
-        dt2 = time.time() - t0
+            # test calculate **distance** matrix
+            dtw = DTW_Linkage(cache_path=tmp_path)
+            t0 = time.time()
+            dtw.calculate_distance_matrix(data, use_mmap=use_mmap)
+            dt = time.time() - t0
+            del dtw
 
-        assert dt2 < dt, "distance matrix is not cached"
+            dtw = DTW_Linkage(cache_path=tmp_path)
+            t0 = time.time()
+            dm = dtw.calculate_distance_matrix(data, use_mmap=use_mmap)
+            dt2 = time.time() - t0
 
-        # test calculate **linkage** matrix
-        dtw = DTW_Linkage(caching=True, local_cache=tmp_path)
-        t0 = time.time()
-        dtw.calculate_linkage_matrix(dm)
-        dt = time.time() - t0
-        del dtw
+            assert dt2 < dt, "distance matrix is not cached"
 
-        dtw = DTW_Linkage(caching=True, local_cache=tmp_path)
-        t0 = time.time()
-        dtw.calculate_linkage_matrix(dm)
-        dt2 = time.time() - t0
+            # test calculate **linkage** matrix
+            dtw = DTW_Linkage(cache_path=tmp_path)
+            t0 = time.time()
+            dtw.calculate_linkage_matrix(dm)
+            dt = time.time() - t0
+            del dtw
 
-        assert dt2 < dt, "linkage matrix is not cached"
+            dtw = DTW_Linkage(cache_path=tmp_path)
+            t0 = time.time()
+            dtw.calculate_linkage_matrix(dm)
+            dt2 = time.time() - t0
+
+            assert dt2 < dt, "linkage matrix is not cached"
