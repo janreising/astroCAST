@@ -3,6 +3,7 @@ import pickle
 import tempfile
 from pathlib import Path
 
+import awkward
 import fastcluster
 import hdbscan
 import numpy as np
@@ -13,7 +14,7 @@ from scipy.cluster.hierarchy import fcluster
 import seaborn as sns
 from tqdm import tqdm
 
-from astroCAST.helper import wrapper_local_cache
+from astroCAST.helper import wrapper_local_cache, is_ragged
 
 # from dtaidistance import dtw_visualisation as dtwvis
 # from dtaidistance import clustering
@@ -133,8 +134,16 @@ class DTW_Linkage:
             # raw = raw[:meta["max_events"]]
 
     @wrapper_local_cache
-    def calculate_distance_matrix(self, traces, use_mmap=False, block=10000, show_progress=True):
+    def calculate_distance_matrix(self, events, use_mmap=False, block=10000, show_progress=True):
 
+        traces = events.events.trace.tolist()
+
+        if is_ragged(traces):
+            traces = awkward.array(traces)
+        else:
+            traces = np.array(traces)
+
+        logging.warning(f"traces.shape: {traces.shape}")
         N = len(traces)
 
         if not use_mmap:
@@ -145,7 +154,7 @@ class DTW_Linkage:
 
             logging.info("creating mmap of shape ({}, 1)".format(int((N*N-N)/2)))
 
-            tmp = tempfile.TemporaryFile()
+            tmp = tempfile.TemporaryFile() # todo might not be a good idea to drop a temporary file in the working directory
             distance_matrix = np.memmap(tmp, dtype=np.float32, mode="w+", shape=(int((N*N-N)/2)))
 
             iterator = range(0, N, block) if not show_progress else tqdm(range(0, N, block),desc="distance matrix:")
@@ -184,11 +193,18 @@ class DTW_Linkage:
         #TODO filtering: clusters = clusters[clusters > min_cluster_size]
 
     @wrapper_local_cache
-    def calculate_barycenters(self, clusters, cluster_labels, traces,
+    def calculate_barycenters(self, clusters, cluster_labels, events,
                               max_it=100, thr=1e-5, penalty=0, psi=None,
                               show_progress=True):
 
         """ Calculate consensus trace (barycenter) for each cluster"""
+
+        traces = events.events.trace.tolist()
+
+        if is_ragged(traces):
+            traces = awkward.array(traces)
+        else:
+            traces = np.array(traces)
 
         barycenters = {}
         iterator = tqdm(enumerate(clusters.index), total=len(clusters), desc="barycenters:") if show_progress else enumerate(clusters.index)
