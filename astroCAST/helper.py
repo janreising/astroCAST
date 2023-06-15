@@ -73,6 +73,9 @@ def wrapper_local_cache(f):
         # convert to ordered dict
         for key in keys:
 
+            if key in ["show_progress", "verbose", "verbosity"]:
+                continue
+
             value = kwargs[key]
 
             if isinstance(value, dict):
@@ -81,26 +84,6 @@ def wrapper_local_cache(f):
                 # hash arguments if necessary
                 sorted_dict[key] = hash_arg(value)
         return sorted_dict
-
-    def get_hash_from_args(f, args, kwargs):
-
-        cache_key = json.dumps(
-            [
-                f.__name__,
-                [hash_arg(arg) for arg in args[1:]],
-                sort(kwargs)
-            ],
-            separators=(',', ':')
-        )
-
-        print(f"\t{f.__name__}: {cache_key}")
-
-        h = xxhash.xxh64()
-        h.update(cache_key)
-        hash_val = h.intdigest()
-        h.reset()
-
-        return hash_val
 
     def get_string_from_args(f, args, kwargs):
 
