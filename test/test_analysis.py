@@ -1,15 +1,10 @@
-import os
-import shutil
 import tempfile
 
 import dask.array
-import numpy as np
-import pandas as pd
 import pytest
-import tifffile
-import dask.array as da
 
 from astroCAST.analysis import *
+from astroCAST.clustering import Distance
 from astroCAST.detection import Detector
 from astroCAST.helper import EventSim, DummyGenerator
 
@@ -364,7 +359,7 @@ class Test_Correlation:
 
     def setup_method(self):
         # Set up any necessary data for the tests
-        self.correlation = Correlation()
+        self.correlation = Distance()
         self.corr_matrix = np.random.rand(100, 100)
 
     @pytest.mark.parametrize("ragged", [True, False])
@@ -374,7 +369,7 @@ class Test_Correlation:
         dg = DummyGenerator(num_rows=25, trace_length=12, ragged=ragged)
         data = dg.get_by_name(input_type)
 
-        c = self.correlation.get_correlation_matrix(events=data)
+        c = self.correlation.get_pearson_correlation(events=data)
 
     def test_get_correlation_histogram(self, num_bins=1000):
         # Test with precomputed correlation matrix
@@ -382,13 +377,13 @@ class Test_Correlation:
         assert np.equal(len(counts), num_bins)  # Adjust the expected value as per the number of bins
 
         # Test with events array
-        counts = Correlation()._get_correlation_histogram(events=self.corr_matrix, num_bins=num_bins)
+        counts = Distance()._get_correlation_histogram(events=self.corr_matrix, num_bins=num_bins)
         assert np.equal(len(counts), num_bins)  # Adjust the expected value as per the number of bins
 
         # Test with event dataframe
         dg = DummyGenerator()
         events = dg.get_dataframe()
-        counts = Correlation()._get_correlation_histogram(events=events, num_bins=num_bins)
+        counts = Distance()._get_correlation_histogram(events=events, num_bins=num_bins)
         assert np.equal(len(counts), num_bins)  # Adjust the expected value as per the number of bins
 
 

@@ -1,23 +1,20 @@
 import copy
 import logging
-from functools import lru_cache
 from pathlib import Path
 
 import dask.array as da
-import deprecation
 import numpy as np
 import pandas as pd
 import psutil
 import xxhash
 from matplotlib import pyplot as plt
-from matplotlib.colors import LinearSegmentedColormap
 import seaborn as sns
 from tqdm import tqdm
 import napari
 
 import astroCAST.detection
 from astroCAST import helper
-from astroCAST.helper import get_data_dimensions, wrapper_local_cache, is_ragged
+from astroCAST.helper import get_data_dimensions
 from astroCAST.preparation import IO
 
 
@@ -105,6 +102,8 @@ class Events:
             if subject_id is not None:
                 self.events["subject_id"] = subject_id
 
+            self.events["name"] = event_dir.stem
+
         else:
             # multi file support
 
@@ -127,6 +126,7 @@ class Events:
 
             self.event_objects = event_objects
             self.events = pd.concat([ev.events for ev in event_objects])
+            self.events.reset_index(drop=False, inplace=True, names="idx")
             self.z_slice = z_slice
 
         self.seed = seed
@@ -653,325 +653,6 @@ class Events:
 
         return val
 
-class Correlation:
-    """
-    A class for computing correlation matrices and histograms.
-    """
-
-    #todo local cache
-    # @wrapper_local_cache
-    @staticmethod
-    def get_correlation_matrix(events, dtype=np.single):
-        """
-        Computes the correlation matrix of events.
-
-        Args:
-            events (np.ndarray or da.Array or pd.DataFrame): Input events data.
-            dtype (np.dtype, optional): Data type of the correlation matrix. Defaults to np.single.
-            mmap (bool, optional): Flag indicating whether to use memory-mapped arrays. Defaults to False.
-
-        Returns:
-            np.ndarray: Correlation matrix.
-
-        Raises:
-            ValueError: If events is not one of (np.ndarray, da.Array, pd.DataFrame).
-            ValueError: If events DataFrame does not have a 'trace' column.
-        """
-
-        if not isinstance(events, (np.ndarray, pd.DataFrame, da.Array, Events)):
-            raise ValueError(f"Please provide events as one of (np.ndarray, pd.DataFrame, Events) instead of {type(events)}.")
-
-        if isinstance(events, Events):
-            events = events.events
-
-        if isinstance(events, pd.DataFrame):
-            if "trace" not in events.columns:
-                raise ValueError("Events DataFrame is expected to have a 'trace' column.")
-
-            events = events["trace"].tolist()
-            events = np.array(events, dtype=object) if is_ragged(events) else np.array(events)
-
-        if is_ragged(events):
-
-            logging.warning(f"Events are ragged (unequal length), default to slow correlation calculation.")
-
-            N = len(events)
-            corr = np.zeros((N, N), dtype=dtype)
-            for x in tqdm(range(N)):
-                for y in range(N):
-
-                    if corr[y, x] == 0:
-
-                        ex = events[x]
-                        ey = events[y]
-
-                        ex = ex - np.mean(ex)
-                        ey = ey - np.mean(ey)
-
-                        c = np.correlate(ex, ey, mode="valid")
-
-                        # ensure result between -1 and 1
-                        c = np.max(c)
-                        c = c / (max(len(ex), len(ey) * np.std(ex) * np.std(ey)))
-
-                        corr[x, y] = c
-
-                    else:
-                        corr[x, y] = corr[y, x]
-        else:
-            corr = np.corrcoef(events).astype(dtype)
-            corr = np.tril(corr)
-
-        return corr
-
-    def _get_correlation_histogram(self, corr=None, events=None, start=-1, stop=1, num_bins=1000, density=False):
-        """
-        Computes the correlation histogram.
-
-        Args:
-            corr (np.ndarray, optional): Precomputed correlation matrix. If not provided, events will be used.
-            events (np.ndarray or pd.DataFrame, optional): Input events data. Required if corr is not provided.
-            start (float, optional): Start value of the histogram range. Defaults to -1.
-            stop (float, optional): Stop value of the histogram range. Defaults to 1.
-            num_bins (int, optional): Number of histogram bins. Defaults to 1000.
-            density (bool, optional): Flag indicating whether to compute the histogram density. Defaults to False.
-
-        Returns:
-            np.ndarray: Correlation histogram counts.
-
-        Raises:
-            ValueError: If neither corr nor events is provided.
-        """
-
-        if corr is None:
-            if events is None:
-                raise ValueError("Please provide either 'corr' or 'events' flag.")
-            corr = self.get_correlation_matrix(events)
-
-        counts, _ = np.histogram(corr, bins=num_bins, range=(start, stop), density=density)
-
-        return counts
-
-    def plot_correlation_characteristics(self, corr=None, events=None, ax=None,
-                                         perc=[5e-5, 5e-4, 1e-3, 1e-2, 0.05], bin_num=50, log_y=True,
-                                         figsize=(10, 3)):
-        """
-        Plots the correlation characteristics.
-
-        Args:
-            corr (np.ndarray, optional): Precomputed correlation matrix. If not provided, footprint correlation is used.
-            ax (matplotlib.axes.Axes or list of matplotlib.axes.Axes, optional): Subplots axes to plot the figure.
-            perc (list, optional): Percentiles to plot vertical lines on the cumulative plot. Defaults to [5e-5, 5e-4, 1e-3, 1e-2, 0.05].
-            bin_num (int, optional): Number of histogram bins. Defaults to 50.
-            log_y (bool, optional): Flag indicating whether to use log scale on the y-axis. Defaults to True.
-            figsize (tuple, optional): Figure size. Defaults to (10, 3).
-
-        Returns:
-            matplotlib.figure.Figure: Plotted figure.
-
-        Raises:
-            ValueError: If ax is provided but is not a tuple of (ax0, ax1).
-        """
-
-        if corr is None:
-            if events is None:
-                raise ValueError("Please provide either 'corr' or 'events' flag.")
-            corr = self.get_correlation_matrix(events)
-
-        if ax is None:
-            fig, (ax0, ax1) = plt.subplots(1, 2, figsize=figsize)
-        else:
-            if not isinstance(ax, (tuple, list, np.ndarray)) or len(ax) != 2:
-                raise ValueError("'ax' argument expects a tuple/list/np.ndarray of (ax0, ax1)")
-
-            ax0, ax1 = ax
-            fig = ax0.get_figure()
-
-        # Plot histogram
-        bins = ax0.hist(corr.flatten(), bins=bin_num)
-        if log_y:
-            ax0.set_yscale("log")
-        ax0.set_ylabel("Counts")
-        ax0.set_xlabel("Correlation")
-
-        # Plot cumulative distribution
-        counts, xaxis, _ = bins
-        counts = np.flip(counts)
-        xaxis = np.flip(xaxis)
-        cumm = np.cumsum(counts)
-        cumm = cumm / np.sum(counts)
-
-        ax1.plot(xaxis[1:], cumm)
-        if log_y:
-            ax1.set_yscale("log")
-        ax1.invert_xaxis()
-        ax1.set_ylabel("Fraction")
-        ax1.set_xlabel("Correlation")
-
-        # Plot vertical lines at percentiles
-        pos = [np.argmin(abs(cumm - p)) for p in perc]
-        vlines = [xaxis[p] for p in pos]
-        for v in vlines:
-            ax1.axvline(v, color="gray", linestyle="--")
-
-        return fig
-
-    def plot_compare_correlated_events(self, corr, events, event_ids=None,
-                                   event_index_range=(0, -1), z_range=None,
-                                   corr_mask=None, corr_range=None,
-                                   ev0_color="blue", ev1_color="red", ev_alpha=0.5, spine_linewidth=3,
-                                   ax=None, figsize=(20, 3), title=None):
-        """
-        Plot and compare correlated events.
-
-        Args:
-            corr (np.ndarray): Correlation matrix.
-            events (pd.DataFrame, np.ndarray or Events): Events data.
-            event_ids (tuple, optional): Tuple of event IDs to plot.
-            event_index_range (tuple, optional): Range of event indices to consider.
-            z_range (tuple, optional): Range of z values to plot.
-            corr_mask (np.ndarray, optional): Correlation mask.
-            corr_range (tuple, optional): Range of correlations to consider.
-            ev0_color (str, optional): Color for the first event plot.
-            ev1_color (str, optional): Color for the second event plot.
-            ev_alpha (float, optional): Alpha value for event plots.
-            spine_linewidth (float, optional): Linewidth for spines.
-            ax (matplotlib.axes.Axes, optional): Axes object to plot on.
-            figsize (tuple, optional): Figure size.
-            title (str, optional): Plot title.
-
-        Returns:
-            matplotlib.figure.Figure: The generated figure.
-        """
-        if ax is None:
-            fig, ax = plt.subplots(1, 1, figsize=figsize)
-        else:
-            fig = ax.get_figure()
-
-        if isinstance(events, Events):
-            events = events.events
-
-        # Validate event_index_range
-        if not isinstance(event_index_range, (tuple, list)) or len(event_index_range) != 2:
-            raise ValueError("Please provide event_index_range as a tuple of (start, stop)")
-
-        # Convert events to numpy array if it is a DataFrame
-        if isinstance(events, pd.DataFrame):
-            if "trace" not in events.columns:
-                raise ValueError("'events' dataframe is expected to have a 'trace' column.")
-
-            events = np.array(events.trace.tolist())
-
-        ind_min, ind_max = event_index_range
-        if ind_max == -1:
-            ind_max = len(events)
-
-        # Choose events
-        if event_ids is None:
-            # Randomly choose two events if corr_mask and corr_range are not provided
-            if corr_mask is None and corr_range is None:
-                ev0, ev1 = np.random.randint(ind_min, ind_max, size=2)
-
-            # Choose events based on corr_mask
-            elif corr_mask is not None:
-                # Warn if corr_range is provided and ignore it
-                if corr_range is not None:
-                    logging.warning("Prioritizing 'corr_mask'; ignoring 'corr_range' argument.")
-
-                if isinstance(corr_mask, (list, tuple)):
-                    corr_mask = np.array(corr_mask)
-
-                    if corr_mask.shape[0] != 2:
-                        raise ValueError(f"corr_mask should have a shape of (2xN) instead of {corr_mask.shape}")
-
-                rand_index = np.random.randint(0, corr_mask.shape[1])
-                ev0, ev1 = corr_mask[:, rand_index]
-
-            # Choose events based on corr_range
-            elif corr_range is not None:
-                # Validate corr_range
-                if len(corr_range) != 2:
-                    raise ValueError("Please provide corr_range as a tuple of (min_corr, max_corr)")
-
-                corr_min, corr_max = corr_range
-
-                # Create corr_mask based on corr_range
-                corr_mask = np.array(np.where(np.logical_and(corr >= corr_min, corr <= corr_max)))
-                logging.warning("Thresholding the correlation array may take a long time. Consider precalculating the 'corr_mask' with eg. 'np.where(np.logical_and(corr >= corr_min, corr <= corr_max))'")
-
-                rand_index = np.random.randint(0, corr_mask.shape[1])
-                ev0, ev1 = corr_mask[:, rand_index]
-
-        else:
-            ev0, ev1 = event_ids
-
-        if isinstance(ev0, np.ndarray):
-            ev0 = ev0[0]
-            ev1 = ev1[0]
-
-        # Choose z range
-        trace_0 = np.squeeze(events[ev0]).astype(float)
-        trace_1 = np.squeeze(events[ev1]).astype(float)
-
-        if isinstance(trace_0, da.Array):
-            trace_0 = trace_0.compute()
-            trace_1 = trace_1.compute()
-
-        if z_range is not None:
-            z0, z1 = z_range
-
-            if (z0 > len(trace_0)) or (z0 > len(trace_1)):
-                raise ValueError(f"Left bound z0 larger than event length: {z0} > {len(trace_0)} or {len(trace_1)}")
-
-            trace_0 = trace_0[z0: min(z1, len(trace_0))]
-            trace_1 = trace_1[z0: min(z1, len(trace_1))]
-
-        ax.plot(trace_0, color=ev0_color, alpha=ev_alpha)
-        ax.plot(trace_1, color=ev1_color, alpha=ev_alpha)
-
-        if title is None:
-            if isinstance(ev0, np.ndarray):
-                ev0 = ev0[0]
-                ev1 = ev1[0]
-            ax.set_title("{:,d} x {:,d} > corr: {:.4f}".format(ev0, ev1, corr[ev0, ev1]))
-
-        def correlation_color_map(colors=None):
-            """
-            Create a correlation color map.
-
-            Args:
-                colors (list, optional): List of colors.
-
-            Returns:
-                function: Color map function.
-            """
-            if colors is None:
-                neg_color = (0, "#ff0000")
-                neu_color = (0.5, "#ffffff")
-                pos_color = (1, "#0a700e")
-
-                colors = [neg_color, neu_color, pos_color]
-
-            cm = LinearSegmentedColormap.from_list("Custom", colors, N=200)
-
-            def lsc(v):
-                assert np.abs(v) <= 1, "Value must be between -1 and 1: {}".format(v)
-
-                if v == 0:
-                    return cm(100)
-                if v < 0:
-                    return cm(100 - int(abs(v) * 100))
-                elif v > 0:
-                    return cm(int(v * 100 + 100))
-
-            return lsc
-
-        lsc = correlation_color_map()
-        for spine in ax.spines.values():
-            spine.set_edgecolor(lsc(corr[ev0, ev1]))
-            spine.set_linewidth(spine_linewidth)
-
-        return fig
 
 class Video:
 
