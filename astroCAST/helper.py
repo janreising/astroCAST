@@ -747,41 +747,6 @@ class Normalization:
                 return data / divisor
 
     @staticmethod
-    def enforce_length(data, min_length=None, pad_mode="edge", max_length=None):
-
-        if min_length is None and max_length is None:
-            return data
-
-        if isinstance(data, np.ndarray):
-
-            logging.warning(data.shape)
-            if min_length is not None and data.shape[1] < min_length:
-                data = np.pad(data, pad_width=min_length - data.shape[1], mode=pad_mode)
-                data = data[:, :min_length]
-
-            elif max_length is not None and data.shape[1] > max_length:
-                data = data[:, :max_length]
-
-            return data
-
-        elif isinstance(data, ak.Array):
-
-            if min_length is not None and max_length is None:
-                data = ak.pad_none(data, min_length)
-
-            elif max_length is not None and min_length is None:
-                data = data[:, :max_length]
-
-            else:
-                assert max_length == min_length, "when providing 'max_length' and 'min_length', both have to be equal"
-                data = ak.pad_none(data, max_length, clip=True)
-
-        else:
-            raise TypeError(f"datatype {type(data)} not recognized.")
-
-        return data
-
-    @staticmethod
     def impute_nan(data, fixed_value=None):
 
         if len(data) == 0:

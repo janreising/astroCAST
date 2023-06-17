@@ -11,10 +11,11 @@ from matplotlib import pyplot as plt
 import seaborn as sns
 from tqdm import tqdm
 import napari
+import awkward as ak
 
 import astroCAST.detection
 from astroCAST import helper
-from astroCAST.helper import get_data_dimensions
+from astroCAST.helper import get_data_dimensions, is_ragged
 from astroCAST.preparation import IO
 
 
@@ -792,6 +793,50 @@ class Events:
 
         return res
 
+    def enforce_length(self, min_length=None, pad_mode="edge", max_length=None, inplace=False):
+
+        if inplace:
+            events = self.events
+        else:
+            events = self.events.copy()
+
+        data = events.trace.tolist()
+
+        if min_length is not None and max_length is not None:
+
+            if is_ragged(data):
+                data = ak.Array(data)
+
+                if min_length is not None and max_length is None:
+                    data = ak.pad_none(data, min_length)
+
+                elif max_length is not None and min_length is None:
+                    data = data[:, :max_length]
+
+                else:
+                    assert max_length == min_length, "when providing 'max_length' and 'min_length', both have to be equal"
+                    data = ak.pad_none(data, max_length, clip=True)
+
+            else:
+
+                data = np.array(data)
+
+                if min_length is not None and data.shape[1] < min_length:
+                    data = np.pad(data, pad_width=min_length - data.shape[1], mode=pad_mode)
+                    data = data[:, :min_length]
+
+                elif max_length is not None and data.shape[1] > max_length:
+                    data = data[:, :max_length]
+
+        # update events dataframe
+        events.trace = data.tolist()
+        events.dz = len(data[0, :])
+        logging.warning("z0 and z1 values do not correspond to the adjusted event boundaries")
+
+        if inplace:
+            self.events = events
+
+        return events
 
 class Video:
 
