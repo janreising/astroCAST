@@ -290,6 +290,7 @@ class DTW_Linkage:
 
             return fig
 
+
 class Distance:
     """
     A class for computing correlation matrices and histograms.
