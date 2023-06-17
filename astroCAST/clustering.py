@@ -1,25 +1,31 @@
 import logging
 import pickle
 import tempfile
+from collections import defaultdict
 from pathlib import Path
 
+import awkward
 import fastcluster
 import hdbscan
 import numpy as np
 import pandas as pd
+from dask import array as da
 from dtaidistance import dtw_barycenter, dtw
 from matplotlib import pyplot as plt
+from matplotlib.colors import LinearSegmentedColormap
 from scipy.cluster.hierarchy import fcluster
 import seaborn as sns
 from tqdm import tqdm
 
-from astroCAST.helper import wrapper_local_cache
+from astroCAST.analysis import Events
+from astroCAST.helper import wrapper_local_cache, is_ragged
 
 # from dtaidistance import dtw_visualisation as dtwvis
 # from dtaidistance import clustering
 # from scipy.cluster.hierarchy import single, complete, average, ward, dendrogram
 
 import fastcluster
+
 
 class HdbScan:
 
@@ -61,6 +67,7 @@ class HdbScan:
         assert path.is_file(), f"can't find hdb: {path}"
         self.hdb = pickle.load(open(path, "rb"))
 
+
 class DTW_Linkage:
 
     """
@@ -73,99 +80,89 @@ class DTW_Linkage:
 	"max_trace_plot":5, "max_plots":25
 """
 
-    def __init__(self, local_cache=None, caching=True):
+    def __init__(self, cache_path=None):
 
-        if caching:
-            assert local_cache is not None, "when enabling caching, please provide a 'local_cache' path"
+        if cache_path is not None:
 
-            local_cache = Path(local_cache)
-            if not local_cache.is_dir():
-                local_cache.mkdir()
+            if isinstance(cache_path, str):
+                cache_path = Path(cache_path)
 
-        self.lc_path=local_cache
-        self.local_cache = caching
+            if not cache_path.is_dir():
+                cache_path.mkdir()
 
-    def get_barycenters(self, traces, param_distance_matrix=None, param_linkage_matrix=None, param_barycenter=None):
-        raise NotImplementedError
+        self.cache_path = cache_path
 
-    def load_traces(self): # TODO delete
-        traces_path = sd.joinpath("bary_traces.npy")
-        raw_path = sd.joinpath("raw_traces.npy")
-        df_path = sd.joinpath("events.csv")
+    def get_barycenters(self, events, z_threshold, default_cluster = -1,
+                        distance_type="pearson", param_distance={},
+                        param_linkage_matrix={}, param_clustering={}, param_barycenter={}):
 
-        if not traces_path.is_file() or not df_path.is_file() or not raw_path.is_file():
-            # load events
-            print("loading events ...")
-            uc = ra.UnbiasedClustering(wd, cache=False)
-            events = uc.combine_omega_objects([subject])
+        corr = Distance(cache_path=self.cache_path)
+        distance_matrix = corr.get_correlation(events,
+                                               correlation_type=distance_type,
+                                               correlation_param=param_distance)
 
-            # prepare traces
-            print("preparing traces ...")
-            parameters = meta["trace_parameters"]
-            parameters["data"] = events
+        linkage_matrix = self.calculate_linkage_matrix(distance_matrix, **param_linkage_matrix)
 
-            res = uc.prepare_traces(**parameters, caching=False,
-                                        cache_dir=None, data_dir=Path(meta["data_dir"]), verbose=10)
-            traces = np.array(res.trace.tolist(), dtype=object)
-            raw = np.array(res.raw.tolist(), dtype=object)
+        clusters, cluster_labels = self.cluster_linkage_matrix(linkage_matrix, z_threshold, **param_clustering)
+        barycenters = self.calculate_barycenters(clusters, cluster_labels, events, **param_barycenter)
 
-            # save dataframe
-            del res["trace"]
-            del res["raw"]
-            res.to_csv(df_path.as_posix(), index=False)
-            del res
+        # create a lookup table to sort event indices into clusters
+        cluster_lookup_table = defaultdict(lambda: default_cluster)
+        for _, row in barycenters.iterrows():
+            cluster_lookup_table.update({idx_: row.cluster for idx_ in row.trace_idx})
 
-            # save traces separately
-            np.save(traces_path.as_posix(), traces)
-            traces = np.load(traces_path.as_posix(), allow_pickle=True)
-
-            np.save(raw_path.as_posix(), raw)
-            raw = np.load(raw_path.as_posix(), allow_pickle=True)
-
-        else:
-
-            traces = np.load(traces_path.as_posix(), allow_pickle=True)
-            # raw = np.load(raw_path.as_posix(), allow_pickle=True)
-
-        if not meta["max_events"] is None:
-            warnings.warn(str("too many events found. Reducing to {}".format(meta["max_events"])))
-            traces = traces[:meta["max_events"]]
-            # raw = raw[:meta["max_events"]]
+        return barycenters, cluster_lookup_table
 
     @wrapper_local_cache
-    def calculate_distance_matrix(self, traces, use_mmap=False, block=10000, show_progress=True):
+    def get_two_step_barycenters(self, events, step_one_column="subject_id",
+                               step_one_threshold=2, step_two_threshold=2,
+                              step_one_param={}, step_two_param={},
+                              default_cluster=-1):
+        """
 
-        N = len(traces)
+        Sometimes it is computationally not feasible to cluster by events trace directly. In that case choosing
+        a two-step clustering approach is an alternative.
 
-        if not use_mmap:
-            distance_matrix = dtw.distance_matrix_fast(traces,
-                        use_pruning=False, parallel=True, compact=True, only_triu=True)
+        :param events:
+        :return:
+        """
 
-        else:
+        # Step 1
+        # calculate individual barycenters
+        combined_barycenters = []
+        internal_lookup_tables = {}
+        for step_one_group in events[step_one_column].unique():
 
-            logging.info("creating mmap of shape ({}, 1)".format(int((N*N-N)/2)))
+            # create a new Events instance that contains only one group
+            event_group = events.copy()
+            event_group.events = event_group.events[event_group.events[step_one_column] == step_one_group]
 
-            tmp = tempfile.TemporaryFile()
-            distance_matrix = np.memmap(tmp, dtype=np.float32, mode="w+", shape=(int((N*N-N)/2)))
+            barycenter, lookup_table = self.get_barycenters(event_group, z_threshold=step_one_threshold,
+                                                 default_cluster=default_cluster, **step_one_param)
 
-            iterator = range(0, N, block) if not show_progress else tqdm(range(0, N, block),desc="distance matrix:")
+            combined_barycenters.append(barycenter)
+            internal_lookup_tables.update(lookup_table)
 
-            i=0
-            for x0 in iterator:
+        combined_barycenters = pd.concat(combined_barycenters).reset_index(drop=True)
+        combined_barycenters.rename(columns={"bc":"trace"}, inplace=True)
 
-                x1 = min(x0 + block, N)
+        # Step 2
+        # create empty Events instance
+        combined_events = Events(event_dir=None)
+        combined_events.events = combined_barycenters
+        combined_events.seed = 2
 
-                dm_ = dtw.distance_matrix_fast(traces, block=((x0, x1), (0, N)),
-                            use_pruning=False, parallel=True, compact=True, only_triu=True)
+        # calculate barycenters again
+        step_two_barycenters, step_two_lookup_table = self.get_barycenters(combined_events, step_two_threshold,
+                                                                           default_cluster=default_cluster,
+                                                                           **step_two_param)
 
-                distance_matrix[i:i+len(dm_)] = dm_
-                distance_matrix.flush()
+        external_lookup_table = defaultdict(lambda: default_cluster)
+        for key in internal_lookup_tables.keys():
+            bary_id = internal_lookup_tables[key]
+            external_lookup_table[key] = step_two_lookup_table[bary_id]
 
-                i = i+len(dm_)
-
-                del dm_
-
-        return distance_matrix
+        return combined_barycenters, internal_lookup_tables, step_two_barycenters, external_lookup_table
 
     @wrapper_local_cache
     def calculate_linkage_matrix(self, distance_matrix, method="average", metric="euclidean"):
@@ -173,22 +170,38 @@ class DTW_Linkage:
         return Z
 
     @staticmethod
-    def cluster_linkage_matrix(Z, z_threshold, criterion="distance"):
+    def cluster_linkage_matrix(Z, z_threshold, criterion="distance",
+                               min_cluster_size=1, max_cluster_size=None):
 
         cluster_labels = fcluster(Z, z_threshold, criterion=criterion)
         clusters = pd.Series(cluster_labels).value_counts().sort_index()
 
-        # TODO do we need to return both of these? or would pd.Series(cluster_labels) be sufficient
+        if (min_cluster_size > 0) and (min_cluster_size < 1):
+            min_cluster_size = int(clusters.sum() * min_cluster_size)
+
+        if min_cluster_size > 1:
+            clusters = clusters[clusters >= min_cluster_size]
+        elif min_cluster_size < 0:
+            logging.warning("min_cluster_size < 0. ignoring argument.")
+
+        if max_cluster_size is not None:
+            clusters = clusters[clusters <= min_cluster_size]
+
         return clusters, cluster_labels
 
-        #TODO filtering: clusters = clusters[clusters > min_cluster_size]
-
     @wrapper_local_cache
-    def calculate_barycenters(self, clusters, cluster_labels, traces,
+    def calculate_barycenters(self, clusters, cluster_labels, events,
                               max_it=100, thr=1e-5, penalty=0, psi=None,
                               show_progress=True):
 
         """ Calculate consensus trace (barycenter) for each cluster"""
+
+        traces = events.events.trace.tolist()
+
+        if is_ragged(traces):
+            traces = awkward.Array(traces)
+        else:
+            traces = np.array(traces)
 
         barycenters = {}
         iterator = tqdm(enumerate(clusters.index), total=len(clusters), desc="barycenters:") if show_progress else enumerate(clusters.index)
@@ -202,7 +215,7 @@ class DTW_Linkage:
                                          nb_initial_samples=nb_initial_samples,
                                          max_it=max_it, thr=thr, use_c=True, penalty=penalty, psi=psi)
 
-            barycenters[cl] = {"idx":idx_, "bc":bc, "num":clusters.iloc[i]}
+            barycenters[cl] = {"idx":idx_, "bc":bc, "num":clusters.iloc[i], "cluster":cl}
 
         return barycenters
 
@@ -276,3 +289,397 @@ class DTW_Linkage:
                 fig.savefig(save_path.as_posix())
 
             return fig
+
+
+class Distance:
+    """
+    A class for computing correlation matrices and histograms.
+    """
+    def __init__(self, cache_path=None):
+
+        if cache_path is not None:
+
+            if isinstance(cache_path, str):
+                cache_path = Path(cache_path)
+
+            if not cache_path.is_dir():
+                cache_path.mkdir()
+
+        self.cache_path = cache_path
+
+    @staticmethod
+    @wrapper_local_cache
+    def get_pearson_correlation(events, dtype=np.single):
+        """
+        Computes the correlation matrix of events.
+
+        Args:
+            events (np.ndarray or da.Array or pd.DataFrame): Input events data.
+            dtype (np.dtype, optional): Data type of the correlation matrix. Defaults to np.single.
+            mmap (bool, optional): Flag indicating whether to use memory-mapped arrays. Defaults to False.
+
+        Returns:
+            np.ndarray: Correlation matrix.
+
+        Raises:
+            ValueError: If events is not one of (np.ndarray, da.Array, pd.DataFrame).
+            ValueError: If events DataFrame does not have a 'trace' column.
+        """
+
+        if not isinstance(events, (np.ndarray, pd.DataFrame, da.Array, Events)):
+            raise ValueError(f"Please provide events as one of (np.ndarray, pd.DataFrame, Events) instead of {type(events)}.")
+
+        if isinstance(events, Events):
+            events = events.events
+
+        if isinstance(events, pd.DataFrame):
+            if "trace" not in events.columns:
+                raise ValueError("Events DataFrame is expected to have a 'trace' column.")
+
+            events = events["trace"].tolist()
+            events = np.array(events, dtype=object) if is_ragged(events) else np.array(events)
+
+        if is_ragged(events):
+
+            logging.warning(f"Events are ragged (unequal length), default to slow correlation calculation.")
+
+            N = len(events)
+            corr = np.zeros((N, N), dtype=dtype)
+            for x in tqdm(range(N)):
+                for y in range(N):
+
+                    if corr[y, x] == 0:
+
+                        ex = events[x]
+                        ey = events[y]
+
+                        ex = ex - np.mean(ex)
+                        ey = ey - np.mean(ey)
+
+                        c = np.correlate(ex, ey, mode="valid")
+
+                        # ensure result between -1 and 1
+                        c = np.max(c)
+                        c = c / (max(len(ex), len(ey) * np.std(ex) * np.std(ey)))
+
+                        corr[x, y] = c
+
+                    else:
+                        corr[x, y] = corr[y, x]
+        else:
+            corr = np.corrcoef(events).astype(dtype)
+            corr = np.tril(corr)
+
+        return corr
+
+    @staticmethod
+    @wrapper_local_cache
+    def get_dtw_correlation(events, use_mmap=False, block=10000, show_progress=True):
+
+        traces = events.events.trace.tolist()
+
+        if is_ragged(traces):
+            traces = awkward.Array(traces)
+        else:
+            traces = np.array(traces)
+
+        logging.warning(f"traces.shape: {traces.shape}")
+        N = len(traces)
+
+        if not use_mmap:
+            distance_matrix = dtw.distance_matrix_fast(traces,
+                        use_pruning=False, parallel=True, compact=True, only_triu=True)
+
+            distance_matrix = np.array(distance_matrix)
+
+        else:
+
+            logging.info("creating mmap of shape ({}, 1)".format(int((N*N-N)/2)))
+
+            tmp = tempfile.TemporaryFile() # todo might not be a good idea to drop a temporary file in the working directory
+            distance_matrix = np.memmap(tmp, dtype=np.float32, mode="w+", shape=(int((N*N-N)/2)))
+
+            iterator = range(0, N, block) if not show_progress else tqdm(range(0, N, block),desc="distance matrix:")
+
+            i=0
+            for x0 in iterator:
+
+                x1 = min(x0 + block, N)
+
+                dm_ = dtw.distance_matrix_fast(traces, block=((x0, x1), (0, N)),
+                            use_pruning=False, parallel=True, compact=True, only_triu=True)
+
+                distance_matrix[i:i+len(dm_)] = dm_
+                distance_matrix.flush()
+
+                i = i+len(dm_)
+
+                del dm_
+
+        return distance_matrix
+
+    def get_correlation(self, events, correlation_type="pearson", correlation_param={}):
+
+        funcs = {
+            "pearson": lambda x: self.get_pearson_correlation(x, **correlation_param),
+            "dtw": lambda x: self.get_dtw_correlation(x, **correlation_param)
+        }
+
+        if correlation_type not in funcs.keys():
+            raise ValueError(f"cannot find correlation type. Choose one of: {funcs.keys()}")
+        else:
+            corr_func = funcs[correlation_type]
+
+        return corr_func(events)
+
+    def _get_correlation_histogram(self, corr=None, events=None,
+                                   correlation_type="pearson", correlation_param={},
+                                   start=-1, stop=1, num_bins=1000, density=False):
+        """
+        Computes the correlation histogram.
+
+        Args:
+            corr (np.ndarray, optional): Precomputed correlation matrix. If not provided, events will be used.
+            events (np.ndarray or pd.DataFrame, optional): Input events data. Required if corr is not provided.
+            start (float, optional): Start value of the histogram range. Defaults to -1.
+            stop (float, optional): Stop value of the histogram range. Defaults to 1.
+            num_bins (int, optional): Number of histogram bins. Defaults to 1000.
+            density (bool, optional): Flag indicating whether to compute the histogram density. Defaults to False.
+
+        Returns:
+            np.ndarray: Correlation histogram counts.
+
+        Raises:
+            ValueError: If neither corr nor events is provided.
+        """
+
+        if corr is None:
+            if events is None:
+                raise ValueError("Please provide either 'corr' or 'events' flag.")
+
+            corr = self.get_correlation(events, correlation_type=correlation_type, correlation_param=correlation_param)
+
+        counts, _ = np.histogram(corr, bins=num_bins, range=(start, stop), density=density)
+
+        return counts
+
+    def plot_correlation_characteristics(self, corr=None, events=None, ax=None,
+                                         perc=(5e-5, 5e-4, 1e-3, 1e-2, 0.05), bin_num=50, log_y=True,
+                                         figsize=(10, 3)):
+        """
+        Plots the correlation characteristics.
+
+        Args:
+            corr (np.ndarray, optional): Precomputed correlation matrix. If not provided, footprint correlation is used.
+            ax (matplotlib.axes.Axes or list of matplotlib.axes.Axes, optional): Subplots axes to plot the figure.
+            perc (list, optional): Percentiles to plot vertical lines on the cumulative plot. Defaults to [5e-5, 5e-4, 1e-3, 1e-2, 0.05].
+            bin_num (int, optional): Number of histogram bins. Defaults to 50.
+            log_y (bool, optional): Flag indicating whether to use log scale on the y-axis. Defaults to True.
+            figsize (tuple, optional): Figure size. Defaults to (10, 3).
+
+        Returns:
+            matplotlib.figure.Figure: Plotted figure.
+
+        Raises:
+            ValueError: If ax is provided but is not a tuple of (ax0, ax1).
+        """
+
+        if corr is None:
+            if events is None:
+                raise ValueError("Please provide either 'corr' or 'events' flag.")
+            corr = self.get_pearson_correlation(events)
+
+        if ax is None:
+            fig, (ax0, ax1) = plt.subplots(1, 2, figsize=figsize)
+        else:
+            if not isinstance(ax, (tuple, list, np.ndarray)) or len(ax) != 2:
+                raise ValueError("'ax' argument expects a tuple/list/np.ndarray of (ax0, ax1)")
+
+            ax0, ax1 = ax
+            fig = ax0.get_figure()
+
+        # Plot histogram
+        bins = ax0.hist(corr.flatten(), bins=bin_num)
+        if log_y:
+            ax0.set_yscale("log")
+        ax0.set_ylabel("Counts")
+        ax0.set_xlabel("Correlation")
+
+        # Plot cumulative distribution
+        counts, xaxis, _ = bins
+        counts = np.flip(counts)
+        xaxis = np.flip(xaxis)
+        cumm = np.cumsum(counts)
+        cumm = cumm / np.sum(counts)
+
+        ax1.plot(xaxis[1:], cumm)
+        if log_y:
+            ax1.set_yscale("log")
+        ax1.invert_xaxis()
+        ax1.set_ylabel("Fraction")
+        ax1.set_xlabel("Correlation")
+
+        # Plot vertical lines at percentiles
+        pos = [np.argmin(abs(cumm - p)) for p in perc]
+        vlines = [xaxis[p] for p in pos]
+        for v in vlines:
+            ax1.axvline(v, color="gray", linestyle="--")
+
+        return fig
+
+    def plot_compare_correlated_events(self, corr, events, event_ids=None,
+                                   event_index_range=(0, -1), z_range=None,
+                                   corr_mask=None, corr_range=None,
+                                   ev0_color="blue", ev1_color="red", ev_alpha=0.5, spine_linewidth=3,
+                                   ax=None, figsize=(20, 3), title=None):
+        """
+        Plot and compare correlated events.
+
+        Args:
+            corr (np.ndarray): Correlation matrix.
+            events (pd.DataFrame, np.ndarray or Events): Events data.
+            event_ids (tuple, optional): Tuple of event IDs to plot.
+            event_index_range (tuple, optional): Range of event indices to consider.
+            z_range (tuple, optional): Range of z values to plot.
+            corr_mask (np.ndarray, optional): Correlation mask.
+            corr_range (tuple, optional): Range of correlations to consider.
+            ev0_color (str, optional): Color for the first event plot.
+            ev1_color (str, optional): Color for the second event plot.
+            ev_alpha (float, optional): Alpha value for event plots.
+            spine_linewidth (float, optional): Linewidth for spines.
+            ax (matplotlib.axes.Axes, optional): Axes object to plot on.
+            figsize (tuple, optional): Figure size.
+            title (str, optional): Plot title.
+
+        Returns:
+            matplotlib.figure.Figure: The generated figure.
+        """
+        if ax is None:
+            fig, ax = plt.subplots(1, 1, figsize=figsize)
+        else:
+            fig = ax.get_figure()
+
+        if isinstance(events, Events):
+            events = events.events
+
+        # Validate event_index_range
+        if not isinstance(event_index_range, (tuple, list)) or len(event_index_range) != 2:
+            raise ValueError("Please provide event_index_range as a tuple of (start, stop)")
+
+        # Convert events to numpy array if it is a DataFrame
+        if isinstance(events, pd.DataFrame):
+            if "trace" not in events.columns:
+                raise ValueError("'events' dataframe is expected to have a 'trace' column.")
+
+            events = np.array(events.trace.tolist())
+
+        ind_min, ind_max = event_index_range
+        if ind_max == -1:
+            ind_max = len(events)
+
+        # Choose events
+        if event_ids is None:
+            # Randomly choose two events if corr_mask and corr_range are not provided
+            if corr_mask is None and corr_range is None:
+                ev0, ev1 = np.random.randint(ind_min, ind_max, size=2)
+
+            # Choose events based on corr_mask
+            elif corr_mask is not None:
+                # Warn if corr_range is provided and ignore it
+                if corr_range is not None:
+                    logging.warning("Prioritizing 'corr_mask'; ignoring 'corr_range' argument.")
+
+                if isinstance(corr_mask, (list, tuple)):
+                    corr_mask = np.array(corr_mask)
+
+                    if corr_mask.shape[0] != 2:
+                        raise ValueError(f"corr_mask should have a shape of (2xN) instead of {corr_mask.shape}")
+
+                rand_index = np.random.randint(0, corr_mask.shape[1])
+                ev0, ev1 = corr_mask[:, rand_index]
+
+            # Choose events based on corr_range
+            elif corr_range is not None:
+                # Validate corr_range
+                if len(corr_range) != 2:
+                    raise ValueError("Please provide corr_range as a tuple of (min_corr, max_corr)")
+
+                corr_min, corr_max = corr_range
+
+                # Create corr_mask based on corr_range
+                corr_mask = np.array(np.where(np.logical_and(corr >= corr_min, corr <= corr_max)))
+                logging.warning("Thresholding the correlation array may take a long time. Consider precalculating the 'corr_mask' with eg. 'np.where(np.logical_and(corr >= corr_min, corr <= corr_max))'")
+
+                rand_index = np.random.randint(0, corr_mask.shape[1])
+                ev0, ev1 = corr_mask[:, rand_index]
+
+        else:
+            ev0, ev1 = event_ids
+
+        if isinstance(ev0, np.ndarray):
+            ev0 = ev0[0]
+            ev1 = ev1[0]
+
+        # Choose z range
+        trace_0 = np.squeeze(events[ev0]).astype(float)
+        trace_1 = np.squeeze(events[ev1]).astype(float)
+
+        if isinstance(trace_0, da.Array):
+            trace_0 = trace_0.compute()
+            trace_1 = trace_1.compute()
+
+        if z_range is not None:
+            z0, z1 = z_range
+
+            if (z0 > len(trace_0)) or (z0 > len(trace_1)):
+                raise ValueError(f"Left bound z0 larger than event length: {z0} > {len(trace_0)} or {len(trace_1)}")
+
+            trace_0 = trace_0[z0: min(z1, len(trace_0))]
+            trace_1 = trace_1[z0: min(z1, len(trace_1))]
+
+        ax.plot(trace_0, color=ev0_color, alpha=ev_alpha)
+        ax.plot(trace_1, color=ev1_color, alpha=ev_alpha)
+
+        if title is None:
+            if isinstance(ev0, np.ndarray):
+                ev0 = ev0[0]
+                ev1 = ev1[0]
+            ax.set_title("{:,d} x {:,d} > corr: {:.4f}".format(ev0, ev1, corr[ev0, ev1]))
+
+        def correlation_color_map(colors=None):
+            """
+            Create a correlation color map.
+
+            Args:
+                colors (list, optional): List of colors.
+
+            Returns:
+                function: Color map function.
+            """
+            if colors is None:
+                neg_color = (0, "#ff0000")
+                neu_color = (0.5, "#ffffff")
+                pos_color = (1, "#0a700e")
+
+                colors = [neg_color, neu_color, pos_color]
+
+            cm = LinearSegmentedColormap.from_list("Custom", colors, N=200)
+
+            def lsc(v):
+                assert np.abs(v) <= 1, "Value must be between -1 and 1: {}".format(v)
+
+                if v == 0:
+                    return cm(100)
+                if v < 0:
+                    return cm(100 - int(abs(v) * 100))
+                elif v > 0:
+                    return cm(int(v * 100 + 100))
+
+            return lsc
+
+        lsc = correlation_color_map()
+        for spine in ax.spines.values():
+            spine.set_edgecolor(lsc(corr[ev0, ev1]))
+            spine.set_linewidth(spine_linewidth)
+
+        return fig

@@ -10,7 +10,7 @@ def test_local_caching_wrapper():
 def test_get_data_dimensions():
     raise NotImplementedError
 
-@pytest.mark.parametrize("typ", ["pandas", "list", "numpy", "dask"])
+@pytest.mark.parametrize("typ", ["pandas", "list", "numpy", "dask", "events"])
 @pytest.mark.parametrize("ragged", ["equal", "ragged"])
 @pytest.mark.parametrize("num_rows", [1, 10])
 def test_dummy_generator(num_rows, typ, ragged):

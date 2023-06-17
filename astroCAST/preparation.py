@@ -1001,7 +1001,7 @@ class MotionCorrection:
 
         if frames_per_file == "auto":
 
-            (Z, X, Y), chunksize, dtype = get_data_dimensions(input_, loc=loc, get_byte_numreturn_dtype=True)
+            (Z, X, Y), chunksize, dtype = get_data_dimensions(input_, loc=loc, return_dtype=True)
             byte_num = np.dtype(dtype).itemsize
             array_size = Z * X * Y * byte_num
 
@@ -1020,23 +1020,6 @@ class MotionCorrection:
         else: raise ValueError(f"Please provide one of these options for 'split_file' flag: None, 'auto', int, float")
 
         return frames_per_file
-
-    # @staticmethod
-    # def save_mmap(input_, loc=None, frames_per_file=None, working_directory=None):
-    #
-    #     (Z, X, Y), chunksize = get_data_dimensions(input_, loc=loc)
-    #
-    #     if working_directory is None:
-    #         working_directory = input_.parent
-    #
-    #     with tempfile.TemporaryDirectory(dir=working_directory) as temp_dir:
-    #         temp_dir = Path(temp_dir)
-
-
-
-
-
-        return files, dimensions, mmaps
 
     def save(self, output=None, loc=None, prefix="mc/", chunks=None, compression=None, remove_mmap=False):
 
@@ -1424,8 +1407,6 @@ class Delta:
                     res[:, x, y] = delta(z, background)
 
         return np.squeeze(arr) if inplace else np.squeeze(res)
-
-        return tr_max
 
     @staticmethod
     def calculate_delta_min_filter(arr: np.ndarray, window: int, method="background", inplace=False) -> np.ndarray:

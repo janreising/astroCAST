@@ -14,6 +14,10 @@ import pandas as pd
 import tifffile
 import tiledb
 import xxhash
+from tqdm import tqdm
+
+import astroCAST
+
 
 def notimplemented(f, msg=""):
 
@@ -46,14 +50,21 @@ def wrapper_local_cache(f):
             return hash_from_ndarray(df_hash.values)
 
         elif isinstance(arg, dict):
-            return sort(arg)
+            return get_sorted_hash(arg)
+
+        elif isinstance(arg, astroCAST.analysis.Events):
+            return hash(arg)
+
+        elif isinstance(arg, bool):
+            return str(arg)
 
         elif callable(arg):
             return arg.__name__
         else:
+            logging.warning(f"unknown argument type: {type(arg)}")
             return arg
 
-    def sort(kwargs):
+    def get_sorted_hash(kwargs):
         sorted_dict = OrderedDict()
 
         # make sure keys are sorted to get same hash
@@ -63,40 +74,23 @@ def wrapper_local_cache(f):
         # convert to ordered dict
         for key in keys:
 
+            if key in ["show_progress", "verbose", "verbosity"]:
+                continue
+
             value = kwargs[key]
 
             if isinstance(value, dict):
-                sorted_dict[key] = sort(value)
+                sorted_dict[key] = get_sorted_hash(value)
             else:
                 # hash arguments if necessary
                 sorted_dict[key] = hash_arg(value)
         return sorted_dict
 
-    def get_hash_from_args(f, args, kwargs):
-
-        cache_key = json.dumps(
-            [
-                f.__name__,
-                [hash_arg(arg) for arg in args[1:]],
-                sort(kwargs)
-            ],
-            separators=(',', ':')
-        )
-
-        print(f"\t{f.__name__}: {cache_key}")
-
-        h = xxhash.xxh64()
-        h.update(cache_key)
-        hash_val = h.intdigest()
-        h.reset()
-
-        return hash_val
-
     def get_string_from_args(f, args, kwargs):
 
         name_ = f.__name__
         args_ = [hash_arg(arg) for arg in args[1:]]
-        kwargs_ = sort(kwargs)
+        kwargs_ = get_sorted_hash(kwargs)
 
         hash_string = f"{name_}_"
 
@@ -165,21 +159,13 @@ def wrapper_local_cache(f):
         # what happens if we call it on a function without self??
         self_ = args[0]
 
-        if self_.local_cache:
-
-            # get hash from arguments
-            # hash_value = get_hash_from_args(f, args, kwargs)
-            # print("\thas_value: ", hash_value)
-            # cache_path = self_.lc_path.joinpath(f"{f.__name__}_{hash_value}")
-            # print("\tcache_path: ", cache_path)
+        if self_.cache_path is not None:
 
             hash_string = get_string_from_args(f, args, kwargs)
-            cache_path = self_.lc_path.joinpath(hash_string)
-            # print("\tcache_path: ", cache_path)
+            cache_path = self_.cache_path.joinpath(hash_string)
 
             # find file with regex matching from hash_value
             files = glob.glob(cache_path.as_posix() + ".*")
-            # print("\tfiles: ", files)
 
             # exists
             if len(files) == 1:
@@ -187,7 +173,7 @@ def wrapper_local_cache(f):
                 result = load_value(files[0])
 
                 if result is None:
-                    logging.info("error during loading. recacalculating value")
+                    logging.info("error during loading. recalculating value")
                     return f(*args, **kwargs)
 
                 logging.info(f"loaded result of {f.__name__} from file")
@@ -204,7 +190,6 @@ def wrapper_local_cache(f):
                 save_value(cache_path, result)
 
         else:
-
             result = f(*args, **kwargs)
 
         return result
@@ -383,6 +368,17 @@ class DummyGenerator:
         else:
             return da.from_array(data, chunks="auto")
 
+    def get_events(self):
+
+        from astroCAST.analysis import Events
+
+        ev = Events(event_dir=None)
+        df = self.get_dataframe()
+
+        ev.events = df
+        ev.seed = 1
+
+        return ev
 
     def get_by_name(self, name, param={}):
 
@@ -390,7 +386,8 @@ class DummyGenerator:
             "numpy": self.get_array(**param),
             "dask": self.get_dask(**param),
             "list": self.get_list(**param),
-            "pandas": self.get_dataframe(**param)
+            "pandas": self.get_dataframe(**param),
+            "events": self.get_events(**param)
         }
 
         if name not in options.keys():
@@ -839,3 +836,58 @@ class Normalization:
 
         else:
             return np.diff(data, axis=1)
+
+class Extension:
+
+    def __init__(self, events, video):
+
+        self.events = events
+        self.video = video
+
+    # todo make static so that it can be cached? issue is getting a hash value for the video input
+    def extend(self, num_frames, use_footprint=True, show_progress=True):
+
+        img = self.video.get_data()
+        events = self.events.events
+
+        if isinstance(num_frames, int):
+            prev_z = post_z = num_frames
+        elif isinstance(num_frames, (list, tuple)):
+            prev_z, post_z = num_frames
+        else:
+            raise ValueError("Please provide 'num_frames' as int or tuple (leading_frames, trailing_frames)")
+
+        ext_events = []
+        iterator = tqdm(events.iterrows(), total=len(events)) if show_progress else events.iterrows()
+        for _, event in iterator:
+
+            # get mask
+            if use_footprint:
+                m0 = m1 = np.invert(np.reshape(event["footprint"], (event.dx, event.dy)))
+            else:
+                m = np.invert(np.reshape(event["mask"], (event.dz, event.dx, event.dy)))
+                m0, m1 = m[0, :, :], m[-1, :, :]
+
+            # get boundaries
+            z0, z1, x0, x1, y0, y1 = event.z0, event.z1, event.x0, event.x1, event.y0, event.y1
+
+            # load previous data
+            prev_data = img[max(z0 - prev_z, 0):z0, x0:x1, y0:y1]
+            prev_data = np.ma.masked_array(data=prev_data, mask=np.broadcast_to(m0, prev_data.shape))
+            prev_data = np.nanmean(prev_data, axis=(1, 2))
+
+            # load past data
+            post_data = img[z1:min(z1+post_z, img.shape[0]), x0:x1, y0:y1]
+            post_data = np.ma.masked_array(data=post_data, mask=np.broadcast_to(m1, post_data.shape))
+            post_data = np.nanmean(post_data, axis=(1, 2))
+
+            # extend trace
+            extended_trace = np.concatenate([prev_data, np.array(event.trace), post_data])
+            ext_events.append(extended_trace)
+
+        return ext_events
+
+
+
+
+
