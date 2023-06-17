@@ -713,6 +713,7 @@ class Video:
     def show(self):
         return napari.view_image(self.data)
 
+
 class Plotting:
 
     def __init__(self, events):

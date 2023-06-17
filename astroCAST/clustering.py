@@ -93,12 +93,12 @@ class DTW_Linkage:
         self.cache_path = cache_path
 
     def get_barycenters(self, events, z_threshold, default_cluster = -1,
-                        correlation_type="pearson",
-                        param_distance={}, param_linkage_matrix={}, param_clustering={}, param_barycenter={}):
+                        distance_type="pearson", param_distance={},
+                        param_linkage_matrix={}, param_clustering={}, param_barycenter={}):
 
         corr = Distance(cache_path=self.cache_path)
         distance_matrix = corr.get_correlation(events,
-                                               correlation_type=correlation_type,
+                                               correlation_type=distance_type,
                                                correlation_param=param_distance)
 
         linkage_matrix = self.calculate_linkage_matrix(distance_matrix, **param_linkage_matrix)
@@ -113,7 +113,6 @@ class DTW_Linkage:
 
         return barycenters, cluster_lookup_table
 
-    #todo not completely done
     @wrapper_local_cache
     def get_two_step_barycenters(self, events, step_one_column="subject_id",
                                step_one_threshold=2, step_two_threshold=2,
@@ -142,7 +141,7 @@ class DTW_Linkage:
                                                  default_cluster=default_cluster, **step_one_param)
 
             combined_barycenters.append(barycenter)
-            internal_lookup_tables.update(lookup_table)  # todo doesn't work because of mapping conflict between cluster names
+            internal_lookup_tables.update(lookup_table)
 
         combined_barycenters = pd.concat(combined_barycenters).reset_index(drop=True)
         combined_barycenters.rename(columns={"bc":"trace"}, inplace=True)
@@ -157,18 +156,13 @@ class DTW_Linkage:
         step_two_barycenters, step_two_lookup_table = self.get_barycenters(combined_events, step_two_threshold,
                                                                            default_cluster=default_cluster,
                                                                            **step_two_param)
-        # todo how would this work?
-        # create a lookup table to sort event indices into clusters
-        # cluster_lookup_table = defaultdict(lambda: default_cluster)
-        # for _, row in step_two_barycenters.iterrows():
-        #
-        #     for step_two_idx in row.trace_idx:
-        #
-        #
-        #
-        #     cluster_lookup_table.update({idx_: row.cluster for idx_ in row.trace_idx})
 
-        # return barycenters, cluster_lookup_table
+        external_lookup_table = defaultdict(lambda: default_cluster)
+        for key in internal_lookup_tables.keys():
+            bary_id = internal_lookup_tables[key]
+            external_lookup_table[key] = step_two_lookup_table[bary_id]
+
+        return combined_barycenters, internal_lookup_tables, step_two_barycenters, external_lookup_table
 
     @wrapper_local_cache
     def calculate_linkage_matrix(self, distance_matrix, method="average", metric="euclidean"):
@@ -295,241 +289,6 @@ class DTW_Linkage:
                 fig.savefig(save_path.as_posix())
 
             return fig
-
-
-class TraceClustering:
-
-    def __init__(self, working_directory:Path, local_cache:bool = True, cache_path:Path = None):
-
-        if local_cache:
-
-            if cache_path is None:
-                cache_path = working_directory.joinpath("cache")
-                logging.warning(f"no 'cache_path' provided. Choosing {cache_path}")
-
-                if not cache_path.is_dir():
-                    cache_path.mkdir()
-
-        self.wd = Path(working_directory)
-        self.lc_path = cache_path
-        self.local_cache = local_cache
-
-    # todo implement wrapper caching
-    @wrapper_local_cache
-    def load_bary(self, subj):
-        """
-        Load barycenter is a static method of the class UnbiasedClustering.
-        It loads barycenter data for a given subject.
-
-        Parameters:
-        - subj (Path): The path to the subject directory.
-
-        Returns:
-        - data (dict): A dictionary containing the loaded barycenter data.
-        - "traces" (ndarray): The barycenter traces.
-        - "raw" (ndarray): The raw traces.
-        - "res" (DataFrame): The events data with additional columns "traces" and "raw".
-        - "linkage_matrix" (ndarray): The linkage matrix.
-
-        Raises:
-        - AssertionError: If the barycenters directory is not found for the subject.
-
-        Notes:
-        - This function assumes that the barycenter data files are located in the "cache/barycenters/" directory
-        within the subject directory.
-
-        Example usage:
-        >>> subj_path = Path("path/to/subject")
-        >>> data = UnbiasedClustering.load_bary(subj_path)
-        """
-
-        #print(self.lc_path) #Delete
-        #sd = subj.joinpath("cache/barycenters/")
-        #assert sd.is_dir(), "cannot find barycenters: {}".format(subj)
-        sd = subj.joinpath(self.lc_path) # TODO implement cache, option when local_cache = False?
-        assert sd.is_dir(), "cannot find barycenters: {}".format(subj)
-
-        data = {}
-
-        traces_path = sd.joinpath("bary_traces.npy")
-        traces = np.load(traces_path.as_posix(), allow_pickle=True)
-        data["traces"] = traces
-
-        raw_path = sd.joinpath("raw_traces.npy")
-        raw = np.load(raw_path.as_posix(), allow_pickle=True)
-        data["raw"] = raw
-
-        df_path = sd.joinpath("events.csv")
-        res = pd.read_csv(df_path.as_posix())
-        res["traces"] = traces
-        res["raw"] = raw
-        data["res"] = res
-
-        z_path = sd.joinpath("linkage_matrix.npy")
-        Z = np.load(z_path.as_posix())
-        data["linkage_matrix"]  = Z
-
-        return data
-
-    def bary_prep(self, subjects: list, mem_data = None, z_thr = 2, min_cluster_size = 15, load_bary = False,
-                 dtw_parameters = {"penalty": 0, "psi": None}, show_progress = False):
-
-        data = {}
-        iterator = tqdm(subjects) if show_progress else subjects
-        for subj_i, (subj, condition) in enumerate(iterator):
-            assert subj.is_dir(), "cannot find folder: {}".format(subj)
-
-            #sd = subj.joinpath("cache/barycenters/")
-            sd = subj.joinpath(self.lc_path) # TODO implement cache, option when local_cache = False?
-            assert sd.is_dir(), "cannot find barycenters: {}".format(subj)
-
-            name = ".".join(subj.name.split(".")[:2])
-            name = os.path.splitext(subj.name)[0]
-
-            # load
-            #data[name] = UnbiasedClustering.load_bary(subj) if mem_data is None else mem_data[name]
-            data[name] = self.load_bary(subj) if mem_data is None else mem_data[name]
-            res = data[name]["res"]
-            res["index"] = res["index"].apply(lambda x: x.replace("0x", f"{subj_i}x")) # convert to unique identifiers
-
-            traces = data[name]["traces"]
-            Z = data[name]["linkage_matrix"]
-
-            if load_bary:
-                bary_path = sd.joinpath("barycenters.npy")
-                barycenters = np.load(bary_path.as_posix(), allow_pickle=True)
-                barycenters["trace_idx"] = barycenters["trace_idx"].apply(
-                    lambda x: [s.replace("0x", f"{subj_i}x") for s in x])
-
-                data[name]["barycenter"] = pd.DataFrame(barycenters[()]).transpose().sort_values("num", ascending=False)
-
-            else:
-
-                # filter
-                cluster_labels = fcluster(Z = Z, t = z_thr, criterion="distance")
-                clusters = pd.Series(cluster_labels).value_counts().sort_index()
-                clusters = clusters[clusters > min_cluster_size]
-
-                # clusters
-                barycenters = {}
-                for i, cl in enumerate(clusters.index):
-
-                    idx_ = np.where(cluster_labels == cl)[0]
-                    sel = [traces[id_] for id_ in idx_]
-
-                    bc = dtw_barycenter.dba_loop(sel, c=None,
-                                                 nb_initial_samples=max(1, int(0.1*len(sel))),
-                                                 max_it=100, thr=1e-5, use_c=True, **dtw_parameters)
-
-                    barycenters[cl] = {"trace_idx":[res["index"][id_] for id_ in idx_], "bc":bc, "num":clusters.iloc[i]}
-
-                barycenters = pd.DataFrame(barycenters).transpose()
-
-                if "num" not in barycenters.columns:
-                    raise KeyError("KeyError: 'num': {}".format(barycenters))
-
-                data[name]["barycenter"] = barycenters.sort_values("num", ascending=False)
-
-            data[name]["condition"] = condition
-
-        return data
-
-
-    def combine_barycenters(self, data: dict, z_thr = 2,
-                            events = None, barycenters = None, Z = None,
-                            add_cluster_to_events:bool = False, default_cluster = -1,
-                            verbose = 0) -> tuple[pd.DataFrame, pd.DataFrame, np.ndarray]:
-        """
-        Combines barycenters from multiple sources and performs clustering.
-
-        Parameters:
-            data (dict): Dictionary containing the loaded barycenter data.
-            z_thr (int): Threshold value for clustering.
-            events (pd.DataFrame, optional): Combined events dataframe. Default is None.
-            barycenters (pd.DataFrame, optional): Combined barycenters dataframe. Default is None.
-            Z (ndarray, optional): Linkage matrix. Default is None.
-            add_cluster_to_events (bool, optional): Flag indicating whether to add cluster labels to events. Default is False.
-            default_cluster (int, optional): Default cluster label. Default is -1.
-            verbose (int, optional): Verbosity level. Default is 0.
-
-        Returns:
-            tuple[pd.DataFrame, pd.DataFrame, np.ndarray]: A tuple containing the combined events dataframe,
-            combined barycenters dataframe, and the linkage matrix.
-        """
-
-        # create combined dataframe: res
-        if events is None:
-            events = []
-            for i, key in enumerate(data.keys()):
-                temp = data[key]["res"]
-                temp["name"] = key
-
-                # # create unique identifiers from sample identifiers
-                # temp["index"] = temp["index"].apply(lambda x: "{}y{}".format(i, x))
-
-                temp["idx"] = temp["index"]
-
-                events.append(temp)
-
-            events = pd.concat(events).reset_index(drop = True)
-
-        # create combined dataframe: barycenter
-        if barycenters is None:
-            barycenters = []
-            for i, key in enumerate(data.keys()):
-
-                temp = data[key]["barycenter"]
-                temp["name"] = key
-                temp["idx"] = temp.index
-
-                # # create unique identifiers from sample identifiers
-                # temp["idx"] = temp["idx"].apply(lambda x: "{}y{}".format(i, x))
-
-                barycenters.append(temp)
-
-            barycenters = pd.concat(barycenters).reset_index(drop = True)
-
-        if Z is None:
-
-            comb_traces = barycenters.bc.tolist()
-
-            # create distance matrix between barycenters
-            dm = dtw.distance_matrix_fast(comb_traces, compact = True)
-
-            # create linkage matrix
-            Z = fastcluster.linkage(dm, method = "complete",
-                                    metric = "euclidean", preserve_input = False)
-
-        # cluster traces
-        cluster_labels = fcluster(Z = Z, t = z_thr, criterion = 'distance')
-
-        # save new labels
-        barycenters["cluster"] = cluster_labels
-
-        if add_cluster_to_events:
-            print("moved to 'get_barycenters'")
-
-        if verbose > 0:
-            print("\t#events:{:,d}".format(len(events)))
-            print("\t#barycenter:{:4,d}".format(len(barycenters)))
-            print("\treduction: {:.1f}%\n".format(len(barycenters)/len(events)*100))
-
-            print("\t#clusters: {:,d}".format(len(barycenters.cluster.unique())))
-            print("\treduction: {:.1f}% / {:.1f}%".format(
-                len(barycenters.cluster.unique())/len(barycenters)*100,
-                len(barycenters.cluster.unique())/len(events)*100))
-
-        if self.lc_path is not None:
-            events.to_pickle(os.path.join(self.lc_path, "combined_events.pkl"))
-            barycenters.to_pickle(os.path.join(self.lc_path, "combined_barycenters.pkl"))
-            np.save(os.path.join(self.lc_path, "combined_linkage_matrix.npy"), Z)
-        else:
-            events.to_pickle(os.path.join(self.wd, "combined_events.pkl"))
-            barycenters.to_pickle(os.path.join(self.wd, "combined_barycenters.pkl"))
-            np.save(os.path.join(self.wd, "combined_linkage_matrix.npy"), Z)
-
-        return events, barycenters, Z
-
 
 class Distance:
     """
