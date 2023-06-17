@@ -424,6 +424,8 @@ class Events:
         elif video is None:
             video = self.data
 
+        video = video.get_data()
+
         n_events = len(events)
         n_frames, X, Y = video.shape
 
@@ -703,10 +705,6 @@ class Events:
         # split trial_length in pre and post
         leading = trailing = int(trial_length / 2)
         leading += trial_length - (leading + trailing)
-
-        # extend events if requested
-        if extend is not None:
-            raise NotImplementedError
 
         # get contained timings per event
         def find_contained_timings(row):
