@@ -332,9 +332,6 @@ class CNN:
             self.encoder = keras.models.load_model(model_path.as_posix())
             self.autoencoder = keras.models.load_model(model_path.as_posix())
 
-class Barycenter_OR_TIMECLUSTERING:
-    def __init__(self):
-        pass
 
 class ClusterTree():
 

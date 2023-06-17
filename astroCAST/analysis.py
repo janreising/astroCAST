@@ -278,7 +278,6 @@ class Events:
 
         return event_map
 
-    # @notimplemented("implement get_time_map()")
     @staticmethod
     def get_time_map(event_dir=None, event_map=None, chunk=100):
         """
@@ -332,7 +331,7 @@ class Events:
         return time_map, events_start_frame, events_end_frame
 
     @staticmethod
-    def load_events(event_dir, z_slice=None, index_prefix=None, custom_columns=["area_norm", "cx", "cy"]):
+    def load_events(event_dir, z_slice=None, index_prefix=None, custom_columns=("area_norm", "cx", "cy")):
 
         """
         Load events from the specified directory and perform optional preprocessing.
@@ -401,11 +400,10 @@ class Events:
 
         return events
 
-    # @wrapper_local_cache
-    @staticmethod
-    def get_extended_events(events, video, dtype=np.half, extend=-1,
-                       normalization_instructions=None, show_progress=True,
-                       memmap_path=None, save_path=None, save_param={}):
+    def get_extended_events(self, video=None, dtype=np.half, extend=-1,
+                            return_array=False, in_place=False,
+                            normalization_instructions=None, show_progress=True,
+                            memmap_path=None, save_path=None, save_param={}):
 
         """ takes the footprint of each individual event and extends it over the whole z-range
 
@@ -418,20 +416,36 @@ class Events:
 
         """
 
+        events = self.events if in_place else self.events.copy()
+
+        if video is None and self.data is None:
+            raise ValueError("to extend the event traces you either have to provide the 'video' argument "
+                             "when calling this function or the 'data' argument during Event creation.")
+        elif video is None:
+            video = self.data
+
         n_events = len(events)
         n_frames, X, Y = video.shape
 
-        # create array to save events in
-        if memmap_path:
-            memmap_path = Path(memmap_path).with_suffix(f".dtype_{np.dtype(dtype).name}_shape_{n_events}x{n_frames}.mmap")
-            arr = np.memmap(memmap_path.as_posix(), dtype=dtype, mode='w+', shape=(n_events, n_frames))
-        else:
-            arr = np.zeros((n_events, n_frames), dtype=dtype)
+        # create container to save extended events in
+        arr_ext, extended = None, None
+        if return_array:
 
-        arr_size = arr.itemsize*n_events*n_frames
-        ram_size = psutil.virtual_memory().total
-        if arr_size > 0.9 * ram_size:
-            logging.warning(f"array size ({n_events}, {n_frames}) is larger than 90% RAM size ({arr_size*1e-9:.2f}GB, {arr_size/ram_size*100}%). Consider using smaller dtype or 'lazy=True'")
+            if memmap_path:
+                memmap_path = Path(memmap_path).with_suffix(f".dtype_{np.dtype(dtype).name}_shape_{n_events}x{n_frames}.mmap")
+                arr_ext = np.memmap(memmap_path.as_posix(), dtype=dtype, mode='w+', shape=(n_events, n_frames))
+            else:
+                arr_ext = np.zeros((n_events, n_frames), dtype=dtype)
+
+            arr_size = arr_ext.itemsize*n_events*n_frames
+            ram_size = psutil.virtual_memory().total
+            if arr_size > 0.9 * ram_size:
+                logging.warning(f"array size ({n_events}, {n_frames}) is larger than 90% RAM size ({arr_size*1e-9:.2f}GB, {arr_size/ram_size*100}%). Consider using smaller dtype or 'lazy=True'")
+
+        else:
+            extended = list()
+
+        z0_container, z1_container = list(), list()
 
         # extract footprints
         c = 0
@@ -473,18 +487,37 @@ class Events:
                 norm = helper.Normalization(data=p, inplace=True)
                 norm.run(normalization_instructions)
 
-            arr[c, z0:z1] = p
+            if return_array:
+                arr_ext[c, z0:z1] = p
+            else:
+                extended.append(p)
+
+            z0_container.append(z0)
+            z1_container.append(z1)
+
             c += 1
 
-        # TODO add trimming of empty left and right borders
+        if return_array:
 
-        if save_path is not None and memmap_path is None:
-            io = IO()
-            io.save(path=save_path, data=arr, **save_param)
+            if save_path is not None and memmap_path is None:
+                io = IO()
+                io.save(path=save_path, data=arr_ext, **save_param)
 
-        return arr
+            elif memmap_path is not None:
+                logging.info(f"extended array saved as memmap to :{memmap_path}")
 
-    # @wrapper_local_cache
+            return arr_ext, z0_container, z1_container
+
+        else:
+
+            events.trace = extended
+            events.z0 = z0_container
+            events.z1 = z1_container
+
+            events.dz = events["z1"] - events["z0"]
+
+            return events
+
     def to_numpy(self, events=None, empty_as_nan=True):
 
         """
@@ -653,6 +686,96 @@ class Events:
 
         return val
 
+    def get_trials(self, trial_timings, trial_length=30, extend=None, multi_timing_behavior="first", format="array"):
+
+        if format not in ["array", "dataframe"]:
+            raise ValueError(f"'format' attribute has to be one of ['array', 'dataframe'] not: {format}")
+
+        if multi_timing_behavior not in ["first", "expand", "exclude"]:
+            raise ValueError("'multi_timing_behavior' has to be one of ['first', 'expand', 'exclude']")
+
+        events = self.events.copy()
+
+        # convert timings to np.ndarray
+        if not isinstance(trial_timings, np.ndarray):
+            trial_timings = np.array(trial_timings)
+
+        # split trial_length in pre and post
+        leading = trailing = int(trial_length / 2)
+        leading += trial_length - (leading + trailing)
+
+        # extend events if requested
+        if extend is not None:
+            raise NotImplementedError
+
+        # get contained timings per event
+        def find_contained_timings(row):
+            mask = np.logical_and(trial_timings >= row.z0, trial_timings <= row.z1)
+
+            num_timings = np.sum(mask)
+            contained_timings = trial_timings[mask]
+            return num_timings, tuple(contained_timings)
+
+        num_timings, contained_timings = events.apply(find_contained_timings, axis=1)
+        events["num_timings"] = num_timings
+        events["timings"] = contained_timings
+
+        # decide what happens if multiple timings happen during a single event
+        if multi_timing_behavior == "first":
+            events = events[events.num_timings > 0]
+            num_rows = len(events)
+
+        elif multi_timing_behavior == "expand":
+            events = events[events.num_timings > 0]
+            num_rows = events.num_timings.sum()
+
+        elif multi_timing_behavior == "exclude":
+            events = events[events.num_timings == 1]
+            num_rows = len(events)
+
+        #create trial matrix
+        array = np.empty((num_rows, trial_length))
+
+        # fill array
+        i = 0
+        for _, row in events.iterrows():
+            for t in row.timings:
+
+                # get boundaries
+                z0, z1 = row.z0, row.z1
+                t0, t1 = t - leading, t + trailing
+                delta_left, delta_right = t0-z0, t1-z1
+
+                # calculate offsets
+                eve_idx_left = max(0, delta_left)
+                eve_idx_right = delta_right if delta_right < 0 else None
+                arr_idx_left = min(0, delta_right)
+                arr_idx_right = delta_left if delta_left < 0 else None
+
+                # splice event into array
+                array[i, arr_idx_left:arr_idx_right] = np.array(row.trace)[eve_idx_left:eve_idx_right]
+
+                i += 1
+
+        if format == "dataframe":
+
+            t_range = list(range(-leading, trailing))
+
+            trial_ids = []
+            values = []
+            timepoints = []
+            for row in range(len(array)):
+
+                trial_ids += [row]*trial_length
+                values += array[row, :].tolist()
+                timepoints += t_range
+
+            res = pd.DataFrame({"trial_ids":trial_ids, "timepoint":timepoints, "value":values})
+
+        else:
+            res = array
+
+        return res
 
 class Video:
 
