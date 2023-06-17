@@ -688,7 +688,7 @@ class Events:
 
         return val
 
-    def get_trials(self, trial_timings, trial_length=30, extend=None, multi_timing_behavior="first", format="array"):
+    def get_trials(self, trial_timings, trial_length=30, multi_timing_behavior="first", format="array"):
 
         if format not in ["array", "dataframe"]:
             raise ValueError(f"'format' attribute has to be one of ['array', 'dataframe'] not: {format}")
@@ -712,15 +712,19 @@ class Events:
 
             num_timings = np.sum(mask)
             contained_timings = trial_timings[mask]
-            return num_timings, tuple(contained_timings)
+            return tuple(contained_timings)
 
-        num_timings, contained_timings = events.apply(find_contained_timings, axis=1)
-        events["num_timings"] = num_timings
-        events["timings"] = contained_timings
+        events["timings"] = events.apply(find_contained_timings, axis=1)
+        events["num_timings"] = events.timings.apply(lambda x: len(x))
 
         # decide what happens if multiple timings happen during a single event
         if multi_timing_behavior == "first":
             events = events[events.num_timings > 0]
+
+            # print(f"num_timings:\n{events.num_timings}")
+            # print(f"timings:\n{events.timings}")
+
+            events.timings = events.timings.apply(lambda x: [x[0]])
             num_rows = len(events)
 
         elif multi_timing_behavior == "expand":
@@ -731,12 +735,15 @@ class Events:
             events = events[events.num_timings == 1]
             num_rows = len(events)
 
+        # print(f"num_timings:\n{events.num_timings}")
+        # print(f"timings:\n{events.timings}")
+
         #create trial matrix
         array = np.empty((num_rows, trial_length))
 
         # fill array
         i = 0
-        for _, row in events.iterrows():
+        for ev_idx, row in events.iterrows():
             for t in row.timings:
 
                 # get boundaries
@@ -747,8 +754,18 @@ class Events:
                 # calculate offsets
                 eve_idx_left = max(0, delta_left)
                 eve_idx_right = delta_right if delta_right < 0 else None
-                arr_idx_left = min(0, delta_right)
-                arr_idx_right = delta_left if delta_left < 0 else None
+
+                # arr_idx_left = min(0, delta_right)
+                # arr_idx_right = delta_left if delta_left < 0 else None
+
+                arr_idx_left = max(0, -delta_left)
+                arr_idx_right = -delta_right if -delta_right < 0 else None
+
+                # print(f"\n{ev_idx} (#{len(row.trace)}) - stimulus_t: {t}")
+                # print(f"z: {z0}-{z1}, t:{t0}-{t1}, d:{delta_left}-{delta_right}")
+                # print(f"event_idx: {eve_idx_left}:{eve_idx_right} (#{len(np.array(row.trace)[eve_idx_left:eve_idx_right])})")
+                # print(f"arr_idx: {arr_idx_left}:{arr_idx_right} (#{len(array[i, arr_idx_left:arr_idx_right])})")
+                # print(np.array(row.trace))
 
                 # splice event into array
                 array[i, arr_idx_left:arr_idx_right] = np.array(row.trace)[eve_idx_left:eve_idx_right]
@@ -774,6 +791,7 @@ class Events:
             res = array
 
         return res
+
 
 class Video:
 
