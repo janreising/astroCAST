@@ -747,7 +747,9 @@ class Modules(CachedClass):
 
         edges["module"] = edge_module
 
-        return nodes, edges
+        lookup_cluster_table = dict(zip(nodes.trace_idx.tolist(), nodes.module.tolist()))
+
+        return nodes, edges, lookup_cluster_table
 
     def summarize_modules(self, nodes):
 

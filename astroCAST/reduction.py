@@ -71,6 +71,7 @@ class UMAP:
         assert path.is_file(), f"can't find umap: {path}"
         self.reducer = pickle.load(open(path, "rb"))
 
+
 class CNN:
 
     """ embeds data in a latent space of defined size
