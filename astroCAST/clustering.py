@@ -17,10 +17,14 @@ from matplotlib.colors import LinearSegmentedColormap
 from networkx.algorithms import community
 from scipy.cluster.hierarchy import fcluster
 import seaborn as sns
+from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
+from sklearn.model_selection import cross_val_score
+from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
+from sklearn import metrics
 from tqdm import tqdm
 
 from astroCAST.analysis import Events
-from astroCAST.helper import wrapper_local_cache, is_ragged, CachedClass
+from astroCAST.helper import wrapper_local_cache, is_ragged, CachedClass, Normalization
 
 # from dtaidistance import dtw_visualisation as dtwvis
 # from dtaidistance import clustering
@@ -771,4 +775,138 @@ class Modules(CachedClass):
 
         return pd.DataFrame(summary)
 
+
+class Discriminator(CachedClass):
+
+    def __init__(self, events, cache_path=None):
+        super().__init__(cache_path=cache_path)
+
+        self.events = events
+        self.X_test = None
+        self.Y_test = None
+        self.X_train = None
+        self.Y_train = None
+        self.indices_train = None
+        self.indices_test = None
+        self.clf = None
+
+    def train_classifier(self, embedding, category_column, split=0.8,
+                         classifier="RandomForestClassifier", param_classifier=dict(n_estimators=100, n_jobs=-1)):
+
+        # split into training and validation dataset
+        self.split_dataset(embedding, category_column, split=split)
+
+        # fit model
+        if classifier == "RandomForestClassifier":
+            clf = RandomForestClassifier(**param_classifier)
+        else:
+            # todo maybe each individual function?
+            raise ValueError("Please provide on of the following classifiers: ['RandomForestClassifier']")
+
+        clf.fit(self.X_train, self.Y_train)
+
+        self.clf = clf
+
+    def predict(self, X, normalization_instructions=None):
+
+        if normalization_instructions is not None:
+            norm = Normalization(X, inplace=True)
+            norm.run(normalization_instructions)
+
+        return self.clf.predict(X)
+
+    def evaluate(self, cutoff=0.5, normalize=None):
+
+        X = self.X_test
+        Y = self.Y_test
+        pred_test = np.squeeze(self.clf.predict(X))
+
+        if pred_test.dtype != int:
+            logging.warning(f"assuming probability prediction. thresholding at {cutoff}")
+
+            Y = Y >= cutoff
+
+        cm =  confusion_matrix(pred_test, Y, normalize=normalize)
+
+        cm = pd.DataFrame(cm)
+        cm.index = [f"true_{i}" for i in cm.index]
+        cm.columns = [f"pred_{c}" for c in cm.columns]
+
+        return cm
+
+
+    def split_dataset(self, embedding, category_column, split=0.8,
+                      balance_training_set=False, balance_test_set=False, encode_category=None,
+                      normalization_instructions=None):
+
+        # get data
+        X = embedding
+
+        # get category to predict
+        if isinstance(category_column, list):
+            Y = np.array(category_column)
+        elif isinstance(category_column, np.ndarray):
+            Y = category_column
+        elif isinstance(category_column, str):
+
+            if encode_category is None:
+                Y = np.array(self.events.events[category_column].tolist())
+            else:
+                Y = np.array(self.events.events[category_column].map(encode_category).tolist())
+
+        # check inputs
+        if len(X) != len(Y):
+            raise ValueError(f"embedding and events must have the same length: "
+                             f"len(embedding)={len(X)} vs. len(events)={len(Y)}")
+
+        if np.sum(np.isnan(X)) > 0:
+            raise ValueError(f"embedding cannot contain NaN values.")
+
+        # normalize
+        if normalization_instructions is not None:
+            norm = Normalization(X, inplace=True)
+            norm.run(normalization_instructions)
+
+        # split X and Y
+        split_idx = int(len(X)*split)
+        X_train, X_test = X[:split_idx], X[split_idx:]
+        Y_train, Y_test = Y[:split_idx], Y[split_idx:]
+
+        indices = self.events.events.index.tolist()
+        indices_train, indices_test = indices[:split_idx], indices[split_idx:]
+
+        # balancing
+        if balance_training_set:
+            X_train, Y_train, indices_train = self._balance_set(X_train, Y_train, indices_train)
+
+        if balance_test_set:
+            X_test, Y_test, indices_test = self._balance_set(X_test, Y_test, indices_test)
+
+        # cache results
+        self.X_train = X_train
+        self.Y_train = Y_train
+        self.X_test = X_test
+        self.Y_test = Y_test
+        self.indices_train = indices_train
+        self.indices_test = indices_test
+
+    def _balance_set(self, X, Y, indices):
+
+        # identify the category with the fewest members
+        count_category_members = pd.Series(Y).value_counts()
+        min_category_count = count_category_members.min()
+
+        # choose random indices
+        rand_indices = list()
+        for category in count_category_members.index.unique():
+            rand_indices.append(np.random.choice(np.where(Y == category)[0], size=min_category_count, replace=False))
+
+        rand_indices = rand_indices.flatten()
+
+        # select randomly chosen rows
+        X = X[rand_indices]
+        Y = Y[rand_indices]
+        indices = indices[rand_indices]
+
+        return X, Y, indices
 
