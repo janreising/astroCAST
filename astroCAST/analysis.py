@@ -15,7 +15,7 @@ import awkward as ak
 
 import astroCAST.detection
 from astroCAST import helper
-from astroCAST.helper import get_data_dimensions, is_ragged, CachedClass
+from astroCAST.helper import get_data_dimensions, is_ragged, CachedClass, Normalization
 from astroCAST.preparation import IO
 
 
@@ -867,6 +867,23 @@ class Events(CachedClass):
             self.events = events
 
         return events
+
+    def get_frequency(self, grouping_column, cluster_column, normalization_instructions=None):
+
+        events = self.events
+
+        grouped = events[[grouping_column, cluster_column, "dz"]].groupby([grouping_column, cluster_column]).count()
+        grouped.reset_index(inplace=True)
+
+        pivot = grouped.pivot(index=cluster_column, columns=grouping_column, values="dz")
+        pivot = pivot.fillna(0)
+
+        if normalization_instructions is not None:
+            norm = Normalization(pivot.values, inplace=True)
+            norm_arr = norm.run(normalization_instructions)
+            pivot = pd.DataFrame(norm_arr, index=pivot.index, columns=pivot.columns)
+
+        return pivot
 
 class Video:
 
