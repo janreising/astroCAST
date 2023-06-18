@@ -15,120 +15,116 @@ import awkward as ak
 
 import astroCAST.detection
 from astroCAST import helper
-from astroCAST.helper import get_data_dimensions, is_ragged
+from astroCAST.helper import get_data_dimensions, is_ragged, CachedClass
 from astroCAST.preparation import IO
 
 
-class Events:
+class Events(CachedClass):
 
-    def __init__(self, event_dir, meta_path=None, in_memory=False,
-                 data=None, h5_loc=None, group=None, subject_id=None,
-                 z_slice=None, index_prefix=None, custom_columns=("area_norm", "cx", "cy"),
-                 frame_to_time_mapping=None, frame_to_time_function=None, seed=1):
+    def __init__(self, event_dir, meta_path=None, in_memory=False, data=None, h5_loc=None, group=None, subject_id=None,
+                 z_slice=None, index_prefix=None, custom_columns=("area_norm", "cx", "cy"), frame_to_time_mapping=None,
+                 frame_to_time_function=None, cache_path=None, seed=1):
 
-        if event_dir is None:
-            return None
+        super().__init__(cache_path=cache_path)
 
-        if not isinstance(event_dir, list):
+        if event_dir is not None:
 
-            event_dir = Path(event_dir)
-            if not event_dir.is_dir():
-                raise FileNotFoundError(f"cannot find provided event directory: {event_dir}")
+            if not isinstance(event_dir, list):
 
-            if meta_path is not None:
-                logging.debug("I should not be called at all")
-                self.get_meta_info(meta_path)
+                event_dir = Path(event_dir)
+                if not event_dir.is_dir():
+                    raise FileNotFoundError(f"cannot find provided event directory: {event_dir}")
 
-            # get data
-            if isinstance(data, (str, Path)):
-                self.data = Video(data, z_slice=z_slice, h5_loc=h5_loc, lazy=False)
+                if meta_path is not None:
+                    logging.debug("I should not be called at all")
+                    self.get_meta_info(meta_path)
 
-            if isinstance(data, (np.ndarray, da.Array)):
+                # get data
+                if isinstance(data, (str, Path)):
+                    self.data = Video(data, z_slice=z_slice, h5_loc=h5_loc, lazy=False)
 
+                if isinstance(data, (np.ndarray, da.Array)):
+
+                    if z_slice is not None:
+                        logging.warning("'data'::array > Please ensure array was not sliced before providing data flag")
+
+                    self.data = Video(data, z_slice=z_slice, lazy=False)
+
+                elif isinstance(data, Video):
+
+                    if z_slice is not None:
+                        logging.warning("'data'::Video > Slice manually during Video object initialization")
+
+                    self.data = data
+
+                else:
+                    self.data = data
+
+                # load event map
+                event_map, event_map_shape, event_map_dtype = self.get_event_map(event_dir, in_memory=in_memory) # todo slicing
+                self.event_map = event_map
+                self.num_frames, self.X, self.Y = event_map_shape
+
+                # create time map
+                time_map, events_start_frame, events_end_frame = self.get_time_map(event_dir)
+
+                # load events
+                self.events = self.load_events(event_dir, z_slice=z_slice, index_prefix=index_prefix, custom_columns=custom_columns)
+
+                # z slicing
+                self.z_slice = z_slice
                 if z_slice is not None:
-                    logging.warning("'data'::array > Please ensure array was not sliced before providing data flag")
+                    z_min, z_max = z_slice
+                    self.events = self.events[(self.events.z0 >= z_min) & (self.events.z1 <= z_max)]
 
-                self.data = Video(data, z_slice=z_slice, lazy=False)
+                    # TODO how does this effect:
+                    #   - time_map, events_start_frame, events_end_frame
+                    #   - data
+                    #   - indices in the self.events dataframe
 
-            elif isinstance(data, Video):
+                self.z_range = (self.events.z0.min(), self.events.z1.max())
 
-                if z_slice is not None:
-                    logging.warning("'data'::Video > Slice manually during Video object initialization")
+                # align time
+                if frame_to_time_mapping is not None or frame_to_time_function is not None:
+                    self.events["t0"] = self.convert_frame_to_time(self.events.z0.tolist(),
+                                                                mapping=frame_to_time_mapping,
+                                                                function=frame_to_time_function)
 
-                self.data = data
+                    self.events["t1"] = self.convert_frame_to_time(self.events.z1.tolist(),
+                                                                mapping=frame_to_time_mapping,
+                                                                function=frame_to_time_function)
+
+                    self.events.dt = self.events.t1 - self.events.t0
+
+                # add group columns
+                self.events["group"] = group
+                self.events["subject_id"] = subject_id
+                self.events["name"] = event_dir.stem
 
             else:
-                self.data = data
+                # multi file support
 
-            # load event map
-            event_map, event_map_shape, event_map_dtype = self.get_event_map(event_dir, in_memory=in_memory) # todo slicing
-            self.event_map = event_map
-            self.num_frames, self.X, self.Y = event_map_shape
+                event_objects = []
+                for i in range(len(event_dir)):
 
-            # create time map
-            time_map, events_start_frame, events_end_frame = self.get_time_map(event_dir)
+                    event = Events(event_dir[i],
+                                   meta_path=meta_path if not isinstance(meta_path, list) else meta_path[i],
+                                   data=data if not isinstance(data, list) else data[i],
+                                   h5_loc=h5_loc if not isinstance(h5_loc, list) else h5_loc[i],
+                                   z_slice=z_slice if not isinstance(z_slice, list) else z_slice[i],
+                                   group=group if not isinstance(group, list) else group[i],
+                                   in_memory=in_memory,
+                                   index_prefix=f"{i}x", subject_id=i,
+                                   custom_columns=custom_columns,
+                                   frame_to_time_mapping=frame_to_time_mapping if not isinstance(frame_to_time_mapping, list) else frame_to_time_mapping[i],
+                                   frame_to_time_function=frame_to_time_function if not isinstance(frame_to_time_function, list) else frame_to_time_function[i])
 
-            # load events
-            self.events = self.load_events(event_dir, z_slice=z_slice, index_prefix=index_prefix, custom_columns=custom_columns)
+                    event_objects.append(event)
 
-            # z slicing
-            self.z_slice = z_slice
-            if z_slice is not None:
-                z_min, z_max = z_slice
-                self.events = self.events[(self.events.z0 >= z_min) & (self.events.z1 <= z_max)]
-
-                # TODO how does this effect:
-                #   - time_map, events_start_frame, events_end_frame
-                #   - data
-                #   - indices in the self.events dataframe
-
-            self.z_range = (self.events.z0.min(), self.events.z1.max())
-
-            # align time
-            if frame_to_time_mapping is not None or frame_to_time_function is not None:
-                self.events["t0"] = self.convert_frame_to_time(self.events.z0.tolist(),
-                                                            mapping=frame_to_time_mapping,
-                                                            function=frame_to_time_function)
-
-                self.events["t1"] = self.convert_frame_to_time(self.events.z1.tolist(),
-                                                            mapping=frame_to_time_mapping,
-                                                            function=frame_to_time_function)
-
-                self.events.dt = self.events.t1 - self.events.t0
-
-            # add group columns
-            if group is not None:
-                self.events["group"] = group
-
-            if subject_id is not None:
-                self.events["subject_id"] = subject_id
-
-            self.events["name"] = event_dir.stem
-
-        else:
-            # multi file support
-
-            event_objects = []
-            for i in range(len(event_dir)):
-
-                event = Events(event_dir[i],
-                               meta_path=meta_path if not isinstance(meta_path, list) else meta_path[i],
-                               data=data if not isinstance(data, list) else data[i],
-                               h5_loc=h5_loc if not isinstance(h5_loc, list) else h5_loc[i],
-                               z_slice=z_slice if not isinstance(z_slice, list) else z_slice[i],
-                               group=group if not isinstance(group, list) else group[i],
-                               in_memory=in_memory,
-                               index_prefix=f"{i}x", subject_id=i,
-                               custom_columns=custom_columns,
-                               frame_to_time_mapping=frame_to_time_mapping if not isinstance(frame_to_time_mapping, list) else frame_to_time_mapping[i],
-                               frame_to_time_function=frame_to_time_function if not isinstance(frame_to_time_function, list) else frame_to_time_function[i])
-
-                event_objects.append(event)
-
-            self.event_objects = event_objects
-            self.events = pd.concat([ev.events for ev in event_objects])
-            self.events.reset_index(drop=False, inplace=True, names="idx")
-            self.z_slice = z_slice
+                self.event_objects = event_objects
+                self.events = pd.concat([ev.events for ev in event_objects])
+                self.events.reset_index(drop=False, inplace=True, names="idx")
+                self.z_slice = z_slice
 
         self.seed = seed
 
@@ -146,6 +142,12 @@ class Events:
         hash_ = xxhash.xxh64_intdigest(hashed_traces.values, seed=self.seed)
 
         return hash_
+
+    def is_multi_subject(self):
+        if len(self.events.subject_id.unique()) > 1:
+            return True
+        else:
+            return False
 
     def add_clustering(self, cluster_lookup_table, column_name="cluster"):
 

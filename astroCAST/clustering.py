@@ -7,18 +7,20 @@ from pathlib import Path
 import awkward
 import fastcluster
 import hdbscan
+import networkx as nx
 import numpy as np
 import pandas as pd
 from dask import array as da
 from dtaidistance import dtw_barycenter, dtw
 from matplotlib import pyplot as plt
 from matplotlib.colors import LinearSegmentedColormap
+from networkx.algorithms import community
 from scipy.cluster.hierarchy import fcluster
 import seaborn as sns
 from tqdm import tqdm
 
 from astroCAST.analysis import Events
-from astroCAST.helper import wrapper_local_cache, is_ragged
+from astroCAST.helper import wrapper_local_cache, is_ragged, CachedClass
 
 # from dtaidistance import dtw_visualisation as dtwvis
 # from dtaidistance import clustering
@@ -68,7 +70,7 @@ class HdbScan:
         self.hdb = pickle.load(open(path, "rb"))
 
 
-class DTW_Linkage:
+class DTW_Linkage(CachedClass):
 
     """
 	"trace_parameters": {
@@ -79,18 +81,6 @@ class DTW_Linkage:
 	"z_threshold":2, "min_cluster_size":15,
 	"max_trace_plot":5, "max_plots":25
 """
-
-    def __init__(self, cache_path=None):
-
-        if cache_path is not None:
-
-            if isinstance(cache_path, str):
-                cache_path = Path(cache_path)
-
-            if not cache_path.is_dir():
-                cache_path.mkdir()
-
-        self.cache_path = cache_path
 
     def get_barycenters(self, events, z_threshold, default_cluster = -1,
                         distance_matrix=None,
@@ -295,21 +285,10 @@ class DTW_Linkage:
             return fig
 
 
-class Distance:
+class Distance(CachedClass):
     """
     A class for computing correlation matrices and histograms.
     """
-    def __init__(self, cache_path=None):
-
-        if cache_path is not None:
-
-            if isinstance(cache_path, str):
-                cache_path = Path(cache_path)
-
-            if not cache_path.is_dir():
-                cache_path.mkdir()
-
-        self.cache_path = cache_path
 
     @wrapper_local_cache
     def get_pearson_correlation(self, events, dtype=np.single):
@@ -678,3 +657,116 @@ class Distance:
             spine.set_linewidth(spine_linewidth)
 
         return fig
+
+
+class Modules(CachedClass):
+
+    def __init__(self, events, cache_path=None):
+
+        if cache_path is None:
+            cache_path = events.cache_path
+
+        super().__init__(cache_path=cache_path)
+
+        if events.is_multi_subject():
+            logging.warning("multiple values for 'subject_id' were found in the events table. "
+                            "The module class expects all events to belong to a single recording.")
+
+        self.events = events
+
+    def __hash__(self):
+        return self.events.__hash__()
+
+    @wrapper_local_cache
+    def _create_node_edge_tables(self, correlation, correlation_boundaries=(0.98, 1)):
+
+        # select correlations within given boundaries
+        lower_bound, upper_bound = correlation_boundaries
+        selected_correlations = np.where(np.logical_and(correlation >= lower_bound, correlation < upper_bound))
+
+        # deal with compact correlation matrices
+        if len(selected_correlations) == 1:
+            triu_indices = np.array(np.triu_indices(len(self.events)))
+            selected_correlations = triu_indices[:, selected_correlations].squeeze()
+
+        # filter events
+        selected_idx = np.unique(selected_correlations).tolist()
+        # selected_events = self.events.events.iloc[selected_idx]
+        selected_events = self.events[selected_idx]
+
+        # create nodes table
+        nodes = pd.DataFrame({
+            "i_idx":selected_idx, "x": selected_events.cx, "y":selected_events.cy, "trace_idx": selected_events.index
+        })
+
+        # create edges table
+        edges = pd.DataFrame({
+            "source":selected_correlations[0, :], "target":selected_correlations[1, :]
+        })
+
+        # convert edge indices from iidx in correlation array
+        # to row_idx in nodes table
+        lookup = dict(zip(nodes.i_idx.tolist(), nodes.index.tolist()))
+        edges.source = edges.source.map(lookup)
+        edges.target = edges.target.map(lookup)
+
+        return nodes, edges
+
+    @wrapper_local_cache
+    def create_graph(self, correlation, correlation_boundaries=(0.98, 1), exclude_out_of_cluster_connection=True):
+
+        nodes, edges = self._create_node_edge_tables(correlation, correlation_boundaries=correlation_boundaries)
+
+        # create graph and populate with edges
+        G = nx.Graph()
+        for _, edge in tqdm(edges.iterrows(), total=len(edges)):
+            G.add_edge(*edge)
+
+        # calculate modularity
+        communities = community.greedy_modularity_communities(G)
+
+        # assign modules
+        nodes["module"] = -1
+        n_mod = 0
+        for module in tqdm(communities):
+            for m in module:
+                nodes.loc[m, "module"] = n_mod
+            n_mod += 1
+
+        # add module column to nodes dataframe
+        nodes["module"] = nodes["module"].astype("category")
+
+        # add module to edges
+        modules_sources = nodes.module.loc[edges.source.tolist()].tolist()
+        modules_targets = nodes.module.loc[edges.target.tolist()].tolist()
+        edge_module = modules_sources
+
+        if exclude_out_of_cluster_connection:
+            for i in np.where(np.array(modules_sources) != np.array(modules_targets))[0]:
+                edge_module[i] = -1
+
+        edges["module"] = edge_module
+
+        return nodes, edges
+
+    def summarize_modules(self, nodes):
+
+        from pointpats import centrography
+
+        summary = {}
+
+        funcs = {
+            "mean_center": lambda module: None if len(module) < 1 else centrography.mean_center(module[["x", "y"]].astype(float)),
+            "median_center": lambda module: None if len(module) < 1 else centrography.euclidean_median(module[["x", "y"]].astype(float)),
+            "std_distance": lambda module: None if len(module) < 1 else centrography.std_distance(module[["x", "y"]].astype(float)),
+            "coordinates": lambda module: module[["x", "y"]].astype(float).values,
+            "num_events": lambda module: len(module),
+        }
+
+        for func_key in funcs.keys():
+            func = funcs[func_key]
+            summary[func_key] = nodes.groupby("module").apply(func)
+
+        return pd.DataFrame(summary)
+
+

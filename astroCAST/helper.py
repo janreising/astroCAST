@@ -802,4 +802,16 @@ class Normalization:
         else:
             return np.diff(data, axis=1)
 
+class CachedClass:
 
+    def __init__(self, cache_path=None):
+
+        if cache_path is not None:
+
+            if isinstance(cache_path, str):
+                cache_path = Path(cache_path)
+
+            if not cache_path.is_dir():
+                cache_path.mkdir()
+
+        self.cache_path = cache_path
