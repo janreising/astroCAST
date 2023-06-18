@@ -687,31 +687,33 @@ class Normalization:
         return self.run(instructions)
 
     @staticmethod
-    def get_value(data, mode, population_wide):
+    def get_value(data, mode, population_wide=False, axis=1):
 
-        axis = None if population_wide else 1
+        summary_axis = None if population_wide else axis
 
         mode_options = {
-            "first": lambda x: np.mean(x[:, 0]) if population_wide else x[:, 0],
-            "mean": lambda x: np.mean(x, axis=axis),
-            "min": lambda x: np.min(x, axis=axis),
-            "min_abs": lambda x: np.min(np.abs(x), axis=axis),
-            "max": lambda x: np.max(x, axis=axis),
-            "max_abs": lambda x: np.max(np.abs(x), axis=axis),
-            "std": lambda x: np.std(x, axis=axis)
+            "first": lambda x: np.mean(x[:, 0] if axis else x[0, :]) if population_wide else x[:, 0] if axis else x[0, :],
+            "mean": lambda x: np.mean(x, axis=summary_axis),
+            "min": lambda x: np.min(x, axis=summary_axis),
+            "min_abs": lambda x: np.min(np.abs(x), axis=summary_axis),
+            "max": lambda x: np.max(x, axis=summary_axis),
+            "max_abs": lambda x: np.max(np.abs(x), axis=summary_axis),
+            "std": lambda x: np.std(x, axis=summary_axis)
         }
         assert mode in mode_options.keys(), f"please provide valid mode: {mode_options.keys()}"
-
-        logging.warning(f"data: {data}")
-        logging.warning(f"type: {type(data)}")
-        # logging.warning(f"shape: {data.shape}")
-        # logging.warning(f"std: {np.std(data, axis=axis)}")
 
         ret = mode_options[mode](data)
         return ret if population_wide else ret[:, None]  # broadcasting for downstream calculation
 
-    def subtract(self, data, mode="min", population_wide=False):
-        return data - self.get_value(data, mode, population_wide)
+    def subtract(self, data, mode="min", population_wide=False, rows=True):
+
+        value = self.get_value(data, mode, population_wide, axis=rows)
+
+        # transpose result if subtracting by columns
+        if not rows:
+            value = value.tranpose()
+
+        return data - value
 
     def divide(self, data, mode="max", population_wide=False):
 
