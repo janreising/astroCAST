@@ -93,13 +93,15 @@ class DTW_Linkage:
         self.cache_path = cache_path
 
     def get_barycenters(self, events, z_threshold, default_cluster = -1,
+                        distance_matrix=None,
                         distance_type="pearson", param_distance={},
                         param_linkage_matrix={}, param_clustering={}, param_barycenter={}):
 
-        corr = Distance(cache_path=self.cache_path)
-        distance_matrix = corr.get_correlation(events,
-                                               correlation_type=distance_type,
-                                               correlation_param=param_distance)
+        if distance_matrix is None:
+            corr = Distance(cache_path=self.cache_path)
+            distance_matrix = corr.get_correlation(events,
+                                                   correlation_type=distance_type,
+                                                   correlation_param=param_distance)
 
         linkage_matrix = self.calculate_linkage_matrix(distance_matrix, **param_linkage_matrix)
 
@@ -109,7 +111,7 @@ class DTW_Linkage:
         # create a lookup table to sort event indices into clusters
         cluster_lookup_table = defaultdict(lambda: default_cluster)
         for _, row in barycenters.iterrows():
-            cluster_lookup_table.update({idx_: row.cluster for idx_ in row.trace_idx})
+            cluster_lookup_table.update({idx_: row.cluster for idx_ in row.idx})
 
         return barycenters, cluster_lookup_table
 
@@ -197,25 +199,27 @@ class DTW_Linkage:
         """ Calculate consensus trace (barycenter) for each cluster"""
 
         traces = events.events.trace.tolist()
+        indices = events.events.index.tolist()
 
-        if is_ragged(traces):
-            traces = awkward.Array(traces)
-        else:
-            traces = np.array(traces)
-
-        barycenters = {}
+        c_idx_, c_bc, c_num, c_cluster = list(), list(), list(), list()
         iterator = tqdm(enumerate(clusters.index), total=len(clusters), desc="barycenters:") if show_progress else enumerate(clusters.index)
         for i, cl in iterator:
 
             idx_ = np.where(cluster_labels == cl)[0]
             sel = [traces[id_] for id_ in idx_]
+            idx = [indices[id_] for id_ in idx_]
 
             nb_initial_samples = len(sel) if len(sel) < 11 else int(0.1*len(sel))
             bc = dtw_barycenter.dba_loop(sel, c=None,
                                          nb_initial_samples=nb_initial_samples,
                                          max_it=max_it, thr=thr, use_c=True, penalty=penalty, psi=psi)
 
-            barycenters[cl] = {"idx":idx_, "bc":bc, "num":clusters.iloc[i], "cluster":cl}
+            c_idx_ += [idx]
+            c_bc += [bc]
+            c_num += [clusters.iloc[i]]
+            c_cluster += [cl]
+
+        barycenters = pd.DataFrame({"idx":c_idx_, "bc":c_bc, "num":c_num, "cluster":c_cluster})
 
         return barycenters
 
@@ -307,9 +311,8 @@ class Distance:
 
         self.cache_path = cache_path
 
-    @staticmethod
     @wrapper_local_cache
-    def get_pearson_correlation(events, dtype=np.single):
+    def get_pearson_correlation(self, events, dtype=np.single):
         """
         Computes the correlation matrix of events.
 
@@ -372,18 +375,10 @@ class Distance:
 
         return corr
 
-    @staticmethod
     @wrapper_local_cache
-    def get_dtw_correlation(events, use_mmap=False, block=10000, show_progress=True):
+    def get_dtw_correlation(self, events, use_mmap=False, block=10000, show_progress=True):
 
         traces = events.events.trace.tolist()
-
-        if is_ragged(traces):
-            traces = awkward.Array(traces)
-        else:
-            traces = np.array(traces)
-
-        logging.warning(f"traces.shape: {traces.shape}")
         N = len(traces)
 
         if not use_mmap:

@@ -155,7 +155,7 @@ class Events:
             logging.warning(f"column_name ({column_name}) already exists in events table > overwriting column. "
                             f"Please provide a different column_name if this is not the expected behavior.")
 
-        events.events[column_name] = events.events.idx.map(cluster_lookup_table)
+        events[column_name] = events.index.map(cluster_lookup_table)
 
     def copy(self):
         return copy.deepcopy(self)
@@ -805,17 +805,44 @@ class Events:
         if min_length is not None and max_length is not None:
 
             if is_ragged(data):
-                data = ak.Array(data)
 
-                if min_length is not None and max_length is None:
-                    data = ak.pad_none(data, min_length)
+                # # todo this implementation would be more efficient, but somehow doesn't work
+                # data = ak.Array(data)
+                #
+                # if min_length is not None and max_length is None:
+                #     data = ak.pad_none(data, min_length)
+                #
+                # elif max_length is not None and min_length is None:
+                #     data = data[:, :max_length]
+                #
+                # else:
+                #     assert max_length == min_length, "when providing 'max_length' and 'min_length', both have to be equal"
+                #     data = ak.pad_none(data, max_length, clip=True)
+                #
+                # # impute missing values
+                # data = data.to_numpy(allow_missing=True)
+                # for i in range(len(data)):
+                #
+                #     trace = data[i]
+                #     mask = np.isnan(trace)
+                #     trace = np.interp(np.flatnonzero(mask), np.flatnonzero(~mask), trace[~mask])
+                #
+                #     data[i] = trace
 
-                elif max_length is not None and min_length is None:
-                    data = data[:, :max_length]
+                for i in range(len(data)):
 
-                else:
-                    assert max_length == min_length, "when providing 'max_length' and 'min_length', both have to be equal"
-                    data = ak.pad_none(data, max_length, clip=True)
+                    trace = np.array(data[i])
+
+                    if min_length is not None and len(trace) < min_length:
+                        # todo not elegant to just add values at the end
+                        trace = np.pad(trace, pad_width=(min_length - len(trace), 0), mode=pad_mode)
+
+                        data[i] = trace
+
+                    elif max_length is not None and len(trace) > max_length:
+                        data[i] = trace[:, :max_length]
+
+                data = np.array(data)
 
             else:
 
@@ -829,8 +856,9 @@ class Events:
                     data = data[:, :max_length]
 
         # update events dataframe
+        print(data.shape)
         events.trace = data.tolist()
-        events.dz = len(data[0, :])
+        events.dz = events.trace.apply(lambda x: len(x))
         logging.warning("z0 and z1 values do not correspond to the adjusted event boundaries")
 
         if inplace:
