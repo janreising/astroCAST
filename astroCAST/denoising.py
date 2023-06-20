@@ -400,7 +400,10 @@ class SubFrameGenerator(tf.keras.utils.Sequence):
                  overlap=None, padding=None,
                  shuffle=True, normalize=None,
                  loc="data/",
-                 output_size=None, cache_results=False, in_memory=False, save_global_descriptive=True):
+                 output_size=None, cache_results=False, in_memory=False, save_global_descriptive=True,
+                 logging_level=logging.INFO):
+
+        logging.basicConfig(level=logging_level)
 
         if type(paths) != list:
             paths = [paths]
@@ -582,6 +585,9 @@ class SubFrameGenerator(tf.keras.utils.Sequence):
                         idx += 1
 
             file_container = pd.DataFrame(file_container)
+
+            if len(file_container) < 1:
+                raise ValueError("cannot find suitable data chunks.")
 
             if self.normalize == "global":
                 if len(file_container) > 1:
