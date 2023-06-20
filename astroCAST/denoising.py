@@ -546,8 +546,13 @@ class SubFrameGenerator(tf.keras.utils.Sequence):
             pad_y1 = ih % Y if self.padding else 0
 
             zRange =list(range(Z0 + z_start - pad_z0, Z1 - stack_len - z_start + pad_z1, z_steps))
-            xRange = list(range(x_start, X - iw - x_start + pad_x1, dw))
-            yRange = list(range(y_start, Y - ih - y_start + pad_y1, dh))
+            xRange = list(range(x_start, X - x_start + pad_x1, dw))
+            yRange = list(range(y_start, Y - y_start + pad_y1, dh))
+
+            logging.debug(f"\nz_range: {zRange}")
+            logging.debug(f"\nx_range: {xRange}")
+            logging.debug(f"\nx_range param > x_start:{x_start}, X:{X} iw:{iw} pad_x1:{pad_x1}, dw:{dw}")
+            logging.debug(f"\ny_range: {yRange}")
 
             if self.shuffle:
                 random.shuffle(zRange)
