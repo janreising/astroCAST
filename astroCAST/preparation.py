@@ -1062,7 +1062,11 @@ class MotionCorrection:
         # caiman's mmap naming convention:
         #   ./{name}_d1_{X}_d2_{Y}_d3_{dim3}_order_{F/C}_frames_{Z}_.mmap
         name = path.stem.split("_")
-        Z, order, Y, X = int(name[-1]), name[-3], int(name[-7]), int(name[-9])
+
+        debug_names = {i:n for i, n in enumerate(name)}
+        logging.debug(f"mmap name elements: {debug_names}")
+
+        Z, order, Y, X = int(name[-2]), name[-4], int(name[-8]), int(name[-10])
 
         # TODO order and shape questionable
         # Read the motion-corrected data from the mmap file as a memory-mapped array
