@@ -315,36 +315,42 @@ class IO:
 
         """
 
-        if isinstance(path, str):
+        if isinstance(path, [str, Path]):
             path = Path(path)
 
-        if path.suffix in [".tdb"]:
-            data =  self._load_tdb(path, lazy=lazy, chunks=chunks)  # Call private method to load TDB file
+            if path.suffix in [".tdb"]:
+                data =  self._load_tdb(path, lazy=lazy, chunks=chunks)  # Call private method to load TDB file
 
-        elif path.suffix in [".tif", ".tiff", ".TIF", ".TIFF"]:
-            data =  self._load_tiff(path, sep, lazy=lazy)  # Call private method to load TIFF file
+            elif path.suffix in [".tif", ".tiff", ".TIF", ".TIFF"]:
+                data =  self._load_tiff(path, sep, lazy=lazy)  # Call private method to load TIFF file
 
-        elif path.suffix in [".czi", ".CZI"]:
-            data =  self._load_czi(path, lazy=lazy)  # Call private method to load CZI file
+            elif path.suffix in [".czi", ".CZI"]:
+                data =  self._load_czi(path, lazy=lazy)  # Call private method to load CZI file
 
-        elif path.suffix in [".h5", ".hdf5", ".H5", ".HDF5"]:
-            data =  self._load_h5(path, h5_loc=h5_loc, lazy=lazy, chunks=chunks)  # Call private method to load HDF5 file
+            elif path.suffix in [".h5", ".hdf5", ".H5", ".HDF5"]:
+                data =  self._load_h5(path, h5_loc=h5_loc, lazy=lazy, chunks=chunks)  # Call private method to load HDF5 file
 
-        elif path.suffix in [".npy", ".NPY"]:
-            data =  self._load_npy(path, lazy=lazy, chunks=chunks)
+            elif path.suffix in [".npy", ".NPY"]:
+                data =  self._load_npy(path, lazy=lazy, chunks=chunks)
 
-        elif path.is_dir():
+            elif path.is_dir():
 
-            # If the path is a directory, load multiple TIFF files
-            files = [f for f in path.glob("*") if f.suffix in [".tif", ".tiff", ".TIF", ".TIFF"]]
-            if len(files) > 1:
-                raise FileNotFoundError("couldn't find files in folder. Recognized ext: [.tif, .tiff, .TIF, .TIFF]")
+                # If the path is a directory, load multiple TIFF files
+                files = [f for f in path.glob("*") if f.suffix in [".tif", ".tiff", ".TIF", ".TIFF"]]
+                if len(files) < 1:
+                    raise FileNotFoundError("couldn't find files in folder. Recognized ext: [.tif, .tiff, .TIF, .TIFF]")
+
+                else:
+                    data =  self._load_tiff(path, sep, lazy=lazy)  # Call private method to load TIFF files from directory
 
             else:
-                data =  self._load_tiff(path, sep, lazy=lazy)  # Call private method to load TIFF files from directory
+                raise ValueError("unrecognized file format! Choose one of [.tiff, .h5, .tdb, .czi]")
 
-        else:
-            raise ValueError("unrecognized file format! Choose one of [.tiff, .h5, .tdb, .czi]")
+        elif isinstance(path, np.ndarray):
+            data = da.from_array(path, chunks=chunks)
+
+        elif isinstance(path, da.Array):
+            data = da.rechunk(path, chunks=chunks)
 
         if z_slice is not None:
 
