@@ -11,123 +11,120 @@ from matplotlib import pyplot as plt
 import seaborn as sns
 from tqdm import tqdm
 import napari
+import awkward as ak
 
 import astroCAST.detection
 from astroCAST import helper
-from astroCAST.helper import get_data_dimensions
+from astroCAST.helper import get_data_dimensions, is_ragged, CachedClass, Normalization
 from astroCAST.preparation import IO
 
 
-class Events:
+class Events(CachedClass):
 
-    def __init__(self, event_dir, meta_path=None, in_memory=False,
-                 data=None, h5_loc=None, group=None, subject_id=None,
-                 z_slice=None, index_prefix=None, custom_columns=("area_norm", "cx", "cy"),
-                 frame_to_time_mapping=None, frame_to_time_function=None, seed=1):
+    def __init__(self, event_dir, meta_path=None, in_memory=False, data=None, h5_loc=None, group=None, subject_id=None,
+                 z_slice=None, index_prefix=None, custom_columns=("area_norm", "cx", "cy"), frame_to_time_mapping=None,
+                 frame_to_time_function=None, cache_path=None, seed=1):
 
-        if event_dir is None:
-            return None
+        super().__init__(cache_path=cache_path)
 
-        if not isinstance(event_dir, list):
+        if event_dir is not None:
 
-            event_dir = Path(event_dir)
-            if not event_dir.is_dir():
-                raise FileNotFoundError(f"cannot find provided event directory: {event_dir}")
+            if not isinstance(event_dir, list):
 
-            if meta_path is not None:
-                logging.debug("I should not be called at all")
-                self.get_meta_info(meta_path)
+                event_dir = Path(event_dir)
+                if not event_dir.is_dir():
+                    raise FileNotFoundError(f"cannot find provided event directory: {event_dir}")
 
-            # get data
-            if isinstance(data, (str, Path)):
-                self.data = Video(data, z_slice=z_slice, h5_loc=h5_loc, lazy=False)
+                if meta_path is not None:
+                    logging.debug("I should not be called at all")
+                    self.get_meta_info(meta_path)
 
-            if isinstance(data, (np.ndarray, da.Array)):
+                # get data
+                if isinstance(data, (str, Path)):
+                    self.data = Video(data, z_slice=z_slice, h5_loc=h5_loc, lazy=False)
 
+                if isinstance(data, (np.ndarray, da.Array)):
+
+                    if z_slice is not None:
+                        logging.warning("'data'::array > Please ensure array was not sliced before providing data flag")
+
+                    self.data = Video(data, z_slice=z_slice, lazy=False)
+
+                elif isinstance(data, Video):
+
+                    if z_slice is not None:
+                        logging.warning("'data'::Video > Slice manually during Video object initialization")
+
+                    self.data = data
+
+                else:
+                    self.data = data
+
+                # load event map
+                event_map, event_map_shape, event_map_dtype = self.get_event_map(event_dir, in_memory=in_memory) # todo slicing
+                self.event_map = event_map
+                self.num_frames, self.X, self.Y = event_map_shape
+
+                # create time map
+                time_map, events_start_frame, events_end_frame = self.get_time_map(event_dir)
+
+                # load events
+                self.events = self.load_events(event_dir, z_slice=z_slice, index_prefix=index_prefix, custom_columns=custom_columns)
+
+                # z slicing
+                self.z_slice = z_slice
                 if z_slice is not None:
-                    logging.warning("'data'::array > Please ensure array was not sliced before providing data flag")
+                    z_min, z_max = z_slice
+                    self.events = self.events[(self.events.z0 >= z_min) & (self.events.z1 <= z_max)]
 
-                self.data = Video(data, z_slice=z_slice, lazy=False)
+                    # TODO how does this effect:
+                    #   - time_map, events_start_frame, events_end_frame
+                    #   - data
+                    #   - indices in the self.events dataframe
 
-            elif isinstance(data, Video):
+                self.z_range = (self.events.z0.min(), self.events.z1.max())
 
-                if z_slice is not None:
-                    logging.warning("'data'::Video > Slice manually during Video object initialization")
+                # align time
+                if frame_to_time_mapping is not None or frame_to_time_function is not None:
+                    self.events["t0"] = self.convert_frame_to_time(self.events.z0.tolist(),
+                                                                mapping=frame_to_time_mapping,
+                                                                function=frame_to_time_function)
 
-                self.data = data
+                    self.events["t1"] = self.convert_frame_to_time(self.events.z1.tolist(),
+                                                                mapping=frame_to_time_mapping,
+                                                                function=frame_to_time_function)
+
+                    self.events.dt = self.events.t1 - self.events.t0
+
+                # add group columns
+                self.events["group"] = group
+                self.events["subject_id"] = subject_id
+                self.events["name"] = event_dir.stem
 
             else:
-                self.data = data
+                # multi file support
 
-            # load event map
-            event_map, event_map_shape, event_map_dtype = self.get_event_map(event_dir, in_memory=in_memory) # todo slicing
-            self.event_map = event_map
-            self.num_frames, self.X, self.Y = event_map_shape
+                event_objects = []
+                for i in range(len(event_dir)):
 
-            # create time map
-            time_map, events_start_frame, events_end_frame = self.get_time_map(event_dir)
+                    event = Events(event_dir[i],
+                                   meta_path=meta_path if not isinstance(meta_path, list) else meta_path[i],
+                                   data=data if not isinstance(data, list) else data[i],
+                                   h5_loc=h5_loc if not isinstance(h5_loc, list) else h5_loc[i],
+                                   z_slice=z_slice if not isinstance(z_slice, list) else z_slice[i],
+                                   group=group if not isinstance(group, list) else group[i],
+                                   in_memory=in_memory,
+                                   index_prefix=f"{i}x", subject_id=i,
+                                   custom_columns=custom_columns,
+                                   frame_to_time_mapping=frame_to_time_mapping if not isinstance(frame_to_time_mapping, list) else frame_to_time_mapping[i],
+                                   frame_to_time_function=frame_to_time_function if not isinstance(frame_to_time_function, list) else frame_to_time_function[i])
 
-            # load events
-            self.events = self.load_events(event_dir, z_slice=z_slice, index_prefix=index_prefix, custom_columns=custom_columns)
+                    event_objects.append(event)
 
-            # z slicing
-            self.z_slice = z_slice
-            if z_slice is not None:
-                z_min, z_max = z_slice
-                self.events = self.events[(self.events.z0 >= z_min) & (self.events.z1 <= z_max)]
-
-                # TODO how does this effect:
-                #   - time_map, events_start_frame, events_end_frame
-                #   - data
-                #   - indices in the self.events dataframe
-
-            self.z_range = (self.events.z0.min(), self.events.z1.max())
-
-            # align time
-            if frame_to_time_mapping is not None or frame_to_time_function is not None:
-                self.events["t0"] = self.convert_frame_to_time(self.events.z0.tolist(),
-                                                            mapping=frame_to_time_mapping,
-                                                            function=frame_to_time_function)
-
-                self.events["t1"] = self.convert_frame_to_time(self.events.z1.tolist(),
-                                                            mapping=frame_to_time_mapping,
-                                                            function=frame_to_time_function)
-
-                self.events.dt = self.events.t1 - self.events.t0
-
-            # add group columns
-            if group is not None:
-                self.events["group"] = group
-
-            if subject_id is not None:
-                self.events["subject_id"] = subject_id
-
-            self.events["name"] = event_dir.stem
-
-        else:
-            # multi file support
-
-            event_objects = []
-            for i in range(len(event_dir)):
-
-                event = Events(event_dir[i],
-                               meta_path=meta_path if not isinstance(meta_path, list) else meta_path[i],
-                               data=data if not isinstance(data, list) else data[i],
-                               h5_loc=h5_loc if not isinstance(h5_loc, list) else h5_loc[i],
-                               z_slice=z_slice if not isinstance(z_slice, list) else z_slice[i],
-                               group=group if not isinstance(group, list) else group[i],
-                               in_memory=in_memory,
-                               index_prefix=f"{i}x", subject_id=i,
-                               custom_columns=custom_columns,
-                               frame_to_time_mapping=frame_to_time_mapping if not isinstance(frame_to_time_mapping, list) else frame_to_time_mapping[i],
-                               frame_to_time_function=frame_to_time_function if not isinstance(frame_to_time_function, list) else frame_to_time_function[i])
-
-                event_objects.append(event)
-
-            self.event_objects = event_objects
-            self.events = pd.concat([ev.events for ev in event_objects])
-            self.events.reset_index(drop=False, inplace=True, names="idx")
-            self.z_slice = z_slice
+                self.event_objects = event_objects
+                self.events = pd.concat([ev.events for ev in event_objects])
+                self.events.reset_index(drop=False, inplace=True, names="idx")
+                self.z_slice = z_slice
 
         self.seed = seed
 
@@ -146,6 +143,12 @@ class Events:
 
         return hash_
 
+    def is_multi_subject(self):
+        if len(self.events.subject_id.unique()) > 1:
+            return True
+        else:
+            return False
+
     def add_clustering(self, cluster_lookup_table, column_name="cluster"):
 
         events = self.events
@@ -154,7 +157,7 @@ class Events:
             logging.warning(f"column_name ({column_name}) already exists in events table > overwriting column. "
                             f"Please provide a different column_name if this is not the expected behavior.")
 
-        events.events[column_name] = events.events.idx.map(cluster_lookup_table)
+        events[column_name] = events.index.map(cluster_lookup_table)
 
     def copy(self):
         return copy.deepcopy(self)
@@ -278,7 +281,6 @@ class Events:
 
         return event_map
 
-    # @notimplemented("implement get_time_map()")
     @staticmethod
     def get_time_map(event_dir=None, event_map=None, chunk=100):
         """
@@ -332,7 +334,7 @@ class Events:
         return time_map, events_start_frame, events_end_frame
 
     @staticmethod
-    def load_events(event_dir, z_slice=None, index_prefix=None, custom_columns=["area_norm", "cx", "cy"]):
+    def load_events(event_dir, z_slice=None, index_prefix=None, custom_columns=("area_norm", "cx", "cy")):
 
         """
         Load events from the specified directory and perform optional preprocessing.
@@ -401,11 +403,10 @@ class Events:
 
         return events
 
-    # @wrapper_local_cache
-    @staticmethod
-    def get_extended_events(events, video, dtype=np.half, extend=-1,
-                       normalization_instructions=None, show_progress=True,
-                       memmap_path=None, save_path=None, save_param={}):
+    def get_extended_events(self, video=None, dtype=np.half, extend=-1,
+                            return_array=False, in_place=False,
+                            normalization_instructions=None, show_progress=True,
+                            memmap_path=None, save_path=None, save_param={}):
 
         """ takes the footprint of each individual event and extends it over the whole z-range
 
@@ -418,20 +419,38 @@ class Events:
 
         """
 
+        events = self.events if in_place else self.events.copy()
+
+        if video is None and self.data is None:
+            raise ValueError("to extend the event traces you either have to provide the 'video' argument "
+                             "when calling this function or the 'data' argument during Event creation.")
+        elif video is None:
+            video = self.data
+
+        video = video.get_data()
+
         n_events = len(events)
         n_frames, X, Y = video.shape
 
-        # create array to save events in
-        if memmap_path:
-            memmap_path = Path(memmap_path).with_suffix(f".dtype_{np.dtype(dtype).name}_shape_{n_events}x{n_frames}.mmap")
-            arr = np.memmap(memmap_path.as_posix(), dtype=dtype, mode='w+', shape=(n_events, n_frames))
-        else:
-            arr = np.zeros((n_events, n_frames), dtype=dtype)
+        # create container to save extended events in
+        arr_ext, extended = None, None
+        if return_array:
 
-        arr_size = arr.itemsize*n_events*n_frames
-        ram_size = psutil.virtual_memory().total
-        if arr_size > 0.9 * ram_size:
-            logging.warning(f"array size ({n_events}, {n_frames}) is larger than 90% RAM size ({arr_size*1e-9:.2f}GB, {arr_size/ram_size*100}%). Consider using smaller dtype or 'lazy=True'")
+            if memmap_path:
+                memmap_path = Path(memmap_path).with_suffix(f".dtype_{np.dtype(dtype).name}_shape_{n_events}x{n_frames}.mmap")
+                arr_ext = np.memmap(memmap_path.as_posix(), dtype=dtype, mode='w+', shape=(n_events, n_frames))
+            else:
+                arr_ext = np.zeros((n_events, n_frames), dtype=dtype)
+
+            arr_size = arr_ext.itemsize*n_events*n_frames
+            ram_size = psutil.virtual_memory().total
+            if arr_size > 0.9 * ram_size:
+                logging.warning(f"array size ({n_events}, {n_frames}) is larger than 90% RAM size ({arr_size*1e-9:.2f}GB, {arr_size/ram_size*100}%). Consider using smaller dtype or 'lazy=True'")
+
+        else:
+            extended = list()
+
+        z0_container, z1_container = list(), list()
 
         # extract footprints
         c = 0
@@ -473,19 +492,38 @@ class Events:
                 norm = helper.Normalization(data=p, inplace=True)
                 norm.run(normalization_instructions)
 
-            arr[c, z0:z1] = p
+            if return_array:
+                arr_ext[c, z0:z1] = p
+            else:
+                extended.append(p)
+
+            z0_container.append(z0)
+            z1_container.append(z1)
+
             c += 1
 
-        # TODO add trimming of empty left and right borders
+        if return_array:
 
-        if save_path is not None and memmap_path is None:
-            io = IO()
-            io.save(path=save_path, data=arr, **save_param)
+            if save_path is not None and memmap_path is None:
+                io = IO()
+                io.save(path=save_path, data=arr_ext, **save_param)
 
-        return arr
+            elif memmap_path is not None:
+                logging.info(f"extended array saved as memmap to :{memmap_path}")
 
-    # @wrapper_local_cache
-    def to_numpy(self, events=None, empty_as_nan=True):
+            return arr_ext, z0_container, z1_container
+
+        else:
+
+            events.trace = extended
+            events.z0 = z0_container
+            events.z1 = z1_container
+
+            events.dz = events["z1"] - events["z0"]
+
+            return events
+
+    def to_numpy(self, events=None, empty_as_nan=True, simple=False):
 
         """
         Convert events DataFrame to a numpy array.
@@ -501,6 +539,9 @@ class Events:
 
         if events is None:
             events = self.events
+
+        if simple:
+            return np.array(events.trace.tolist())
 
         num_frames = events.z1.max() + 1
         arr = np.zeros((len(events), num_frames))
@@ -653,6 +694,199 @@ class Events:
 
         return val
 
+    def get_trials(self, trial_timings, trial_length=30, multi_timing_behavior="first", format="array"):
+
+        if format not in ["array", "dataframe"]:
+            raise ValueError(f"'format' attribute has to be one of ['array', 'dataframe'] not: {format}")
+
+        if multi_timing_behavior not in ["first", "expand", "exclude"]:
+            raise ValueError("'multi_timing_behavior' has to be one of ['first', 'expand', 'exclude']")
+
+        events = self.events.copy()
+
+        # convert timings to np.ndarray
+        if not isinstance(trial_timings, np.ndarray):
+            trial_timings = np.array(trial_timings)
+
+        # split trial_length in pre and post
+        leading = trailing = int(trial_length / 2)
+        leading += trial_length - (leading + trailing)
+
+        # get contained timings per event
+        def find_contained_timings(row):
+            mask = np.logical_and(trial_timings >= row.z0, trial_timings <= row.z1)
+
+            num_timings = np.sum(mask)
+            contained_timings = trial_timings[mask]
+            return tuple(contained_timings)
+
+        events["timings"] = events.apply(find_contained_timings, axis=1)
+        events["num_timings"] = events.timings.apply(lambda x: len(x))
+
+        # decide what happens if multiple timings happen during a single event
+        if multi_timing_behavior == "first":
+            events = events[events.num_timings > 0]
+
+            # print(f"num_timings:\n{events.num_timings}")
+            # print(f"timings:\n{events.timings}")
+
+            events.timings = events.timings.apply(lambda x: [x[0]])
+            num_rows = len(events)
+
+        elif multi_timing_behavior == "expand":
+            events = events[events.num_timings > 0]
+            num_rows = events.num_timings.sum()
+
+        elif multi_timing_behavior == "exclude":
+            events = events[events.num_timings == 1]
+            num_rows = len(events)
+
+        # print(f"num_timings:\n{events.num_timings}")
+        # print(f"timings:\n{events.timings}")
+
+        #create trial matrix
+        array = np.empty((num_rows, trial_length))
+
+        # fill array
+        i = 0
+        for ev_idx, row in events.iterrows():
+            for t in row.timings:
+
+                # get boundaries
+                z0, z1 = row.z0, row.z1
+                t0, t1 = t - leading, t + trailing
+                delta_left, delta_right = t0-z0, t1-z1
+
+                # calculate offsets
+                eve_idx_left = max(0, delta_left)
+                eve_idx_right = delta_right if delta_right < 0 else None
+
+                # arr_idx_left = min(0, delta_right)
+                # arr_idx_right = delta_left if delta_left < 0 else None
+
+                arr_idx_left = max(0, -delta_left)
+                arr_idx_right = -delta_right if -delta_right < 0 else None
+
+                # print(f"\n{ev_idx} (#{len(row.trace)}) - stimulus_t: {t}")
+                # print(f"z: {z0}-{z1}, t:{t0}-{t1}, d:{delta_left}-{delta_right}")
+                # print(f"event_idx: {eve_idx_left}:{eve_idx_right} (#{len(np.array(row.trace)[eve_idx_left:eve_idx_right])})")
+                # print(f"arr_idx: {arr_idx_left}:{arr_idx_right} (#{len(array[i, arr_idx_left:arr_idx_right])})")
+                # print(np.array(row.trace))
+
+                # splice event into array
+                array[i, arr_idx_left:arr_idx_right] = np.array(row.trace)[eve_idx_left:eve_idx_right]
+
+                i += 1
+
+        if format == "dataframe":
+
+            t_range = list(range(-leading, trailing))
+
+            trial_ids = []
+            values = []
+            timepoints = []
+            for row in range(len(array)):
+
+                trial_ids += [row]*trial_length
+                values += array[row, :].tolist()
+                timepoints += t_range
+
+            res = pd.DataFrame({"trial_ids":trial_ids, "timepoint":timepoints, "value":values})
+
+        else:
+            res = array
+
+        return res
+
+    def enforce_length(self, min_length=None, pad_mode="edge", max_length=None, inplace=False):
+
+        if inplace:
+            events = self.events
+        else:
+            events = self.events.copy()
+
+        data = events.trace.tolist()
+
+        if min_length is not None and max_length is not None:
+
+            if is_ragged(data):
+
+                # # todo this implementation would be more efficient, but somehow doesn't work
+                # data = ak.Array(data)
+                #
+                # if min_length is not None and max_length is None:
+                #     data = ak.pad_none(data, min_length)
+                #
+                # elif max_length is not None and min_length is None:
+                #     data = data[:, :max_length]
+                #
+                # else:
+                #     assert max_length == min_length, "when providing 'max_length' and 'min_length', both have to be equal"
+                #     data = ak.pad_none(data, max_length, clip=True)
+                #
+                # # impute missing values
+                # data = data.to_numpy(allow_missing=True)
+                # for i in range(len(data)):
+                #
+                #     trace = data[i]
+                #     mask = np.isnan(trace)
+                #     trace = np.interp(np.flatnonzero(mask), np.flatnonzero(~mask), trace[~mask])
+                #
+                #     data[i] = trace
+
+                for i in range(len(data)):
+
+                    trace = np.array(data[i])
+
+                    if min_length is not None and len(trace) < min_length:
+                        # todo not elegant to just add values at the end
+                        trace = np.pad(trace, pad_width=(min_length - len(trace), 0), mode=pad_mode)
+
+                        data[i] = trace
+
+                    elif max_length is not None and len(trace) > max_length:
+                        data[i] = trace[:, :max_length]
+
+                data = np.array(data)
+
+            else:
+
+                data = np.array(data)
+
+                if min_length is not None and data.shape[1] < min_length:
+                    data = np.pad(data, pad_width=min_length - data.shape[1], mode=pad_mode)
+                    data = data[:, :min_length]
+
+                elif max_length is not None and data.shape[1] > max_length:
+                    data = data[:, :max_length]
+
+        # update events dataframe
+        print(data.shape)
+        events.trace = data.tolist()
+        events.dz = events.trace.apply(lambda x: len(x))
+        logging.warning("z0 and z1 values do not correspond to the adjusted event boundaries")
+
+        if inplace:
+            self.events = events
+
+        return events
+
+    def get_frequency(self, grouping_column, cluster_column, normalization_instructions=None):
+
+        events = self.events
+
+        grouped = events[[grouping_column, cluster_column, "dz"]].groupby([grouping_column, cluster_column]).count()
+        grouped.reset_index(inplace=True)
+
+        pivot = grouped.pivot(index=cluster_column, columns=grouping_column, values="dz")
+        pivot = pivot.fillna(0)
+
+        if normalization_instructions is not None:
+            norm = Normalization(pivot.values, inplace=True)
+            norm_arr = norm.run(normalization_instructions)
+            pivot = pd.DataFrame(norm_arr, index=pivot.index, columns=pivot.columns)
+
+        return pivot
 
 class Video:
 

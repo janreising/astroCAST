@@ -7,18 +7,25 @@ from pathlib import Path
 import awkward
 import fastcluster
 import hdbscan
+import networkx as nx
 import numpy as np
 import pandas as pd
 from dask import array as da
 from dtaidistance import dtw_barycenter, dtw
 from matplotlib import pyplot as plt
 from matplotlib.colors import LinearSegmentedColormap
+from networkx.algorithms import community
 from scipy.cluster.hierarchy import fcluster
 import seaborn as sns
+from sklearn.cluster import KMeans
+from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
+from sklearn.model_selection import cross_val_score
+from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
+from sklearn import metrics
 from tqdm import tqdm
 
 from astroCAST.analysis import Events
-from astroCAST.helper import wrapper_local_cache, is_ragged
+from astroCAST.helper import wrapper_local_cache, is_ragged, CachedClass, Normalization
 
 # from dtaidistance import dtw_visualisation as dtwvis
 # from dtaidistance import clustering
@@ -67,8 +74,23 @@ class HdbScan:
         assert path.is_file(), f"can't find hdb: {path}"
         self.hdb = pickle.load(open(path, "rb"))
 
+class KMeansClustering(CachedClass):
 
-class DTW_Linkage:
+    @wrapper_local_cache
+    def fit(self, events, embedding, n_clusters, param={}, default_cluster=-1):
+
+        if len(events) != len(embedding):
+            raise ValueError(f"embedding and events must have the same length: "
+                             f"len(embedding)={len(embedding)} vs. len(events)={len(events)}")
+
+        labels = KMeans(n_clusters=n_clusters, **param).fit_transform(embedding)
+
+        cluster_lookup_table = defaultdict(lambda: default_cluster)
+        cluster_lookup_table.update({k: label for k, label in list(zip(events.events.index.tolist(), labels.tolist()))})
+
+        return cluster_lookup_table
+
+class Linkage(CachedClass):
 
     """
 	"trace_parameters": {
@@ -80,28 +102,18 @@ class DTW_Linkage:
 	"max_trace_plot":5, "max_plots":25
 """
 
-    def __init__(self, cache_path=None):
-
-        if cache_path is not None:
-
-            if isinstance(cache_path, str):
-                cache_path = Path(cache_path)
-
-            if not cache_path.is_dir():
-                cache_path.mkdir()
-
-        self.cache_path = cache_path
-
     def get_barycenters(self, events, z_threshold, default_cluster = -1,
+                        distance_matrix=None,
                         distance_type="pearson", param_distance={},
-                        param_linkage_matrix={}, param_clustering={}, param_barycenter={}):
+                        param_linkage={}, param_clustering={}, param_barycenter={}):
 
-        corr = Distance(cache_path=self.cache_path)
-        distance_matrix = corr.get_correlation(events,
-                                               correlation_type=distance_type,
-                                               correlation_param=param_distance)
+        if distance_matrix is None:
+            corr = Distance(cache_path=self.cache_path)
+            distance_matrix = corr.get_correlation(events,
+                                                   correlation_type=distance_type,
+                                                   correlation_param=param_distance)
 
-        linkage_matrix = self.calculate_linkage_matrix(distance_matrix, **param_linkage_matrix)
+        linkage_matrix = self.calculate_linkage_matrix(distance_matrix, **param_linkage)
 
         clusters, cluster_labels = self.cluster_linkage_matrix(linkage_matrix, z_threshold, **param_clustering)
         barycenters = self.calculate_barycenters(clusters, cluster_labels, events, **param_barycenter)
@@ -109,7 +121,7 @@ class DTW_Linkage:
         # create a lookup table to sort event indices into clusters
         cluster_lookup_table = defaultdict(lambda: default_cluster)
         for _, row in barycenters.iterrows():
-            cluster_lookup_table.update({idx_: row.cluster for idx_ in row.trace_idx})
+            cluster_lookup_table.update({idx_: row.cluster for idx_ in row.idx})
 
         return barycenters, cluster_lookup_table
 
@@ -190,32 +202,34 @@ class DTW_Linkage:
         return clusters, cluster_labels
 
     @wrapper_local_cache
-    def calculate_barycenters(self, clusters, cluster_labels, events,
+    def calculate_barycenters(self, clusters, cluster_labels, events, init_fraction=0.1,
                               max_it=100, thr=1e-5, penalty=0, psi=None,
                               show_progress=True):
 
         """ Calculate consensus trace (barycenter) for each cluster"""
 
         traces = events.events.trace.tolist()
+        indices = events.events.index.tolist()
 
-        if is_ragged(traces):
-            traces = awkward.Array(traces)
-        else:
-            traces = np.array(traces)
-
-        barycenters = {}
+        c_idx_, c_bc, c_num, c_cluster = list(), list(), list(), list()
         iterator = tqdm(enumerate(clusters.index), total=len(clusters), desc="barycenters:") if show_progress else enumerate(clusters.index)
         for i, cl in iterator:
 
             idx_ = np.where(cluster_labels == cl)[0]
             sel = [traces[id_] for id_ in idx_]
+            idx = [indices[id_] for id_ in idx_]
 
-            nb_initial_samples = len(sel) if len(sel) < 11 else int(0.1*len(sel))
+            nb_initial_samples = len(sel) if len(sel) < 11 else int(init_fraction*len(sel))
             bc = dtw_barycenter.dba_loop(sel, c=None,
                                          nb_initial_samples=nb_initial_samples,
                                          max_it=max_it, thr=thr, use_c=True, penalty=penalty, psi=psi)
 
-            barycenters[cl] = {"idx":idx_, "bc":bc, "num":clusters.iloc[i], "cluster":cl}
+            c_idx_ += [idx]
+            c_bc += [bc]
+            c_num += [clusters.iloc[i]]
+            c_cluster += [cl]
+
+        barycenters = pd.DataFrame({"idx":c_idx_, "bc":c_bc, "num":c_num, "cluster":c_cluster})
 
         return barycenters
 
@@ -291,25 +305,13 @@ class DTW_Linkage:
             return fig
 
 
-class Distance:
+class Distance(CachedClass):
     """
     A class for computing correlation matrices and histograms.
     """
-    def __init__(self, cache_path=None):
 
-        if cache_path is not None:
-
-            if isinstance(cache_path, str):
-                cache_path = Path(cache_path)
-
-            if not cache_path.is_dir():
-                cache_path.mkdir()
-
-        self.cache_path = cache_path
-
-    @staticmethod
     @wrapper_local_cache
-    def get_pearson_correlation(events, dtype=np.single):
+    def get_pearson_correlation(self, events, dtype=np.single):
         """
         Computes the correlation matrix of events.
 
@@ -372,18 +374,10 @@ class Distance:
 
         return corr
 
-    @staticmethod
     @wrapper_local_cache
-    def get_dtw_correlation(events, use_mmap=False, block=10000, show_progress=True):
+    def get_dtw_correlation(self, events, use_mmap=False, block=10000, show_progress=True):
 
         traces = events.events.trace.tolist()
-
-        if is_ragged(traces):
-            traces = awkward.Array(traces)
-        else:
-            traces = np.array(traces)
-
-        logging.warning(f"traces.shape: {traces.shape}")
         N = len(traces)
 
         if not use_mmap:
@@ -683,3 +677,252 @@ class Distance:
             spine.set_linewidth(spine_linewidth)
 
         return fig
+
+
+class Modules(CachedClass):
+
+    def __init__(self, events, cache_path=None):
+
+        if cache_path is None:
+            cache_path = events.cache_path
+
+        super().__init__(cache_path=cache_path)
+
+        if events.is_multi_subject():
+            logging.warning("multiple values for 'subject_id' were found in the events table. "
+                            "The module class expects all events to belong to a single recording.")
+
+        self.events = events
+
+    def __hash__(self):
+        return self.events.__hash__()
+
+    @wrapper_local_cache
+    def _create_node_edge_tables(self, correlation, correlation_boundaries=(0.98, 1)):
+
+        # select correlations within given boundaries
+        lower_bound, upper_bound = correlation_boundaries
+        selected_correlations = np.where(np.logical_and(correlation >= lower_bound, correlation < upper_bound))
+
+        # deal with compact correlation matrices
+        if len(selected_correlations) == 1:
+            triu_indices = np.array(np.triu_indices(len(self.events)))
+            selected_correlations = triu_indices[:, selected_correlations].squeeze()
+
+        # filter events
+        selected_idx = np.unique(selected_correlations).tolist()
+        # selected_events = self.events.events.iloc[selected_idx]
+        selected_events = self.events[selected_idx]
+
+        # create nodes table
+        nodes = pd.DataFrame({
+            "i_idx":selected_idx, "x": selected_events.cx, "y":selected_events.cy, "trace_idx": selected_events.index
+        })
+
+        # create edges table
+        edges = pd.DataFrame({
+            "source":selected_correlations[0, :], "target":selected_correlations[1, :]
+        })
+
+        # convert edge indices from iidx in correlation array
+        # to row_idx in nodes table
+        lookup = dict(zip(nodes.i_idx.tolist(), nodes.index.tolist()))
+        edges.source = edges.source.map(lookup)
+        edges.target = edges.target.map(lookup)
+
+        return nodes, edges
+
+    @wrapper_local_cache
+    def create_graph(self, correlation, correlation_boundaries=(0.98, 1), exclude_out_of_cluster_connection=True):
+
+        nodes, edges = self._create_node_edge_tables(correlation, correlation_boundaries=correlation_boundaries)
+
+        # create graph and populate with edges
+        G = nx.Graph()
+        for _, edge in tqdm(edges.iterrows(), total=len(edges)):
+            G.add_edge(*edge)
+
+        # calculate modularity
+        communities = community.greedy_modularity_communities(G)
+
+        # assign modules
+        nodes["module"] = -1
+        n_mod = 0
+        for module in tqdm(communities):
+            for m in module:
+                nodes.loc[m, "module"] = n_mod
+            n_mod += 1
+
+        # add module column to nodes dataframe
+        nodes["module"] = nodes["module"].astype("category")
+
+        # add module to edges
+        modules_sources = nodes.module.loc[edges.source.tolist()].tolist()
+        modules_targets = nodes.module.loc[edges.target.tolist()].tolist()
+        edge_module = modules_sources
+
+        if exclude_out_of_cluster_connection:
+            for i in np.where(np.array(modules_sources) != np.array(modules_targets))[0]:
+                edge_module[i] = -1
+
+        edges["module"] = edge_module
+
+        lookup_cluster_table = dict(zip(nodes.trace_idx.tolist(), nodes.module.tolist()))
+
+        return nodes, edges, lookup_cluster_table
+
+    def summarize_modules(self, nodes):
+
+        from pointpats import centrography
+
+        summary = {}
+
+        funcs = {
+            "mean_center": lambda module: None if len(module) < 1 else centrography.mean_center(module[["x", "y"]].astype(float)),
+            "median_center": lambda module: None if len(module) < 1 else centrography.euclidean_median(module[["x", "y"]].astype(float)),
+            "std_distance": lambda module: None if len(module) < 1 else centrography.std_distance(module[["x", "y"]].astype(float)),
+            "coordinates": lambda module: module[["x", "y"]].astype(float).values,
+            "num_events": lambda module: len(module),
+        }
+
+        for func_key in funcs.keys():
+            func = funcs[func_key]
+            summary[func_key] = nodes.groupby("module").apply(func)
+
+        return pd.DataFrame(summary)
+
+
+class Discriminator(CachedClass):
+
+    def __init__(self, events, cache_path=None):
+        super().__init__(cache_path=cache_path)
+
+        self.events = events
+        self.X_test = None
+        self.Y_test = None
+        self.X_train = None
+        self.Y_train = None
+        self.indices_train = None
+        self.indices_test = None
+        self.clf = None
+
+    def train_classifier(self, embedding, category_column, split=0.8,
+                         classifier="RandomForestClassifier", param_classifier=dict(n_estimators=100, n_jobs=-1)):
+
+        # split into training and validation dataset
+        self.split_dataset(embedding, category_column, split=split)
+
+        # fit model
+        if classifier == "RandomForestClassifier":
+            clf = RandomForestClassifier(**param_classifier)
+        else:
+            # todo maybe each individual function?
+            raise ValueError("Please provide on of the following classifiers: ['RandomForestClassifier']")
+
+        clf.fit(self.X_train, self.Y_train)
+
+        self.clf = clf
+
+    def predict(self, X, normalization_instructions=None):
+
+        if normalization_instructions is not None:
+            norm = Normalization(X, inplace=True)
+            norm.run(normalization_instructions)
+
+        return self.clf.predict(X)
+
+    def evaluate(self, cutoff=0.5, normalize=None):
+
+        X = self.X_test
+        Y = self.Y_test
+        pred_test = np.squeeze(self.clf.predict(X))
+
+        if pred_test.dtype != int:
+            logging.warning(f"assuming probability prediction. thresholding at {cutoff}")
+
+            Y = Y >= cutoff
+
+        cm =  confusion_matrix(pred_test, Y, normalize=normalize)
+
+        cm = pd.DataFrame(cm)
+        cm.index = [f"true_{i}" for i in cm.index]
+        cm.columns = [f"pred_{c}" for c in cm.columns]
+
+        return cm
+
+
+    def split_dataset(self, embedding, category_column, split=0.8,
+                      balance_training_set=False, balance_test_set=False, encode_category=None,
+                      normalization_instructions=None):
+
+        # get data
+        X = embedding
+
+        # get category to predict
+        if isinstance(category_column, list):
+            Y = np.array(category_column)
+        elif isinstance(category_column, np.ndarray):
+            Y = category_column
+        elif isinstance(category_column, str):
+
+            if encode_category is None:
+                Y = np.array(self.events.events[category_column].tolist())
+            else:
+                Y = np.array(self.events.events[category_column].map(encode_category).tolist())
+
+        # check inputs
+        if len(X) != len(Y):
+            raise ValueError(f"embedding and events must have the same length: "
+                             f"len(embedding)={len(X)} vs. len(events)={len(Y)}")
+
+        if np.sum(np.isnan(X)) > 0:
+            raise ValueError(f"embedding cannot contain NaN values.")
+
+        # normalize
+        if normalization_instructions is not None:
+            norm = Normalization(X, inplace=True)
+            norm.run(normalization_instructions)
+
+        # split X and Y
+        split_idx = int(len(X)*split)
+        X_train, X_test = X[:split_idx], X[split_idx:]
+        Y_train, Y_test = Y[:split_idx], Y[split_idx:]
+
+        indices = self.events.events.index.tolist()
+        indices_train, indices_test = indices[:split_idx], indices[split_idx:]
+
+        # balancing
+        if balance_training_set:
+            X_train, Y_train, indices_train = self._balance_set(X_train, Y_train, indices_train)
+
+        if balance_test_set:
+            X_test, Y_test, indices_test = self._balance_set(X_test, Y_test, indices_test)
+
+        # cache results
+        self.X_train = X_train
+        self.Y_train = Y_train
+        self.X_test = X_test
+        self.Y_test = Y_test
+        self.indices_train = indices_train
+        self.indices_test = indices_test
+
+    def _balance_set(self, X, Y, indices):
+
+        # identify the category with the fewest members
+        count_category_members = pd.Series(Y).value_counts()
+        min_category_count = count_category_members.min()
+
+        # choose random indices
+        rand_indices = list()
+        for category in count_category_members.index.unique():
+            rand_indices.append(np.random.choice(np.where(Y == category)[0], size=min_category_count, replace=False))
+
+        rand_indices = rand_indices.flatten()
+
+        # select randomly chosen rows
+        X = X[rand_indices]
+        Y = Y[rand_indices]
+        indices = indices[rand_indices]
+
+        return X, Y, indices
+

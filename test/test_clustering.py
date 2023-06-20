@@ -38,7 +38,7 @@ class Test_dtw_linkage:
     @pytest.mark.parametrize("use_mmap", [True, False])
     def test_clustering(self, use_mmap):
 
-        dtw = DTW_Linkage()
+        dtw = Linkage()
         DG = DummyGenerator(num_rows=11, trace_length=16, ragged=False)
         data = DG.get_events()
 
@@ -49,7 +49,7 @@ class Test_dtw_linkage:
         barycenters = dtw.calculate_barycenters(clusters, cluster_labels, events=data)
 
     def test_wrapper_function(self):
-        dtw = DTW_Linkage()
+        dtw = Linkage()
         DG = DummyGenerator(num_rows=11, trace_length=16, ragged=False)
         data = DG.get_events()
 
@@ -59,7 +59,7 @@ class Test_dtw_linkage:
     @pytest.mark.parametrize("min_cluster_size", [None, 10])
     def test_plotting(self, z_threshold, min_cluster_size, tmp_path):
 
-        dtw = DTW_Linkage()
+        dtw = Linkage()
         DG = DummyGenerator(num_rows=11, trace_length=16, ragged=False)
         data = DG.get_events()
 
@@ -87,13 +87,13 @@ class Test_dtw_linkage:
             data = DG.get_events()
 
             # test calculate **distance** matrix
-            dtw = DTW_Linkage(cache_path=tmp_path)
+            dtw = Linkage(cache_path=tmp_path)
             t0 = time.time()
             dtw.calculate_distance_matrix(data, use_mmap=use_mmap)
             dt = time.time() - t0
             del dtw
 
-            dtw = DTW_Linkage(cache_path=tmp_path)
+            dtw = Linkage(cache_path=tmp_path)
             t0 = time.time()
             dm = dtw.calculate_distance_matrix(data, use_mmap=use_mmap)
             dt2 = time.time() - t0
@@ -101,13 +101,13 @@ class Test_dtw_linkage:
             assert dt2 < dt, "distance matrix is not cached"
 
             # test calculate **linkage** matrix
-            dtw = DTW_Linkage(cache_path=tmp_path)
+            dtw = Linkage(cache_path=tmp_path)
             t0 = time.time()
             dtw.calculate_linkage_matrix(dm)
             dt = time.time() - t0
             del dtw
 
-            dtw = DTW_Linkage(cache_path=tmp_path)
+            dtw = Linkage(cache_path=tmp_path)
             t0 = time.time()
             dtw.calculate_linkage_matrix(dm)
             dt2 = time.time() - t0

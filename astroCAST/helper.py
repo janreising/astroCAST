@@ -687,31 +687,33 @@ class Normalization:
         return self.run(instructions)
 
     @staticmethod
-    def get_value(data, mode, population_wide):
+    def get_value(data, mode, population_wide=False, axis=1):
 
-        axis = None if population_wide else 1
+        summary_axis = None if population_wide else axis
 
         mode_options = {
-            "first": lambda x: np.mean(x[:, 0]) if population_wide else x[:, 0],
-            "mean": lambda x: np.mean(x, axis=axis),
-            "min": lambda x: np.min(x, axis=axis),
-            "min_abs": lambda x: np.min(np.abs(x), axis=axis),
-            "max": lambda x: np.max(x, axis=axis),
-            "max_abs": lambda x: np.max(np.abs(x), axis=axis),
-            "std": lambda x: np.std(x, axis=axis)
+            "first": lambda x: np.mean(x[:, 0] if axis else x[0, :]) if population_wide else x[:, 0] if axis else x[0, :],
+            "mean": lambda x: np.mean(x, axis=summary_axis),
+            "min": lambda x: np.min(x, axis=summary_axis),
+            "min_abs": lambda x: np.min(np.abs(x), axis=summary_axis),
+            "max": lambda x: np.max(x, axis=summary_axis),
+            "max_abs": lambda x: np.max(np.abs(x), axis=summary_axis),
+            "std": lambda x: np.std(x, axis=summary_axis)
         }
         assert mode in mode_options.keys(), f"please provide valid mode: {mode_options.keys()}"
-
-        logging.warning(f"data: {data}")
-        logging.warning(f"type: {type(data)}")
-        # logging.warning(f"shape: {data.shape}")
-        # logging.warning(f"std: {np.std(data, axis=axis)}")
 
         ret = mode_options[mode](data)
         return ret if population_wide else ret[:, None]  # broadcasting for downstream calculation
 
-    def subtract(self, data, mode="min", population_wide=False):
-        return data - self.get_value(data, mode, population_wide)
+    def subtract(self, data, mode="min", population_wide=False, rows=True):
+
+        value = self.get_value(data, mode, population_wide, axis=rows)
+
+        # transpose result if subtracting by columns
+        if not rows:
+            value = value.tranpose()
+
+        return data - value
 
     def divide(self, data, mode="max", population_wide=False):
 
@@ -745,41 +747,6 @@ class Normalization:
 
             else:
                 return data / divisor
-
-    @staticmethod
-    def enforce_length(data, min_length=None, pad_mode="edge", max_length=None):
-
-        if min_length is None and max_length is None:
-            return data
-
-        if isinstance(data, np.ndarray):
-
-            logging.warning(data.shape)
-            if min_length is not None and data.shape[1] < min_length:
-                data = np.pad(data, pad_width=min_length - data.shape[1], mode=pad_mode)
-                data = data[:, :min_length]
-
-            elif max_length is not None and data.shape[1] > max_length:
-                data = data[:, :max_length]
-
-            return data
-
-        elif isinstance(data, ak.Array):
-
-            if min_length is not None and max_length is None:
-                data = ak.pad_none(data, min_length)
-
-            elif max_length is not None and min_length is None:
-                data = data[:, :max_length]
-
-            else:
-                assert max_length == min_length, "when providing 'max_length' and 'min_length', both have to be equal"
-                data = ak.pad_none(data, max_length, clip=True)
-
-        else:
-            raise TypeError(f"datatype {type(data)} not recognized.")
-
-        return data
 
     @staticmethod
     def impute_nan(data, fixed_value=None):
@@ -837,57 +804,16 @@ class Normalization:
         else:
             return np.diff(data, axis=1)
 
-class Extension:
+class CachedClass:
 
-    def __init__(self, events, video):
+    def __init__(self, cache_path=None):
 
-        self.events = events
-        self.video = video
+        if cache_path is not None:
 
-    # todo make static so that it can be cached? issue is getting a hash value for the video input
-    def extend(self, num_frames, use_footprint=True, show_progress=True):
+            if isinstance(cache_path, str):
+                cache_path = Path(cache_path)
 
-        img = self.video.get_data()
-        events = self.events.events
+            if not cache_path.is_dir():
+                cache_path.mkdir()
 
-        if isinstance(num_frames, int):
-            prev_z = post_z = num_frames
-        elif isinstance(num_frames, (list, tuple)):
-            prev_z, post_z = num_frames
-        else:
-            raise ValueError("Please provide 'num_frames' as int or tuple (leading_frames, trailing_frames)")
-
-        ext_events = []
-        iterator = tqdm(events.iterrows(), total=len(events)) if show_progress else events.iterrows()
-        for _, event in iterator:
-
-            # get mask
-            if use_footprint:
-                m0 = m1 = np.invert(np.reshape(event["footprint"], (event.dx, event.dy)))
-            else:
-                m = np.invert(np.reshape(event["mask"], (event.dz, event.dx, event.dy)))
-                m0, m1 = m[0, :, :], m[-1, :, :]
-
-            # get boundaries
-            z0, z1, x0, x1, y0, y1 = event.z0, event.z1, event.x0, event.x1, event.y0, event.y1
-
-            # load previous data
-            prev_data = img[max(z0 - prev_z, 0):z0, x0:x1, y0:y1]
-            prev_data = np.ma.masked_array(data=prev_data, mask=np.broadcast_to(m0, prev_data.shape))
-            prev_data = np.nanmean(prev_data, axis=(1, 2))
-
-            # load past data
-            post_data = img[z1:min(z1+post_z, img.shape[0]), x0:x1, y0:y1]
-            post_data = np.ma.masked_array(data=post_data, mask=np.broadcast_to(m1, post_data.shape))
-            post_data = np.nanmean(post_data, axis=(1, 2))
-
-            # extend trace
-            extended_trace = np.concatenate([prev_data, np.array(event.trace), post_data])
-            ext_events.append(extended_trace)
-
-        return ext_events
-
-
-
-
-
+        self.cache_path = cache_path

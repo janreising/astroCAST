@@ -3,7 +3,7 @@ import json
 from pathlib import Path
 
 from astroCAST.analysis import Events
-from astroCAST.clustering import DTW_Linkage
+from astroCAST.clustering import Linkage
 
 if __name__ == "__main__":
 
@@ -26,11 +26,11 @@ if __name__ == "__main__":
     events = Events(event_dir=event_dir)
 
     # run linkage analysis
-    dtw = DTW_Linkage(cache_path=args.cachepath)
+    dtw = Linkage(cache_path=args.cachepath)
     barycenters, cluster_lookup_table = dtw.get_barycenters(events, z_threshold=args.zthr,
                                                             distance_type=args.correlation,
                                                             param_distance=args.distanceparam,
-                                                            param_linkage_matrix=args.linkageparam,
+                                                            param_linkage=args.linkageparam,
                                                             param_clustering=args.clusteringparam,
                                                             param_barycenter=args.baryparam,
                                                             )
