@@ -523,7 +523,7 @@ class Events(CachedClass):
 
             return events
 
-    def to_numpy(self, events=None, empty_as_nan=True):
+    def to_numpy(self, events=None, empty_as_nan=True, simple=False):
 
         """
         Convert events DataFrame to a numpy array.
@@ -539,6 +539,9 @@ class Events(CachedClass):
 
         if events is None:
             events = self.events
+
+        if simple:
+            return np.array(events.trace.tolist())
 
         num_frames = events.z1.max() + 1
         arr = np.zeros((len(events), num_frames))

@@ -17,6 +17,7 @@ from matplotlib.colors import LinearSegmentedColormap
 from networkx.algorithms import community
 from scipy.cluster.hierarchy import fcluster
 import seaborn as sns
+from sklearn.cluster import KMeans
 from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
 from sklearn.model_selection import cross_val_score
 from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
@@ -73,8 +74,23 @@ class HdbScan:
         assert path.is_file(), f"can't find hdb: {path}"
         self.hdb = pickle.load(open(path, "rb"))
 
+class KMeansClustering(CachedClass):
 
-class DTW_Linkage(CachedClass):
+    @wrapper_local_cache
+    def fit(self, events, embedding, n_clusters, param={}, default_cluster=-1):
+
+        if len(events) != len(embedding):
+            raise ValueError(f"embedding and events must have the same length: "
+                             f"len(embedding)={len(embedding)} vs. len(events)={len(events)}")
+
+        labels = KMeans(n_clusters=n_clusters, **param).fit_transform(embedding)
+
+        cluster_lookup_table = defaultdict(lambda: default_cluster)
+        cluster_lookup_table.update({k: label for k, label in list(zip(events.events.index.tolist(), labels.tolist()))})
+
+        return cluster_lookup_table
+
+class Linkage(CachedClass):
 
     """
 	"trace_parameters": {
@@ -89,7 +105,7 @@ class DTW_Linkage(CachedClass):
     def get_barycenters(self, events, z_threshold, default_cluster = -1,
                         distance_matrix=None,
                         distance_type="pearson", param_distance={},
-                        param_linkage_matrix={}, param_clustering={}, param_barycenter={}):
+                        param_linkage={}, param_clustering={}, param_barycenter={}):
 
         if distance_matrix is None:
             corr = Distance(cache_path=self.cache_path)
@@ -97,7 +113,7 @@ class DTW_Linkage(CachedClass):
                                                    correlation_type=distance_type,
                                                    correlation_param=param_distance)
 
-        linkage_matrix = self.calculate_linkage_matrix(distance_matrix, **param_linkage_matrix)
+        linkage_matrix = self.calculate_linkage_matrix(distance_matrix, **param_linkage)
 
         clusters, cluster_labels = self.cluster_linkage_matrix(linkage_matrix, z_threshold, **param_clustering)
         barycenters = self.calculate_barycenters(clusters, cluster_labels, events, **param_barycenter)
@@ -186,7 +202,7 @@ class DTW_Linkage(CachedClass):
         return clusters, cluster_labels
 
     @wrapper_local_cache
-    def calculate_barycenters(self, clusters, cluster_labels, events,
+    def calculate_barycenters(self, clusters, cluster_labels, events, init_fraction=0.1,
                               max_it=100, thr=1e-5, penalty=0, psi=None,
                               show_progress=True):
 
@@ -203,7 +219,7 @@ class DTW_Linkage(CachedClass):
             sel = [traces[id_] for id_ in idx_]
             idx = [indices[id_] for id_ in idx_]
 
-            nb_initial_samples = len(sel) if len(sel) < 11 else int(0.1*len(sel))
+            nb_initial_samples = len(sel) if len(sel) < 11 else int(init_fraction*len(sel))
             bc = dtw_barycenter.dba_loop(sel, c=None,
                                          nb_initial_samples=nb_initial_samples,
                                          max_it=max_it, thr=thr, use_c=True, penalty=penalty, psi=psi)
