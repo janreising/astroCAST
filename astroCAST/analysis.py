@@ -143,6 +143,9 @@ class Events(CachedClass):
 
         return hash_
 
+    def _repr_html_(self):
+        return self.events._repr_html_()
+
     def is_multi_subject(self):
         if len(self.events.subject_id.unique()) > 1:
             return True
