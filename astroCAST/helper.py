@@ -707,7 +707,7 @@ class Normalization:
 
     def subtract(self, data, mode="min", population_wide=False, rows=True):
 
-        value = self.get_value(data, mode, population_wide, axis=rows)
+        value = self.get_value(data, mode, population_wide, axis=int(rows))
 
         # transpose result if subtracting by columns
         if not rows:
@@ -718,7 +718,6 @@ class Normalization:
     def divide(self, data, mode="max", population_wide=False):
 
         divisor = self.get_value(data, mode, population_wide)
-        print("type: ", type(data))
 
         # deal with ZeroDivisonError
         if population_wide and divisor == 0:
@@ -727,7 +726,6 @@ class Normalization:
 
         else:
             idx = np.where(divisor == 0)[0]
-            print("idx: ", idx)
             if len(idx) > 0:
                 logging.warning("Encountered '0' in divisor, returning those rows untouched.")
 
