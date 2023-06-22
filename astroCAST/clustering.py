@@ -223,7 +223,7 @@ class Linkage(CachedClass):
         for i, cl in iterator:
 
             idx_ = np.where(cluster_labels == cl)[0]
-            sel = [traces[id_] for id_ in idx_]
+            sel = [np.array(traces[id_]) for id_ in idx_]
             idx = [indices[id_] for id_ in idx_]
 
             nb_initial_samples = len(sel) if len(sel) < 11 else int(init_fraction*len(sel))
@@ -384,7 +384,7 @@ class Distance(CachedClass):
     @wrapper_local_cache
     def get_dtw_correlation(self, events, use_mmap=False, block=10000, show_progress=True):
 
-        traces = events.events.trace.tolist()
+        traces = [np.array(t) for t in events.events.trace.tolist()]
         N = len(traces)
 
         if not use_mmap:
@@ -709,17 +709,17 @@ class Modules(CachedClass):
 
         # select correlations within given boundaries
         lower_bound, upper_bound = correlation_boundaries
-        selected_correlations = np.where(np.logical_and(correlation >= lower_bound, correlation < upper_bound))
+        selected_correlations = np.where(np.logical_and(correlation >= lower_bound, correlation < upper_bound))[0]
 
         # deal with compact correlation matrices
-        if len(selected_correlations) == 1:
+        if len(selected_correlations.shape) == 1:
             triu_indices = np.array(np.triu_indices(len(self.events)))
             selected_correlations = triu_indices[:, selected_correlations].squeeze()
 
         # filter events
-        selected_idx = np.unique(selected_correlations).tolist()
+        selected_idx = np.unique(selected_correlations)
         # selected_events = self.events.events.iloc[selected_idx]
-        selected_events = self.events[selected_idx]
+        selected_events = self.events[selected_idx.tolist()]
 
         # create nodes table
         nodes = pd.DataFrame({
