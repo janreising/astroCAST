@@ -804,7 +804,7 @@ class Normalization:
 
 class CachedClass:
 
-    def __init__(self, cache_path=None):
+    def __init__(self, cache_path=None, logging_level=logging.INFO):
 
         if cache_path is not None:
 
@@ -815,3 +815,6 @@ class CachedClass:
                 cache_path.mkdir()
 
         self.cache_path = cache_path
+
+        # set logging level
+        logging.basicConfig(level=logging_level)
