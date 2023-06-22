@@ -523,6 +523,11 @@ class SubFrameGenerator(tf.keras.utils.Sequence):
 
             if file.suffix == ".h5":
                 with h5.File(file.as_posix(), "r") as f:
+
+                    if self.loc not in f:
+                        logging.warning(f"cannot find {self.loc} in {file}")
+                        continue
+
                     data = f[self.loc]
                     Z, X, Y = data.shape
 
