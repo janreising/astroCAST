@@ -152,6 +152,9 @@ class Events(CachedClass):
         else:
             return False
 
+    def is_ragged(self):
+        return is_ragged(self.events.trace.tolist())
+
     def add_clustering(self, cluster_lookup_table, column_name="cluster"):
 
         events = self.events
@@ -668,13 +671,13 @@ class Events(CachedClass):
         return viewer
 
     def get_summary_statistics(self, decimals=2, groupby=None,
-        columns_excluded=('z0', 'z1', 'x0', 'x1', 'y0', 'y1', 'dz', 'dx', 'dy', 'mask', 'contours', 'footprint', 'fp_cx', 'fp_cy', 'trace', 'error',  'cx', 'cy')):
+        columns_excluded=('name', 'subject_id', 'group', 'z0', 'z1', 'x0', 'x1', 'y0', 'y1', 'mask', 'contours', 'footprint', 'fp_cx', 'fp_cy', 'trace', 'error',  'cx', 'cy')):
 
         events = self.events
 
         # select columns
         if columns_excluded is not None:
-            cols = [c for c in events.columns if c not in columns_excluded ]
+            cols = [c for c in events.columns if c not in columns_excluded ] + [] if groupby is None else [groupby]
             ev = events[cols]
         else:
             ev = events.copy()
@@ -848,7 +851,7 @@ class Events(CachedClass):
                         data[i] = trace
 
                     elif max_length is not None and len(trace) > max_length:
-                        data[i] = trace[:, :max_length]
+                        data[i] = trace[:max_length]
 
                 data = np.array(data)
 
@@ -891,24 +894,29 @@ class Events(CachedClass):
 
         return pivot
 
+    def normalize(self, normalize_instructions, inplace=True):
+
+        traces = self.events.trace
+
+        norm = Normalization(traces)
+        norm_traces = norm.run(normalize_instructions)
+
+        # update events
+        if inplace:
+            self.events.trace = norm_traces.tolist()
+        else:
+            return norm_traces
+
 class Video:
 
-    def __init__(self, data, z_slice=None, h5_loc=None, lazy=False):
+    def __init__(self, data, z_slice=None, h5_loc=None, lazy=False, name=None):
 
-        if isinstance(data, (np.ndarray, da.Array)):
-            self.data = data
-
-            if z_slice is not None:
-                z0, z1 = z_slice
-                self.data = self.data[z0:z1, :, :]
-
-        elif isinstance(data, (str, Path)):
-
-            io = IO()
-            self.data = io.load(data, h5_loc=h5_loc, lazy=lazy, z_slice=z_slice)
+        io = IO()
+        self.data = io.load(data, h5_loc=h5_loc, lazy=lazy, z_slice=z_slice)
 
         self.z_slice = z_slice
         self.Z, self.X, self.Y = self.data.shape
+        self.name = name
 
     def get_data(self, in_memory=False):
 
@@ -947,8 +955,15 @@ class Video:
 
         return proj
 
-    def show(self):
-        return napari.view_image(self.data)
+    def show(self, viewer=None):
+
+        if viewer is None:
+            viewer = napari.view_image(self.data, name=self.name)
+
+        else:
+            viewer.add_image(self.data, name=self.name)
+
+        return viewer
 
 
 class Plotting:
