@@ -102,6 +102,11 @@ class Linkage(CachedClass):
 	"max_trace_plot":5, "max_plots":25
 """
 
+    def __init__(self, logging_level=logging.INFO):
+        super().__init__(logging_level=logging_level)
+
+        self.Z = None
+
     def get_barycenters(self, events, z_threshold, default_cluster = -1,
                         distance_matrix=None,
                         distance_type="pearson", param_distance={},
@@ -179,6 +184,8 @@ class Linkage(CachedClass):
     @wrapper_local_cache
     def calculate_linkage_matrix(self, distance_matrix, method="average", metric="euclidean"):
         Z = fastcluster.linkage(distance_matrix, method=method, metric=metric, preserve_input=False)
+        # todo add flag to cache or not to cache
+        self.Z = Z
         return Z
 
     @staticmethod
