@@ -315,7 +315,7 @@ class IO:
 
         """
 
-        if isinstance(path, [str, Path]):
+        if isinstance(path, (str, Path)):
             path = Path(path)
 
             if path.suffix in [".tdb"]:
@@ -1081,13 +1081,16 @@ class MotionCorrection:
 
         # If output is None, return the motion-corrected data as a NumPy array
         if output is None:
-            return np.array(data)
+            data = np.array(data)
+            data = np.swapaxes(data, 1, 2)
+            return data
 
         elif isinstance(output, (str, Path)):
             output = Path(output) if isinstance(output, Path) else output
 
             # Create a dask array from the memory-mapped data with specified chunking and compression
             data = da.from_array(data, chunks=chunks)
+            data = data.swapaxes(1, 2)
 
             # Check if the output file is an HDF5 file and loc is provided
             if output.suffix in [".h5", ".hdf5"] and loc is None:
