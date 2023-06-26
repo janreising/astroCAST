@@ -1,5 +1,6 @@
 import copy
 import logging
+from collections import defaultdict
 from pathlib import Path
 
 import dask.array as da
@@ -906,6 +907,13 @@ class Events(CachedClass):
             self.events.trace = norm_traces.tolist()
         else:
             return norm_traces
+
+    def create_lookup_table(self, labels, default_cluster=-1):
+
+        cluster_lookup_table = defaultdict(lambda: default_cluster)
+        cluster_lookup_table.update({k: label for k, label in list(zip(self.events.index.tolist(), labels.tolist()))})
+
+        return cluster_lookup_table
 
 class Video:
 

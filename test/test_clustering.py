@@ -8,30 +8,58 @@ from astroCAST.helper import DummyGenerator
 
 class Test_hdbscan:
 
-    def test_clustering(self):
+    def test_plain(self):
 
-        data = np.random.random(size=(12, 25))
-
-        hdb = HdbScan()
-        _ = hdb.fit(data)
-
-        data2 = np.random.random(size=(12, 25))
-        _ = hdb.predict(data2)
-
-    def test_load_save(self, tmp_path):
-
-        data = np.random.random(size=(12, 25))
+        dg = DummyGenerator(ragged=False)
+        arr = dg.get_array()
 
         hdb = HdbScan()
-        _ = hdb.fit(data)
-        hdb.save(tmp_path)
+        lbls = hdb.fit(arr)
+        lbls2, strengths = hdb.predict(arr)
 
-        data2 = np.random.random(size=(12, 25))
-        hdb2 = HdbScan()
-        hdb2.load(tmp_path)
-        _ = hdb2.predict(data2)
+        assert isinstance(lbls, np.ndarray), f"lbls is type {type(lbls)} instead of 'np.ndarray'"
+        assert isinstance(lbls2, np.ndarray), f"lbls_predicted is type {type(lbls2)} instead of 'np.ndarray'"
+        assert isinstance(strengths, np.ndarray), f"strengths is type {type(strengths)} instead of 'np.ndarray'"
 
-# TODO test different inputs
+    def test_events(self):
+
+        dg = DummyGenerator(ragged=False)
+        events = dg.get_events()
+        arr = dg.get_array()
+
+        hdb = HdbScan(events=events)
+
+        lut = hdb.fit(arr)
+        assert isinstance(lut, dict), f"lut should be dictionary instead of {type(lut)}"
+
+        lut2, strength = hdb.predict(arr)
+
+        events.add_clustering(lut, "cluster_1")
+        events.add_clustering(lut2, "cluster_2")
+        events.add_clustering(strength, "strength")
+
+    def test_load_save(self):
+
+        with tempfile.TemporaryDirectory() as dir:
+            tmp_path = Path(dir)
+            assert tmp_path.is_dir()
+
+            dg = DummyGenerator(ragged=False)
+            arr = dg.get_array()
+
+            # Fit
+            hdb = HdbScan()
+            _ = hdb.fit(arr)
+            lbls_1 = hdb.predict(arr)
+
+            hdb.save(tmp_path.joinpath("hdb.p"))
+
+            # Load
+            hdb_loaded = HdbScan()
+            hdb_loaded.load(tmp_path.joinpath("hdb.p"))
+            lbls_2 = hdb_loaded.predict(arr)
+
+            assert np.allclose(lbls_1, lbls_2)
 
 class Test_dtw_linkage:
 
