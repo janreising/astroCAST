@@ -23,7 +23,7 @@ def create_sim_data(dir, name="sim.h5", h5_loc="dff/ch0", save_active_pixels=Fal
 
     sim = EventSim()
     video, num_events = sim.simulate(shape=shape, **sim_param)
-    IO.save(path=path, prefix="", data={h5_loc:video})
+    IO.save(path=path, h5_loc=None, data={h5_loc:video})
 
     det = Detector(path.as_posix(),  output=None)
     det.run(dataset=h5_loc, use_dask=True, save_activepixels=save_active_pixels)
@@ -511,7 +511,7 @@ class Test_Video:
                 h5_loc = "data"
 
                 io = IO()
-                io.save(path=path, data=data, prefix=h5_loc)
+                io.save(path=path, data=data, h5_loc=h5_loc)
 
                 vid = Video(data=path, h5_loc="data/ch0", lazy=lazy, z_slice=z_slice)
 
