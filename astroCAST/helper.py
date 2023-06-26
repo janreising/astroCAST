@@ -278,9 +278,13 @@ def get_data_dimensions(input_, loc=None, return_dtype=False):
 
 class DummyGenerator:
 
-    def __init__(self, num_rows=25, trace_length=12, ragged=False, offset=0):
+    def __init__(self, num_rows=25, trace_length=12, ragged=False, offset=0, n_groups=None, n_clusters=None):
 
-        self.data = self.get_data(num_rows=num_rows, trace_length=trace_length, ragged=ragged, offset=offset)
+        self.data = self.get_data(num_rows=num_rows, trace_length=trace_length,
+                                  ragged=ragged, offset=offset)
+
+        self.groups = None if n_groups is None else np.random.randint(0, n_groups, size=len(self.data), dtype=int)
+        self.clusters = None if n_clusters is None else np.random.randint(0, n_clusters, size=len(self.data), dtype=int)
 
     @staticmethod
     def get_data(num_rows, trace_length, ragged, offset):
@@ -374,6 +378,12 @@ class DummyGenerator:
 
         ev = Events(event_dir=None)
         df = self.get_dataframe()
+
+        if self.groups is not None:
+            df["group"] = self.groups
+
+        if self.clusters is not None:
+            df["clusters"] = self.clusters
 
         ev.events = df
         ev.seed = 1

@@ -355,6 +355,20 @@ class Test_Events:
 
         np.allclose(arr_expected, arr_out)
 
+    def test_frequency(self, n_groups=3, n_clusters=10):
+
+        dg = helper.DummyGenerator(n_groups=n_groups, n_clusters=n_clusters, num_rows=200, trace_length=2)
+        events = dg.get_events()
+
+        freq = events.get_frequency(grouping_column="group", cluster_column="clusters", normalization_instructions=None)
+        assert len(freq) == n_clusters
+        assert len(freq.columns) == n_groups
+
+        instr = {0: ["subtract", {"mode": "max"}]}
+        freq = events.get_frequency(grouping_column="group", cluster_column="clusters",
+                            normalization_instructions=instr)
+        assert freq.max().max() == 0
+
 class Test_Correlation:
 
     def setup_method(self):
