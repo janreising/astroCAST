@@ -65,12 +65,21 @@ class Input:
 
         logging.info("loading data ...")
         io = IO()
-        data = io.load(input_path, sep=sep, z_slice=z_slice, lazy=lazy, chunks=chunks)
+        data = io.load(input_path, sep=sep, z_slice=z_slice, lazy=lazy, chunks=(1, -1, -1))
 
         logging.info("preparing data ...")
         data = self.prepare_data(data, channels=channels, subtract_background=subtract_background,
                                  subtract_func=subtract_func, rescale=rescale, dtype=dtype, in_memory=in_memory)
 
+        logging.debug(f"data type: {type(data[list(data.keys())[0]])}")
+
+        # rechunk
+        if chunks is not None:
+            for k in data:
+                if data[k].chunksize != chunks:
+                    data[k] = da.rechunk(data[k], chunks=chunks)
+
+        # return result
         if output_path is None:
             return data
 
@@ -195,7 +204,8 @@ class Input:
         for k in data.keys():
             # Rescale the data array using the specified scaling factors and anti-aliasing
             data[k] = data[k].map_blocks(
-                lambda chunk: resize(chunk, (chunk.shape[0], rX, rY), anti_aliasing=True))
+                lambda chunk: resize(chunk, (chunk.shape[0], rX, rY), anti_aliasing=True),
+                chunks=(1, rX, rY))
 
         return data
 
@@ -261,15 +271,29 @@ class Input:
 
             # Convert the prep_data type if specified
             if dtype is not None:
-
-                for k in prep_data.keys():
-                    prep_data[k] = img_as_uint(prep_data[k]) if dtype == np.uint else prep_data[k].astype(dtype)
+                prep_data = self.convert_dtype(prep_data, dtype=dtype)
 
             # Load the prep_data into memory if requested
             prep_data = dask.compute(prep_data)[0] if in_memory else prep_data
 
             # Rename the channels in the output dictionary
             return {channels[i]: prep_data[i] for i in prep_data.keys()}
+
+    def convert_dtype(self, data, dtype):
+
+        if dtype == np.uint:
+            def func(chunk):
+                return img_as_uint(chunk)
+
+        else:
+            def func(chunk):
+                return chunk.astype(dtype)
+
+        for k in data.keys():
+            data[k] = data[k].map_blocks(lambda chunk: func(chunk), dtype=dtype)
+
+        return data
+
 
     def save(self, path, data, h5_loc=None, chunks=None, compression=None):
 
@@ -614,7 +638,8 @@ class IO:
 
                 if isinstance(channel, da.Array):
                     # Save Dask array
-                    da.to_hdf5(fpath, loc, channel, chunks=chunks, compression=compression, shuffle=False)
+                    with ProgressBar(minimum=10, dt=1):
+                        da.to_hdf5(fpath, loc, channel, chunks=chunks, compression=compression, shuffle=False)
 
                 else:
                     # Save NumPy array
@@ -633,7 +658,8 @@ class IO:
                     channel = da.from_array(channel, chunks=chunks if chunks is not None else "auto")
 
                 fpath = path.with_suffix(f".{k}.tdb") if len(data.keys()) > 1 else path
-                da.to_tiledb(channel, fpath.as_posix(), compute=True)
+                with ProgressBar(minimum=10, dt=1):
+                    da.to_tiledb(channel, fpath.as_posix(), compute=True)
 
                 saved_paths.append(fpath)
                 logging.info(f"dataset saved to {fpath}")
@@ -658,7 +684,8 @@ class IO:
                     np.save(file=fpath.as_posix(), arr=channel)
 
                 else:
-                    da.to_npy_stack(fpath, x=channel, axis=0)
+                    with ProgressBar(minimum=10, dt=1):
+                        da.to_npy_stack(fpath, x=channel, axis=0)
 
                 saved_paths.append(fpath)
                 logging.info(f"saved data to {fpath}")
