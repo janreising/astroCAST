@@ -36,19 +36,37 @@ import fastcluster
 
 class HdbScan:
 
-    def __init__(self, min_samples=2, min_cluster_size=2, allow_single_cluster=True, n_jobs=-1):
+    def __init__(self, events, min_samples=2, min_cluster_size=2, allow_single_cluster=True, n_jobs=-1):
 
         self.hdb = hdbscan.HDBSCAN(min_samples=min_samples, min_cluster_size=min_cluster_size,
                                    allow_single_cluster=allow_single_cluster, core_dist_n_jobs=n_jobs,
                                    prediction_data=True)
 
-    def fit(self, data, y=None):
-        hdb_labels =  self.hdb.fit_predict(data, y=y)
-        return hdb_labels
+        self.events = events
 
-    def predict(self, data):
-        test_labels, strengths = hdbscan.approximate_predict(self.hdb, data)
-        return test_labels, strengths
+        if self.events is not None:
+            self.data = self.events.to_numpy(simple=True)
+
+    def fit(self, y=None):
+
+        hdb_labels =  self.hdb.fit_predict(self.data, y=y)
+        lookup_table = self.events.create_lookup_table(hdb_labels)
+
+        return lookup_table
+
+    def predict(self, events=None):
+
+        if events is None:
+            events = self.events
+            data = self.data
+        else:
+            data = events.to_numpy(simple=True)
+
+        labels, strengths = hdbscan.approximate_predict(self.hdb, data)
+        lookup_table = events.events.create_lookup_table(labels)
+        lookup_table_strength = events.events.create_lookup_table(strengths)
+
+        return lookup_table, lookup_table_strength
 
     def save(self, path):
 
