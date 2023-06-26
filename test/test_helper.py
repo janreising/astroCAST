@@ -1,3 +1,4 @@
+import numpy as np
 import pytest
 
 from astroCAST.helper import *
@@ -272,6 +273,39 @@ class Test_normalization:
             })
 
         assert np.sum(np.isnan(imputed if isinstance(imputed, np.ndarray) else ak.ravel(imputed))) == 0
+
+    def test_column_wise(self, num_rows, ragged):
+
+        if ragged == "ragged":
+
+            with pytest.raises(ValueError):
+
+                data = np.array([(np.random.random((np.random.randint(1, 10)))*10).astype(int) for _ in range(3)])
+
+                norm = Normalization(data)
+
+                instr = {0: ["divide", {"mode": "max", "rows":False}],}
+                res = norm.run(instr)
+
+        else:
+
+            data = np.random.random((num_rows, 3))
+            data = data * 10
+            data = data.astype(int)
+
+            norm = Normalization(data)
+
+            instr = {0: ["divide", {"mode": "max", "rows":False}],}
+            res = norm.run(instr)
+            assert np.max(res) <= 1
+
+            # force 0s
+            data[:, 2] -= np.max(data[:, 2])
+            norm = Normalization(data)
+
+            instr = {0: ["divide", {"mode": "max", "rows":False}],}
+            res = norm.run(instr)
+            np.allclose(data[:, 2], res[:, 2])
 
 class Test_EventSim:
     def test_simulate_default_arguments(self):
