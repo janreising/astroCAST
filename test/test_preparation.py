@@ -323,7 +323,7 @@ class Test_Input:
             output_path = tmpdir.joinpath(output_path)
 
             inp.run(input_path=tmpdir, output_path=output_path,
-                            dtype=None, in_memory=False, prefix="data")
+                            dtype=None, in_memory=False, h5_loc="data")
 
             assert output_path.is_file() or output_path.is_dir(), f"cannot find output file: {output_path}"
 
@@ -385,7 +385,7 @@ class Test_IO:
             h5loc = None if output_path.suffix != ".h5" else "data/ch0"
             data = {"ch0":arr}
 
-            output_path = io.save(output_path, data, prefix=prefix)
+            output_path = io.save(output_path, data, h5_loc=prefix)
 
             arr_load = io.load(output_path, h5_loc=h5loc)
 
@@ -412,7 +412,7 @@ class Test_IO:
             h5loc = None if output_path.suffix != ".h5" else "data/ch0"
             data = {"ch0":arr}
 
-            output_path = io.save(output_path, data, prefix=prefix)
+            output_path = io.save(output_path, data, h5_loc=prefix)
 
             arr_load = io.load(output_path, h5_loc=h5loc)
 
@@ -442,7 +442,7 @@ class Test_IO:
             h5loc = None if output_path.suffix != ".h5" else "data/ch0"
             data = {"ch0":arr}
 
-            output_path = io.save(output_path, data, prefix=prefix)
+            output_path = io.save(output_path, data, h5_loc=prefix)
 
             arr_load = io.load(output_path, h5_loc=h5loc, z_slice=z_slice)
 
@@ -468,7 +468,7 @@ class Test_IO:
             h5loc = None if output_path.suffix != ".h5" else "data/ch0"
             data = {"ch0":arr}
 
-            output_path = io.save(output_path, data, prefix=prefix)
+            output_path = io.save(output_path, data, h5_loc=prefix)
             logging.warning(output_path)
 
             # Loading
@@ -478,8 +478,29 @@ class Test_IO:
             assert arr.shape == arr_load.shape
             assert np.array_equal(arr, arr_load)
 
-    def test_sequential_tiff(self):
-        raise NotImplementedError
+    @pytest.mark.parametrize("sep", ["_", "x"])
+    def test_load_sequential_tiff(self, sep, shape=(100, 100, 100)):
+
+        with tempfile.TemporaryDirectory() as dir:
+            tmpdir = Path(dir)
+            assert tmpdir.is_dir()
+
+            input_dir = tmpdir.joinpath("seq_tiff")
+            input_dir.mkdir()
+
+            # create tiff files
+            arr = np.random.random(shape)
+
+            for z in range(len(arr)):
+                img = arr[z, :, :]
+                tifffile.imwrite(input_dir.joinpath(f"img{sep}{z}.tiff"), data=img)
+
+            # load data
+            io = IO()
+            arr_load = io.load(input_dir, sep=sep)
+
+            assert arr.shape == arr_load.shape
+            assert np.array_equal(arr, arr_load)
 
 class Test_MotionCorrection:
 
@@ -499,7 +520,7 @@ class Test_MotionCorrection:
 
                 h5_loc = "mc/ch0"
                 temp_path = tmpdir.joinpath("test.h5")
-                io.save(temp_path, data={"ch0":data}, prefix="mc")
+                io.save(temp_path, data={"ch0":data}, h5_loc="mc")
 
                 data = temp_path
 
@@ -513,7 +534,7 @@ class Test_MotionCorrection:
             elif input_type == ".tdb":
 
                 temp_path = tmpdir.joinpath("test.tdb")
-                temp_path = io.save(temp_path, data={"ch0":data}, prefix=None)
+                temp_path = io.save(temp_path, data={"test/ch0":data}, h5_loc=None)
 
                 assert temp_path.is_dir(), f"cannot find {temp_path}"
                 data = temp_path
@@ -548,7 +569,7 @@ class Test_MotionCorrection:
 
                 h5_loc = "mc/ch0"
                 temp_path = tmpdir.joinpath("test.h5")
-                io.save(temp_path, data={"ch0":data}, prefix="mc")
+                io.save(temp_path, data={"test/ch0":data}, h5_loc="mc")
 
                 data = temp_path
 
@@ -562,7 +583,7 @@ class Test_MotionCorrection:
             elif input_type == ".tdb":
 
                 temp_path = tmpdir.joinpath("test.tdb")
-                temp_path = io.save(temp_path, data={"ch0":data}, prefix=None)
+                temp_path = io.save(temp_path, data={"ch0":data}, h5_loc=None)
 
                 assert temp_path.is_file(), f"cannot find {temp_path}"
                 data = temp_path

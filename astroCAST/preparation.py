@@ -36,7 +36,7 @@ class Input:
             sep="_", channels=1, z_slice=None, lazy=True,
             subtract_background=None, subtract_func="mean",
             rescale=None, dtype=np.uint,
-            in_memory=False, prefix="data", chunks=None, compression=None):
+            in_memory=False, h5_loc="data", chunks=None, compression=None):
 
         """ Loads input data from a specified path, performs data processing, and optionally saves the processed data.
 
@@ -75,7 +75,7 @@ class Input:
             return data
 
         logging.info("saving data ...")
-        io.save(output_path, data, prefix=prefix, chunks=chunks, compression=compression)
+        io.save(output_path, data, h5_loc=h5_loc, chunks=chunks, compression=compression)
 
     @staticmethod
     def subtract_background(data, channels, subtract_background, subtract_func):
@@ -271,7 +271,7 @@ class Input:
             # Rename the channels in the output dictionary
             return {channels[i]: prep_data[i] for i in prep_data.keys()}
 
-    def save(self, path, data, prefix=None, chunks=None, compression=None):
+    def save(self, path, data, h5_loc=None, chunks=None, compression=None):
 
         """Save the processed data to a specified path.
 
@@ -284,17 +284,9 @@ class Input:
         """
 
         io = IO()
-        io.save(path=path, data=data, prefix=prefix, chunks=chunks, compression=compression)
+        io.save(path=path, data=data, h5_loc=h5_loc, chunks=chunks, compression=compression)
 
 class IO:
-
-    """
-    A helper class for input/output operations.
-
-    Attributes:
-        None
-
-    """
 
     def load(self, path, h5_loc=None, sep="_", z_slice=None, lazy=False, chunks="auto"):
 
@@ -555,7 +547,7 @@ class IO:
         return stack
 
     @staticmethod
-    def save(path, data, prefix=None, chunks=None, compression=None):
+    def save(path, data, h5_loc=None, chunks=None, compression=None):
 
         """
         Save data to a specified file format.
@@ -563,7 +555,7 @@ class IO:
         Args:
             path (str or pathlib.Path): The path to the output file.
             data (dict or np.ndarray or dask.array.Array): A dictionary containing the data to be saved, with keys as channel names and values as arrays.
-            prefix (str): The prefix to be used for naming datasets within the file (applicable only for HDF5 format).
+            h5_loc (str): Name of the dataset within the file (applicable only for HDF5 format).
             chunks (tuple or None): The chunk size to be used when saving Dask arrays (applicable only for HDF5 format).
             compression (str or None): The compression method to be used when saving Dask arrays (applicable only for HDF5 format).
 
@@ -589,7 +581,7 @@ class IO:
         if isinstance(data, (np.ndarray, da.Array)):
             data = {"ch0": data}
         elif not isinstance(data, dict):
-            raise TypeError("please provide data as dict of {channel_name:array}")
+            raise TypeError("please provide data as dict of {channel_name:array} or np.ndarray")
 
         saved_paths = []  # Initialize an empty list to store the paths of the saved files
         for k in data.keys():
@@ -603,7 +595,22 @@ class IO:
                 # Save as HDF5 format
 
                 fpath = path
-                loc = f"{prefix}/{k}" if prefix is not None else f"{k}"
+
+                # create dataset location
+                if isinstance(h5_loc, dict):
+                        loc = h5_loc[k]
+
+                elif h5_loc is None:
+                    loc = k if "/" in k else f"io/{k}"
+
+                elif len(data) == 1:
+                        loc = f"{h5_loc}/{k}" if "/" not in h5_loc[:-1] else h5_loc
+
+                else:
+                    loc = f"{h5_loc}/{k}"
+
+                logging.warning(f"loc: {loc}")
+                logging.info(f"saving channel {k} to '{loc}'")
 
                 if isinstance(channel, da.Array):
                     # Save Dask array
@@ -1026,7 +1033,7 @@ class MotionCorrection:
 
         return frames_per_file
 
-    def save(self, output=None, loc=None, prefix="mc/", chunks=None, compression=None, remove_mmap=False):
+    def save(self, output=None, loc=None, h5_loc="mc", chunks=None, compression=None, remove_mmap=False):
 
         """
         Retrieve the motion-corrected data and optionally save it to a file.
@@ -1097,7 +1104,7 @@ class MotionCorrection:
                 raise ValueError("when saving to .h5 please provide a location to save to instead of 'loc=None'")
 
             # Save the motion-corrected data to the output file using the I/O module
-            self.io.save(output, data={loc:data}, prefix=prefix, chunks=chunks, compression=compression)
+            self.io.save(output, data={loc:data}, h5_loc=h5_loc, chunks=chunks, compression=compression)
 
         else:
             raise ValueError(f"please provide output as None, str or pathlib.Path instead of {path}")
@@ -1298,7 +1305,7 @@ class Delta:
     def save(self, output_path, h5_loc="df", chunks=(-1, "auto", "auto"), compression=None):
 
         io = IO()
-        io.save(output_path, data=self.res, prefix=h5_loc, chunks=chunks, compression=compression)
+        io.save(output_path, data=self.res, h5_loc=h5_loc, chunks=chunks, compression=compression)
 
     def prepare_data(self, input_, in_memory=True, shared=True, use_dask=True):
 
