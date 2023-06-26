@@ -22,17 +22,18 @@ from deprecated import deprecated
 from scipy.ndimage import minimum_filter1d
 
 from astroCAST.helper import get_data_dimensions
+from dask.diagnostics import ProgressBar
 
 
 class Input:
 
     """Class for loading input data, performing data processing, and saving the processed data."""
 
-    def __init__(self):
-        pass
+    def __init__(self, logging_level=logging.INFO):
+        logging.basicConfig(level=logging_level)
 
     def run(self, input_path, output_path=None,
-            sep="_", channels=1,
+            sep="_", channels=1, z_slice=None, lazy=True,
             subtract_background=None, subtract_func="mean",
             rescale=None, dtype=np.uint,
             in_memory=False, prefix="data", chunks=None, compression=None):
@@ -62,25 +63,18 @@ class Input:
         assert isinstance(input_path, Path), "please provide 'input_path' as str or input_pathlib.input_path"
         assert input_path.is_file() or input_path.is_dir(), f"cannot find input: {input_path}"
 
+        logging.info("loading data ...")
         io = IO()
+        data = io.load(input_path, sep=sep, z_slice=z_slice, lazy=lazy, chunks=chunks)
 
-        if input_path.suffix in [".tiff", ".tif", ".TIFF", ".TIF"] or \
-                (input_path.is_dir() and len(
-                    [f for f in input_path.glob("*") if f.suffix in [".tif", ".tiff", ".TIF", ".TIFF"]]) > 0):
-            data = io._load_tiff(input_path, sep=sep)
-
-        elif input_path.suffix in [".czi"]:
-            data = io.load_czi(input_path)
-
-        else:
-            raise TypeError(f"File format is not implemented: {input_path.suffix}")
-
+        logging.info("preparing data ...")
         data = self.prepare_data(data, channels=channels, subtract_background=subtract_background,
                                  subtract_func=subtract_func, rescale=rescale, dtype=dtype, in_memory=in_memory)
 
         if output_path is None:
             return data
 
+        logging.info("saving data ...")
         io.save(output_path, data, prefix=prefix, chunks=chunks, compression=compression)
 
     @staticmethod
@@ -230,51 +224,52 @@ class Input:
             ValueError: If the channels input is not of type int or dict.
             ValueError: If the number of channels does not divide the number of frames evenly.
         """
+        with ProgressBar(minimum=10, dt=1):
 
-        # Convert data to a dask array if it's a ndarray, otherwise validate the input type
-        stack = da.from_array(data, chunks=(1, -1, -1)) if isinstance(data, np.ndarray) else data
-        if not isinstance(stack, (da.Array, da.core.Array)):
-            raise TypeError(f"Please provide data as np.ndarray or dask.array.Array instead of {type(data)}")
+            # Convert data to a dask array if it's a ndarray, otherwise validate the input type
+            stack = da.from_array(data, chunks=(1, -1, -1)) if isinstance(data, np.ndarray) else data
+            if not isinstance(stack, (da.Array, da.core.Array)):
+                raise TypeError(f"Please provide data as np.ndarray or dask.array.Array instead of {type(data)}")
 
-        # Check if the data has the correct dimensions
-        if len(stack.shape) != 3:
-            raise NotImplementedError(f"dimensions incorrect: {len(stack.shape)}. Currently not implemented for dim != 3D")
+            # Check if the data has the correct dimensions
+            if len(stack.shape) != 3:
+                raise NotImplementedError(f"dimensions incorrect: {len(stack.shape)}. Currently not implemented for dim != 3D")
 
-        # Validate the channels input and determine the number of channels
-        if not isinstance(channels, (int, dict)):
-            raise ValueError(f"please provide channels as int or dictionary.")
+            # Validate the channels input and determine the number of channels
+            if not isinstance(channels, (int, dict)):
+                raise ValueError(f"please provide channels as int or dictionary.")
 
-        num_channels = channels if isinstance(channels, int) else len(len(channels.keys()))
+            num_channels = channels if isinstance(channels, int) else len(len(channels.keys()))
 
-        if stack.shape[0] % num_channels != 0:
-            logging.warning(f"cannot divide frames into channel number: {stack.shape[0]} % {num_channels} != 0. May lead to unexpacted behavior")
+            if stack.shape[0] % num_channels != 0:
+                logging.warning(f"cannot divide frames into channel number: {stack.shape[0]} % {num_channels} != 0. May lead to unexpacted behavior")
 
-        channels = channels if isinstance(channels, dict) else {i: f"ch{i}" for i in range(num_channels)}
+            channels = channels if isinstance(channels, dict) else {i: f"ch{i}" for i in range(num_channels)}
 
-        # Split the data into channels based on the given channel indices or names
-        prep_data = {}
-        for channel_key in channels.keys():
-            prep_data[channel_key] = stack[channel_key::num_channels, :, :]
+            # Split the data into channels based on the given channel indices or names
+            prep_data = {}
+            for channel_key in channels.keys():
+                prep_data[channel_key] = stack[channel_key::num_channels, :, :]
 
-        # Subtract background if specified
-        if subtract_background is not None:
-            prep_data = self.subtract_background(prep_data, channels, subtract_background, subtract_func)
+            # Subtract background if specified
+            if subtract_background is not None:
+                prep_data = self.subtract_background(prep_data, channels, subtract_background, subtract_func)
 
-        # Rescale the prep_data if specified
-        if (rescale is not None) and rescale != 1 and rescale != 1.0:
-            self.rescale_data(prep_data, rescale)
+            # Rescale the prep_data if specified
+            if (rescale is not None) and rescale != 1 and rescale != 1.0:
+                self.rescale_data(prep_data, rescale)
 
-        # Convert the prep_data type if specified
-        if dtype is not None:
+            # Convert the prep_data type if specified
+            if dtype is not None:
 
-            for k in prep_data.keys():
-                prep_data[k] = img_as_uint(prep_data[k]) if dtype == np.uint else prep_data[k].astype(dtype)
+                for k in prep_data.keys():
+                    prep_data[k] = img_as_uint(prep_data[k]) if dtype == np.uint else prep_data[k].astype(dtype)
 
-        # Load the prep_data into memory if requested
-        prep_data = dask.compute(prep_data)[0] if in_memory else prep_data
+            # Load the prep_data into memory if requested
+            prep_data = dask.compute(prep_data)[0] if in_memory else prep_data
 
-        # Rename the channels in the output dictionary
-        return {channels[i]: prep_data[i] for i in prep_data.keys()}
+            # Rename the channels in the output dictionary
+            return {channels[i]: prep_data[i] for i in prep_data.keys()}
 
     def save(self, path, data, prefix=None, chunks=None, compression=None):
 
@@ -320,42 +315,49 @@ class IO:
 
         """
 
-        if isinstance(path, str):
+        if isinstance(path, (str, Path)):
             path = Path(path)
 
-        if path.suffix in [".tdb"]:
-            data =  self._load_tdb(path, lazy=lazy, chunks=chunks)  # Call private method to load TDB file
+            if path.suffix in [".tdb"]:
+                data =  self._load_tdb(path, lazy=lazy, chunks=chunks)  # Call private method to load TDB file
 
-        elif path.suffix in [".tif", ".tiff", ".TIF", ".TIFF"]:
-            data =  self._load_tiff(path, sep, lazy=lazy)  # Call private method to load TIFF file
+            elif path.suffix in [".tif", ".tiff", ".TIF", ".TIFF"]:
+                data =  self._load_tiff(path, sep, lazy=lazy)  # Call private method to load TIFF file
 
-        elif path.suffix in [".czi", ".CZI"]:
-            data =  self._load_czi(path, lazy=lazy)  # Call private method to load CZI file
+            elif path.suffix in [".czi", ".CZI"]:
+                data =  self._load_czi(path, lazy=lazy)  # Call private method to load CZI file
 
-        elif path.suffix in [".h5", ".hdf5", ".H5", ".HDF5"]:
-            data =  self._load_h5(path, h5_loc=h5_loc, lazy=lazy, chunks=chunks)  # Call private method to load HDF5 file
+            elif path.suffix in [".h5", ".hdf5", ".H5", ".HDF5"]:
+                data =  self._load_h5(path, h5_loc=h5_loc, lazy=lazy, chunks=chunks)  # Call private method to load HDF5 file
 
-        elif path.suffix in [".npy", ".NPY"]:
-            data =  self._load_npy(path, lazy=lazy, chunks=chunks)
+            elif path.suffix in [".npy", ".NPY"]:
+                data =  self._load_npy(path, lazy=lazy, chunks=chunks)
 
-        elif path.is_dir():
+            elif path.is_dir():
 
-            # If the path is a directory, load multiple TIFF files
-            files = [f for f in path.glob("*") if f.suffix in [".tif", ".tiff", ".TIF", ".TIFF"]]
-            if len(files) > 1:
-                raise FileNotFoundError("couldn't find files in folder. Recognized ext: [.tif, .tiff, .TIF, .TIFF]")
+                # If the path is a directory, load multiple TIFF files
+                files = [f for f in path.glob("*") if f.suffix in [".tif", ".tiff", ".TIF", ".TIFF"]]
+                if len(files) < 1:
+                    raise FileNotFoundError("couldn't find files in folder. Recognized ext: [.tif, .tiff, .TIF, .TIFF]")
+
+                else:
+                    data =  self._load_tiff(path, sep, lazy=lazy)  # Call private method to load TIFF files from directory
 
             else:
-                data =  self._load_tiff(path, sep, lazy=lazy)  # Call private method to load TIFF files from directory
+                raise ValueError("unrecognized file format! Choose one of [.tiff, .h5, .tdb, .czi]")
 
-        else:
-            raise ValueError("unrecognized file format! Choose one of [.tiff, .h5, .tdb, .czi]")
+        elif isinstance(path, np.ndarray):
+            data = da.from_array(path, chunks=chunks)
+
+        elif isinstance(path, da.Array):
+            data = da.rechunk(path, chunks=chunks)
 
         if z_slice is not None:
 
             if not isinstance(z_slice, (tuple, list)) or len(z_slice) != 2:
                 raise ValueError("please provide z_slice as tuple or list of (z_start, z_end)")
 
+            # todo would be better not to load all the data first
             z0, z1 = z_slice
             data = data[z0:z1, :, :]
 
@@ -749,7 +751,7 @@ class MotionCorrection:
 
     """
 
-    def __init__(self, working_directory=None):
+    def __init__(self, working_directory=None, logging_level=logging.INFO):
 
         """
         Initializes the MotionCorrection object.
@@ -763,6 +765,9 @@ class MotionCorrection:
         # is only relevant if provided with a .tdb or np.ndarray
         # otherwise the .mmap file is created in the same folder
         # as the input file.
+
+        logging.basicConfig(level=logging_level)
+
         self.working_directory = working_directory
         self.tempdir = None
 
@@ -1063,7 +1068,11 @@ class MotionCorrection:
         # caiman's mmap naming convention:
         #   ./{name}_d1_{X}_d2_{Y}_d3_{dim3}_order_{F/C}_frames_{Z}_.mmap
         name = path.stem.split("_")
-        Z, order, Y, X = int(name[-1]), name[-3], int(name[-7]), int(name[-9])
+
+        debug_names = {i:n for i, n in enumerate(name)}
+        logging.debug(f"mmap name elements: {debug_names}")
+
+        Z, order, Y, X = int(name[-2]), name[-4], int(name[-8]), int(name[-10])
 
         # TODO order and shape questionable
         # Read the motion-corrected data from the mmap file as a memory-mapped array
@@ -1072,13 +1081,16 @@ class MotionCorrection:
 
         # If output is None, return the motion-corrected data as a NumPy array
         if output is None:
-            return np.array(data)
+            data = np.array(data)
+            data = np.swapaxes(data, 1, 2)
+            return data
 
         elif isinstance(output, (str, Path)):
             output = Path(output) if isinstance(output, Path) else output
 
             # Create a dask array from the memory-mapped data with specified chunking and compression
             data = da.from_array(data, chunks=chunks)
+            data = data.swapaxes(1, 2)
 
             # Check if the output file is an HDF5 file and loc is provided
             if output.suffix in [".h5", ".hdf5"] and loc is None:

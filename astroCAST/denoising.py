@@ -400,7 +400,10 @@ class SubFrameGenerator(tf.keras.utils.Sequence):
                  overlap=None, padding=None,
                  shuffle=True, normalize=None,
                  loc="data/",
-                 output_size=None, cache_results=False, in_memory=False, save_global_descriptive=True):
+                 output_size=None, cache_results=False, in_memory=False, save_global_descriptive=True,
+                 logging_level=logging.INFO):
+
+        logging.basicConfig(level=logging_level)
 
         if type(paths) != list:
             paths = [paths]
@@ -520,6 +523,11 @@ class SubFrameGenerator(tf.keras.utils.Sequence):
 
             if file.suffix == ".h5":
                 with h5.File(file.as_posix(), "r") as f:
+
+                    if self.loc not in f:
+                        logging.warning(f"cannot find {self.loc} in {file}")
+                        continue
+
                     data = f[self.loc]
                     Z, X, Y = data.shape
 
@@ -543,8 +551,13 @@ class SubFrameGenerator(tf.keras.utils.Sequence):
             pad_y1 = ih % Y if self.padding else 0
 
             zRange =list(range(Z0 + z_start - pad_z0, Z1 - stack_len - z_start + pad_z1, z_steps))
-            xRange = list(range(x_start, X - iw - x_start + pad_x1, dw))
-            yRange = list(range(y_start, Y - ih - y_start + pad_y1, dh))
+            xRange = list(range(x_start, X - x_start + pad_x1, dw))
+            yRange = list(range(y_start, Y - y_start + pad_y1, dh))
+
+            logging.debug(f"\nz_range: {zRange}")
+            logging.debug(f"\nx_range: {xRange}")
+            logging.debug(f"\nx_range param > x_start:{x_start}, X:{X} iw:{iw} pad_x1:{pad_x1}, dw:{dw}")
+            logging.debug(f"\ny_range: {yRange}")
 
             if self.shuffle:
                 random.shuffle(zRange)
@@ -582,6 +595,9 @@ class SubFrameGenerator(tf.keras.utils.Sequence):
                         idx += 1
 
             file_container = pd.DataFrame(file_container)
+
+            if len(file_container) < 1:
+                raise ValueError("cannot find suitable data chunks.")
 
             if self.normalize == "global":
                 if len(file_container) > 1:

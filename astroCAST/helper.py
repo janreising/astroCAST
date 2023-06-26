@@ -707,7 +707,7 @@ class Normalization:
 
     def subtract(self, data, mode="min", population_wide=False, rows=True):
 
-        value = self.get_value(data, mode, population_wide, axis=rows)
+        value = self.get_value(data, mode, population_wide, axis=int(rows))
 
         # transpose result if subtracting by columns
         if not rows:
@@ -718,7 +718,6 @@ class Normalization:
     def divide(self, data, mode="max", population_wide=False):
 
         divisor = self.get_value(data, mode, population_wide)
-        print("type: ", type(data))
 
         # deal with ZeroDivisonError
         if population_wide and divisor == 0:
@@ -727,7 +726,6 @@ class Normalization:
 
         else:
             idx = np.where(divisor == 0)[0]
-            print("idx: ", idx)
             if len(idx) > 0:
                 logging.warning("Encountered '0' in divisor, returning those rows untouched.")
 
@@ -806,7 +804,7 @@ class Normalization:
 
 class CachedClass:
 
-    def __init__(self, cache_path=None):
+    def __init__(self, cache_path=None, logging_level=logging.INFO):
 
         if cache_path is not None:
 
@@ -817,3 +815,6 @@ class CachedClass:
                 cache_path.mkdir()
 
         self.cache_path = cache_path
+
+        # set logging level
+        logging.basicConfig(level=logging_level)
