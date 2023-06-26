@@ -478,8 +478,29 @@ class Test_IO:
             assert arr.shape == arr_load.shape
             assert np.array_equal(arr, arr_load)
 
-    def test_sequential_tiff(self):
-        raise NotImplementedError
+    @pytest.mark.parametrize("sep", ["_", "x"])
+    def test_load_sequential_tiff(self, sep, shape=(100, 100, 100)):
+
+        with tempfile.TemporaryDirectory() as dir:
+            tmpdir = Path(dir)
+            assert tmpdir.is_dir()
+
+            input_dir = tmpdir.joinpath("seq_tiff")
+            input_dir.mkdir()
+
+            # create tiff files
+            arr = np.random.random(shape)
+
+            for z in range(len(arr)):
+                img = arr[z, :, :]
+                tifffile.imwrite(input_dir.joinpath(f"img{sep}{z}.tiff"), data=img)
+
+            # load data
+            io = IO()
+            arr_load = io.load(input_dir, sep=sep)
+
+            assert arr.shape == arr_load.shape
+            assert np.array_equal(arr, arr_load)
 
 class Test_MotionCorrection:
 
