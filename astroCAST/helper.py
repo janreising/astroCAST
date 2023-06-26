@@ -725,36 +725,50 @@ class Normalization:
 
         return data - value
 
-    def divide(self, data, mode="max", population_wide=False):
+    def divide(self, data, mode="max", population_wide=False, rows=True):
 
-        divisor = self.get_value(data, mode, population_wide)
+        divisor = self.get_value(data, mode, population_wide, axis=int(rows))
 
         # deal with ZeroDivisonError
         if population_wide and divisor == 0:
             logging.warning("Encountered '0' in divisor, returning data untouched.")
             return data
 
+        # row by row
         else:
+
+            # check if there are zeros in any rows
             idx = np.where(divisor == 0)[0]
             if len(idx) > 0:
                 logging.warning("Encountered '0' in divisor, returning those rows untouched.")
 
                 if isinstance(data, ak.Array):
 
+                    if not rows:
+                        raise ValueError("column wise normalization cannot be performed for ragged arrays.")
+
                     # recreate array, since modifications cannot be done inplace
                     data = ak.Array([data[i] / divisor[i] if i not in idx else data[i] for i in range(len(data))])
 
                 else:
-                    mask = np.ones(len(data), bool)
+
+                    mask = np.ones(data.shape[0], bool) if rows else np.ones(data.shape[1], bool)
                     mask[idx] = 0
 
-                    print("divisor_mask: ", divisor[mask])
-                    data[mask, :] = data[mask, :] / divisor[mask]
+                    if rows:
+                        data[mask, :] = data[mask, :] / divisor[mask]
+                    else:
+                        data[:, mask] = np.squeeze(data[:, mask]) / np.squeeze(divisor[mask])
 
                 return data
 
+            # all rows healthy
             else:
-                return data / divisor
+
+                if rows:
+                    return data / divisor
+                else:
+                    return data / np.squeeze(divisor)
 
     @staticmethod
     def impute_nan(data, fixed_value=None):
