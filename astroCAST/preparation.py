@@ -3,6 +3,7 @@ import logging
 import multiprocessing
 import os
 import tempfile
+from collections import OrderedDict
 from pathlib import Path
 
 import czifile
@@ -16,6 +17,7 @@ import tiledb
 import dask.array as da
 import dask_image.imread
 from dask.distributed import Client, LocalCluster
+from scipy import signal
 from skimage.transform import resize
 from skimage.util import img_as_uint
 from deprecated import deprecated
@@ -1509,3 +1511,107 @@ class Delta:
         res = np.reshape(res, original_dims)
 
         return res
+
+class XII:
+
+    def __init__(self, file_path, dataset_name, num_channels=1, sampling_rate=None, channel_names=None):
+        self.container = self.load_xii(file_path, dataset_name, num_channels, sampling_rate, channel_names)
+
+    @staticmethod
+    def load_xii(file_path, dataset_name, num_channels=1, sampling_rate=None, channel_names=None):
+
+        """
+        :param unit:
+        :param dataset_name:
+        :param file:
+        :param channels:
+        :param unify_timeline:
+        :param sampling_rate: in ms
+        :return:
+        """
+
+
+        # define sampling rate
+        if sampling_rate is None:
+            sampling_rate = 1
+
+        elif isinstance(sampling_rate, (float, int)):
+            sampling_rate = float(sampling_rate)
+
+        elif isinstance(sampling_rate, str):
+
+            units = OrderedDict(
+                [("ps", 1e-12), ("ns", 1e-9), ("us", 1e-6), ("ms", 1e-3), ("s", 1), ("min", 60), ("h", 60*60)]
+            )
+
+            found_unit = False
+            for key, value in units.items():
+
+                if sampling_rate.endswith(key):
+                    sampling_rate = sampling_rate.replace(key, "")
+                    sampling_rate = float(sampling_rate) * value
+                    found_unit = True
+
+                    break
+
+            if not found_unit:
+                raise ValueError(f"when providing the sampling_rate as string, the value has to end in one of these units: {units.keys()}")
+
+        # define steps
+        timestep = sampling_rate * num_channels
+
+        # load data
+        with h5py.File(file_path, "r") as f:
+
+            if dataset_name not in f:
+                raise ValueError(f"cannot find dataset in file. Choose one of: {list(f.keys())}")
+
+            data = f[dataset_name][:]
+
+        # split data
+        container = {}
+        for ch in range(num_channels):
+
+            data_ch = data[ch::num_channels]
+
+            data_ch = pd.Series(data_ch,
+                                index=pd.RangeIndex(
+                                    timestep*ch, timestep*ch + len(data_ch)*timestep, timestep
+                                ))
+
+            if not channel_names is None:
+                ch_name = f"ch{ch}"
+            else:
+                ch_name = channel_names[ch]
+
+            container[ch_name] = data_ch
+
+        return container
+
+    def __getitem__(self, item):
+
+        if item not in self.container.keys:
+            raise ValueError(f"cannot find {item}. Provide one of: {self.container.keys()}")
+
+        return self.container[item]
+
+    def get_camera_timing(self, dataset_name, downsample=100, prominence=0.5):
+
+        camera_out = self.container[dataset_name]
+
+        peaks, _ = signal.find_peaks(camera_out.values[::downsample], prominence=prominence)
+        peaks = pd.Series([camera_out.index[p * downsample] for p in peaks])
+
+        return peaks
+
+    def detrend(self, dataset_name, window=25, inplace=True):
+
+        trace = self.container[dataset_name]
+        trend = trace.rolling(window, center=False).min()
+
+        de_trended = trace[window:-window] - trend[window:-window]
+
+        if inplace:
+            self.container[dataset_name] = de_trended
+
+        return de_trended
