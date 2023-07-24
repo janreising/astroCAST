@@ -1579,7 +1579,7 @@ class XII:
                                     timestep*ch, timestep*ch + len(data_ch)*timestep, timestep
                                 ))
 
-            if not channel_names is None:
+            if  channel_names is None:
                 ch_name = f"ch{ch}"
             else:
                 ch_name = channel_names[ch]
