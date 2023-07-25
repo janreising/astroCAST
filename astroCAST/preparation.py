@@ -9,6 +9,7 @@ from pathlib import Path
 import czifile
 import dask
 import h5py
+import napari_plot
 import numpy as np
 import pandas as pd
 import psutil
@@ -17,6 +18,8 @@ import tiledb
 import dask.array as da
 import dask_image.imread
 from dask.distributed import Client, LocalCluster
+from napari_plot._qt.qt_viewer import QtViewer
+from napari.utils.events import Event
 from scipy import signal
 from skimage.transform import resize
 from skimage.util import img_as_uint
@@ -1574,11 +1577,14 @@ class XII:
 
             data_ch = data[ch::num_channels]
 
-            data_ch = pd.Series(data_ch,
-                                index=pd.RangeIndex(
-                                    timestep*ch, timestep*ch + len(data_ch)*timestep, timestep
-                                ))
+            if isinstance(timestep, int):
+                idx = pd.RangeIndex(timestep*ch, timestep*ch + len(data_ch)*timestep, timestep)
+            elif isinstance(timestep, float):
+                idx = pd.Index(np.arange(timestep*ch, timestep*ch + len(data_ch)*timestep, timestep))
+            else:
+                raise ValueError(f"sampling_rate should be able to be cast to int or float instead of: {type(timestep)}")
 
+            data_ch = pd.Series(data_ch, index=idx)
             if  channel_names is None:
                 ch_name = f"ch{ch}"
             else:
@@ -1590,7 +1596,7 @@ class XII:
 
     def __getitem__(self, item):
 
-        if item not in self.container.keys:
+        if item not in self.container.keys():
             raise ValueError(f"cannot find {item}. Provide one of: {self.container.keys()}")
 
         return self.container[item]
@@ -1609,9 +1615,69 @@ class XII:
         trace = self.container[dataset_name]
         trend = trace.rolling(window, center=False).min()
 
-        de_trended = trace[window:-window] - trend[window:-window]
+        de_trended = trace - trend
+        de_trended = de_trended.iloc[window:-window]
 
         if inplace:
             self.container[dataset_name] = de_trended
 
         return de_trended
+
+    @staticmethod
+    def align(video, timing, idx_channel=0, num_channels=2, offset_start=0, offset_stop=0):
+
+        idx = np.arange(offset_start+idx_channel, offset_start + len(video)*2 - offset_stop, num_channels)
+
+        if len(idx) != len(video):
+            raise ValueError(f"video length and indices don't align: video ({len(video)}) vs. idx ({len(idx)}). \n{idx}")
+
+        mapping = timing.to_dict()
+        idx = pd.Index([np.round(mapping[id_], decimals=3) for id_ in idx])
+
+        return idx, mapping
+
+    def show(self, dataset_name, mapping, viewer=None, viewer1d=None, down_sample=100,
+             colormap=None, window=160, ylabel="XII", xlabel="step"):
+
+        # todo: test with Video
+
+        xii = self.container[dataset_name][::down_sample]
+
+        if viewer1d is None:
+            v1d = napari_plot.ViewerModel1D()
+            qt_viewer = QtViewer(v1d)
+        else:
+            v1d = viewer1d
+
+        v1d.axis.y_label = ylabel
+        v1d.axis.x_label = xlabel
+        v1d.text_overlay.visible = True
+        v1d.text_overlay.position = "top_right"
+
+        # create attachable qtviewer
+        X, Y = xii.index, xii.values
+        line = v1d.add_line(np.c_[X, Y], name=ylabel, color=colormap)
+
+        def update_line(event: Event):
+            Z, _, _ = event.value
+            z0, z1 = Z-window, Z
+
+            if z0 < 0:
+                z0 = 0
+
+            t0, t1 = mapping[z0], mapping[z1]
+
+            xii_ = xii[(xii.index >= t0) & (xii.index <= t1)]
+
+            x_, y_ = xii_.index, xii_.values
+            line.data = np.c_[x_, y_]
+
+            v1d.reset_x_view()
+            v1d.reset_y_view()
+
+        viewer.dims.events.current_step.connect(update_line)
+
+        if viewer1d is None:
+            viewer.window.add_dock_widget(qt_viewer, area="bottom", name=ylabel)
+
+        return viewer, v1d

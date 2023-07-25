@@ -1,9 +1,12 @@
 import copy
 import logging
 from collections import defaultdict
+from functools import lru_cache
 from pathlib import Path
 
 import dask.array as da
+import napari_plot
+from napari_plot._qt.qt_viewer import QtViewer
 import numpy as np
 import pandas as pd
 import psutil
@@ -12,6 +15,7 @@ from matplotlib import pyplot as plt
 import seaborn as sns
 from tqdm import tqdm
 import napari
+from napari.utils.events import Event
 import awkward as ak
 
 import astroCAST.detection
@@ -915,6 +919,7 @@ class Events(CachedClass):
 
         return cluster_lookup_table
 
+
 class Video:
 
     def __init__(self, data, z_slice=None, h5_loc=None, lazy=False, name=None):
@@ -934,16 +939,16 @@ class Video:
         else:
             return self.data
 
-    # @lru_cache(maxsize=None)
+    @lru_cache(maxsize=None)
     # @wrapper_local_cache
-    def get_image_project(self, agg_func=np.mean, window=None, window_agg=np.sum,
+    def get_image_project(self, agg_func=np.mean, window=None, window_agg=np.sum, axis=0,
                           show_progress=True):
 
         img = self.data
 
         # calculate projection
         if window is None:
-            proj = agg_func(img, axis=0)
+            proj = agg_func(img, axis=axis)
 
         else:
 
@@ -963,13 +968,74 @@ class Video:
 
         return proj
 
-    def show(self, viewer=None):
+    def show(self, viewer=None, colormap=None,
+             show_trace=False, window=160, indices=None, viewer1d=None, xlabel="frames", ylabel="Intensity", reset_y=False):
 
         if viewer is None:
-            viewer = napari.view_image(self.data, name=self.name)
+            viewer = napari.view_image(self.data, name=self.name, colormap=colormap)
 
         else:
-            viewer.add_image(self.data, name=self.name)
+            viewer.add_image(self.data, name=self.name, colormap=colormap)
+
+        if show_trace:
+
+            # get trace
+            Y = self.get_image_project(agg_func=np.mean, axis=(1, 2))
+            X = range(len(Y)) if indices is None else indices
+
+            # create 1D viewer
+            # v1d = None
+            # if attach:
+            #
+            #     for widget in viewer.window._dock_widgets.values():
+            #         potential_widget = widget.widget()
+            #         print(potential_widget)
+            #         print(potential_widget.children())
+            #         if isinstance(potential_widget, napari_plot._qt.qt_viewer.QtViewer):
+            #             v1d = potential_widget
+            #             break
+
+            if viewer1d is None:
+                v1d = napari_plot.ViewerModel1D()
+                qt_viewer = QtViewer(v1d)
+            else:
+                v1d = viewer1d
+
+            v1d.axis.y_label = ylabel
+            v1d.axis.x_label = xlabel
+            v1d.text_overlay.visible = True
+            v1d.text_overlay.position = "top_right"
+
+            v1d.set_y_view(np.min(Y) * 0.9, np.max(Y) * 1.1)
+
+            # create attachable qtviewer
+            # qt_viewer = QtViewer(v1d)
+            line = v1d.add_line(np.c_[X, Y], name=self.name, color=colormap)
+
+            def update_line(event: Event):
+                Z, _, _ = event.value
+                z0, z1 = Z-window, Z
+
+                if z0 < 0:
+                    z0 = 0
+
+                y_ = Y[z0:z1]
+                x_ = X[z0:z1]
+                # y1 = np.pad(y1, (-z0, 0), 'constant', constant_values=0)
+
+                line.data = np.c_[x_, y_]
+
+                v1d.reset_x_view()
+
+                if reset_y:
+                    v1d.reset_y_view()
+
+            viewer.dims.events.current_step.connect(update_line)
+
+            if viewer1d is None:
+                viewer.window.add_dock_widget(qt_viewer, area="bottom", name=self.name)
+
+            return viewer, v1d
 
         return viewer
 
