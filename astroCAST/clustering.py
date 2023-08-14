@@ -742,6 +742,8 @@ class Modules(CachedClass):
         # selected_events = self.events.events.iloc[selected_idx]
         selected_events = self.events[selected_idx.tolist()]
 
+        logging.info(f"remaining connections {len(selected_events):,d}/{len(self.events):,d} ({len(selected_events)/len(self.events)*100:.2f}%)")
+
         # create nodes table
         nodes = pd.DataFrame({
             "i_idx":selected_idx, "x": selected_events.cx, "y":selected_events.cy, "trace_idx": selected_events.index
@@ -764,6 +766,7 @@ class Modules(CachedClass):
     def create_graph(self, correlation, correlation_boundaries=(0.98, 1), exclude_out_of_cluster_connection=True):
 
         nodes, edges = self._create_node_edge_tables(correlation, correlation_boundaries=correlation_boundaries)
+        logging.info(f"#nodes: {len(nodes)}, #edges: {len(edges)}")
 
         # create graph and populate with edges
         G = nx.Graph()

@@ -565,13 +565,14 @@ class IO:
 
         elif path.is_file():
             # If the path is a file, load a single TIFF file
-            stack = dask_image.imread.imread(path)
+
+            if lazy:
+                stack = dask_image.imread.imread(path)
+            else:
+                stack = tifffile.imread(path.as_posix())
 
         else:
             raise FileNotFoundError(f"cannot find directory or file: {path}")
-
-        if not lazy:
-            stack = stack.compute()
 
         return stack
 
