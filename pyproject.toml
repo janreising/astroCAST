@@ -7,7 +7,7 @@ author_email = "jan.reising@ki.se"
 dependencies = ["awkward", "colorcet", "opencv-python", "czifile", "dask", "dask-image", "datashader", "dtaidistance",
                 "fastcluster", "h5py", "hdbscan", "keras", "matplotlib", "multiprocess", "networkx", "pandas", "napari[all]", "napari-plot",
                 "powerlaw", "pynwb", "deprecated", "deprecation", "jupyterlab", "peakutils", "holoviews", "pointpats", "psutil", "ipyparallel", "pytest", "scipy", "seaborn", "SharedArray", "scikit-image", "scikit-learn",
-                "tensorflow", "tifffile", "tiledb", "tqdm", "tsfresh", "tslearn", "umap-learn", "xarray", "xxhash", "caiman@git+https://github.com/flatironinstitute/CaImAn", "numpy"]
+                "tensorflow", "tifffile", "tiledb", "tqdm", "tsfresh", "tslearn", "umap-learn", "xarray", "xxhash", "jnormcorre", "numpy"]
 
 [build-system]
 requires = ["hatchling"]

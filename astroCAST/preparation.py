@@ -816,9 +816,6 @@ class MotionCorrection:
         # needed if only one dataset in .h5 files. Weird behavior from caiman.MotionCorrection
         self.dummy_folder_name = "delete_me"
 
-        # cluster setup for caiman
-        self.dview = None
-
         # mmap location
         self.mmap_path = None
 
@@ -826,7 +823,7 @@ class MotionCorrection:
             max_shifts=(50, 50), niter_rig=1, splits_rig=14, num_splits_to_process_rig=None,
             strides=(48, 48), overlaps=(24, 24), pw_rigid=False, splits_els=14,
             num_splits_to_process_els=None, upsample_factor_grid=4, max_deviation_rigid=3,
-            shifts_opencv=True, nonneg_movie=True, use_cuda=False, border_nan='copy', num_frames_split=80,
+            shifts_opencv=True, nonneg_movie=True, border_nan='copy', num_frames_split=80,
             gSig_filt=(20, 20)):
 
         """
@@ -896,38 +893,28 @@ class MotionCorrection:
 
         """
 
-        import caiman.cluster
+        # import NormCorre module
+        from jnormcorre import motion_correction
 
         input_ = self._validate_input(input_, h5_loc=h5_loc)
         self.input_ = input_
 
-        try:
-            # Set up cluster if parallel flag is True
-            if parallel:
-                _, self.dview, _ = caiman.cluster.setup_cluster(
-                                        backend="local", n_processes=multiprocessing.cpu_count(), single_thread=False)
+        # Create MotionCorrect instance
+        mc = motion_correction.MotionCorrect(input_, var_name_hdf5=h5_loc,
+                max_shifts=max_shifts, niter_rig=niter_rig, splits_rig=splits_rig,
+                num_splits_to_process_rig=num_splits_to_process_rig, strides=strides, overlaps=overlaps,
+                pw_rigid=pw_rigid, splits_els=splits_els, num_splits_to_process_els=num_splits_to_process_els,
+                upsample_factor_grid=upsample_factor_grid, max_deviation_rigid=max_deviation_rigid,
+                shifts_opencv=shifts_opencv, nonneg_movie=nonneg_movie, border_nan=border_nan,
+                num_frames_split=num_frames_split, gSig_filt=gSig_filt)
 
-             # Create MotionCorrect instance using caiman.motion_correction.MotionCorrect
-            mc = caiman.motion_correction.MotionCorrect(input_, dview=self.dview, var_name_hdf5=h5_loc,
-                    max_shifts=max_shifts, niter_rig=niter_rig, splits_rig=splits_rig,
-                    num_splits_to_process_rig=num_splits_to_process_rig, strides=strides, overlaps=overlaps,
-                    pw_rigid=pw_rigid, splits_els=splits_els, num_splits_to_process_els=num_splits_to_process_els,
-                    upsample_factor_grid=upsample_factor_grid, max_deviation_rigid=max_deviation_rigid,
-                    shifts_opencv=shifts_opencv, nonneg_movie=nonneg_movie, use_cuda=use_cuda, border_nan=border_nan,
-                    num_frames_split=num_frames_split, gSig_filt=gSig_filt)
-
-            # Perform motion correction
-            mc.motion_correct(save_movie=True)
-            self.shifts = mc.shifts_rig
-
-        finally:
-            # Stop the cluster if it was set up
-            if self.dview is not None:
-                caiman.stop_server(dview=self.dview)
+        # Perform motion correction
+        mc.motion_correct(save_movie=True)
+        self.shifts = mc.shifts_rig
 
         # Check if the motion correction generated the mmap file
         if len(mc.mmap_file) < 1 or not Path(mc.mmap_file[0]).is_file():
-            raise FileNotFoundError(f"caiman powered motion correction failed unexpectedly. mmap path: {mc.mmap}")
+            raise FileNotFoundError(f"motion correction failed unexpectedly. mmap path: {mc.mmap}")
 
         # Set the mmap_path attribute to the generated mmap file
         self.mmap_path = mc.mmap_file[0]
