@@ -1103,7 +1103,7 @@ class MotionCorrection:
 
         # TODO order and shape questionable
         # Read the motion-corrected data from the mmap file as a memory-mapped array
-        data = np.memmap(path.as_posix(), shape=(Z, Y, X), dtype=np.float32, order="C")
+        data = np.memmap(path.as_posix(), shape=(Z, Y, X), dtype=float, order="C")
         # data[start:stop, :, :] = np.swapaxes(mm, 1, 2) # ????
 
         # If output is None, return the motion-corrected data as a NumPy array
@@ -1285,7 +1285,7 @@ class Delta:
                                   window=window,
                                   method=method,
                                   inplace=False,
-                                  dtype=np.float32).compute()
+                                  dtype=float).compute()
 
         else:
             raise NotImplementedError("Input data type not recognized!")

@@ -419,7 +419,7 @@ class Distance(CachedClass):
             logging.info("creating mmap of shape ({}, 1)".format(int((N*N-N)/2)))
 
             tmp = tempfile.TemporaryFile() # todo might not be a good idea to drop a temporary file in the working directory
-            distance_matrix = np.memmap(tmp, dtype=np.float32, mode="w+", shape=(int((N*N-N)/2)))
+            distance_matrix = np.memmap(tmp, dtype=float, mode="w+", shape=(int((N*N-N)/2)))
 
             iterator = range(0, N, block) if not show_progress else tqdm(range(0, N, block),desc="distance matrix:")
 
