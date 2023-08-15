@@ -302,7 +302,7 @@ class FullFrameGenerator(keras.utils.Sequence):
         return shuffle_indexes
 
     def infer(self, model, output=None, batch_size=25,
-              out_loc=None, dtype=np.float, chunk_size=None, rescale=True):
+              out_loc=None, dtype=float, chunk_size=None, rescale=True):
 
         """
 

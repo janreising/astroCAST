@@ -45,24 +45,35 @@ def wrapper_local_cache(f):
         if isinstance(arg, np.ndarray):
             return hash_from_ndarray(arg)
 
-        elif isinstance(arg, pd.DataFrame) or isinstance(arg, pd.Series):
+        elif isinstance(arg, (pd.DataFrame, pd.Series)):
             df_hash = pd.util.hash_pandas_object(arg)
             return hash_from_ndarray(df_hash.values)
 
         elif isinstance(arg, dict):
             return get_sorted_hash(arg)
 
-        elif isinstance(arg, astroCAST.analysis.Events):
+        elif isinstance(arg, (astroCAST.analysis.Events, astroCAST.analysis.Video)):
             return hash(arg)
 
         elif isinstance(arg, bool):
             return str(arg)
 
+        elif isinstance(arg, tuple):
+            return hash(arg)
+
         elif callable(arg):
             return arg.__name__
+
         else:
             logging.warning(f"unknown argument type: {type(arg)}")
-            return arg
+
+            try:
+                h = hash(arg)
+                return h
+
+            except:
+                logging.error(f"couldn't hash argument type: {type(arg)}")
+                return arg
 
     def get_sorted_hash(kwargs):
         sorted_dict = OrderedDict()
@@ -89,7 +100,7 @@ def wrapper_local_cache(f):
     def get_string_from_args(f, args, kwargs):
 
         name_ = f.__name__
-        args_ = [hash_arg(arg) for arg in args[1:]]
+        args_ = [hash_arg(arg) for arg in args]
         kwargs_ = get_sorted_hash(kwargs)
 
         hash_string = f"{name_}_"

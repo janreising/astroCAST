@@ -1,9 +1,12 @@
 import copy
 import logging
 from collections import defaultdict
+from functools import lru_cache
 from pathlib import Path
 
 import dask.array as da
+import napari_plot
+from napari_plot._qt.qt_viewer import QtViewer
 import numpy as np
 import pandas as pd
 import psutil
@@ -12,11 +15,12 @@ from matplotlib import pyplot as plt
 import seaborn as sns
 from tqdm import tqdm
 import napari
+from napari.utils.events import Event
 import awkward as ak
 
 import astroCAST.detection
 from astroCAST import helper
-from astroCAST.helper import get_data_dimensions, is_ragged, CachedClass, Normalization
+from astroCAST.helper import get_data_dimensions, is_ragged, CachedClass, Normalization, wrapper_local_cache
 from astroCAST.preparation import IO
 
 
@@ -67,7 +71,7 @@ class Events(CachedClass):
                 self.num_frames, self.X, self.Y = event_map_shape
 
                 # create time map
-                time_map, events_start_frame, events_end_frame = self.get_time_map(event_dir)
+                # time_map, events_start_frame, events_end_frame = self.get_time_map(event_dir=event_dir, event_map=event_map)
 
                 # load events
                 self.events = self.load_events(event_dir, z_slice=z_slice, index_prefix=index_prefix, custom_columns=custom_columns)
@@ -190,7 +194,7 @@ class Events(CachedClass):
             self.events = events
 
         L2 = len(events)
-        logging.info(f"#events: {L1} > {L2} ({L1/L2*100:.1f}%)")
+        logging.info(f"#events: {L1} > {L2} ({L2/L1*100:.1f}%)")
 
         return events
 
@@ -288,6 +292,7 @@ class Events(CachedClass):
 
         return event_map
 
+    @wrapper_local_cache
     @staticmethod
     def get_time_map(event_dir=None, event_map=None, chunk=100):
         """
@@ -318,6 +323,10 @@ class Events(CachedClass):
 
             if time_map_path.is_file():
                 time_map = np.load(time_map_path.as_posix(), allow_pickle=True)[()]
+
+            elif event_map is not None:
+                time_map = astroCAST.detection.Detector.get_time_map(event_map=event_map, chunk=chunk)
+                np.save(time_map_path.as_posix(), time_map)
 
             else:
                 raise ValueError(f"cannot find {time_map_path}. Please provide the event_map argument instead.")
@@ -410,6 +419,7 @@ class Events(CachedClass):
 
         return events
 
+    @wrapper_local_cache
     def get_extended_events(self, video=None, dtype=np.half, extend=-1,
                             return_array=False, in_place=False,
                             normalization_instructions=None, show_progress=True,
@@ -523,9 +533,15 @@ class Events(CachedClass):
         else:
 
             events.trace = extended
+
+            # save a copy of original z frames
+            events["z0_orig"] = events.z0
+            events["z1_orig"] = events.z1
+            events["dz_orig"] = events.dz
+
+            # update current z frames
             events.z0 = z0_container
             events.z1 = z1_container
-
             events.dz = events["z1"] - events["z0"]
 
             return events
@@ -562,7 +578,7 @@ class Events(CachedClass):
 
         return arr
 
-    # @wrapper_local_cache
+    @wrapper_local_cache
     def get_average_event_trace(self, events: pd.DataFrame = None, empty_as_nan: bool = True,
                                 agg_func: callable = np.nanmean, index: list = None,
                                 gradient: bool = False, smooth: int = None) -> pd.Series:
@@ -671,6 +687,7 @@ class Events(CachedClass):
 
         return viewer
 
+    @wrapper_local_cache
     def get_summary_statistics(self, decimals=2, groupby=None,
         columns_excluded=('name', 'subject_id', 'group', 'z0', 'z1', 'x0', 'x1', 'y0', 'y1', 'mask', 'contours', 'footprint', 'fp_cx', 'fp_cy', 'trace', 'error',  'cx', 'cy')):
 
@@ -701,6 +718,7 @@ class Events(CachedClass):
 
         return val
 
+    @wrapper_local_cache
     def get_trials(self, trial_timings, trial_length=30, multi_timing_behavior="first", format="array"):
 
         if format not in ["array", "dataframe"]:
@@ -878,6 +896,7 @@ class Events(CachedClass):
 
         return events
 
+    @wrapper_local_cache
     def get_frequency(self, grouping_column, cluster_column, normalization_instructions=None):
 
         events = self.events
@@ -915,9 +934,10 @@ class Events(CachedClass):
 
         return cluster_lookup_table
 
+
 class Video:
 
-    def __init__(self, data, z_slice=None, h5_loc=None, lazy=False, name=None):
+    def __init__(self, data, z_slice=None, h5_loc=None, lazy=False, name=None, hash_value=None):
 
         io = IO()
         self.data = io.load(data, h5_loc=h5_loc, lazy=lazy, z_slice=z_slice)
@@ -925,7 +945,18 @@ class Video:
         self.z_slice = z_slice
         self.Z, self.X, self.Y = self.data.shape
         self.name = name
+        self.hash_value = None
 
+    def __hash__(self):
+
+        if self.hash_value is not None:
+            return self.hash_value
+
+        if isinstance(self.data, da.Array):
+            logging.warning(f"calculating hash of Video instance. Converting lazy array to np.ndarray!")
+            self.data = self.data.compute()
+
+        return xxhash.xxh128_intdigest(self.data.data)
     def get_data(self, in_memory=False):
 
         if in_memory and isinstance(self.data, da.Array):
@@ -934,16 +965,16 @@ class Video:
         else:
             return self.data
 
-    # @lru_cache(maxsize=None)
+    @lru_cache(maxsize=None)
     # @wrapper_local_cache
-    def get_image_project(self, agg_func=np.mean, window=None, window_agg=np.sum,
+    def get_image_project(self, agg_func=np.mean, window=None, window_agg=np.sum, axis=0,
                           show_progress=True):
 
         img = self.data
 
         # calculate projection
         if window is None:
-            proj = agg_func(img, axis=0)
+            proj = agg_func(img, axis=axis)
 
         else:
 
@@ -963,13 +994,74 @@ class Video:
 
         return proj
 
-    def show(self, viewer=None):
+    def show(self, viewer=None, colormap=None,
+             show_trace=False, window=160, indices=None, viewer1d=None, xlabel="frames", ylabel="Intensity", reset_y=False):
 
         if viewer is None:
-            viewer = napari.view_image(self.data, name=self.name)
+            viewer = napari.view_image(self.data, name=self.name, colormap=colormap)
 
         else:
-            viewer.add_image(self.data, name=self.name)
+            viewer.add_image(self.data, name=self.name, colormap=colormap)
+
+        if show_trace:
+
+            # get trace
+            Y = self.get_image_project(agg_func=np.mean, axis=(1, 2))
+            X = range(len(Y)) if indices is None else indices
+
+            # create 1D viewer
+            # v1d = None
+            # if attach:
+            #
+            #     for widget in viewer.window._dock_widgets.values():
+            #         potential_widget = widget.widget()
+            #         print(potential_widget)
+            #         print(potential_widget.children())
+            #         if isinstance(potential_widget, napari_plot._qt.qt_viewer.QtViewer):
+            #             v1d = potential_widget
+            #             break
+
+            if viewer1d is None:
+                v1d = napari_plot.ViewerModel1D()
+                qt_viewer = QtViewer(v1d)
+            else:
+                v1d = viewer1d
+
+            v1d.axis.y_label = ylabel
+            v1d.axis.x_label = xlabel
+            v1d.text_overlay.visible = True
+            v1d.text_overlay.position = "top_right"
+
+            v1d.set_y_view(np.min(Y) * 0.9, np.max(Y) * 1.1)
+
+            # create attachable qtviewer
+            # qt_viewer = QtViewer(v1d)
+            line = v1d.add_line(np.c_[X, Y], name=self.name, color=colormap)
+
+            def update_line(event: Event):
+                Z, _, _ = event.value
+                z0, z1 = Z-window, Z
+
+                if z0 < 0:
+                    z0 = 0
+
+                y_ = Y[z0:z1]
+                x_ = X[z0:z1]
+                # y1 = np.pad(y1, (-z0, 0), 'constant', constant_values=0)
+
+                line.data = np.c_[x_, y_]
+
+                v1d.reset_x_view()
+
+                if reset_y:
+                    v1d.reset_y_view()
+
+            viewer.dims.events.current_step.connect(update_line)
+
+            if viewer1d is None:
+                viewer.window.add_dock_widget(qt_viewer, area="bottom", name=self.name)
+
+            return viewer, v1d
 
         return viewer
 

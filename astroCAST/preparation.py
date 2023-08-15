@@ -3,11 +3,13 @@ import logging
 import multiprocessing
 import os
 import tempfile
+from collections import OrderedDict
 from pathlib import Path
 
 import czifile
 import dask
 import h5py
+import napari_plot
 import numpy as np
 import pandas as pd
 import psutil
@@ -16,6 +18,9 @@ import tiledb
 import dask.array as da
 import dask_image.imread
 from dask.distributed import Client, LocalCluster
+from napari_plot._qt.qt_viewer import QtViewer
+from napari.utils.events import Event
+from scipy import signal
 from skimage.transform import resize
 from skimage.util import img_as_uint
 from deprecated import deprecated
@@ -560,13 +565,14 @@ class IO:
 
         elif path.is_file():
             # If the path is a file, load a single TIFF file
-            stack = dask_image.imread.imread(path)
+
+            if lazy:
+                stack = dask_image.imread.imread(path)
+            else:
+                stack = tifffile.imread(path.as_posix())
 
         else:
             raise FileNotFoundError(f"cannot find directory or file: {path}")
-
-        if not lazy:
-            stack = stack.compute()
 
         return stack
 
@@ -810,9 +816,6 @@ class MotionCorrection:
         # needed if only one dataset in .h5 files. Weird behavior from caiman.MotionCorrection
         self.dummy_folder_name = "delete_me"
 
-        # cluster setup for caiman
-        self.dview = None
-
         # mmap location
         self.mmap_path = None
 
@@ -820,7 +823,7 @@ class MotionCorrection:
             max_shifts=(50, 50), niter_rig=1, splits_rig=14, num_splits_to_process_rig=None,
             strides=(48, 48), overlaps=(24, 24), pw_rigid=False, splits_els=14,
             num_splits_to_process_els=None, upsample_factor_grid=4, max_deviation_rigid=3,
-            shifts_opencv=True, nonneg_movie=True, use_cuda=False, border_nan='copy', num_frames_split=80,
+            shifts_opencv=True, nonneg_movie=True, border_nan='copy', num_frames_split=80,
             gSig_filt=(20, 20)):
 
         """
@@ -890,38 +893,28 @@ class MotionCorrection:
 
         """
 
-        import caiman.cluster
+        # import NormCorre module
+        from jnormcorre import motion_correction
 
         input_ = self._validate_input(input_, h5_loc=h5_loc)
         self.input_ = input_
 
-        try:
-            # Set up cluster if parallel flag is True
-            if parallel:
-                _, self.dview, _ = caiman.cluster.setup_cluster(
-                                        backend="local", n_processes=multiprocessing.cpu_count(), single_thread=False)
+        # Create MotionCorrect instance
+        mc = motion_correction.MotionCorrect(input_, var_name_hdf5=h5_loc,
+                max_shifts=max_shifts, niter_rig=niter_rig, splits_rig=splits_rig,
+                num_splits_to_process_rig=num_splits_to_process_rig, strides=strides, overlaps=overlaps,
+                pw_rigid=pw_rigid, splits_els=splits_els, num_splits_to_process_els=num_splits_to_process_els,
+                upsample_factor_grid=upsample_factor_grid, max_deviation_rigid=max_deviation_rigid,
+                shifts_opencv=shifts_opencv, nonneg_movie=nonneg_movie, border_nan=border_nan,
+                num_frames_split=num_frames_split, gSig_filt=gSig_filt)
 
-             # Create MotionCorrect instance using caiman.motion_correction.MotionCorrect
-            mc = caiman.motion_correction.MotionCorrect(input_, dview=self.dview, var_name_hdf5=h5_loc,
-                    max_shifts=max_shifts, niter_rig=niter_rig, splits_rig=splits_rig,
-                    num_splits_to_process_rig=num_splits_to_process_rig, strides=strides, overlaps=overlaps,
-                    pw_rigid=pw_rigid, splits_els=splits_els, num_splits_to_process_els=num_splits_to_process_els,
-                    upsample_factor_grid=upsample_factor_grid, max_deviation_rigid=max_deviation_rigid,
-                    shifts_opencv=shifts_opencv, nonneg_movie=nonneg_movie, use_cuda=use_cuda, border_nan=border_nan,
-                    num_frames_split=num_frames_split, gSig_filt=gSig_filt)
-
-            # Perform motion correction
-            mc.motion_correct(save_movie=True)
-            self.shifts = mc.shifts_rig
-
-        finally:
-            # Stop the cluster if it was set up
-            if self.dview is not None:
-                caiman.stop_server(dview=self.dview)
+        # Perform motion correction
+        mc.motion_correct(save_movie=True)
+        self.shifts = mc.shifts_rig
 
         # Check if the motion correction generated the mmap file
         if len(mc.mmap_file) < 1 or not Path(mc.mmap_file[0]).is_file():
-            raise FileNotFoundError(f"caiman powered motion correction failed unexpectedly. mmap path: {mc.mmap}")
+            raise FileNotFoundError(f"motion correction failed unexpectedly. mmap path: {mc.mmap}")
 
         # Set the mmap_path attribute to the generated mmap file
         self.mmap_path = mc.mmap_file[0]
@@ -1110,7 +1103,7 @@ class MotionCorrection:
 
         # TODO order and shape questionable
         # Read the motion-corrected data from the mmap file as a memory-mapped array
-        data = np.memmap(path.as_posix(), shape=(Z, Y, X), dtype=np.float32, order="C")
+        data = np.memmap(path.as_posix(), shape=(Z, Y, X), dtype=float, order="C")
         # data[start:stop, :, :] = np.swapaxes(mm, 1, 2) # ????
 
         # If output is None, return the motion-corrected data as a NumPy array
@@ -1292,7 +1285,7 @@ class Delta:
                                   window=window,
                                   method=method,
                                   inplace=False,
-                                  dtype=np.float32).compute()
+                                  dtype=float).compute()
 
         else:
             raise NotImplementedError("Input data type not recognized!")
@@ -1509,3 +1502,170 @@ class Delta:
         res = np.reshape(res, original_dims)
 
         return res
+
+class XII:
+
+    def __init__(self, file_path, dataset_name, num_channels=1, sampling_rate=None, channel_names=None):
+        self.container = self.load_xii(file_path, dataset_name, num_channels, sampling_rate, channel_names)
+
+    @staticmethod
+    def load_xii(file_path, dataset_name, num_channels=1, sampling_rate=None, channel_names=None):
+
+        """
+        :param unit:
+        :param dataset_name:
+        :param file:
+        :param channels:
+        :param unify_timeline:
+        :param sampling_rate: in ms
+        :return:
+        """
+
+
+        # define sampling rate
+        if sampling_rate is None:
+            sampling_rate = 1
+
+        elif isinstance(sampling_rate, (float, int)):
+            sampling_rate = float(sampling_rate)
+
+        elif isinstance(sampling_rate, str):
+
+            units = OrderedDict(
+                [("ps", 1e-12), ("ns", 1e-9), ("us", 1e-6), ("ms", 1e-3), ("s", 1), ("min", 60), ("h", 60*60)]
+            )
+
+            found_unit = False
+            for key, value in units.items():
+
+                if sampling_rate.endswith(key):
+                    sampling_rate = sampling_rate.replace(key, "")
+                    sampling_rate = float(sampling_rate) * value
+                    found_unit = True
+
+                    break
+
+            if not found_unit:
+                raise ValueError(f"when providing the sampling_rate as string, the value has to end in one of these units: {units.keys()}")
+
+        # define steps
+        timestep = sampling_rate * num_channels
+
+        # load data
+        with h5py.File(file_path, "r") as f:
+
+            if dataset_name not in f:
+                raise ValueError(f"cannot find dataset in file. Choose one of: {list(f.keys())}")
+
+            data = f[dataset_name][:]
+
+        # split data
+        container = {}
+        for ch in range(num_channels):
+
+            data_ch = data[ch::num_channels]
+
+            if isinstance(timestep, int):
+                idx = pd.RangeIndex(timestep*ch, timestep*ch + len(data_ch)*timestep, timestep)
+            elif isinstance(timestep, float):
+                idx = pd.Index(np.arange(timestep*ch, timestep*ch + len(data_ch)*timestep, timestep))
+            else:
+                raise ValueError(f"sampling_rate should be able to be cast to int or float instead of: {type(timestep)}")
+
+            data_ch = pd.Series(data_ch, index=idx)
+            if  channel_names is None:
+                ch_name = f"ch{ch}"
+            else:
+                ch_name = channel_names[ch]
+
+            container[ch_name] = data_ch
+
+        return container
+
+    def __getitem__(self, item):
+
+        if item not in self.container.keys():
+            raise ValueError(f"cannot find {item}. Provide one of: {self.container.keys()}")
+
+        return self.container[item]
+
+    def get_camera_timing(self, dataset_name, downsample=100, prominence=0.5):
+
+        camera_out = self.container[dataset_name]
+
+        peaks, _ = signal.find_peaks(camera_out.values[::downsample], prominence=prominence)
+        peaks = pd.Series([camera_out.index[p * downsample] for p in peaks])
+
+        return peaks
+
+    def detrend(self, dataset_name, window=25, inplace=True):
+
+        trace = self.container[dataset_name]
+        trend = trace.rolling(window, center=False).min()
+
+        de_trended = trace - trend
+        de_trended = de_trended.iloc[window:-window]
+
+        if inplace:
+            self.container[dataset_name] = de_trended
+
+        return de_trended
+
+    @staticmethod
+    def align(video, timing, idx_channel=0, num_channels=2, offset_start=0, offset_stop=0):
+
+        idx = np.arange(offset_start+idx_channel, offset_start + len(video)*2 - offset_stop, num_channels)
+
+        if len(idx) != len(video):
+            raise ValueError(f"video length and indices don't align: video ({len(video)}) vs. idx ({len(idx)}). \n{idx}")
+
+        mapping = timing.to_dict()
+        idx = pd.Index([np.round(mapping[id_], decimals=3) for id_ in idx])
+
+        return idx, mapping
+
+    def show(self, dataset_name, mapping, viewer=None, viewer1d=None, down_sample=100,
+             colormap=None, window=160, ylabel="XII", xlabel="step"):
+
+        # todo: test with Video
+
+        xii = self.container[dataset_name][::down_sample]
+
+        if viewer1d is None:
+            v1d = napari_plot.ViewerModel1D()
+            qt_viewer = QtViewer(v1d)
+        else:
+            v1d = viewer1d
+
+        v1d.axis.y_label = ylabel
+        v1d.axis.x_label = xlabel
+        v1d.text_overlay.visible = True
+        v1d.text_overlay.position = "top_right"
+
+        # create attachable qtviewer
+        X, Y = xii.index, xii.values
+        line = v1d.add_line(np.c_[X, Y], name=ylabel, color=colormap)
+
+        def update_line(event: Event):
+            Z, _, _ = event.value
+            z0, z1 = Z-window, Z
+
+            if z0 < 0:
+                z0 = 0
+
+            t0, t1 = mapping[z0], mapping[z1]
+
+            xii_ = xii[(xii.index >= t0) & (xii.index <= t1)]
+
+            x_, y_ = xii_.index, xii_.values
+            line.data = np.c_[x_, y_]
+
+            v1d.reset_x_view()
+            v1d.reset_y_view()
+
+        viewer.dims.events.current_step.connect(update_line)
+
+        if viewer1d is None:
+            viewer.window.add_dock_widget(qt_viewer, area="bottom", name=ylabel)
+
+        return viewer, v1d
