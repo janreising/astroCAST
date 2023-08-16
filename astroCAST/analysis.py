@@ -1069,7 +1069,9 @@ class Video:
 class Plotting:
 
     def __init__(self, events):
-        self.events = events.events
+
+        if events is not None:
+            self.events = events.events
 
     @staticmethod
     def _get_factorials(nr):

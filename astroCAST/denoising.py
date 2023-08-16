@@ -10,6 +10,8 @@ from tqdm import tqdm
 
 from functools import lru_cache
 
+import astroCAST.helper
+
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 import tensorflow as tf
 
@@ -447,7 +449,7 @@ class SubFrameGenerator(tf.keras.utils.Sequence):
         self.drop_frame_probability = drop_frame_probability
 
         # assert normalize in [None, "normalize", "center", "standardize"], "normalize argument needs be one of: [None, 'normalize', 'center', 'standardize']"
-        assert normalize in [None, "local", "global"], "normalize argument needs be one of: [None, local, global]"
+        assert normalize in [None, "local", "global", "minmax", "negpos"], "normalize argument needs be one of: [None, local, global, minmax, negpos]"
         self.normalize = normalize
         if self.normalize == "global":
                 self.descr = {}
@@ -459,6 +461,7 @@ class SubFrameGenerator(tf.keras.utils.Sequence):
         self.mem_data = {} if in_memory else -1
 
         # get items
+        self.cache_tables = {}
         self.fov_size = None
         self.items = self.generate_items()
 
@@ -513,114 +516,123 @@ class SubFrameGenerator(tf.keras.utils.Sequence):
         idx = 0
         container = []
         for file in tqdm(self.paths, desc="file preprocessing"):
+            file_hash = hash(file)
 
-            file_container = []
+            if file_hash in list(self.cache_tables.keys()):
+                file_container = self.cache_tables[file_hash]
 
-            if type(file) == str:
-                file = Path(file)
-
-            assert file.is_file(), "can't find: {}".format(file)
-
-            if file.suffix == ".h5":
-                with h5.File(file.as_posix(), "r") as f:
-
-                    if self.loc not in f:
-                        logging.warning(f"cannot find {self.loc} in {file}")
-                        continue
-
-                    data = f[self.loc]
-                    Z, X, Y = data.shape
-
-            elif file.suffix in (".tiff", ".tif"):
-
-                tif = tiff.TiffFile(file.as_posix())
-                Z = len(tif.pages)
-                X, Y = tif.pages[0].shape
-                tif.close()
             else:
-                raise NotImplementedError(f"filetype is recognized - please provide .h5, .tif or .tiff instead of: {file}")
 
-            if self.z_select is not None:
-                Z0 = max(0, self.z_select[0])
-                Z1 = min(Z, self.z_select[1])
-            else:
-                Z0, Z1 = 0, Z
+                file_container = []
 
-            pad_z0, pad_z1 = (signal_frames[0]+gap_frames[0], signal_frames[1]+gap_frames[1]+1) if self.padding is not None else (0, 0)
-            pad_x1 = iw % X if self.padding else 0
-            pad_y1 = ih % Y if self.padding else 0
+                if type(file) == str:
+                    file = Path(file)
 
-            zRange =list(range(Z0 + z_start - pad_z0, Z1 - stack_len - z_start + pad_z1, z_steps))
-            xRange = list(range(x_start, X - x_start + pad_x1, dw))
-            yRange = list(range(y_start, Y - y_start + pad_y1, dh))
+                assert file.is_file(), "can't find: {}".format(file)
 
-            logging.debug(f"\nz_range: {zRange}")
-            logging.debug(f"\nx_range: {xRange}")
-            logging.debug(f"\nx_range param > x_start:{x_start}, X:{X} iw:{iw} pad_x1:{pad_x1}, dw:{dw}")
-            logging.debug(f"\ny_range: {yRange}")
+                if file.suffix == ".h5":
+                    with h5.File(file.as_posix(), "r") as f:
 
-            if self.shuffle:
-                random.shuffle(zRange)
-                random.shuffle(xRange)
-                random.shuffle(yRange)
+                        if self.loc not in f:
+                            logging.warning(f"cannot find {self.loc} in {file}")
+                            continue
 
-            for z0 in zRange:
-                z1 = z0 + stack_len
+                        data = f[self.loc]
+                        Z, X, Y = data.shape
 
-                for x0 in xRange:
-                    x1 = x0 + iw
+                elif file.suffix in (".tiff", ".tif"):
 
-                    for y0 in yRange:
-                        y1 = y0 + ih
+                    tif = tiff.TiffFile(file.as_posix())
+                    Z = len(tif.pages)
+                    X, Y = tif.pages[0].shape
+                    tif.close()
+                else:
+                    raise NotImplementedError(f"filetype is recognized - please provide .h5, .tif or .tiff instead of: {file}")
 
-                        rot = random.choice(allowed_rotation)
-                        flip = random.choice(allowed_flip)
+                if self.z_select is not None:
+                    Z0 = max(0, self.z_select[0])
+                    Z1 = min(Z, self.z_select[1])
+                else:
+                    Z0, Z1 = 0, Z
 
-                        if (self.drop_frame_probability is not None) and (np.random.random() <= self.drop_frame_probability):
-                            drop_frame = np.random.randint(0, np.sum(signal_frames))
+                pad_z0, pad_z1 = (signal_frames[0]+gap_frames[0], signal_frames[1]+gap_frames[1]+1) if self.padding is not None else (0, 0)
+                pad_x1 = iw % X if self.padding is not None else 0
+                pad_y1 = ih % Y if self.padding is not None else 0
+
+                zRange =list(range(Z0 + z_start - pad_z0, Z1 - stack_len - z_start + pad_z1, z_steps))
+                xRange = list(range(x_start, X - x_start + pad_x1 - dw, dw))
+                yRange = list(range(y_start, Y - y_start + pad_y1 - dh, dh))
+
+                logging.debug(f"\nz_range: {zRange}")
+                logging.debug(f"\nx_range: {xRange}")
+                logging.debug(f"\nx_range param > x_start:{x_start}, X:{X} iw:{iw} pad_x1:{pad_x1}, dw:{dw}")
+                logging.debug(f"\ny_range: {yRange}")
+
+                if self.shuffle:
+                    random.shuffle(zRange)
+                    random.shuffle(xRange)
+                    random.shuffle(yRange)
+
+                for z0 in zRange:
+                    z1 = z0 + stack_len
+
+                    for x0 in xRange:
+                        x1 = x0 + iw
+
+                        for y0 in yRange:
+                            y1 = y0 + ih
+
+                            rot = random.choice(allowed_rotation)
+                            flip = random.choice(allowed_flip)
+
+                            if (self.drop_frame_probability is not None) and (np.random.random() <= self.drop_frame_probability):
+                                drop_frame = np.random.randint(0, np.sum(signal_frames))
+                            else:
+                                drop_frame = -1
+                            file_container.append(
+                                {"idx": idx, "path": file, "z0": z0, "z1": z1, "x0": x0, "x1": x1, "y0": y0,
+                                 "y1": y1, "rot": rot, "flip": flip,
+                                 "noise": self.add_noise, "drop_frame": drop_frame,
+                                 "padding": (
+                                     0 if z0 > 0 else 0 - z0,
+                                     0 if z1 < Z1 else z1 - Z1,
+                                     0 if x1 < X else x1 - X,
+                                     0 if y1 < Y else y1 - Y
+                                 )
+                                 })
+
+                            idx += 1
+
+                file_container = pd.DataFrame(file_container)
+
+                if len(file_container) < 1:
+                    raise ValueError("cannot find suitable data chunks.")
+
+                if self.normalize == "global":
+                    if len(file_container) > 1:
+
+                        local_save = self.get_local_descriptive(file, h5_loc=self.loc)
+
+                        if local_save is None and not self.save_global_descriptive:
+                            self.descr[file] = self._bootstrap_descriptive(file_container)
+
+                        elif local_save is None:
+
+                            mean, std = self._bootstrap_descriptive(file_container)
+                            self.descr[file] = (mean, std)
+
+                            if self.save_global_descriptive:
+                                self.set_local_descriptive(file, h5_loc=self.loc, mean=mean, std=std)
+
                         else:
-                            drop_frame = -1
-                        file_container.append(
-                            {"idx": idx, "path": file, "z0": z0, "z1": z1, "x0": x0, "x1": x1, "y0": y0,
-                             "y1": y1, "rot": rot, "flip": flip,
-                             "noise": self.add_noise, "drop_frame": drop_frame,
-                             "padding": (
-                                 0 if z0 > 0 else 0 - z0,
-                                 0 if z1 < Z1 else z1 - Z1,
-                                 0 if x1 < X else x1 - X,
-                                 0 if y1 < Y else y1 - Y
-                             )
-                             })
-
-                        idx += 1
-
-            file_container = pd.DataFrame(file_container)
-
-            if len(file_container) < 1:
-                raise ValueError("cannot find suitable data chunks.")
-
-            if self.normalize == "global":
-                if len(file_container) > 1:
-
-                    local_save = self.get_local_descriptive(file, h5_loc=self.loc)
-
-                    if local_save is None and not self.save_global_descriptive:
-                        self.descr[file] = self._bootstrap_descriptive(file_container)
-
-                    elif local_save is None:
-
-                        mean, std = self._bootstrap_descriptive(file_container)
-                        self.descr[file] = (mean, std)
-
-                        if self.save_global_descriptive:
-                            self.set_local_descriptive(file, h5_loc=self.loc, mean=mean, std=std)
+                            logging.info("loading descriptive statistics from file")
+                            self.descr[file] = local_save
 
                     else:
-                        logging.info("loading descriptive statistics from file")
-                        self.descr[file] = local_save
+                        logging.warning(f"found file without eligible items: {file}")
 
-                else:
-                    logging.warning(f"found file without eligible items: {file}")
+                # cache full table
+                self.cache_tables[file_hash] = file_container
 
             if self.max_per_file is not None:
                 file_container = file_container.sample(self.max_per_file)
@@ -784,6 +796,16 @@ class SubFrameGenerator(tf.keras.utils.Sequence):
 
                 data = data - sub
                 data = data / div
+
+            elif self.normalize == "minmax":
+
+                data -= np.min(data)
+                data /= np.max(data)
+
+            elif self.normalize == "negpos":
+
+                min_, max_ = np.min(data), np.max(data)
+                data = 2 * (data - min_) / (max_ - min_) - 1
 
             if row.drop_frame != -1:
                 data[row.drop_frame, :, :] = np.zeros(data[0, :, :].shape)
