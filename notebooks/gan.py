@@ -64,6 +64,92 @@ class ImgGenerator():
         self.sfg.on_epoch_end()
         raise StopIteration
 
+    def next(self):
+        for t in self:
+            return t
+
+    def sample(self, index=0, max_n=16):
+
+        i0 = self[index][:max_n]
+
+        logging.info(f"img shape: {i0.shape}")
+        logging.info(f"values: {np.min(i0):.2f} - {np.max(i0):.2f}")
+
+        N = i0.shape[0]
+        n = int(np.sqrt(N)) + int(N % int(np.sqrt(N)) > 0)
+
+        fig, axx = plt.subplots(n, n)
+        axx = list(axx.flatten())
+
+        for i in range(N):
+            axx[i].imshow(i0[i, :, :])
+            axx[i].axis("off")
+
+        for i in range(i, n**2):
+            axx[i].remove()
+
+        plt.tight_layout()
+
+        return i0
+
+class TemplateGenerator():
+
+    def __init__(self, files, loc="data", BATCH_SIZE=32, IMG_SIZE=(28, 28), max_per_file=1, scale=1):
+
+        xy = (int(IMG_SIZE[0]*scale), int(IMG_SIZE[1]*scale))
+
+        self.tg = denoising.SubFrameGenerator(files, loc=loc,
+            batch_size = BATCH_SIZE, input_size=xy, max_per_file=max_per_file*BATCH_SIZE,
+            pre_post_frame=(1, 0), gap_frames=0, allowed_rotation=(1, 2, 3), allowed_flip=(0, 1), padding=None,
+            random_offset=True, normalize=None, logging_level=logging.INFO)
+
+        self.scale = scale
+        self.IMG_SIZE = IMG_SIZE
+        self.BATCH_SIZE = BATCH_SIZE
+
+    def __getitem__(self, index):
+        data = self.tg[index][1]
+
+        mask = data > 1
+        background = np.random.normal(size=data.shape)
+        signal = np.random.normal(loc=1, scale=0.5, size=data.shape) * mask
+
+        data = background + signal
+
+        min_, max_ = np.min(data, axis=0), np.max(data, axis=0)
+        data = 2 * (data - min_) / (max_ - min_) - 1
+
+        if self.scale != 1:
+
+            new_data = np.zeros((data.shape[0], self.IMG_SIZE[0], self.IMG_SIZE[1]), dtype=data.dtype)
+            for z in range(data.shape[0]):
+
+                new_data[z, :, :] = resize(data[z, :, :], self.IMG_SIZE, anti_aliasing=True)
+
+            data = new_data
+
+        return data
+
+    def __len__(self):
+        return len(self.tg)
+
+    def __iter__(self):
+        self.current = 0
+        return self
+
+    def __next__(self): # Python 2: def next(self)
+
+        if self.current < len(self) - 1:
+            self.current += 1
+            return self[self.current]
+
+        self.tg.on_epoch_end()
+        raise StopIteration
+
+    def next(self):
+        for t in self:
+            return t
+
     def sample(self, index=0, max_n=16):
 
         i0 = self[index][:max_n]
@@ -90,7 +176,7 @@ class ImgGenerator():
 
 class GAN:
 
-    def __init__(self, img_generator, checkpoint_dir='./training_checkpoints', checkpoint_frequency=10,
+    def __init__(self, img_generator, tmp_generator, checkpoint_dir='./training_checkpoints', checkpoint_frequency=10,
                  modifier_param={},
                  optimizer_lambda=1e-4, logging_level=logging.INFO):
 
@@ -98,12 +184,13 @@ class GAN:
 
         self.cross_entropy = tf.keras.losses.BinaryCrossentropy(from_logits=True)
         self.img_generator = img_generator
+        self.tmp_generator = tmp_generator
 
         self.batch_size = self.img_generator.BATCH_SIZE
         self.input_noise_shape = tuple((*self.img_generator.IMG_SIZE, 1))
         logging.info(f"batch size: {self.batch_size}, noise shape: {self.input_noise_shape}")
 
-        self.generator = self.make_modifier_model(**modifier_param)
+        self.generator = self.make_modifier_model_up_down(**modifier_param)
         self.discriminator = self.make_discriminator_model()
 
         # Optimizers
@@ -156,7 +243,44 @@ class GAN:
 
         return model
 
-    def make_discriminator_model(self):
+    def make_modifier_model_up_down(self, kernel_exponents=(6, 5), kernel_size=5, line_length=100):
+
+        layer_container = []
+        for i, k in enumerate(kernel_exponents):
+
+            if i == 0:
+                layer_container += [layers.Conv2DTranspose(int(2**k), (kernel_size, kernel_size),
+                                                                      strides=(2, 2), padding="same", use_bias=False,
+                                                                      input_shape=self.input_noise_shape)]
+            else:
+                layer_container += [layers.Conv2DTranspose(int(2**k), (kernel_size, kernel_size),
+                                                                      strides=(2, 2), padding="same", use_bias=False)]
+
+            layer_container += [layers.BatchNormalization()]
+            layer_container += [layers.LeakyReLU()]
+
+        for i, k in enumerate(kernel_exponents[::-1]):
+
+            if i == 0:
+                layer_container += [layers.Conv2D(int(2**k), (kernel_size, kernel_size),
+                                                                      strides=(2, 2), padding="same", use_bias=False,
+                                                                      input_shape=self.input_noise_shape)]
+            else:
+                layer_container += [layers.Conv2D(int(2**k), (kernel_size, kernel_size),
+                                                                      strides=(2, 2), padding="same", use_bias=False)]
+
+            layer_container += [layers.BatchNormalization()]
+            layer_container += [layers.LeakyReLU()]
+
+        layer_container += [layers.Conv2DTranspose(1, (kernel_size, kernel_size), strides=(1, 1),
+                                                          padding='same', use_bias=False, activation="tanh")]
+
+        model = tf.keras.Sequential(layer_container)
+        logging.info(model.summary(line_length=line_length))
+
+        return model
+
+    def make_discriminator_model(self, line_length=100):
         model = tf.keras.Sequential()
         model.add(layers.Conv2D(64, (5, 5), strides=(2, 2), padding='same',
                                          input_shape=self.input_noise_shape))
@@ -167,8 +291,14 @@ class GAN:
         model.add(layers.LeakyReLU())
         model.add(layers.Dropout(0.3))
 
+        # model.add(layers.Conv2D(256, (5, 5), strides=(2, 2), padding='same'))
+        # model.add(layers.LeakyReLU())
+        # model.add(layers.Dropout(0.3))
+
         model.add(layers.Flatten())
         model.add(layers.Dense(1))
+
+        logging.info(model.summary(line_length=line_length))
 
         return model
 
@@ -187,13 +317,14 @@ class GAN:
     def generate_seed(self, num_seeds=1):
         return tf.random.normal([num_seeds, *self.input_noise_shape])
 
-    def train(self, epochs, num_examples_to_generate=16, load_pretrained=False,
+    def train(self, epochs, num_examples_to_generate=12, load_pretrained=False,
               plot_param={}):
 
         if load_pretrained:
             self.load_last_checkpoint()
 
-        seed = self.generate_seed(num_seeds=num_examples_to_generate)
+        seed = self.tmp_generator.next()[:num_examples_to_generate, :, :]
+        truth = self.img_generator.next()[:num_examples_to_generate, :, :]
 
         for epoch in range(epochs):
             start = time.time()
@@ -201,7 +332,7 @@ class GAN:
             for image_batch in self.img_generator:
                 self.train_step(image_batch)
 
-            self.generate_and_save_images(epoch=epoch+1, test_input=seed, **plot_param)
+            self.generate_and_save_images(epoch=epoch+1, test_input=seed, reference=truth, **plot_param)
 
             # Save the model every 15 epochs
             if (epoch + 1) % self.checkpoint_frequency == 0:
@@ -214,7 +345,7 @@ class GAN:
 
     @tf.function
     def train_step(self, images):
-        noise = tf.random.normal([self.batch_size, *self.input_noise_shape])
+        noise = self.tmp_generator.next()
 
         with tf.GradientTape() as gen_tape, tf.GradientTape() as disc_tape:
             generated_images = self.generator(noise, training=True)
@@ -231,20 +362,33 @@ class GAN:
         self.generator_optimizer.apply_gradients(zip(gradients_of_generator, self.generator.trainable_variables))
         self.discriminator_optimizer.apply_gradients(zip(gradients_of_discriminator, self.discriminator.trainable_variables))
 
-    def generate_and_save_images(self, epoch, test_input, max_n=5, figsize=(4, 4), figsize_multiply=4, save_dir=None):
+    def generate_and_save_images(self, epoch, test_input, reference, max_n=5, figsize=(6,6), figsize_multiply=4, save_dir=None):
 
         predictions = self.generator(test_input, training=False)
-        class_ = self.discriminator(predictions, training=False)
+
+        class_p = self.discriminator(predictions, training=False)
+        class_r = self.discriminator(reference, training=False)
+
+        predictions = np.concatenate([np.squeeze(predictions), np.squeeze(reference)], axis=0)
+        class_ = np.concatenate([class_p, class_r], axis=0)
 
         display.clear_output(wait=True)
 
         N=len(class_)
         plotting = astroCAST.analysis.Plotting(None)
         fig, axx = plotting._get_square_grid(N=N, figsize=figsize, figsize_multiply=figsize_multiply, max_n=max_n)
+        fig.suptitle(f"Epoch {epoch}")
 
         for i in range(N):
-            axx[i].imshow(predictions[i, :, :, 0], cmap="Greens" if class_[i]>0 else "Reds")
+            axx[i].imshow(predictions[i, :, :],
+                          vmin=-1, vmax=1
+                          # cmap="Greys"
+                          )
             axx[i].axis('off')
+            axx[i].text(0.05, 0.95, f"{float(class_[i]):.2f}", transform=axx[i].transAxes, fontsize=7,
+                    verticalalignment='top', bbox=dict(boxstyle='round',
+                                                       facecolor="green" if class_[i]>0 else "red",
+                                                       alpha=0.5))
 
         plt.tight_layout()
 
