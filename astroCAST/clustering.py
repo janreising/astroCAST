@@ -123,15 +123,30 @@ class Linkage(CachedClass):
 	"max_trace_plot":5, "max_plots":25
 """
 
-    def __init__(self, logging_level=logging.INFO):
-        super().__init__(logging_level=logging_level)
+    def __init__(self, cache_path=None, logging_level=logging.INFO):
+        super().__init__(logging_level=logging_level, cache_path=None, )
 
         self.Z = None
 
-    def get_barycenters(self, events, z_threshold, default_cluster = -1,
+    def get_barycenters(self, events, cutoff, criterion="distance", default_cluster = -1,
                         distance_matrix=None,
                         distance_type="pearson", param_distance={},
                         param_linkage={}, param_clustering={}, param_barycenter={}):
+
+        """
+
+        :param events:
+        :param cutoff: maximum cluster distance (criterion='distance') or number of clusters (criterion='maxclust')
+        :param criterion: one of 'inconsistent', 'distance', 'monocrit', 'maxclust' or 'maxclust_monocrit'
+        :param default_cluster: cluster value for excluded events
+        :param distance_matrix:
+        :param distance_type:
+        :param param_distance:
+        :param param_linkage:
+        :param param_clustering:
+        :param param_barycenter:
+        :return:
+        """
 
         if distance_matrix is None:
             corr = Distance(cache_path=self.cache_path)
@@ -140,8 +155,8 @@ class Linkage(CachedClass):
                                                    correlation_param=param_distance)
 
         linkage_matrix = self.calculate_linkage_matrix(distance_matrix, **param_linkage)
-
-        clusters, cluster_labels = self.cluster_linkage_matrix(linkage_matrix, z_threshold, **param_clustering)
+        clusters, cluster_labels = self.cluster_linkage_matrix(linkage_matrix, cutoff, criterion=criterion,
+                                                               **param_clustering)
         barycenters = self.calculate_barycenters(clusters, cluster_labels, events, **param_barycenter)
 
         # create a lookup table to sort event indices into clusters
@@ -210,10 +225,15 @@ class Linkage(CachedClass):
         return Z
 
     @staticmethod
-    def cluster_linkage_matrix(Z, z_threshold, criterion="distance",
+    def cluster_linkage_matrix(Z, cutoff, criterion="distance",
                                min_cluster_size=1, max_cluster_size=None):
 
-        cluster_labels = fcluster(Z, z_threshold, criterion=criterion)
+        valid_criterion = ('inconsistent', 'distance', 'monocrit', 'maxclust', 'maxclust_monocrit')
+        if criterion not in valid_criterion:
+            raise ValueError(f"criterion has to be one of: {valid_criterion}. "
+                             f"For more guidance see: https://docs.scipy.org/doc/scipy/reference/generated/scipy.cluster.hierarchy.fcluster.html")
+
+        cluster_labels = fcluster(Z, t=cutoff, criterion=criterion)
         clusters = pd.Series(cluster_labels).value_counts().sort_index()
 
         if (min_cluster_size > 0) and (min_cluster_size < 1):
@@ -262,7 +282,7 @@ class Linkage(CachedClass):
         return barycenters
 
     @staticmethod
-    def plot_cluster_fraction_of_retention(Z, z_threshold=None, min_cluster_size=None, ax=None, save_path=None):
+    def plot_cluster_fraction_of_retention(Z, cutoff, criterion='distance', min_cluster_size=None, ax=None, save_path=None):
 
         """ plot fraction of included traces for levels of 'z_threshold' and 'min_cluster_size' """
 
@@ -283,7 +303,7 @@ class Linkage(CachedClass):
             for i, mc_ in enumerate(tqdm(mcs)):
                 for j, z_ in enumerate(zs):
 
-                    cluster_labels = fcluster(Z, z_, criterion='distance')
+                    cluster_labels = fcluster(Z, z_, criterion=criterion)
                     clusters = pd.Series(cluster_labels).value_counts().sort_index()
 
                     clusters = clusters[clusters > mc_]
@@ -305,11 +325,13 @@ class Linkage(CachedClass):
             ax.set_ylabel("num_cluster threshold")
 
             # convert chosen values to log scale and plot
-            if z_threshold is None: x_ = None
+            if cutoff is None:
+                x_ = None
+
             else:
                 x_ = 0
                 for z_ in zs:
-                    if z_threshold > z_:
+                    if cutoff > z_:
                         x_ += 1
 
             if min_cluster_size is None: y_ = 0

@@ -93,7 +93,7 @@ class Events(CachedClass):
             if isinstance(data, (str, Path)):
                 self.data = Video(data, z_slice=z_slice, h5_loc=h5_loc, lazy=False)
 
-            elif isinstance(self.data, (np.ndarray, da.Array)):
+            elif isinstance(data, (np.ndarray, da.Array)):
 
                 if z_slice is not None:
                     logging.warning("'data'::array > Please ensure array was not sliced before providing data flag")

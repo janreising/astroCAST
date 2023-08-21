@@ -63,49 +63,42 @@ class Test_hdbscan:
 
 class Test_dtw_linkage:
 
-    @pytest.mark.parametrize("use_mmap", [True, False])
-    def test_clustering(self, use_mmap):
+    @pytest.mark.parametrize("distance_type", ["pearson", "dtw"])
+    @pytest.mark.parametrize("criterion", ["distance", "maxclust"])
+    def test_clustering(self, distance_type, criterion, cutoff=2):
 
-        dtw = Linkage()
         DG = DummyGenerator(num_rows=11, trace_length=16, ragged=False)
         data = DG.get_events()
 
-        dm = dtw.calculate_distance_matrix(events=data, use_mmap=use_mmap)
-        Z = dtw.calculate_linkage_matrix(dm)
-        clusters, cluster_labels = dtw.cluster_linkage_matrix(Z, z_threshold=3)
-
-        barycenters = dtw.calculate_barycenters(clusters, cluster_labels, events=data)
-
-    def test_wrapper_function(self):
         dtw = Linkage()
+        _, _ = dtw.get_barycenters(data, cutoff, distance_type=distance_type, criterion=criterion)
+
+    @pytest.mark.parametrize("cutoff", [2, 6])
+    @pytest.mark.parametrize("min_cluster_size", [1, 10])
+    @pytest.mark.parametrize("distance_type", ["pearson", "dtw"])
+    def test_plotting(self, distance_type, cutoff, min_cluster_size, tmp_path):
+
         DG = DummyGenerator(num_rows=11, trace_length=16, ragged=False)
         data = DG.get_events()
 
-        barycenters = dtw.get_barycenters(data, z_threshold=2)
-
-    @pytest.mark.parametrize("z_threshold", [None, 2])
-    @pytest.mark.parametrize("min_cluster_size", [None, 10])
-    def test_plotting(self, z_threshold, min_cluster_size, tmp_path):
+        corr = Distance()
+        distance_matrix = corr.get_correlation(data, correlation_type=distance_type)
 
         dtw = Linkage()
-        DG = DummyGenerator(num_rows=11, trace_length=16, ragged=False)
-        data = DG.get_events()
-
-        dm = dtw.calculate_distance_matrix(data, use_mmap=False)
-        Z = dtw.calculate_linkage_matrix(dm)
+        linkage_matrix = dtw.calculate_linkage_matrix(distance_matrix)
 
         # test custom values
-        dtw.plot_cluster_fraction_of_retention(Z, z_threshold=z_threshold, min_cluster_size=min_cluster_size)
+        dtw.plot_cluster_fraction_of_retention(linkage_matrix,
+                                               cutoff=cutoff, min_cluster_size=min_cluster_size)
 
         # test provided axis
         fig, ax = plt.subplots(1, 1)
-        dtw.plot_cluster_fraction_of_retention(Z, ax=ax)
+        dtw.plot_cluster_fraction_of_retention(linkage_matrix, cutoff=cutoff, ax=ax)
 
         # test saving
-        dtw.plot_cluster_fraction_of_retention(Z, ax=ax, save_path=tmp_path)
+        dtw.plot_cluster_fraction_of_retention(linkage_matrix, cutoff=cutoff, ax=ax, save_path=tmp_path)
 
-    @pytest.mark.parametrize("use_mmap", [True, False])
-    def test_local_cache(self, use_mmap):
+    def test_local_cache(self):
 
         with tempfile.TemporaryDirectory() as dir:
             tmp_path = Path(dir)
@@ -117,27 +110,13 @@ class Test_dtw_linkage:
             # test calculate **distance** matrix
             dtw = Linkage(cache_path=tmp_path)
             t0 = time.time()
-            dtw.calculate_distance_matrix(data, use_mmap=use_mmap)
+            dtw.get_barycenters(data, cutoff=2)
             dt = time.time() - t0
             del dtw
 
             dtw = Linkage(cache_path=tmp_path)
             t0 = time.time()
-            dm = dtw.calculate_distance_matrix(data, use_mmap=use_mmap)
+            _, _ = dtw.get_barycenters(data, cutoff=2)
             dt2 = time.time() - t0
 
-            assert dt2 < dt, "distance matrix is not cached"
-
-            # test calculate **linkage** matrix
-            dtw = Linkage(cache_path=tmp_path)
-            t0 = time.time()
-            dtw.calculate_linkage_matrix(dm)
-            dt = time.time() - t0
-            del dtw
-
-            dtw = Linkage(cache_path=tmp_path)
-            t0 = time.time()
-            dtw.calculate_linkage_matrix(dm)
-            dt2 = time.time() - t0
-
-            assert dt2 < dt, "linkage matrix is not cached"
+            assert dt2 < dt, "results are not cached"
