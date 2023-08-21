@@ -26,44 +26,28 @@ from astroCAST.preparation import IO
 
 class Events(CachedClass):
 
-    def __init__(self, event_dir, meta_path=None, in_memory=False, data=None, h5_loc=None, group=None, subject_id=None,
+    def __init__(self, event_dir, in_memory=False, data=None, h5_loc=None, group=None, subject_id=None,
                  z_slice=None, index_prefix=None, custom_columns=("area_norm", "cx", "cy"), frame_to_time_mapping=None,
                  frame_to_time_function=None, cache_path=None, seed=1):
 
         super().__init__(cache_path=cache_path)
 
-        if event_dir is not None:
+        self.seed = seed
+        self.z_slice = z_slice
 
-            if not isinstance(event_dir, list):
+        if not isinstance(event_dir, list): # single file support
+
+            if event_dir is None:
+                logging.warning("event_dir is None. Creating empty Events instance!")
+                self.event_map = None
+                self.num_frames, self.X, self.Y = None, None, None
+                self.events = None
+
+            else:
 
                 event_dir = Path(event_dir)
                 if not event_dir.is_dir():
                     raise FileNotFoundError(f"cannot find provided event directory: {event_dir}")
-
-                if meta_path is not None:
-                    logging.debug("I should not be called at all")
-                    self.get_meta_info(meta_path)
-
-                # get data
-                if isinstance(data, (str, Path)):
-                    self.data = Video(data, z_slice=z_slice, h5_loc=h5_loc, lazy=False)
-
-                if isinstance(data, (np.ndarray, da.Array)):
-
-                    if z_slice is not None:
-                        logging.warning("'data'::array > Please ensure array was not sliced before providing data flag")
-
-                    self.data = Video(data, z_slice=z_slice, lazy=False)
-
-                elif isinstance(data, Video):
-
-                    if z_slice is not None:
-                        logging.warning("'data'::Video > Slice manually during Video object initialization")
-
-                    self.data = data
-
-                else:
-                    self.data = data
 
                 # load event map
                 event_map, event_map_shape, event_map_dtype = self.get_event_map(event_dir, in_memory=in_memory) # todo slicing
@@ -77,7 +61,6 @@ class Events(CachedClass):
                 self.events = self.load_events(event_dir, z_slice=z_slice, index_prefix=index_prefix, custom_columns=custom_columns)
 
                 # z slicing
-                self.z_slice = z_slice
                 if z_slice is not None:
                     z_min, z_max = z_slice
                     self.events = self.events[(self.events.z0 >= z_min) & (self.events.z1 <= z_max)]
@@ -106,32 +89,49 @@ class Events(CachedClass):
                 self.events["subject_id"] = subject_id
                 self.events["name"] = event_dir.stem
 
+            # get data
+            if isinstance(data, (str, Path)):
+                self.data = Video(data, z_slice=z_slice, h5_loc=h5_loc, lazy=False)
+
+            elif isinstance(self.data, (np.ndarray, da.Array)):
+
+                if z_slice is not None:
+                    logging.warning("'data'::array > Please ensure array was not sliced before providing data flag")
+
+                self.data = Video(data, z_slice=z_slice, lazy=False)
+
+            elif isinstance(data, Video):
+
+                if z_slice is not None:
+                    logging.warning("'data'::Video > Slice manually during Video object initialization")
+
+                self.data = data
+
             else:
-                # multi file support
+                self.data = data
 
-                event_objects = []
-                for i in range(len(event_dir)):
+        else: # multi file support
 
-                    event = Events(event_dir[i],
-                                   meta_path=meta_path if not isinstance(meta_path, list) else meta_path[i],
-                                   data=data if not isinstance(data, list) else data[i],
-                                   h5_loc=h5_loc if not isinstance(h5_loc, list) else h5_loc[i],
-                                   z_slice=z_slice if not isinstance(z_slice, list) else z_slice[i],
-                                   group=group if not isinstance(group, list) else group[i],
-                                   in_memory=in_memory,
-                                   index_prefix=f"{i}x", subject_id=i,
-                                   custom_columns=custom_columns,
-                                   frame_to_time_mapping=frame_to_time_mapping if not isinstance(frame_to_time_mapping, list) else frame_to_time_mapping[i],
-                                   frame_to_time_function=frame_to_time_function if not isinstance(frame_to_time_function, list) else frame_to_time_function[i])
+            event_objects = []
+            for i in range(len(event_dir)):
 
-                    event_objects.append(event)
+                event = Events(event_dir[i],
+                               data=data if not isinstance(data, list) else data[i],
+                               h5_loc=h5_loc if not isinstance(h5_loc, list) else h5_loc[i],
+                               z_slice=z_slice if not isinstance(z_slice, list) else z_slice[i],
+                               group=group if not isinstance(group, list) else group[i],
+                               in_memory=in_memory,
+                               index_prefix=f"{i}x", subject_id=i,
+                               custom_columns=custom_columns,
+                               frame_to_time_mapping=frame_to_time_mapping if not isinstance(frame_to_time_mapping, list) else frame_to_time_mapping[i],
+                               frame_to_time_function=frame_to_time_function if not isinstance(frame_to_time_function, list) else frame_to_time_function[i])
 
-                self.event_objects = event_objects
-                self.events = pd.concat([ev.events for ev in event_objects])
-                self.events.reset_index(drop=False, inplace=True, names="idx")
-                self.z_slice = z_slice
+                event_objects.append(event)
 
-        self.seed = seed
+            self.event_objects = event_objects
+            self.events = pd.concat([ev.events for ev in event_objects])
+            self.events.reset_index(drop=False, inplace=True, names="idx")
+            self.z_slice = z_slice
 
     def __len__(self):
         return len(self.events)
@@ -199,13 +199,13 @@ class Events(CachedClass):
         return events
 
     @staticmethod
-    def get_event_map(event_dir, in_memory=False):
+    def get_event_map(event_dir:Path, in_memory=False):
 
         """
         Retrieve the event map from the specified directory.
 
         Args:
-            event_dir (str): The directory path where the event map is located.
+            event_dir (Path): The directory path where the event map is located.
             in_memory (bool, optional): Specifies whether to load the event map into memory. Defaults to False.
 
         Returns:
@@ -214,18 +214,17 @@ class Events(CachedClass):
         """
 
         # Check if the event map is stored as a directory with 'event_map.tdb' file
-        if Path(event_dir).joinpath("event_map.tdb").is_dir():
-            path = Path(event_dir).joinpath("event_map.tdb")
+        if event_dir.joinpath("event_map.tdb").is_dir():
+            path = event_dir.joinpath("event_map.tdb")
             shape, chunksize, dtype = get_data_dimensions(path, return_dtype=True)
 
         # Check if the event map is stored as a file with 'event_map.tiff' extension
-        elif Path(event_dir).joinpath("event_map.tiff").is_file():
-            path = Path(event_dir).joinpath("event_map.tiff")
+        elif event_dir.joinpath("event_map.tiff").is_file():
+            path = event_dir.joinpath("event_map.tiff")
             shape, chunksize, dtype = get_data_dimensions(path, return_dtype=True)
 
-        else:
+        else: # Neither 'event_map.tdb' directory nor 'event_map.tiff' file found
 
-            # Neither 'event_map.tdb' directory nor 'event_map.tiff' file found
             logging.warning(f"Cannot find 'event_map.tdb' or 'event_map.tiff'."
                             f"Consider recreating the file with 'create_event_map()', "
                             f"otherwise errors downstream might occur'.")
@@ -350,13 +349,13 @@ class Events(CachedClass):
         return time_map, events_start_frame, events_end_frame
 
     @staticmethod
-    def load_events(event_dir, z_slice=None, index_prefix=None, custom_columns=("area_norm", "cx", "cy")):
+    def load_events(event_dir:Path, z_slice=None, index_prefix=None, custom_columns=("area_norm", "cx", "cy")):
 
         """
         Load events from the specified directory and perform optional preprocessing.
 
         Args:
-            event_dir (str): The directory containing the events.npy file.
+            event_dir (Path): The directory containing the events.npy file.
             z_slice (tuple, optional): A tuple specifying the z-slice range to filter events.
             index_prefix (str, optional): A prefix to add to the event index.
             custom_columns (list, optional): A list of custom columns to compute for the events DataFrame.
@@ -370,11 +369,11 @@ class Events(CachedClass):
 
         """
 
-        path = Path(event_dir).joinpath("events.npy")
+        path = event_dir.joinpath("events.npy")
         if not path.is_file():
             raise FileNotFoundError(f"Did not find 'events.npy' in {event_dir}")
 
-        events = np.load(path, allow_pickle=True)[()]
+        events = np.load(path.as_posix(), allow_pickle=True)[()]
         logging.info(f"Number of events: {len(events)}")
 
         events = pd.DataFrame(events).transpose()
@@ -383,7 +382,6 @@ class Events(CachedClass):
         # Dictionary of custom column functions
         custom_column_functions = {
             "area_norm": lambda events: events.area / events.dz,
-            # "pix_num_norm": lambda events: events.pix_num / events.dz,
             "area_footprint": lambda events: events.footprint.apply(sum),
             "cx": lambda events: events.x0 + events.dx * events["fp_centroid_local-0"],
             "cy": lambda events: events.y0 + events.dy * events["fp_centroid_local-1"]
@@ -945,7 +943,7 @@ class Video:
         self.z_slice = z_slice
         self.Z, self.X, self.Y = self.data.shape
         self.name = name
-        self.hash_value = None
+        self.hash_value = hash_value
 
     def __hash__(self):
 
