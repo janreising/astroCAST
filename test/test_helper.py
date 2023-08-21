@@ -98,7 +98,6 @@ class Test_LocalCache:
         assert n1 == n2, f"cached result is incorrect: {n1} != {n2}"
         assert d2 < d1, f"cached result took too long: {d1} <= {d2}"
 
-@pytest.mark.xfail
 def test_get_data_dimensions():
     raise NotImplementedError
 
