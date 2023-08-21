@@ -1,13 +1,103 @@
+import tempfile
+import time
+
 import numpy as np
+import pandas as pd
 import pytest
 
 from astroCAST.helper import *
 
-@pytest.mark.xfail
-def test_local_caching_wrapper():
-    raise NotImplementedError
+class Test_LocalCache:
 
-@pytest.mark.xfail
+    def setup_method(self):
+
+        self.dir = tempfile.TemporaryDirectory()
+        self.tmpdir = Path(self.dir.name)
+        assert self.tmpdir.is_dir(), f"Creation of {self.tmpdir} failed."
+
+    def teardown_method(self):
+        self.dir.cleanup()
+        assert not self.tmpdir.is_dir(), f"Teardown of {self.tmpdir} failed."
+
+    def test_simple(self):
+
+        @wrapper_local_cache
+        def func(cache_path=None):
+            N = float(np.random.random(1))
+            time.sleep(2)
+            return N
+
+        t0 = time.time()
+        n1 = func(cache_path=self.tmpdir)
+        d1 = time.time() - t0
+
+        t0 = time.time()
+        n2 = func(cache_path=self.tmpdir)
+        d2 = time.time() - t0
+
+        assert n1 == n2, f"cached result is incorrect: {n1} != {n2}"
+        assert d2 < d1, f"cached result took too long: {d1} <= {d2}"
+
+    @pytest.mark.parametrize("position", ["arg", "kwarg"])
+    @pytest.mark.parametrize("data", ["A", 2, 2.9, True, (1, 2), [1, 2], np.zeros(1),
+                                      {"a":1}, {"n":np.zeros(1)}, {"outer":{"inner":3}},
+                                      pd.DataFrame({"A":[1, 2]}), pd.Series([1, 2, 3]),
+                                      np.array_equal])
+    def test_input_type(self, position, data):
+
+        if position == "arg":
+
+            @wrapper_local_cache
+            def func(data, cache_path=None):
+                N = float(np.random.random(1))
+                time.sleep(0.2)
+                return N
+
+            t0 = time.time()
+            n1 = func(data, cache_path=self.tmpdir)
+            d1 = time.time() - t0
+
+            t0 = time.time()
+            n2 = func(data, cache_path=self.tmpdir)
+            d2 = time.time() - t0
+
+        elif position == "kwarg":
+
+            @wrapper_local_cache
+            def func(data=data, cache_path=None):
+                N = float(np.random.random(1))
+                time.sleep(1)
+                return N
+
+            t0 = time.time()
+            n1 = func(data=data, cache_path=self.tmpdir)
+            d1 = time.time() - t0
+
+            t0 = time.time()
+            n2 = func(data=data, cache_path=self.tmpdir)
+            d2 = time.time() - t0
+
+        else:
+            raise ValueError
+
+        assert n1 == n2, f"cached result is incorrect: {n1} != {n2}"
+        assert d2 < d1, f"cached result took too long: {d1} <= {d2}"
+
+    def test_CustomClasses(self):
+
+        cc = CachedClass(cache_path=self.tmpdir)
+
+        t0 = time.time()
+        n1 = cc.print_cache_path()
+        d1 = time.time() - t0
+
+        t0 = time.time()
+        n2 = cc.print_cache_path()
+        d2 = time.time() - t0
+
+        assert n1 == n2, f"cached result is incorrect: {n1} != {n2}"
+        assert d2 < d1, f"cached result took too long: {d1} <= {d2}"
+
 def test_get_data_dimensions():
     raise NotImplementedError
 
