@@ -4,6 +4,7 @@ import pickle
 from pathlib import Path
 
 import keras.models
+import napari
 import numpy as np
 import pandas as pd
 import umap
@@ -28,24 +29,48 @@ class UMAP:
     def embed(self, data):
         return self.reducer.transform(data)
 
-    def plot(self, data=None, ax=None, labels=None):
+    def plot(self, data=None, ax=None, labels=None, size=0.1, use_napari=True):
 
-        if ax is None:
-            fig, ax = plt.subplots(1, 1, figsize=(10, 10))
+        if use_napari:
 
-        if data is None:
-            umap.plot.points(self.reducer, labels=labels, ax=ax)
+            if data is None:
+                raise ValueError("please provide the data attribute or set 'use_napari' to False")
+
+            viewer = napari.Viewer()
+
+            points = data
+
+            if labels is None:
+                viewer.add_points(points, size=size)
+            else:
+                labels_ = labels/np.max(labels)
+                viewer.add_points(points,
+                                  properties={'labels':labels_},
+                                  face_color='labels', face_colormap='viridis',
+                                  size=size)
+
+            return viewer
 
         else:
 
-            if labels is not None:
+            if ax is None:
+                fig, ax = plt.subplots(1, 1, figsize=(10, 10))
 
-                palette = sns.color_palette("husl", len(np.unique(labels)))
-                ax.scatter(data[:, 0], data[:, 1], alpha=0.1, s=1,
-                           color=[palette[v] for v in labels])
+            if data is None:
+                umap.plot.points(self.reducer, labels=labels, ax=ax)
 
             else:
-                ax.scatter(data[:, 0], data[:, 1], alpha=0.1, s=1)
+
+                if labels is not None:
+
+                    palette = sns.color_palette("husl", len(np.unique(labels)))
+                    ax.scatter(data[:, 0], data[:, 1], alpha=0.1, s=size,
+                               color=[palette[v] for v in labels])
+
+                else:
+                    ax.scatter(data[:, 0], data[:, 1], alpha=0.1, s=size)
+
+                return ax
 
     def save(self, path):
 

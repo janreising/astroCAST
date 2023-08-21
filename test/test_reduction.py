@@ -115,7 +115,19 @@ class Test_UMAP:
         um = UMAP()
         embedded = um.train(data)
 
-        um.plot()
+        # vanilla
+        um.plot(use_napari=False)
+
+        # custom axis
+        fig, ax = plt.subplots(1, 1)
+        um.plot(ax=ax, use_napari=False)
+
+        # napari
+        um.plot(data=embedded)
+
+        # napari
+        labels = np.random.randint(0, 5, size=len(data))
+        um.plot(data=embedded, labels=labels)
 
     def test_save_load(self, tmp_path):
 
