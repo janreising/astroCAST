@@ -1,7 +1,8 @@
 import glob
-import json
 import logging
 import pickle
+import time
+import types
 from collections import OrderedDict
 from pathlib import Path
 import awkward as ak
@@ -14,10 +15,6 @@ import pandas as pd
 import tifffile
 import tiledb
 import xxhash
-from tqdm import tqdm
-
-import astroCAST
-
 
 def notimplemented(f, msg=""):
 
@@ -42,6 +39,8 @@ def wrapper_local_cache(f):
 
     def hash_arg(arg):
 
+        from astroCAST.analysis import Events, Video
+
         if isinstance(arg, np.ndarray):
             return hash_from_ndarray(arg)
 
@@ -50,16 +49,26 @@ def wrapper_local_cache(f):
             return hash_from_ndarray(df_hash.values)
 
         elif isinstance(arg, dict):
-            return get_sorted_hash(arg)
+            return get_hash_from_dict(arg)
 
-        elif isinstance(arg, (astroCAST.analysis.Events, astroCAST.analysis.Video)):
+        elif isinstance(arg, (Events, Video)):
             return hash(arg)
 
-        elif isinstance(arg, bool):
+        elif isinstance(arg, (bool, int, tuple)):
             return str(arg)
 
-        elif isinstance(arg, tuple):
-            return hash(arg)
+        elif isinstance(arg, (str)):
+
+            if len(arg) < 10:
+                return arg
+            else:
+                return hash(arg)
+
+        elif isinstance(arg, list):
+
+            arg = pd.Series(arg)
+            df_hash = pd.util.hash_pandas_object(arg)
+            return hash_from_ndarray(df_hash.values)
 
         elif callable(arg):
             return arg.__name__
@@ -75,42 +84,38 @@ def wrapper_local_cache(f):
                 logging.error(f"couldn't hash argument type: {type(arg)}")
                 return arg
 
-    def get_sorted_hash(kwargs):
-        sorted_dict = OrderedDict()
+    def get_hash_from_dict(kwargs):
 
         # make sure keys are sorted to get same hash
         keys = list(kwargs.keys())
         keys.sort()
 
         # convert to ordered dict
+        hash_string = ""
         for key in keys:
 
-            if key in ["show_progress", "verbose", "verbosity"]:
+            if key in ["show_progress", "verbose", "verbosity", "cache_path"]:
                 continue
 
-            value = kwargs[key]
+            # save key name
+            hash_string += f"{hash_arg(key)}-"
 
-            if isinstance(value, dict):
-                sorted_dict[key] = get_sorted_hash(value)
-            else:
-                # hash arguments if necessary
-                sorted_dict[key] = hash_arg(value)
-        return sorted_dict
+            value = kwargs[key]
+            hash_string += f"{hash_arg(value)}_"
+
+        return hash_string
 
     def get_string_from_args(f, args, kwargs):
 
-        name_ = f.__name__
+        hash_string = f"{f.__name__}_"
+
         args_ = [hash_arg(arg) for arg in args]
-        kwargs_ = get_sorted_hash(kwargs)
-
-        hash_string = f"{name_}_"
-
         for a in args_:
             hash_string += f"{a}_"
 
-        for k in kwargs.keys():
-            hash_string += f"{k}-{kwargs_[k]}_"
+        hash_string +=  get_hash_from_dict(kwargs)
 
+        logging.warning(f"hash_string: {hash_string}")
         return hash_string
 
     def save_value(path, value):
@@ -167,13 +172,25 @@ def wrapper_local_cache(f):
 
     def inner_function(*args, **kwargs):
 
-        # what happens if we call it on a function without self??
-        self_ = args[0]
+        if isinstance(f, types.FunctionType) and "cache_path" in list(kwargs.keys()):
+            cache_path = kwargs["cache_path"]
 
-        if self_.cache_path is not None:
+        else:
+
+            try:
+                self_ = args[0]
+                cache_path = self_.cache_path
+
+            except:
+                logging.warning(f"trying to cache static method or class without 'cache_path': {f.__name__}")
+                cache_path = None
+
+        if cache_path is not None:
+
+            logging.warning("here")
 
             hash_string = get_string_from_args(f, args, kwargs)
-            cache_path = self_.cache_path.joinpath(hash_string)
+            cache_path = cache_path.joinpath(hash_string)
 
             # find file with regex matching from hash_value
             files = glob.glob(cache_path.as_posix() + ".*")
@@ -853,3 +870,9 @@ class CachedClass:
 
         # set logging level
         logging.basicConfig(level=logging_level)
+
+    @wrapper_local_cache
+    def print_cache_path(self):
+        logging.warning(f"cache_path: {self.cache_path}")
+        time.sleep(0.5)
+        return np.random.random(1)
