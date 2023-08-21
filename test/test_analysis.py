@@ -1,4 +1,5 @@
 import tempfile
+import time
 
 import dask.array
 import pytest
@@ -195,7 +196,7 @@ class Test_Events:
             event_dir = create_sim_data(Path(tmpdir), shape=shape)
             events = Events(event_dir)
             df = events.load_events(event_dir)
-            video, shape, dtype = events.get_event_map(event_dir, in_memory=True)
+            video, shape, dtype = events.get_event_map(event_dir, lazy=False)
 
             trace = events.get_extended_events(events=df, video=video, extend=extend)
 
@@ -207,6 +208,34 @@ class Test_Events:
             data_unique_values = np.unique(video.flatten().astype(int))
             trace_unique_values = np.unique(trace.flatten().astype(int))
             assert abs(len(data_unique_values) - len(trace_unique_values)) <= 1
+
+    @pytest.mark.parametrize("lazy", [True, False])
+    def test_extension_cache(self, lazy, shape=(50, 100, 100)):
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+
+            # Create dummy data
+            event_dir = create_sim_data(Path(tmpdir), shape=shape)
+
+            # load events - 1
+            events_1 = Events(event_dir, lazy=lazy, cache_path=event_dir)
+            video = Video(events_1.event_map)
+
+            t0 = time.time()
+            trace = events_1.get_extended_events(video=video, extend=(2, 2), in_place=True)
+            d1 = time.time() - t0
+
+            # load events - 2
+            events_2 = Events(event_dir, lazy=lazy, cache_path=event_dir)
+            video = Video(events_2.event_map)
+
+            t0 = time.time()
+            trace_2 = events_2.get_extended_events(video=video, extend=(2, 2))
+            events_2.events = trace_2
+            d2 = time.time() - t0
+
+            assert d2 < d1, f"caching is taking too long: {d2} >= {d1}"
+            assert hash(events_1) == hash(events_2)
 
     def test_extension_save(self, shape=(50, 100, 100)):
 
