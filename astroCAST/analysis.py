@@ -453,6 +453,7 @@ class Events(CachedClass):
         arr_ext, extended = None, None
         if return_array:
 
+            # create array
             if memmap_path:
                 memmap_path = Path(memmap_path).with_suffix(f".dtype_{np.dtype(dtype).name}_shape_{n_events}x{n_frames}.mmap")
                 arr_ext = np.memmap(memmap_path.as_posix(), dtype=dtype, mode='w+', shape=(n_events, n_frames))
