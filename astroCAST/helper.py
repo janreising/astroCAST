@@ -94,7 +94,7 @@ def wrapper_local_cache(f):
         hash_string = ""
         for key in keys:
 
-            if key in ["show_progress", "verbose", "verbosity", "cache_path"]:
+            if key in ["show_progress", "verbose", "verbosity", "cache_path", "n_jobs", "njobs"]:
                 continue
 
             if key in ["in_place", "inplace"]:
