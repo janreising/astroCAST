@@ -292,8 +292,7 @@ class Events(CachedClass):
         return event_map
 
     @wrapper_local_cache
-    @staticmethod
-    def get_time_map(event_dir=None, event_map=None, chunk=100):
+    def get_time_map(self, event_dir=None, event_map=None, chunk=100):
         """
         Creates a binary array representing the duration of events.
 
@@ -969,7 +968,12 @@ class Video:
             self.data = io.load(data, h5_loc=h5_loc, lazy=lazy, z_slice=z_slice)
 
         elif isinstance(data, (np.ndarray, da.Array)):
-            self.data = data
+
+            if z_slice is not None:
+                z0, z1 = z_slice
+                self.data = data[z0:z1, :, :]
+            else:
+                self.data = data
 
         self.z_slice = z_slice
         self.Z, self.X, self.Y = self.data.shape
