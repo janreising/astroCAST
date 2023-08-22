@@ -418,6 +418,59 @@ class Test_IO:
 
             assert arr.shape == arr_load.shape
             assert np.array_equal(arr, arr_load)
+    @pytest.mark.parametrize("shape", [(10, 5, 5), (100, 100, 100)])
+    @pytest.mark.parametrize("chunks", [None, (2, 2, 2), "infer"])
+    def test_save_chunks(self, shape, chunks, output_path="out.h5"):
+
+        with tempfile.TemporaryDirectory() as dir:
+            tmpdir = Path(dir)
+            assert tmpdir.is_dir()
+
+            output_path = tmpdir.joinpath(output_path)
+
+            # Reference
+            arr = np.random.random(shape)
+
+            # Loaded
+            io = IO()
+
+            prefix = None if output_path.suffix != ".h5" else "data/"
+            h5loc = None if output_path.suffix != ".h5" else "data/ch0"
+            data = {"ch0":arr}
+
+            output_path = io.save(output_path, data, h5_loc=prefix, chunks=chunks)
+
+            arr_load = io.load(output_path, h5_loc=h5loc)
+
+            assert arr.shape == arr_load.shape
+            assert np.array_equal(arr, arr_load)
+
+    @pytest.mark.parametrize("compression", ["gzip", "infer"])
+    @pytest.mark.parametrize("shape", [(100, 100, 100), (512, 512, 5000)])
+    def test_save_compression(self, compression, shape, chunks=(100, 100, 100), output_path="out.h5"):
+
+        with tempfile.TemporaryDirectory() as dir:
+            tmpdir = Path(dir)
+            assert tmpdir.is_dir()
+
+            output_path = tmpdir.joinpath(output_path)
+
+            # Reference
+            arr = np.zeros(shape, dtype=float)
+
+            # Loaded
+            io = IO()
+
+            prefix = None if output_path.suffix != ".h5" else "data/"
+            h5loc = None if output_path.suffix != ".h5" else "data/ch0"
+            data = {"ch0":arr}
+
+            output_path = io.save(output_path, data, h5_loc=prefix, chunks=chunks, compression=compression)
+
+            arr_load = io.load(output_path, h5_loc=h5loc)
+
+            assert arr.shape == arr_load.shape
+            assert np.array_equal(arr, arr_load)
 
     @pytest.mark.parametrize("output_path", ["out.h5", "out.tdb", "out.tiff", "out.npy"])
     @pytest.mark.parametrize("shape", [(10, 5, 5), (100, 100, 100)])

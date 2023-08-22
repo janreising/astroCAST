@@ -600,11 +600,9 @@ class IO:
         """
 
         # Cast the path to a pathlib.Path object if it's provided as a string
-        if isinstance(path, str):
+        if isinstance(path, (str, Path)):
             path = Path(path)
-
-        # Check if the path is a pathlib.Path object, otherwise raise an error
-        if not isinstance(path, Path):
+        else:
             raise TypeError("please provide 'path' as str or pathlib.Path data type")
 
         # Check if the data is a dictionary or data array, otherwise raise an error
@@ -616,6 +614,28 @@ class IO:
         saved_paths = []  # Initialize an empty list to store the paths of the saved files
         for k in data.keys():
             channel = data[k]
+
+            # infer chunks if necessary
+            if chunks == "infer":
+
+                new_chunks = []
+                for dim in channel.shape:
+                    dim = int(dim * 0.1)
+                    dim = min(100, dim)
+                    dim = max(1, dim)
+                    new_chunks.append(dim)
+
+                chunks = tuple(new_chunks)
+                logging.warning(f"inferred chunk size: {chunks}")
+
+            # infer compression
+            if compression == "infer":
+                size = channel.size * channel.itemsize
+                if size > 10e9 and path.suffix in [".h5", ".hdf5"]:
+                    compression = "gzip"
+                    logging.warning(f"inferred compression: {compression}")
+                else:
+                    compression = None
 
             # Check if the channel is a numpy.ndarray or a dask.array.Array, otherwise raise an error
             if not isinstance(channel, (np.ndarray, da.Array)):
