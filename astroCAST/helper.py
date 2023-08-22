@@ -3,7 +3,6 @@ import logging
 import pickle
 import time
 import types
-from collections import OrderedDict
 from pathlib import Path
 import awkward as ak
 import dask.array as da
@@ -15,9 +14,6 @@ import pandas as pd
 import tifffile
 import tiledb
 import xxhash
-
-
-
 
 def notimplemented(f, msg=""):
 
@@ -627,6 +623,27 @@ class EventSim:
         event_map = img_as_uint(event_map)
 
         return event_map, num_events
+
+    def create_dataset(self, h5_path, h5_loc="dff/ch0", save_active_pixels=False, shape=(50, 100, 100),
+                       z_fraction=0.2, xy_fraction=0.1, gap_space=1, gap_time=1,
+                       blob_size_fraction=0.05, event_probability=0.2):
+
+        from astroCAST.analysis import IO
+        from astroCAST.detection import Detector
+
+        h5_path = Path(h5_path)
+
+        data, num_events = self.simulate(shape=shape, z_fraction=z_fraction, xy_fraction=xy_fraction,
+                                         gap_space=gap_space, gap_time=gap_time,
+                                         blob_size_fraction=blob_size_fraction, event_probability=event_probability)
+
+        IO.save(path=h5_path, data=data, h5_loc=h5_loc)
+
+        det = Detector(h5_path.as_posix(),  output=None)
+        det.run(dataset=h5_loc, use_dask=True, save_activepixels=save_active_pixels)
+
+        return det.output_directory
+
 
 def is_ragged(data):
 

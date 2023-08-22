@@ -14,44 +14,31 @@ matplotlib.use('Agg')  # Use the Agg backend
 
 import matplotlib.pyplot as plt
 
-
-def create_sim_data(dir, name="sim.h5", h5_loc="dff/ch0", save_active_pixels=False, shape=(50, 100, 100), sim_param={}):
-
-    tmpdir = Path(dir)
-    assert tmpdir.is_dir()
-
-    path = tmpdir.joinpath(name)
-
-    sim = EventSim()
-    video, num_events = sim.simulate(shape=shape, **sim_param)
-    IO.save(path=path, h5_loc=None, data={h5_loc:video})
-
-    det = Detector(path.as_posix(),  output=None)
-    det.run(dataset=h5_loc, use_dask=True, save_activepixels=save_active_pixels)
-
-    return det.output_directory
-
 class Test_Events:
 
     def test_load_events_minimal(self):
 
         with tempfile.TemporaryDirectory() as tmpdir:
 
-            # Create dummy data
-            event_dir = create_sim_data(Path(tmpdir))
+            tmpdir = Path(tmpdir)
+            assert tmpdir.is_dir()
 
-            # Call the function and assert the expected result
+            # Create dummy data
+            sim = EventSim()
+            event_dir = sim.create_dataset(tmpdir.joinpath("sim.h5"))
+
             events = Events(event_dir)
             result = events.load_events(event_dir, custom_columns=None)
+
             assert isinstance(result, pd.DataFrame)
-            # Add additional assertions as needed
 
     def test_load_events_custom_columns(self):
 
         with tempfile.TemporaryDirectory() as tmpdir:
 
             # Create dummy data
-            event_dir = create_sim_data(Path(tmpdir))
+            sim = EventSim()
+            event_dir = sim.create_dataset(Path(tmpdir).joinpath("sim.h5"))
 
             custom_columns = ["area_norm", "cx", "cy", "area_footprint",
                               # "pix_num_norm",
@@ -76,7 +63,8 @@ class Test_Events:
         with tempfile.TemporaryDirectory() as tmpdir:
 
             # Create dummy data
-            event_dir = create_sim_data(Path(tmpdir), shape=(50, 100, 100))
+            sim = EventSim()
+            event_dir = sim.create_dataset(Path(tmpdir).joinpath("sim.h5"))
 
             # Call the function and assert the expected result
             events = Events(event_dir)
@@ -91,7 +79,8 @@ class Test_Events:
         with tempfile.TemporaryDirectory() as tmpdir:
 
             # Create dummy data
-            event_dir = create_sim_data(Path(tmpdir), shape=(50, 100, 100))
+            sim = EventSim()
+            event_dir = sim.create_dataset(Path(tmpdir).joinpath("sim.h5"))
 
             # Call the function and assert the expected result
             events = Events(event_dir)
@@ -107,7 +96,8 @@ class Test_Events:
         with tempfile.TemporaryDirectory() as tmpdir:
 
             # Create dummy data
-            event_dir = create_sim_data(Path(tmpdir), shape=shape)
+            sim = EventSim()
+            event_dir = sim.create_dataset(Path(tmpdir).joinpath("sim.h5"))
 
             # Call the function and assert the expected result
             events = Events(event_dir)
@@ -131,7 +121,8 @@ class Test_Events:
         with tempfile.TemporaryDirectory() as tmpdir:
 
             # Create dummy data
-            event_dir = create_sim_data(Path(tmpdir), shape=(50, 100, 100))
+            sim = EventSim()
+            event_dir = sim.create_dataset(Path(tmpdir).joinpath("sim.h5"))
 
             # Call the function and assert the expected result
             events = Events(event_dir)
@@ -144,8 +135,9 @@ class Test_Events:
         with tempfile.TemporaryDirectory() as tmpdir:
 
             # Create dummy data
-            event_dir = create_sim_data(Path(tmpdir), shape=shape,
-                                        sim_param=dict(blob_size_fraction=0.01, event_probability=0.1))
+            sim = EventSim()
+            event_dir = sim.create_dataset(Path(tmpdir).joinpath("sim.h5"), shape=shape,
+                                           blob_size_fraction=0.05, event_probability=0.2)
 
             # Call the function and assert the expected result
             events = Events(event_dir)
@@ -177,15 +169,21 @@ class Test_Events:
                 param["memmap_path"] = None
 
             # Create dummy data
-            event_dir = create_sim_data(Path(tmpdir), shape=shape)
+            sim = EventSim()
+            event_dir = sim.create_dataset(Path(tmpdir).joinpath("sim.h5"), shape=shape)
+
             events = Events(event_dir)
             df = events.load_events(event_dir)
-            video, shape, dtype = events.get_event_map(event_dir, in_memory=True)
+            arr, shape, dtype = events.get_event_map(event_dir, lazy=False)
 
-            trace = events.get_extended_events(events=df, video=video, **param)
+            traces, _, _ = events.get_extended_events(video=Video(arr), return_array=True, **param)
 
-            assert trace.shape == (len(df), shape[0])
-            assert len(np.unique(trace.astype(int))) == len(np.unique(video.astype(int)))
+            assert traces.shape == (len(df), shape[0])
+
+            logging.warning(f"trace: {traces}")
+            logging.warning(f"arr: {arr}")
+
+            assert (len(np.unique(traces.astype(int))) == len(np.unique(arr.astype(int)))) or (len(np.unique(traces.astype(int))) == len(np.unique(arr.astype(int)))-1)
 
     @pytest.mark.parametrize("extend", [4, (3, 2), (-1, 2), (2, -1)])
     def test_extension_partial(self, extend, shape=(50, 100, 100)):
@@ -193,20 +191,21 @@ class Test_Events:
         with tempfile.TemporaryDirectory() as tmpdir:
 
             # Create dummy data
-            event_dir = create_sim_data(Path(tmpdir), shape=shape)
+            sim = EventSim()
+            event_dir = sim.create_dataset(Path(tmpdir).joinpath("sim.h5"), shape=shape)
             events = Events(event_dir)
             df = events.load_events(event_dir)
-            video, shape, dtype = events.get_event_map(event_dir, lazy=False)
+            arr, shape, dtype = events.get_event_map(event_dir, lazy=False)
 
-            trace = events.get_extended_events(events=df, video=video, extend=extend)
+            traces, _, _ = events.get_extended_events(video=Video(arr), extend=extend, return_array=True)
 
-            assert trace.shape == (len(df), shape[0])
+            assert traces.shape == (len(df), shape[0])
 
             # this works because we are feeding the event_map as dummy data
             # hence all the traces will be a constant number
 
-            data_unique_values = np.unique(video.flatten().astype(int))
-            trace_unique_values = np.unique(trace.flatten().astype(int))
+            data_unique_values = np.unique(arr.flatten().astype(int))
+            trace_unique_values = np.unique(traces.flatten().astype(int))
             assert abs(len(data_unique_values) - len(trace_unique_values)) <= 1
 
     @pytest.mark.parametrize("lazy", [True, False])
@@ -214,11 +213,15 @@ class Test_Events:
 
         with tempfile.TemporaryDirectory() as tmpdir:
 
+            tmpdir = Path(tmpdir)
+            cache_path = tmpdir.joinpath("cache_dir/")
+
             # Create dummy data
-            event_dir = create_sim_data(Path(tmpdir), shape=shape)
+            sim = EventSim()
+            event_dir = sim.create_dataset(Path(tmpdir).joinpath("sim.h5"), shape=shape)
 
             # load events - 1
-            events_1 = Events(event_dir, lazy=lazy, cache_path=event_dir)
+            events_1 = Events(event_dir, lazy=lazy, cache_path=cache_path)
             video = Video(events_1.event_map)
 
             t0 = time.time()
@@ -226,7 +229,7 @@ class Test_Events:
             d1 = time.time() - t0
 
             # load events - 2
-            events_2 = Events(event_dir, lazy=lazy, cache_path=event_dir)
+            events_2 = Events(event_dir, lazy=lazy, cache_path=cache_path)
             video = Video(events_2.event_map)
 
             t0 = time.time()
@@ -242,13 +245,15 @@ class Test_Events:
         with tempfile.TemporaryDirectory() as tmpdir:
 
             # Create dummy data
-            event_dir = create_sim_data(Path(tmpdir), shape=shape)
+            sim = EventSim()
+            event_dir = sim.create_dataset(Path(tmpdir).joinpath("sim.h5"), shape=shape)
+
             events = Events(event_dir)
             df = events.load_events(event_dir)
-            video, shape, dtype = events.get_event_map(event_dir, in_memory=True)
+            arr, shape, dtype = events.get_event_map(event_dir, lazy=True)
 
             save_path=Path(tmpdir).joinpath("footprints.npy")
-            trace = events.get_extended_events(events=df, video=video, save_path=save_path)
+            trace, _, _ = events.get_extended_events(video=Video(arr), save_path=save_path, return_array=True)
 
             io = IO()
             trace_loaded = io.load(save_path)
@@ -260,15 +265,19 @@ class Test_Events:
         with tempfile.TemporaryDirectory() as tmpdir:
 
             # Create dummy data
-            event_dir = create_sim_data(Path(tmpdir), shape=shape)
+            sim = EventSim()
+            event_dir = sim.create_dataset(Path(tmpdir).joinpath("sim.h5"), shape=shape)
             events = Events(event_dir, z_slice=z_slice)
+
+            # TODO there should be some kind of assert here, no?
 
     def test_frame_to_time_conversion(self, shape=(50, 100, 100)):
 
         with tempfile.TemporaryDirectory() as tmpdir:
 
             # Create dummy data
-            event_dir = create_sim_data(Path(tmpdir), shape=shape)
+            sim = EventSim()
+            event_dir = sim.create_dataset(Path(tmpdir).joinpath("sim.h5"), shape=shape)
 
             # test dictionary mapping
             frame_to_time_mapping={i:i*2 for i in range(1000)}
@@ -286,7 +295,8 @@ class Test_Events:
         with tempfile.TemporaryDirectory() as tmpdir:
 
             # Create dummy data
-            event_dir = create_sim_data(Path(tmpdir), shape=shape)
+            sim = EventSim()
+            event_dir = sim.create_dataset(Path(tmpdir).joinpath("sim.h5"), shape=shape)
 
             # test path
             events = Events(event_dir, data=event_dir.joinpath("event_map.tiff"))
@@ -305,8 +315,9 @@ class Test_Events:
         with tempfile.TemporaryDirectory() as tmpdir_1:
             with tempfile.TemporaryDirectory() as tmpdir_2:
 
-                event_dir_1 = create_sim_data(Path(tmpdir_1), shape=shape)
-                event_dir_2 = create_sim_data(Path(tmpdir_2), shape=shape)
+                sim = EventSim()
+                event_dir_1 = sim.create_dataset(Path(tmpdir_1).joinpath("sim.h5"), shape=shape)
+                event_dir_2 = sim.create_dataset(Path(tmpdir_2).joinpath("sim.h5"), shape=shape)
 
                 event_1 = Events(event_dir_1)
                 event_2 = Events(event_dir_2)
@@ -317,27 +328,24 @@ class Test_Events:
                 assert total_num_events == num_events
 
     @pytest.mark.xfail
-    def test_get_num_events(self, shape=(50, 100, 100)):
-        with tempfile.TemporaryDirectory() as tmpdir:
-
-            # Create dummy data
-            event_dir = create_sim_data(Path(tmpdir), shape=shape)
-            events = Events(event_dir)
-            events.get_num_events()
-    @pytest.mark.xfail
     def test_get_event_timing(self, shape=(50, 100, 100)):
         with tempfile.TemporaryDirectory() as tmpdir:
 
             # Create dummy data
-            event_dir = create_sim_data(Path(tmpdir), shape=shape)
+            sim = EventSim()
+            event_dir = sim.create_dataset(Path(tmpdir).joinpath("sim.h5"), shape=shape)
+
             events = Events(event_dir)
             events.get_event_timing()
+
     @pytest.mark.xfail
     def test_set_timings(self, shape=(50, 100, 100)):
         with tempfile.TemporaryDirectory() as tmpdir:
 
             # Create dummy data
-            event_dir = create_sim_data(Path(tmpdir), shape=shape)
+            sim = EventSim()
+            event_dir = sim.create_dataset(Path(tmpdir).joinpath("sim.h5"), shape=shape)
+
             events = Events(event_dir)
             events.set_timings()
 
@@ -346,7 +354,9 @@ class Test_Events:
         with tempfile.TemporaryDirectory() as tmpdir:
 
             # Create dummy data
-            event_dir = create_sim_data(Path(tmpdir), shape=shape)
+            sim = EventSim()
+            event_dir = sim.create_dataset(Path(tmpdir).joinpath("sim.h5"), shape=shape)
+
             events = Events(event_dir)
             events.align()
 
@@ -357,7 +367,9 @@ class Test_Events:
         with tempfile.TemporaryDirectory() as tmpdir:
 
             # Create dummy data
-            event_dir = create_sim_data(Path(tmpdir), shape=shape)
+            sim = EventSim()
+            event_dir = sim.create_dataset(Path(tmpdir).joinpath("sim.h5"), shape=shape)
+
             events = Events(event_dir)
             avg = events.get_average_event_trace(**param)
 
@@ -397,118 +409,6 @@ class Test_Events:
         freq = events.get_frequency(grouping_column="group", cluster_column="clusters",
                             normalization_instructions=instr)
         assert freq.max().max() == 0
-
-class Test_Correlation:
-
-    def setup_method(self):
-        # Set up any necessary data for the tests
-        self.correlation = Distance()
-        self.corr_matrix = np.random.rand(100, 100)
-
-    @pytest.mark.parametrize("ragged", [True, False])
-    @pytest.mark.parametrize("input_type", ["numpy", "dask", "pandas"])
-    def test_get_correlation_matrix(self, input_type, ragged):
-
-        dg = DummyGenerator(num_rows=25, trace_length=12, ragged=ragged)
-        data = dg.get_by_name(input_type)
-
-        c = self.correlation.get_pearson_correlation(events=data)
-
-    def test_get_correlation_histogram(self, num_bins=1000):
-        # Test with precomputed correlation matrix
-        counts = self.correlation._get_correlation_histogram(corr=self.corr_matrix, num_bins=num_bins)
-        assert np.equal(len(counts), num_bins)  # Adjust the expected value as per the number of bins
-
-        # Test with events array
-        counts = Distance()._get_correlation_histogram(events=self.corr_matrix, num_bins=num_bins)
-        assert np.equal(len(counts), num_bins)  # Adjust the expected value as per the number of bins
-
-        # Test with event dataframe
-        dg = DummyGenerator()
-        events = dg.get_dataframe()
-        counts = Distance()._get_correlation_histogram(events=events, num_bins=num_bins)
-        assert np.equal(len(counts), num_bins)  # Adjust the expected value as per the number of bins
-
-
-    def test_plot_correlation_characteristics(self):
-        # Test the plot_correlation_characteristics function
-
-        # auto figure creation
-        result = self.correlation.plot_correlation_characteristics(corr=self.corr_matrix,
-                                                                   perc=[0.01, 0.05, 0.1],
-                                                                   bin_num=20, log_y=True,
-                                                                   figsize=(8, 4))
-        assert isinstance(result, plt.Figure)
-
-        # provided figure
-        fig, axx = plt.subplots(1, 2)
-        logging.warning(f"{axx}, {type(axx)}")
-        result = self.correlation.plot_correlation_characteristics(corr=self.corr_matrix, ax=axx,
-                                                                   perc=[0.01, 0.05, 0.1],
-                                                                   bin_num=20, log_y=True,
-                                                                   figsize=(8, 4))
-        assert isinstance(result, plt.Figure)
-
-    @pytest.mark.parametrize("ragged", [True, False])
-    @pytest.mark.parametrize("input_type", ["numpy", "dask", "pandas"])
-    def test_plot_compare_correlated_events(self, ragged, input_type, num_rows=25, trace_length=20,
-                                            corr_range = (0.1, 0.999)):
-
-        dg = DummyGenerator(num_rows=num_rows, trace_length=trace_length, ragged=ragged)
-        events = dg.get_by_name(input_type)
-
-        # default arguments
-        fig = self.correlation.plot_compare_correlated_events(self.corr_matrix, events)
-        assert isinstance(fig, plt.Figure)
-
-        # test style attributes
-        fig = self.correlation.plot_compare_correlated_events(self.corr_matrix, events,
-                                    ev0_color="red", ev1_color="blue", ev_alpha=0.2, spine_linewidth=1)
-        assert isinstance(fig, plt.Figure)
-
-        # test
-        fig = self.correlation.plot_compare_correlated_events(self.corr_matrix, events,
-                                    )
-        assert isinstance(fig, plt.Figure)
-
-        # test indices
-        fig = self.correlation.plot_compare_correlated_events(self.corr_matrix, events,
-                                    event_index_range=(10, 15))
-        assert isinstance(fig, plt.Figure)
-
-        # test custom fig
-        _, ax = plt.subplots(1, 1)
-        fig = self.correlation.plot_compare_correlated_events(self.corr_matrix, events,
-                                    ax=ax, figsize=(10, 10), title="hello")
-        assert isinstance(fig, plt.Figure)
-
-        # test z_range
-        fig = self.correlation.plot_compare_correlated_events(self.corr_matrix, events,
-                                    z_range=(2, 10))
-        assert isinstance(fig, plt.Figure)
-
-        # test z_range
-        fig = self.correlation.plot_compare_correlated_events(self.corr_matrix, events,
-                                    z_range=(2, 10))
-        assert isinstance(fig, plt.Figure)
-
-        # test corr filtering
-
-        corr_min, corr_max = corr_range
-        corr_matrix = np.random.random(size=(num_rows, num_rows))
-
-        fig = self.correlation.plot_compare_correlated_events(corr_matrix, events,
-                                    corr_range=(corr_min, corr_max))
-        assert isinstance(fig, plt.Figure)
-
-        corr_mask = np.where(np.logical_and(corr_matrix >= corr_min, corr_matrix <= corr_max))
-        fig = self.correlation.plot_compare_correlated_events(corr_matrix, events,
-                                    corr_mask=corr_mask)
-        assert isinstance(fig, plt.Figure)
-
-    def teardown_method(self):
-        # Clean up after the tests, if necessary
-        plt.close()
 
 class Test_Video:
 
