@@ -1,6 +1,7 @@
 import logging
 import multiprocessing
 import pickle
+from functools import lru_cache
 from pathlib import Path
 
 import keras.models
@@ -17,7 +18,44 @@ from matplotlib import pyplot as plt
 import seaborn as sns
 from scipy.cluster import hierarchy
 from tqdm import tqdm
+import tsfresh
 
+from astroCAST.analysis import Events
+from astroCAST.helper import CachedClass, wrapper_local_cache
+
+
+class FeatureExtraction(CachedClass):
+
+    def __init__(self, events:Events, cache_path=None, logging_level=logging.INFO):
+        super().__init__(cache_path=cache_path, logging_level=logging_level)
+
+        self.events = events
+
+    @wrapper_local_cache
+    def get_features(self, n_jobs=-1, show_progress=True, additional_columns=None):
+
+        # calculate features for long traces
+        X = self.events.to_tsfresh(show_progress=show_progress)
+
+        logging.info("extracting features ...")
+        features = tsfresh.extract_features(X, column_id="id", column_sort="time", disable_progressbar=not show_progress,
+                                            n_jobs=multiprocessing.cpu_count() if n_jobs == -1 else n_jobs)
+
+        data = self.events.events
+        features.index = data.index
+
+        if additional_columns is not None:
+
+            if isinstance(additional_columns, str):
+                additional_columns = list(additional_columns)
+
+            for col in additional_columns:
+                features[col] = data[col]
+
+        return features
+
+    def __hash__(self):
+        return hash(self.events)
 
 class UMAP:
     def __init__(self, n_neighbors=30, min_dist=0, n_components=2, metric="euclidean",):

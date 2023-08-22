@@ -1,3 +1,6 @@
+import tempfile
+import time
+
 import pytest
 
 from astroCAST.reduction import *
@@ -8,45 +11,48 @@ DG_ragged = DummyGenerator(ragged=True)
 
 class Test_FeatureExtraction:
 
-    @pytest.mark.parametrize(("typ", "feature_only"), [("use_dataframe", False), ("use_list", True), ("use_array", True)])
     @pytest.mark.parametrize("ragged", [True, False])
-    def test_input_type(self, typ, feature_only, ragged):
+    def test_extraction(self, ragged):
 
-        DG = DG_ragged if ragged else DG_equal
+        DG = DummyGenerator(ragged=ragged)
+        events = DG.get_events()
 
-        if typ == "use_dataframe":
-            data = DG.get_dataframe()
+        FE = FeatureExtraction(events)
+        features = FE.get_features()
 
-        elif typ == "use_list":
-            data = DG.get_list()
+        assert len(events) == len(features)
 
-        elif typ == "use_array":
-            data = DG.get_array()
+    def test_add_columns(self):
 
-        else:
-            raise TypeError
+        DG = DummyGenerator(ragged=False)
+        events = DG.get_events()
 
-        FE = FeatureExtraction()
-        FE.get_features(data=data, feature_only=feature_only)
+        FE = FeatureExtraction(events)
+        features = FE.get_features(additional_columns=["dz"])
 
-    @pytest.mark.parametrize("normalize", [None, "min_max"])
-    def test_normalization(self, normalize):
-
-        data = DG_ragged.get_dataframe()
-
-        FE = FeatureExtraction()
-        FE.get_features(data=data, normalize=normalize)
-
-    @pytest.mark.parametrize("padding", [None, "edge"])
-    def test_padding(self, padding):
-
-        data = DG_ragged.get_dataframe()
-
-        FE = FeatureExtraction()
-        FE.get_features(data=data, normalize=padding)
+        assert len(events) == len(features)
 
     def test_local_caching(self):
-        raise NotImplementedError
+
+        DG = DummyGenerator(ragged=False)
+        events = DG.get_events()
+
+        with tempfile.TemporaryDirectory() as dir:
+            tmp_path = Path(dir)
+            assert tmp_path.is_dir()
+
+            FE = FeatureExtraction(events, cache_path=tmp_path)
+            t0 = time.time()
+            features_1 = FE.get_features()
+            d1 = time.time() - t0
+
+            FE = FeatureExtraction(events, cache_path=tmp_path)
+            t0 = time.time()
+            features_2 = FE.get_features()
+            d2 = time.time() - t0
+
+            assert d2 < d1, f"caching is taking too long: {d2} > {d1}"
+            assert features_1.equals(features_2)
 
 class Test_CNN:
 

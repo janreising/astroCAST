@@ -578,6 +578,29 @@ class Events(CachedClass):
 
         return arr
 
+    @lru_cache
+    def to_tsfresh(self, show_progress=False):
+
+        iterator = self.events.trace.items()
+        iterator = tqdm(iterator, total=len(self.events)) if show_progress else iterator
+
+        logging.info("creating tsfresh dataset ...")
+        ids, times, dim_0s = [], [], []
+        for id_, trace in iterator:
+
+            if type(trace) != np.ndarray:
+                trace = np.array(trace)
+
+            # take care of NaN
+            trace = np.nan_to_num(trace)
+
+            ids = ids + [id_]*len(trace)
+            times = times + list(range(len(trace)))
+            dim_0s = dim_0s + list(trace)
+
+        X = pd.DataFrame({"id":ids, "time":times, "dim_0":dim_0s})
+        return X
+
     @wrapper_local_cache
     def get_average_event_trace(self, events: pd.DataFrame = None, empty_as_nan: bool = True,
                                 agg_func: callable = np.nanmean, index: list = None,
