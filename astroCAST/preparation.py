@@ -839,7 +839,7 @@ class MotionCorrection:
         # mmap location
         self.mmap_path = None
 
-    def run(self, input_, h5_loc=None, parallel=True,
+    def run(self, input_, h5_loc=None,
             max_shifts=(50, 50), niter_rig=1, splits_rig=14, num_splits_to_process_rig=None,
             strides=(48, 48), overlaps=(24, 24), pw_rigid=False, splits_els=14,
             num_splits_to_process_els=None, upsample_factor_grid=4, max_deviation_rigid=3,
@@ -1009,7 +1009,6 @@ class MotionCorrection:
         else:
             raise ValueError(f"please provide input_ as one of: np.ndarray, str, Path")
 
-
     def clean_up(self):
         """
         Clean up temporary files and resources associated with motion correction.
@@ -1046,7 +1045,6 @@ class MotionCorrection:
             if temp_h5_path.is_file():
                 os.remove(temp_h5_path.as_posix())
 
-
     @staticmethod
     @deprecated("use caiman's built-in file splitting function instead")
     def get_frames_per_file(input_, frames_per_file, loc=None):
@@ -1073,7 +1071,7 @@ class MotionCorrection:
 
         return frames_per_file
 
-    def save(self, output=None, loc=None, h5_loc="mc", chunks=None, compression=None, remove_mmap=False):
+    def save(self, output=None, h5_loc="mc", chunks=None, compression=None, remove_mmap=False):
 
         """
         Retrieve the motion-corrected data and optionally save it to a file.
@@ -1120,11 +1118,11 @@ class MotionCorrection:
         logging.debug(f"mmap name elements: {debug_names}")
 
         Z, order, Y, X = int(name[-2]), name[-4], int(name[-8]), int(name[-10])
+        logging.debug(f"Z: {Z}, order: {order}, X:{X}, Y:{Y}")
 
         # TODO order and shape questionable
         # Read the motion-corrected data from the mmap file as a memory-mapped array
         data = np.memmap(path.as_posix(), shape=(Z, Y, X), dtype=float, order="C")
-        # data[start:stop, :, :] = np.swapaxes(mm, 1, 2) # ????
 
         # If output is None, return the motion-corrected data as a NumPy array
         if output is None:
@@ -1140,11 +1138,23 @@ class MotionCorrection:
             data = data.swapaxes(1, 2)
 
             # Check if the output file is an HDF5 file and loc is provided
-            if output.suffix in [".h5", ".hdf5"] and loc is None:
-                raise ValueError("when saving to .h5 please provide a location to save to instead of 'loc=None'")
+            if output.suffix in [".h5", ".hdf5"] and h5_loc is None:
+                raise ValueError("when saving to .h5 please provide a location to save to instead of 'h5_loc=None'")
+
+            # split location into channel and folder information
+            split_h5 = h5_loc.split("/")
+            if len(split_h5) < 2:
+                loc, channel = "mc", h5_loc
+            elif len(split_h5) == 2:
+                loc, channel = split_h5
+            elif len(split_h5) > 2:
+                loc = "/".join(split_h5[:-1])
+                channel = split_h5[-1]
+            else:
+                raise ValueError(f"please provide h5_loc as 'channel_name' or 'folder/channel_name' instead of {h5_loc}")
 
             # Save the motion-corrected data to the output file using the I/O module
-            self.io.save(output, data={loc:data}, h5_loc=h5_loc, chunks=chunks, compression=compression)
+            self.io.save(output, data={channel:data}, h5_loc=loc, chunks=chunks, compression=compression)
 
         else:
             raise ValueError(f"please provide output as None, str or pathlib.Path instead of {path}")
