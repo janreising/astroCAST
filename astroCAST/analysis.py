@@ -26,7 +26,7 @@ from astroCAST.preparation import IO
 
 class Events(CachedClass):
 
-    def __init__(self, event_dir, in_memory=False, data=None, h5_loc=None, group=None, subject_id=None,
+    def __init__(self, event_dir, lazy=True, data=None, h5_loc=None, group=None, subject_id=None,
                  z_slice=None, index_prefix=None, custom_columns=("area_norm", "cx", "cy"), frame_to_time_mapping=None,
                  frame_to_time_function=None, cache_path=None, seed=1):
 
@@ -50,7 +50,7 @@ class Events(CachedClass):
                     raise FileNotFoundError(f"cannot find provided event directory: {event_dir}")
 
                 # load event map
-                event_map, event_map_shape, event_map_dtype = self.get_event_map(event_dir, in_memory=in_memory) # todo slicing
+                event_map, event_map_shape, event_map_dtype = self.get_event_map(event_dir, lazy=lazy) # todo slicing
                 self.event_map = event_map
                 self.num_frames, self.X, self.Y = event_map_shape
 
@@ -120,7 +120,7 @@ class Events(CachedClass):
                                h5_loc=h5_loc if not isinstance(h5_loc, list) else h5_loc[i],
                                z_slice=z_slice if not isinstance(z_slice, list) else z_slice[i],
                                group=group if not isinstance(group, list) else group[i],
-                               in_memory=in_memory,
+                               lazy=lazy,
                                index_prefix=f"{i}x", subject_id=i,
                                custom_columns=custom_columns,
                                frame_to_time_mapping=frame_to_time_mapping if not isinstance(frame_to_time_mapping, list) else frame_to_time_mapping[i],
@@ -199,7 +199,7 @@ class Events(CachedClass):
         return events
 
     @staticmethod
-    def get_event_map(event_dir:Path, in_memory=False):
+    def get_event_map(event_dir:Path, lazy=True):
 
         """
         Retrieve the event map from the specified directory.
@@ -235,7 +235,7 @@ class Events(CachedClass):
 
         # Load the event map from the specified path
         io = IO()
-        event_map = io.load(path, lazy=not in_memory)
+        event_map = io.load(path, lazy=lazy)
 
         return event_map, shape, dtype
 
@@ -435,16 +435,18 @@ class Events(CachedClass):
         """
 
         events = self.events if in_place else self.events.copy()
+        n_events = len(events)
 
-        if video is None and self.data is None:
+        # load data
+        if video is not None:
+            video = video.get_data()
+        elif self.data is not None:
+            video = self.data.get_data()
+        else:
             raise ValueError("to extend the event traces you either have to provide the 'video' argument "
                              "when calling this function or the 'data' argument during Event creation.")
-        elif video is None:
-            video = self.data
 
-        video = video.get_data()
-
-        n_events = len(events)
+        # get video dimensions
         n_frames, X, Y = video.shape
 
         # create container to save extended events in
@@ -460,7 +462,7 @@ class Events(CachedClass):
             arr_size = arr_ext.itemsize*n_events*n_frames
             ram_size = psutil.virtual_memory().total
             if arr_size > 0.9 * ram_size:
-                logging.warning(f"array size ({n_events}, {n_frames}) is larger than 90% RAM size ({arr_size*1e-9:.2f}GB, {arr_size/ram_size*100}%). Consider using smaller dtype or 'lazy=True'")
+                logging.warning(f"array size ({n_events}, {n_frames}) is larger than 90% RAM size ({arr_size*1e-9:.2f}GB, {arr_size/ram_size*100}%). Consider using smaller dtype or providing a 'mmemap_path'")
 
         else:
             extended = list()
@@ -519,12 +521,12 @@ class Events(CachedClass):
 
         if return_array:
 
-            if save_path is not None and memmap_path is None:
+            if memmap_path is not None:
+                logging.info(f"'save_path' ignored. Extended array saved as memmap to :{memmap_path}")
+
+            elif save_path is not None:
                 io = IO()
                 io.save(path=save_path, data=arr_ext, **save_param)
-
-            elif memmap_path is not None:
-                logging.info(f"extended array saved as memmap to :{memmap_path}")
 
             return arr_ext, z0_container, z1_container
 
@@ -935,26 +937,32 @@ class Events(CachedClass):
 
 class Video:
 
-    def __init__(self, data, z_slice=None, h5_loc=None, lazy=False, name=None, hash_value=None):
+    def __init__(self, data, z_slice=None, h5_loc=None, lazy=False, name=None):
 
-        io = IO()
-        self.data = io.load(data, h5_loc=h5_loc, lazy=lazy, z_slice=z_slice)
+        if isinstance(data, (Path, str)):
+
+            io = IO()
+            self.data = io.load(data, h5_loc=h5_loc, lazy=lazy, z_slice=z_slice)
+
+        elif isinstance(data, (np.ndarray, da.Array)):
+            self.data = data
 
         self.z_slice = z_slice
         self.Z, self.X, self.Y = self.data.shape
         self.name = name
-        self.hash_value = hash_value
 
     def __hash__(self):
 
-        if self.hash_value is not None:
-            return self.hash_value
-
         if isinstance(self.data, da.Array):
-            logging.warning(f"calculating hash of Video instance. Converting lazy array to np.ndarray!")
-            self.data = self.data.compute()
+            logging.warning(f"da.Array.name: {self.data.name}")
+            return hash(self.data.name)
 
-        return xxhash.xxh128_intdigest(self.data.data)
+        elif isinstance(self.data, np.ndarray):
+            return xxhash.xxh128_intdigest(self.data.data)
+
+        else:
+            raise ValueError(f"please provide data as either np.ndarray or dask.array")
+
     def get_data(self, in_memory=False):
 
         if in_memory and isinstance(self.data, da.Array):
@@ -964,7 +972,6 @@ class Video:
             return self.data
 
     @lru_cache(maxsize=None)
-    # @wrapper_local_cache
     def get_image_project(self, agg_func=np.mean, window=None, window_agg=np.sum, axis=0,
                           show_progress=True):
 

@@ -97,6 +97,11 @@ def wrapper_local_cache(f):
             if key in ["show_progress", "verbose", "verbosity", "cache_path"]:
                 continue
 
+            if key in ["in_place", "inplace"]:
+                logging.warning(f"cached value was loaded, which is incompatible with inplace option. "
+                                f"Please overwrite value manually!")
+                continue
+
             # save key name
             hash_string += f"{hash_arg(key)}-"
 
@@ -186,8 +191,6 @@ def wrapper_local_cache(f):
                 cache_path = None
 
         if cache_path is not None:
-
-            logging.warning("here")
 
             hash_string = get_string_from_args(f, args, kwargs)
             cache_path = cache_path.joinpath(hash_string)
