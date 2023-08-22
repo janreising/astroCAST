@@ -28,7 +28,7 @@ class Test_FeatureExtraction:
         events = DG.get_events()
 
         FE = FeatureExtraction(events)
-        features = FE.get_features(additional_columns=["dz", "dy"])
+        features = FE.get_features(additional_columns=["dz"])
 
         assert len(events) == len(features)
 
@@ -43,12 +43,12 @@ class Test_FeatureExtraction:
 
             FE = FeatureExtraction(events, cache_path=tmp_path)
             t0 = time.time()
-            features_1 = FE.get_features(additional_columns=["dz", "dy"])
+            features_1 = FE.get_features()
             d1 = time.time() - t0
 
             FE = FeatureExtraction(events, cache_path=tmp_path)
             t0 = time.time()
-            features_2 = FE.get_features(additional_columns=["dz", "dy"])
+            features_2 = FE.get_features()
             d2 = time.time() - t0
 
             assert d2 < d1, f"caching is taking too long: {d2} > {d1}"

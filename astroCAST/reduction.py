@@ -31,42 +31,17 @@ class FeatureExtraction(CachedClass):
 
         self.events = events
 
-    @lru_cache
-    @staticmethod
-    def to_tsfresh(data, show_progress=False):
-
-        iterator = data.items()
-
-        iterator = tqdm(iterator, total=len(data)) if show_progress else iterator
-
-        logging.info("creating tsfresh dataset ...")
-        ids, times, dim_0s = [], [], []
-        for id_, trace in iterator:
-
-            if type(trace) != np.ndarray:
-                trace = np.array(trace)
-
-            # take care of NaN
-            trace = np.nan_to_num(trace)
-
-            ids = ids + [id_]*len(trace)
-            times = times + list(range(len(trace)))
-            dim_0s = dim_0s + list(trace)
-
-        X = pd.DataFrame({"id":ids, "time":times, "dim_0":dim_0s})
-        return X
-
     @wrapper_local_cache
     def get_features(self, n_jobs=-1, show_progress=True, additional_columns=None):
 
         # calculate features for long traces
-        data = self.events.events.trace
-        X = self.to_tsfresh(data, show_progress=show_progress)
+        X = self.events.to_tsfresh(show_progress=show_progress)
 
         logging.info("extracting features ...")
         features = tsfresh.extract_features(X, column_id="id", column_sort="time", disable_progressbar=not show_progress,
                                             n_jobs=multiprocessing.cpu_count() if n_jobs == -1 else n_jobs)
 
+        data = self.events.events
         features.index = data.index
 
         if additional_columns is not None:
@@ -78,6 +53,9 @@ class FeatureExtraction(CachedClass):
                 features[col] = data[col]
 
         return features
+
+    def __hash__(self):
+        return hash(self.events)
 
 class UMAP:
     def __init__(self, n_neighbors=30, min_dist=0, n_components=2, metric="euclidean",):

@@ -16,6 +16,9 @@ import tifffile
 import tiledb
 import xxhash
 
+
+
+
 def notimplemented(f, msg=""):
 
     def raise_not_implemented(msg):
@@ -40,6 +43,7 @@ def wrapper_local_cache(f):
     def hash_arg(arg):
 
         from astroCAST.analysis import Events, Video
+        from astroCAST.reduction import FeatureExtraction
 
         if isinstance(arg, np.ndarray):
             return hash_from_ndarray(arg)
@@ -51,7 +55,7 @@ def wrapper_local_cache(f):
         elif isinstance(arg, dict):
             return get_hash_from_dict(arg)
 
-        elif isinstance(arg, (Events, Video)):
+        elif isinstance(arg, (Events, Video, FeatureExtraction)):
             return hash(arg)
 
         elif isinstance(arg, (bool, int, tuple)):
