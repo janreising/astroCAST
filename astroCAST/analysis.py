@@ -969,7 +969,8 @@ class Video:
             self.data = io.load(data, h5_loc=h5_loc, lazy=lazy, z_slice=z_slice)
 
         elif isinstance(data, (np.ndarray, da.Array)):
-            self.data = data
+            z0, z1 = z_slice
+            self.data = data[z0:z1, :, :]
 
         self.z_slice = z_slice
         self.Z, self.X, self.Y = self.data.shape

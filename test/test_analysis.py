@@ -556,6 +556,7 @@ class Test_Video:
             d = vid.get_data(in_memory=True)
 
             # test same result
+            assert original_data.shape == d.shape, f"shape unequal: orig>{original_data.shape} vs load>{d.shape}"
             assert np.allclose(original_data, d)
 
             # test project
@@ -571,6 +572,7 @@ class Test_Video:
                             proj_org[:, x, y] = pd.Series(original_data[:, x, y]).rolling(window=window).apply(proj_func).values
 
                 proj = vid.get_image_project(agg_func=proj_func, window=window)
+                assert proj_org.shape == proj.shape, f"shape unequal: orig>{proj_org.shape} vs load>{proj.shape}"
                 assert np.allclose(proj_org, proj)
 
     @pytest.mark.parametrize("lazy", [True, False])
