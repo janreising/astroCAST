@@ -98,9 +98,6 @@ class Test_LocalCache:
         assert n1 == n2, f"cached result is incorrect: {n1} != {n2}"
         assert d2 < d1, f"cached result took too long: {d1} <= {d2}"
 
-def test_get_data_dimensions():
-    raise NotImplementedError
-
 @pytest.mark.parametrize("typ", ["pandas", "list", "numpy", "dask", "events"])
 @pytest.mark.parametrize("ragged", ["equal", "ragged"])
 @pytest.mark.parametrize("num_rows", [1, 10])
@@ -306,9 +303,10 @@ class Test_normalization:
 
     @staticmethod
     @pytest.mark.parametrize("fixed_value", [None, 999])
-    def test_impute_nan(num_rows, ragged, fixed_value):
+    @pytest.mark.parametrize("nan_value", [np.nan])
+    def test_impute_nan(num_rows, nan_value, ragged, fixed_value):
 
-        DG = DummyGenerator(num_rows=num_rows, trace_length=10, ragged=ragged)
+        DG = DummyGenerator(num_rows=num_rows, trace_length=25, ragged=ragged)
         data = DG.get_array()
 
         for r in range(len(data)):
@@ -318,7 +316,7 @@ class Test_normalization:
 
             row = data[r]
             rand_idx = np.random.randint(0, max(len(row), 1))
-            row[rand_idx] = np.nan
+            row[rand_idx] = nan_value
             data[r] = row
 
         norm = Normalization(data)
@@ -328,7 +326,10 @@ class Test_normalization:
             0: ["impute_nan", dict(fixed_value=fixed_value)]
         })
 
-        assert np.sum(np.isnan(imputed if isinstance(imputed, np.ndarray) else ak.ravel(imputed))) == 0
+        if isinstance(imputed, ak.Array):
+            imputed = ak.ravel(imputed)
+
+        assert np.sum(np.isnan(imputed)) == 0
 
     def test_column_wise(self, num_rows, ragged):
 
