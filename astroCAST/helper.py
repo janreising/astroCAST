@@ -398,6 +398,7 @@ class DummyGenerator:
                     raise ValueError("unable to infer chunks for da. Please provide 'chunks' flag.")
 
                 chunks = (1, -1) if chunks is None else chunks
+
                 return da.from_array(data, chunks=chunks)
 
         else:
