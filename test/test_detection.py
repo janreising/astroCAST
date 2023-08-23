@@ -9,30 +9,32 @@ from astroCAST.preparation import IO
 
 class Test_Detector:
 
-    # TODO test custom threshold
-    # TODO test custom output folder
-    # TODO test dummy data
+    @pytest.mark.parametrize("input_", ["testdata/sample_0.h5", "testdata/sample_0.tiff"])
     @pytest.mark.parametrize("save_active_pixels", [True, False])
-    def test_real_data(self, save_active_pixels, threshold=None, output=None):
+    def test_real_data(self, input_, save_active_pixels):
 
-        det = Detector("testdata/sample_0.h5",  output = output)
-        det.run(dataset = "data/ch0", use_dask = True, save_activepixels = save_active_pixels)
+        with tempfile.TemporaryDirectory() as dir:
+            tmpdir = Path(dir)
+            assert tmpdir.is_dir()
 
-        dir_ = det.output_directory
+            det = Detector(input_,  output=tmpdir)
+            det.run(dataset = "data/ch0", lazy=False, save_activepixels = save_active_pixels)
 
-        assert dir_.is_dir(), "Output folder does not exist"
-        assert bool(det.meta), "metadata dictionary is empty"
-        assert det.data.size != 0, "data object is empty"
-        assert det.data.shape is not None, "data has no dimensions"
+            dir_ = det.output_directory
 
-        expected_files = ["event_map.tdb", "event_map.tiff", "active_pixels.tiff", "time_map.npy", "time_map.npy", "events.npy", "meta.json", ""]
-        for file_name in expected_files:
-            is_file = dir_.joinpath(file_name)
+            assert dir_.is_dir(), "Output folder does not exist"
+            assert bool(det.meta), "metadata dictionary is empty"
+            assert det.data.size != 0, "data object is empty"
+            assert det.data.shape is not None, "data has no dimensions"
 
-            if file_name == "active_pixels.tiff":
-                assert is_file == save_active_pixels, "can't/can find active_pixels.tiff but should/shouldn't"
-            else:
-                assert is_file, f"{file_name} file does not exist in output directory"
+            expected_files = ["event_map.tdb", "event_map.tiff", "active_pixels.tiff", "time_map.npy", "time_map.npy", "events.npy", "meta.json", ""]
+            for file_name in expected_files:
+                is_file = dir_.joinpath(file_name)
+
+                if file_name == "active_pixels.tiff":
+                    assert is_file == save_active_pixels, "can't/can find active_pixels.tiff but should/shouldn't"
+                else:
+                    assert is_file, f"{file_name} file does not exist in output directory"
 
     def test_sim_data(self):
 
@@ -46,10 +48,10 @@ class Test_Detector:
 
             sim = EventSim()
             video, num_events = sim.simulate(shape=(50, 100, 100))
-            IO.save(path=path, h5_loc=None, data={h5_loc:video})
+            IO.save(path=path, data={h5_loc:video})
 
             det = Detector(path.as_posix(),  output=None)
-            events = det.run(dataset=h5_loc, use_dask=True, save_activepixels=save_active_pixels)
+            events = det.run(dataset=h5_loc, lazy=True, save_activepixels=save_active_pixels)
 
             dir_ = det.output_directory
 

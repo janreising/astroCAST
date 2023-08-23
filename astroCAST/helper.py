@@ -640,7 +640,7 @@ class EventSim:
         IO.save(path=h5_path, data=data, h5_loc=h5_loc)
 
         det = Detector(h5_path.as_posix(),  output=None)
-        det.run(dataset=h5_loc, use_dask=True, save_activepixels=save_active_pixels)
+        det.run(dataset=h5_loc, lazy=True, save_activepixels=save_active_pixels)
 
         return det.output_directory
 

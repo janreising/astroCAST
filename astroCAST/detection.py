@@ -58,7 +58,7 @@ class Detector:
 
     def run(self, dataset: Optional[str] = None,
             threshold: Optional[float] = None, min_size: int = 20,
-            use_dask: bool = False, adjust_for_noise: bool = False,
+            lazy: bool = False, adjust_for_noise: bool = False,
             subset: Optional[str] = None, split_events: bool = True,
             binary_struct_iterations: int = 1,
             binary_struct_connectivity: int = 2,  # TODO better way to do this
@@ -72,7 +72,7 @@ class Detector:
                 If None, automatic thresholding is performed.
             min_size (int): Minimum size of an event region. 
                 Events with size < min_size will be excluded.
-            use_dask (bool): Whether to use Dask for parallel computation.
+            lazy (bool): Whether to use Dask for parallel computation.
             adjust_for_noise (bool): Whether to adjust event detection for background noise.
             subset (Optional[str]): Subset of the dataset to process.
             split_events (bool): Whether to split detected events into smaller events 
@@ -111,27 +111,20 @@ class Detector:
         pbar = ProgressBar(minimum=10)
         pbar.register()
 
-        # TODO save this information somewhere
-        # resources = ResourceProfiler()
-        # resources.register()
         # load data
         io = IO()
-        data = io.load(path=self.input_path, h5_loc=dataset, z_slice=subset, lazy=use_dask)  # todo: add chunks flag
+        data = io.load(path=self.input_path, h5_loc=dataset, z_slice=subset, lazy=lazy)  # todo: add chunks flag
         self.Z, self.X, self.Y = data.shape
         self.data = data
-        logging.info(f"data: {data}") if use_dask else logging.info(f"data: {data.shape}")
-
-        # self.vprint(data if use_dask else data.shape, 2)
+        logging.info(f"data: {data}") if lazy else logging.info(f"data: {data.shape}")
 
         # calculate event map
         event_map_path = self.output_directory.joinpath("event_map.tdb")
         if not os.path.isdir(event_map_path):
             logging.info("Estimating noise")
-            # self.vprint("Estimating noise", 2)
             # TODO maybe should be adjusted since it might already be calculated
             noise = self.estimate_background(data) if adjust_for_noise else 1
 
-            # self.vprint("Thresholding events", 2)
             logging.info("Thresholding events")
             event_map = self.get_events(data, roi_threshold=threshold, var_estimate=noise,
                                         min_roi_size=min_size,
@@ -139,47 +132,38 @@ class Detector:
                                         binary_struct_connectivity=binary_struct_connectivity,
                                         save_activepixels=save_activepixels)
 
-            # self.vprint(f"Saving event map to: {event_map_path}", 2)
             logging.info(f"Saving event map to: {event_map_path}")
             event_map.rechunk((100, 100, 100)).to_tiledb(event_map_path.as_posix())
 
             tiff_path = event_map_path.with_suffix(".tiff")
-            # self.vprint(f"Saving tiff to : {tiff_path}", 2)
             logging.info(f"Saving tiff to: {tiff_path}")
             tf.imwrite(tiff_path, event_map, dtype=event_map.dtype)
 
         else:
-            # self.vprint(f"Loading event map from: {event_map_path}", 2)
             logging.info(f"Loading event map from: {event_map_path}")
             event_map = da.from_tiledb(event_map_path.as_posix())
 
             tiff_path = event_map_path.with_suffix(".tiff")
             if not tiff_path.is_file():
-                # self.vprint(f"Saving tiff to : {tiff_path}", 2)
                 logging.info(f"Saving tiff to: {tiff_path}")
                 tf.imwrite(tiff_path, event_map, dtype=event_map.dtype)
 
         # calculate time map
-        # self.vprint("Calculating time map", 2)
         logging.info("Calculating time map")
         time_map_path = self.output_directory.joinpath("time_map.npy")
         if not time_map_path.is_file():
             time_map = self.get_time_map(event_map)
 
-            # self.vprint(f"Saving event map to: {time_map_path}", 2)
             logging.info(f"Saving event map to: {time_map_path}")
             np.save(time_map_path, time_map)
         else:
-            # self.vprint(f"Loading time map from: {time_map_path}", 2)
             logging.info(f"Loading time map from {time_map_path}")
             time_map = np.load(time_map_path.as_posix())
 
         # calculate features
-        # self.vprint("Calculating features", 2)
         logging.info("Calculating features")
         events = self.custom_slim_features(time_map, event_map_path, split_events=split_events)
 
-        # self.vprint("saving features", 2)
         logging.info("Saving features")
         with open(self.output_directory.joinpath("meta.json"), 'w') as outfile:
             json.dump(self.meta, outfile)
@@ -230,8 +214,6 @@ class Detector:
         # threshold data by significance value
         if roi_threshold is not None:
             active_pixels = da.from_array(np.zeros(data.shape, dtype=np.bool_))
-            # self.vprint("Noise threshold:
-            # {:.2f}".format(roi_threshold * np.sqrt(var_estimate)), 4)
 
             # Abs. threshold is roi_threshold * np.sqrt(var_estimate) when var_estimate != None.
             absolute_threshold = roi_threshold * np.sqrt(var_estimate) \
@@ -241,10 +223,7 @@ class Detector:
             active_pixels[:] = ndfilters.gaussian_filter(data, smoXY) > absolute_threshold
 
         else:
-            # self.vprint("no threshold defined. Using skimage.threshold
-            # to define threshold dynamically ...", 3)
-            logging.warning("no threshold defined. Using skimage.threshold \
-                            to define threshold dynamically...")
+            logging.warning("no threshold defined. Using skimage.threshold to define threshold dynamically.")
 
             # Executed when a roi_threshold has not been provided.
             def dynamic_threshold(img):  # Add paramters
@@ -258,7 +237,8 @@ class Detector:
             data_rechunked = data.rechunk((1, -1, -1))
             active_pixels = data_rechunked.map_blocks(dynamic_threshold, dtype=np.bool_)
 
-            # TODO add flag whether to save or not
+            logging.warning(f"active_pixels: {active_pixels.compute()}")
+
             if save_activepixels is True:
                 tiff_path = self.output_directory.joinpath("active_pixels.tiff")
                 logging.info(f"Saving active pixels to: {tiff_path}")
@@ -774,7 +754,7 @@ if __name__ == "__main__":
 
     # deal with data input
     ed = Detector(args.input, verbosity=args.verbosity, output=args.output)
-    ed.run(dataset=args.key, use_dask=args.usedask, subset=None,
+    ed.run(dataset=args.key, lazy=args.usedask, subset=None,
            split_events=args.splitevents,
            binary_struct_connectivity=args.binaryconnect,
            binary_struct_iterations=args.binarystruct,
