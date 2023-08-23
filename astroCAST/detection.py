@@ -29,6 +29,25 @@ from astroCAST.preparation import IO
 
 class Detector:
 
+    """
+    The detector class provides a method and dependency functions to detect events, estimate background noise, identify methods based on a threshold (user provided or calculated), characterize events...
+
+    Methods:
+     - run(self, dataset: Optional[str] = None, threshold: Optional[float] = None, min_size: int = 20,
+        lazy: bool = True, adjust_for_noise: bool = False, subset: Optional[str] = None, split_events: bool = True,
+        binary_struct_iterations: int = 1, binary_struct_connectivity: int = 2, save_activepixels: bool = False):
+        the 'dataset' parameter corresponds to the name or identifier of the dataset in the h5 file.
+        the 'threshold' value to discriminate background from events. If None, automatic thresholding is performed.
+         the 'min_size' refers to Minimum size of an event region. Events with size < min_size will be excluded.
+        the 'lazy' parameter, if set to True, lazy loading is implemented.
+        the 'adjust_for_noise', indicates if event detection for background noise adjustment must be carried out.
+        the 'subset' indicates which subset of the dataset to process.
+        the 'split_events' indicates  Whether to split detected events into smaller events
+                if multiple peaks are detected.
+        binary_struct_iterations (int): Number of iterations for binary structuring element.
+        binary_struct_connectivity (int): Connectivity of binary structuring element.
+
+    """
     def __init__(self, input_path: str, output=None,
                  indices: np.array = None, verbosity: int = 1):
 
