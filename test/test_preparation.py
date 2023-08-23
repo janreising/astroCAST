@@ -51,15 +51,19 @@ class Test_Delta:
     @pytest.mark.parametrize("in_memory", (True, False))
     def test_methods_run(self, method, parallel, use_dask, in_memory):
 
-        Z, X, Y = 25, 2, 2
+        with tempfile.TemporaryDirectory() as tmpdir:
 
-        data = np.random.randint(0, 100, (Z, X, Y), dtype=int)
-        loc = None
+            tmp_path = Path(tmpdir).joinpath("out.tdb")
 
-        delta = Delta(data, loc=loc,
-                      in_memory=in_memory, parallel=parallel)
+            Z, X, Y = 25, 2, 2
 
-        delta.run(method=method, window=5, use_dask=use_dask)
+            data = np.random.randint(0, 100, (Z, X, Y), dtype=int)
+            loc = None
+
+            delta = Delta(data, loc=loc,
+                          in_memory=in_memory, parallel=parallel)
+
+            delta.run(method=method, output_path=tmp_path, window=5, use_dask=use_dask)
 
     @pytest.mark.parametrize("dim", [(100), (100, 5), (100, 5, 5), (100, 2, 10)])
     def test_background_dimensions(self, dim):
@@ -82,13 +86,18 @@ class Test_Delta:
 
         arr = np.random.randint(0, 100, dim, dtype=int)
 
-        ctrl = Delta.calculate_delta_min_filter(arr.copy(), window, method=method)
-        logging.warning(f"sum of ctrl: {np.sum(ctrl)}")
+        with tempfile.TemporaryDirectory() as tmpdir:
 
-        delta = Delta(arr, loc=None, in_memory=in_memory, parallel=parallel)
-        res = delta.run(method=method, window=window, use_dask=use_dask, overwrite_first_frame=False)
+            tmp_path = Path(tmpdir).joinpath("out.tdb")
 
-        assert np.allclose(ctrl, res)
+            ctrl = Delta.calculate_delta_min_filter(arr.copy(), window, method=method)
+            logging.warning(f"sum of ctrl: {np.sum(ctrl)}")
+
+            delta = Delta(arr, loc=None, in_memory=in_memory, parallel=parallel)
+            res = delta.run(method=method, output_path=tmp_path,
+                            window=window, use_dask=use_dask, overwrite_first_frame=False)
+
+            assert np.allclose(ctrl, res)
 
     @pytest.mark.xfail(reason="Not implemented")
     def test_quality_of_dff(self):

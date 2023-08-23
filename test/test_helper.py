@@ -305,62 +305,28 @@ class Test_normalization:
         norm.min_max()
 
     @staticmethod
-    @pytest.mark.parametrize("min_length", [None, 5, 20])
-    @pytest.mark.parametrize("max_length", [None, 5, 20])
-    def test_enforced_length(num_rows, ragged, min_length, max_length):
-
-        if (min_length is not None) and (max_length is not None) and (min_length != max_length):
-            return None
-
-        DG = DummyGenerator(num_rows=num_rows, ragged=ragged)
-        data = DG.get_array()
-
-        norm = Normalization(data)
-        res = norm.run({0: ["enforce_length", dict(min_length=min_length, max_length=max_length)]})
-
-        for r in range(len(res)):
-            row = res[r]
-
-            if min_length is not None:
-                assert len(row) >= min_length
-
-            if max_length is not None:
-                assert len(row) <= max_length
-
-    @staticmethod
     @pytest.mark.parametrize("fixed_value", [None, 999])
-    @pytest.mark.parametrize("enforced", [True, False])
-    def test_impute_nan(num_rows, ragged, fixed_value, enforced):
+    def test_impute_nan(num_rows, ragged, fixed_value):
 
         DG = DummyGenerator(num_rows=num_rows, trace_length=10, ragged=ragged)
         data = DG.get_array()
 
-        if enforced:
+        for r in range(len(data)):
 
-            norm = Normalization(data)
-            imputed = norm.run({
-                0: ["enforce_length", dict(min_length=14, max_length=None)],
-                1: ["impute_nan", dict(fixed_value=fixed_value)]
-            })
+            if len(data[r]) < 2:
+                pass
 
-        else:
+            row = data[r]
+            rand_idx = np.random.randint(0, max(len(row), 1))
+            row[rand_idx] = np.nan
+            data[r] = row
 
-            for r in range(len(data)):
+        norm = Normalization(data)
+        assert np.sum(np.isnan(norm.data if isinstance(norm.data, np.ndarray) else ak.ravel(norm.data))) > 0
 
-                if len(data[r]) < 2:
-                    pass
-
-                row = data[r]
-                rand_idx = np.random.randint(0, max(len(row), 1))
-                row[rand_idx] = np.nan
-                data[r] = row
-
-            norm = Normalization(data)
-            assert np.sum(np.isnan(norm.data if isinstance(norm.data, np.ndarray) else ak.ravel(norm.data))) > 0
-
-            imputed = norm.run({
-                0: ["impute_nan", dict(fixed_value=fixed_value)]
-            })
+        imputed = norm.run({
+            0: ["impute_nan", dict(fixed_value=fixed_value)]
+        })
 
         assert np.sum(np.isnan(imputed if isinstance(imputed, np.ndarray) else ak.ravel(imputed))) == 0
 

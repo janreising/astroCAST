@@ -1173,7 +1173,7 @@ class Delta:
         # The location of the data in the HDF5 file (optional, only applicable for .h5 files)
         self.loc = loc
 
-    def run(self, method="background", window=None, overwrite_first_frame=True, use_dask=True):
+    def run(self, method="background", window=None, chunks="infer", output_path=None, overwrite_first_frame=True, use_dask=True):
         """
         Runs the delta calculation on the input data.
 
@@ -1195,7 +1195,7 @@ class Delta:
 
         """
         # Prepare the data for processing
-        data = self.prepare_data(self.input_, in_memory=self.in_memory, shared=self.parallel, use_dask=use_dask)
+        data = self.prepare_data(self.input_, chunks=chunks, output_path=output_path, in_memory=self.in_memory, shared=self.parallel, use_dask=use_dask)
 
         # Sequential execution
         if isinstance(data, np.ndarray):
@@ -1203,7 +1203,7 @@ class Delta:
             res = self.calculate_delta_min_filter(data, window, method=method, inplace=False)
 
         # Parallel from .tdb file
-        elif isinstance(data, str) and data.startswith("tdb:"):
+        elif isinstance(data, (str, Path)) and Path(data).suffix in (".tdb"):
             # Warning message for overwriting the .tdb file
             logging.warning("This function will overwrite the provided .tdb file!")
 
@@ -1223,7 +1223,7 @@ class Delta:
                     tdb[:, x0:x1, y0:y1] = calculate_delta_min_filter(data, window, method=method, inplace=False)
 
             # Extract the path from the input data
-            path = data[len("tdb:"):]
+            path = data.as_posix()
 
             # Get the dimensions and chunk size of the .tdb file
             (Z, X, Y), chunksize = get_data_dimensions(path, loc=None)
@@ -1243,7 +1243,8 @@ class Delta:
                     client.gather(futures)
 
             # Load the modified .tdb file into memory
-            res = self.load_to_memory(Path(path), loc=None)
+            io = IO()
+            res = io.load(Path(path))
 
         elif isinstance(data, da.core.Array):
             # Calculate delta using Dask array for lazy loading and computation
@@ -1254,7 +1255,7 @@ class Delta:
                                   dtype=float).compute()
 
         else:
-            raise NotImplementedError("Input data type not recognized!")
+            raise NotImplementedError(f"Input data type not recognized: {type(data)}")
 
         # Overwrite the first frame with the second frame if required
         if overwrite_first_frame:
@@ -1263,37 +1264,12 @@ class Delta:
         self.res = res
         return res
 
-    @staticmethod
-    def load_to_memory(path, loc=None):
-        """
-        This function loads data from the specified path into memory and returns it.
-
-        Args:
-        - path: A path to the data to be loaded.
-        - loc: A string representing the location of the data in the HDF5 file. This parameter is optional
-          and only applicable when path has the .h5 extension.
-
-        Returns:
-        - The data loaded from the specified path.
-
-        Raises:
-        - TypeError: If the file type is not recognized.
-
-        """
-
-        # Check if the input is already a numpy ndarray
-        if isinstance(path, np.ndarray):
-            return path
-
-        io = IO()
-        return io.load(path, h5_loc=loc)
-
     def save(self, output_path, h5_loc="df", chunks=(-1, "auto", "auto"), compression=None):
 
         io = IO()
         io.save(output_path, data=self.res, h5_loc=h5_loc, chunks=chunks, compression=compression)
 
-    def prepare_data(self, input_, in_memory=True, shared=True, use_dask=True):
+    def prepare_data(self, input_, chunks="infer", output_path=None, in_memory=True, shared=True, use_dask=True):
 
         """
         Preprocesses the input data by converting it to a TileDB array and optionally loading it into memory
@@ -1314,6 +1290,8 @@ class Delta:
         - TypeError: If the input data type is not recognized.
         """
 
+        io = IO()
+
         # convert to .tdb
         if not in_memory:
 
@@ -1322,12 +1300,31 @@ class Delta:
 
             elif isinstance(input_, Path):
                 # if the input is a file path, load it into memory and convert to TileDB array
-                data = self.load_to_memory(input_, loc=self.loc)
-                return self.save_to_tdb(data)
 
-            elif isinstance(input_, np.ndarray):
+                data = io.load(input_, h5_loc=self.loc)
+
+                new_path = input_.with_suffix(".tdb") if output_path is None else Path(output_path)
+                if not new_path.suffix in (".tdb"):
+                    raise ValueError(f"Please provide an output_path with '.tdb' ending instead of {new_path.suffix}")
+
+                io.save(new_path, data=data, chunks=chunks)
+
+                return new_path
+
+            elif isinstance(input_, (np.ndarray, da.Array)):
                 # if the input is a numpy ndarray, convert to TileDB array
-                return self.save_to_tdb(input_)
+
+                if output_path is None:
+                    raise ValueError("when providing an array as input, an output_path needs to be provided as well.")
+                else:
+                    new_path = Path(output_path)
+
+                if not new_path.suffix in (".tdb"):
+                    raise ValueError(f"Please provide an output_path with '.tdb' ending instead of {new_path.suffix}")
+
+                io.save(new_path, data=input_, chunks=chunks)
+
+                return new_path
 
             else:
                 # if the input data type is not recognized, raise an error
@@ -1335,13 +1332,14 @@ class Delta:
 
         # simple load
         elif in_memory and not shared:
-            return self.load_to_memory(input_, loc=self.loc)
+
+            data = io.load(input_, h5_loc=self.loc)
+            return data
 
         # create dask.array
         elif in_memory and use_dask:
             # if 'in_memory' is True and 'shared' is True, load the data into memory as a Dask array
-            # TODO this should be lazy loading through dask array instead
-            arr = self.load_to_memory(input_, loc=self.loc)
+            arr = io.load(input_, h5_loc=self.loc, lazy=True)
 
             if not isinstance(arr, da.Array):
                 arr = da.from_array(arr, chunks=(self.dim))
