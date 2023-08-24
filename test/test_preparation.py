@@ -1,3 +1,5 @@
+import tempfile
+
 import pytest
 import dask
 
@@ -6,50 +8,52 @@ from astroCAST.preparation import *
 class Test_Delta:
 
     @pytest.mark.parametrize("input_type", [np.ndarray, "testdata/sample_0.tiff", "testdata/sample_0.h5", "tiledb"])
-    @pytest.mark.parametrize("in_memory", (True, False))
-    @pytest.mark.parametrize("parallel", (True, False))
-    def test_load(self, input_type, in_memory, parallel):
+    @pytest.mark.parametrize("lazy", (True, False))
+    def test_load(self, input_type, lazy, shape=(50, 10, 10)):
 
-        Z, X, Y = 50, 10, 10
+        Z, X, Y = shape
+        output_path = None
+        loc = None
 
-        if input_type == np.ndarray:
-            data = np.random.randint(0, 100, (Z, X, Y), dtype=int)
-            loc = None
+        with tempfile.TemporaryDirectory() as tmpdir:
 
-        elif input_type == "tiledb":
+            tmpdir = Path(tmpdir)
 
-            arr = da.from_array(
-                x=np.random.randint(0, 100, (Z, X, Y), dtype=int),
-                chunks=(Z, "auto", "auto")
-            )
+            if input_type == np.ndarray:
+                data = np.random.randint(0, 100, (Z, X, Y), dtype=int)
+                output_path = tmpdir.joinpath("temp.tdb")
 
-            loc = None
-            tmpdir = Path(tempfile.mkdtemp()).joinpath("temp.tdb")
-            logging.warning(f"tmpdir: {tmpdir}, {type(tmpdir)}")
+            elif input_type == "tiledb":
 
-            arr.to_tiledb(tmpdir.as_posix())
-            data = tmpdir
+                arr = da.from_array(
+                    x=np.random.randint(0, 100, (Z, X, Y), dtype=int),
+                    chunks=(Z, "auto", "auto")
+                )
 
-        elif isinstance(input_type, str):
+                loc = None
+                path = tmpdir.joinpath("temp.tdb")
+                arr.to_tiledb(path.as_posix())
+                data = path
 
-            path = Path(input_type)
-            assert path.is_file()
-            data = path
+            elif isinstance(input_type, str):
 
-            loc = "data/ch0" if path.suffix == ".h5" else None
+                path = Path(input_type)
+                assert path.is_file()
+                data = path
+                output_path = tmpdir.joinpath("temp.tdb")
 
-        else:
-            raise TypeError
+                loc = "data/ch0"
 
-        delta = Delta(data, loc=loc, in_memory=in_memory, parallel=parallel)
+            else:
+                raise TypeError
 
-        delta.run(method="background", window=5)
+            delta = Delta(data, loc=loc)
+
+            delta.run(method="background", window=5, output_path=output_path, lazy=lazy)
 
     @pytest.mark.parametrize("method", ("background", "dF", "dFF"))
-    @pytest.mark.parametrize("parallel", (True, False))
-    @pytest.mark.parametrize("use_dask", (True, False))
-    @pytest.mark.parametrize("in_memory", (True, False))
-    def test_methods_run(self, method, parallel, use_dask, in_memory):
+    @pytest.mark.parametrize("lazy", (True, False))
+    def test_methods_run(self, method, lazy):
 
         with tempfile.TemporaryDirectory() as tmpdir:
 
@@ -60,10 +64,9 @@ class Test_Delta:
             data = np.random.randint(0, 100, (Z, X, Y), dtype=int)
             loc = None
 
-            delta = Delta(data, loc=loc,
-                          in_memory=in_memory, parallel=parallel)
+            delta = Delta(data, loc=loc)
 
-            delta.run(method=method, output_path=tmp_path, window=5, use_dask=use_dask)
+            delta.run(method=method, output_path=tmp_path, window=5, lazy=lazy)
 
     @pytest.mark.parametrize("dim", [(100), (100, 5), (100, 5, 5), (100, 2, 10)])
     def test_background_dimensions(self, dim):
@@ -76,10 +79,8 @@ class Test_Delta:
         assert res.shape == orig_shape, f"dimensions are not the same input: {dim} vs output: {res.shape}"
 
     @pytest.mark.parametrize("method", ("background", "dF", "dFF"))
-    @pytest.mark.parametrize("parallel", (True, False))
-    @pytest.mark.parametrize("use_dask", (True, False))
-    @pytest.mark.parametrize("in_memory", (True, False))
-    def test_result_for_parallel(self, method, parallel, use_dask, in_memory):
+    @pytest.mark.parametrize("lazy", (True, False))
+    def test_result_for_parallel(self, method, lazy):
 
         dim = (250, 50, 50)
         window = 10
@@ -93,18 +94,14 @@ class Test_Delta:
             ctrl = Delta.calculate_delta_min_filter(arr.copy(), window, method=method)
             logging.warning(f"sum of ctrl: {np.sum(ctrl)}")
 
-            delta = Delta(arr, loc=None, in_memory=in_memory, parallel=parallel)
+            delta = Delta(arr, loc=None)
             res = delta.run(method=method, output_path=tmp_path,
-                            window=window, use_dask=use_dask, overwrite_first_frame=False)
+                            window=window, lazy=lazy, overwrite_first_frame=False)
 
             assert np.allclose(ctrl, res)
 
     @pytest.mark.xfail(reason="Not implemented")
     def test_quality_of_dff(self):
-        raise NotImplementedError
-
-    @pytest.mark.xfail(reason="Not implemented")
-    def test_new_dFF_version(self):
         raise NotImplementedError
 
 class Test_Input:
@@ -566,7 +563,7 @@ class Test_IO:
 
 class Test_MotionCorrection:
 
-    @pytest.mark.parametrize("input_type", ["array", ".h5", ".tdb", ".tiff"])
+    @pytest.mark.parametrize("input_type", ["array", ".h5", ".tiff"])
     def test_random(self, input_type, shape=(100, 100, 100)):
 
         data = np.random.random(shape)
@@ -582,7 +579,7 @@ class Test_MotionCorrection:
 
                 h5_loc = "mc/ch0"
                 temp_path = tmpdir.joinpath("test.h5")
-                io.save(temp_path, data={"ch0":data}, h5_loc="mc")
+                io.save(temp_path, data=data, h5_loc=h5_loc)
 
                 data = temp_path
 
@@ -596,7 +593,7 @@ class Test_MotionCorrection:
             elif input_type == ".tdb":
 
                 temp_path = tmpdir.joinpath("test.tdb")
-                temp_path = io.save(temp_path, data={"test/ch0":data}, h5_loc=None)
+                temp_path = io.save(temp_path, data=data)
 
                 assert temp_path.is_dir(), f"cannot find {temp_path}"
                 data = temp_path
@@ -607,7 +604,11 @@ class Test_MotionCorrection:
             else:
                 raise ValueError
 
-            mc = MotionCorrection()
+            wd = tmpdir.joinpath("wd/")
+            if not wd.exists():
+                wd.mkdir()
+
+            mc = MotionCorrection(working_directory=wd)
             mc.run(data, h5_loc=h5_loc, max_shifts=(6, 6))
 
             data = mc.save(output=None, remove_mmap=True)

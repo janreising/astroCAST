@@ -651,7 +651,7 @@ class IO:
                         loc = h5_loc[k]
 
                 elif h5_loc is None:
-                    loc = k if "/" in k else f"io/{k}"
+                    loc = k if "/" in str(k) else f"io/{k}"
 
                 elif len(data) == 1:
                         loc = f"{h5_loc}/{k}" if "/" not in h5_loc[:-1] else h5_loc
@@ -899,9 +899,9 @@ class MotionCorrection:
         if isinstance(input_, (str, Path)):
             # If input is a string or Path object
 
-            input_ = Path(input_) if isinstance(input_, str) else input_
+            input_ = Path(input_)
 
-            if not input_.is_file():
+            if not input_.exists():
                 raise FileNotFoundError(f"cannot find input_: {input_}")
 
             if input_.suffix in [".h5", ".hdf5"]:
@@ -924,9 +924,8 @@ class MotionCorrection:
                 # If input is a TIFF file
                 return input_
 
-            elif input_.suffix in [".tdb"]:
-                # If input is a TDB file (not implemented)
-                raise NotImplementedError
+            else:
+                raise ValueError(f"unknown input type. Please provide .h5 or .tiff file.")
 
         elif isinstance(input_, np.ndarray):
             # If input is a ndarray create a temporary TIFF file to run the motion correction on
@@ -936,7 +935,13 @@ class MotionCorrection:
             if self.working_directory is None:
                 self.working_directory = tempfile.TemporaryDirectory()
 
-            temp_h5_path = Path(self.working_directory.name) if isinstance(self.working_directory, tempfile.TemporaryDirectory) else Path(self.working_directory)
+            if isinstance(self.working_directory, tempfile.TemporaryDirectory):
+                temp_h5_path = Path(self.working_directory.name)
+            else:
+                temp_h5_path = Path(self.working_directory)
+
+            assert temp_h5_path.exists(), f"working directory doesn't exist: {temp_h5_path}"
+
             temp_h5_path = temp_h5_path.joinpath(f"{self.dummy_folder_name}.tiff").as_posix()
             tifffile.imwrite(temp_h5_path, input_)
 
@@ -1143,7 +1148,7 @@ class Delta:
 
     """
 
-    def __init__(self, input_, loc=None, in_memory=True, parallel=False):
+    def __init__(self, input_, loc=None):
         """
         Initializes a Delta object.
 
@@ -1164,16 +1169,11 @@ class Delta:
         # Get the dimensions and chunk size of the input data
         self.dim, self.chunksize = get_data_dimensions(self.input_, loc=loc)
 
-        # Flag indicating whether the data should be loaded into memory
-        self.in_memory = in_memory
-
-        # Flag indicating whether to use parallel processing
-        self.parallel = parallel
-
         # The location of the data in the HDF5 file (optional, only applicable for .h5 files)
         self.loc = loc
 
-    def run(self, method="background", window=None, chunks="infer", output_path=None, overwrite_first_frame=True, use_dask=True):
+    def run(self, method="background", window=None, chunks="infer", output_path=None,
+            overwrite_first_frame=True, lazy=True):
         """
         Runs the delta calculation on the input data.
 
@@ -1195,7 +1195,7 @@ class Delta:
 
         """
         # Prepare the data for processing
-        data = self.prepare_data(self.input_, chunks=chunks, output_path=output_path, in_memory=self.in_memory, shared=self.parallel, use_dask=use_dask)
+        data = self.prepare_data(self.input_, h5_loc=self.loc, chunks=chunks, output_path=output_path, lazy=lazy)
 
         # Sequential execution
         if isinstance(data, np.ndarray):
@@ -1255,7 +1255,7 @@ class Delta:
                                   dtype=float).compute()
 
         else:
-            raise NotImplementedError(f"Input data type not recognized: {type(data)}")
+            raise ValueError(f"Input data type not recognized: {type(data)}")
 
         # Overwrite the first frame with the second frame if required
         if overwrite_first_frame:
@@ -1269,7 +1269,7 @@ class Delta:
         io = IO()
         io.save(output_path, data=self.res, h5_loc=h5_loc, chunks=chunks, compression=compression)
 
-    def prepare_data(self, input_, chunks="infer", output_path=None, in_memory=True, shared=True, use_dask=True):
+    def prepare_data(self, input_, chunks="infer", h5_loc=None, output_path=None, lazy=True):
 
         """
         Preprocesses the input data by converting it to a TileDB array and optionally loading it into memory
@@ -1292,76 +1292,48 @@ class Delta:
 
         io = IO()
 
-        # convert to .tdb
-        if not in_memory:
+        if not lazy:
+            data = io.load(input_, h5_loc=h5_loc, lazy=lazy)
 
-            if isinstance(input_, Path) and input_.suffix == ".tdb":
-                return f"tdb:{input_.as_posix()}"
-
-            elif isinstance(input_, Path):
-                # if the input is a file path, load it into memory and convert to TileDB array
-
-                data = io.load(input_, h5_loc=self.loc)
-
-                new_path = input_.with_suffix(".tdb") if output_path is None else Path(output_path)
-                if not new_path.suffix in (".tdb"):
-                    raise ValueError(f"Please provide an output_path with '.tdb' ending instead of {new_path.suffix}")
-
-                io.save(new_path, data=data, chunks=chunks)
-
-                return new_path
-
-            elif isinstance(input_, (np.ndarray, da.Array)):
-                # if the input is a numpy ndarray, convert to TileDB array
-
-                if output_path is None:
-                    raise ValueError("when providing an array as input, an output_path needs to be provided as well.")
-                else:
-                    new_path = Path(output_path)
-
-                if not new_path.suffix in (".tdb"):
-                    raise ValueError(f"Please provide an output_path with '.tdb' ending instead of {new_path.suffix}")
-
-                io.save(new_path, data=input_, chunks=chunks)
-
-                return new_path
-
-            else:
-                # if the input data type is not recognized, raise an error
-                raise TypeError(f"do not recognize data type: {type(input_)}")
-
-        # simple load
-        elif in_memory and not shared:
-
-            data = io.load(input_, h5_loc=self.loc)
+            if not isinstance(data, da.Array):
+                data = da.from_array(data, chunks=(self.dim))
+            data = da.rechunk(data, chunks=(-1, "auto", "auto"))
             return data
 
-        # create dask.array
-        elif in_memory and use_dask:
-            # if 'in_memory' is True and 'shared' is True, load the data into memory as a Dask array
-            arr = io.load(input_, h5_loc=self.loc, lazy=True)
+        # convert to .tdb
+        elif isinstance(input_, Path) and input_.suffix == ".tdb":
+            return io.load(input_, lazy=lazy)
 
-            if not isinstance(arr, da.Array):
-                arr = da.from_array(arr, chunks=(self.dim))
+        elif isinstance(input_, Path):
+            # if the input is a file path, load it into memory and convert to TileDB array
 
-            data = da.rechunk(arr, chunks=(-1, "auto", "auto"))
+            data = io.load(input_, h5_loc=self.loc)
 
-        elif in_memory and not use_dask:
+            new_path = input_.with_suffix(".tdb") if output_path is None else Path(output_path)
+            if not new_path.suffix in (".tdb"):
+                raise ValueError(f"Please provide an output_path with '.tdb' ending instead of {new_path.suffix}")
 
-            # TODO create VRAM shared memory
-            # if not use_dask:
-            #     shm_name = "my_shared_memory" # TODO dynamic
-            #     shm_length = arr.nbytes # TODO dynamic
-            #     shm_array = shm.SharedMemory(create=True, name=shm_name, size=shm_length)
-            #     shm_array_np = np.ndarray(arr.shape, dtype=arr.dtype, buffer=shm_array.buf)
-            #     shm_array_np[:] = arr[:]
+            io.save(new_path, data=data, chunks=chunks)
 
-            raise NotImplementedError("implement shared memory option")
+            return io.load(new_path, lazy=lazy)
+
+        elif isinstance(input_, (np.ndarray, da.Array)):
+            # if the input is a numpy ndarray, convert to TileDB array
+
+            if output_path is None:
+                raise ValueError("when providing an array as input, an output_path needs to be provided as well.")
+            else:
+                new_path = Path(output_path)
+
+            if not new_path.suffix in (".tdb"):
+                raise ValueError(f"Please provide an output_path with '.tdb' ending instead of {new_path.suffix}")
+
+            io.save(new_path, data=input_, chunks=chunks)
+
+            return io.load(new_path, lazy=lazy)
 
         else:
-            raise NotImplementedError
-
-        return data
+            raise TypeError(f"do not recognize data type: {type(input_)}")
 
     @staticmethod
     @deprecated(reason="faster implementation but superseded by: calculate_background_even_faster")
