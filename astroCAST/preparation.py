@@ -775,7 +775,7 @@ class MotionCorrection:
         # mmap location
         self.mmap_path = None
 
-    def run(self, input_, h5_loc=None,
+    def run(self, input_, h5_loc="",
             max_shifts=(50, 50), niter_rig=1, splits_rig=14, num_splits_to_process_rig=None,
             strides=(48, 48), overlaps=(24, 24), pw_rigid=False, splits_els=14,
             num_splits_to_process_els=None, upsample_factor_grid=4, max_deviation_rigid=3,
