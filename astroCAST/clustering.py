@@ -299,7 +299,7 @@ class Linkage(CachedClass):
             zs = np.logspace(start=-1, stop=1, num=20, base=10, endpoint=True)
 
             # calculate the inclusion fraction for each log threshold
-            fraction = np.zeros((len(mcs), len(zs)), dtype=np.half)
+            fraction = np.zeros((len(mcs), len(zs)), dtype=float)
             for i, mc_ in enumerate(tqdm(mcs)):
                 for j, z_ in enumerate(zs):
 

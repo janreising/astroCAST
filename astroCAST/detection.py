@@ -280,21 +280,17 @@ class Detector:
             logging.info("removed small objects")
 
             # label connected pixels
-            event_map = da.from_array(np.zeros(data.shape, dtype=np.uintc))
+            event_map = da.from_array(np.zeros(data.shape, dtype=int))
             event_map[:], num_events = ndimage.label(active_pixels)
             logging.info("labelled connected pixel. #events: {}".format(num_events))
 
         # characterize each event
+        # if num_events < 2 * 32767:
+        #     event_map = event_map.astype(np.int16)
+        # else:
+        #     event_map = event_map.astype("int32")
 
-        # event_properties = measure.regionprops(event_map, intensity_image=data, cache=True,
-        #                                        extra_properties=[self.trace, self.footprint]
-        #                                        )
-        # self.vprint("events collected", 3)
-
-        if num_events < 2 * 32767:
-            event_map = event_map.astype("uint16")
-        else:
-            event_map = event_map.astype("uint32")
+        event_map = event_map.astype(int)
 
         logging.info("event_map dype: {}".format(event_map.dtype))
 
@@ -445,7 +441,8 @@ class Detector:
         data = data[t0:t1, gx0:gx1, gy0:gy1]
 
         if split_events:
-            event_map, _ = self.detect_subevents(data, event_map == event_id)
+            mask = event_map == event_id
+            event_map, _ = self.detect_subevents(data, mask)
 
         res = {}
         for em_id in np.unique(event_map):
