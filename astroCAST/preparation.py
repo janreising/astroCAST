@@ -779,8 +779,7 @@ class MotionCorrection:
             max_shifts=(50, 50), niter_rig=1, splits_rig=14, num_splits_to_process_rig=None,
             strides=(48, 48), overlaps=(24, 24), pw_rigid=False, splits_els=14,
             num_splits_to_process_els=None, upsample_factor_grid=4, max_deviation_rigid=3,
-            shifts_opencv=True, nonneg_movie=True, border_nan='copy', num_frames_split=80,
-            gSig_filt=(20, 20)):
+            nonneg_movie=True, gSig_filt=(20, 20)):
 
         """
 
@@ -822,21 +821,11 @@ class MotionCorrection:
         max_deviation_rigid:int
             maximum deviation allowed for patch with respect to rigid shift
 
-        shifts_opencv: Bool
-            apply shifts fast way (but smoothing results)
-
         nonneg_movie: boolean
             make the SAVED movie and template mostly nonnegative by removing min_mov from movie
 
         use_cuda : bool, optional
             Use skcuda.fft (if available). Default: False
-
-        border_nan : bool or string, optional
-            Specifies how to deal with borders. (True, False, 'copy', 'min')
-
-        num_frames_split: int, default: 80
-            Number of frames in each batch. Used when cosntructing the options
-            through the params object
 
         var_name_hdf5: str, default: 'mov'
             If loading from hdf5, name of the variable to load
@@ -861,8 +850,7 @@ class MotionCorrection:
                 num_splits_to_process_rig=num_splits_to_process_rig, strides=strides, overlaps=overlaps,
                 pw_rigid=pw_rigid, splits_els=splits_els, num_splits_to_process_els=num_splits_to_process_els,
                 upsample_factor_grid=upsample_factor_grid, max_deviation_rigid=max_deviation_rigid,
-                shifts_opencv=shifts_opencv, nonneg_movie=nonneg_movie, border_nan=border_nan,
-                num_frames_split=num_frames_split, gSig_filt=gSig_filt)
+                nonneg_movie=nonneg_movie, gSig_filt=gSig_filt)
 
         # Perform motion correction
         mc.motion_correct(save_movie=True)
