@@ -857,11 +857,11 @@ class MotionCorrection:
         self.shifts = mc.shifts_rig
 
         # Check if the motion correction generated the mmap file
-        if len(mc.mmap_file) < 1 or not Path(mc.mmap_file[0]).is_file():
+        if len(mc.fname_tot_rig) < 1 or not Path(mc.fname_tot_rig[0]).is_file():
             raise FileNotFoundError(f"motion correction failed unexpectedly. mmap path: {mc.mmap}")
 
         # Set the mmap_path attribute to the generated mmap file
-        self.mmap_path = mc.mmap_file[0]
+        self.mmap_path = mc.fname_tot_rig[0]
 
     def _validate_input(self, input_, h5_loc):
         """

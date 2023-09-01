@@ -202,10 +202,10 @@ class FullFrameGenerator(keras.utils.Sequence):
         img_out_shape = data_img_output.shape
 
         data_img_input = (
-            data_img_input.astype("float") - self.local_mean
+            data_img_input.astype(float) - self.local_mean
         ) / self.local_std
         data_img_output = (
-            data_img_output.astype("float") - self.local_mean
+            data_img_output.astype(float) - self.local_mean
         ) / self.local_std
 
         input_full[0, : img_in_shape[0], : img_in_shape[1], :] = data_img_input

@@ -567,7 +567,7 @@ class Test_MotionCorrection:
     def test_random(self, input_type, shape=(100, 100, 100)):
 
         data = np.random.random(shape)
-        h5_loc = None
+        h5_loc = ""
 
         with tempfile.TemporaryDirectory() as dir:
             tmpdir = Path(dir)
@@ -691,7 +691,7 @@ class Test_MotionCorrection:
             data[t] = shifted_structure
 
         mc = MotionCorrection()
-        mc.run(data, h5_loc=None, max_shifts=(int(X/2)-1, int(Y/2)-1))
+        mc.run(data, max_shifts=(int(X/2)-1, int(Y/2)-1))
 
         data = mc.save(output=None, remove_mmap=True)
         assert type(data) == np.ndarray

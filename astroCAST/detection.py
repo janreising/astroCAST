@@ -81,7 +81,8 @@ class Detector:
             subset: Optional[str] = None, split_events: bool = True,
             binary_struct_iterations: int = 1,
             binary_struct_connectivity: int = 2,  # TODO better way to do this
-            save_activepixels: bool = False) -> None:
+            save_activepixels: bool = False,
+            parallel=True) -> None:
         """
         Runs the event detection process on the specified dataset.
 
@@ -98,6 +99,7 @@ class Detector:
                 if multiple peaks are detected.
             binary_struct_iterations (int): Number of iterations for binary structuring element. 
             binary_struct_connectivity (int): Connectivity of binary structuring element.
+            parallel: parallel execution of event characterization. Recommended to be true.
 
         Returns:
             dictionary of events
@@ -183,7 +185,7 @@ class Detector:
 
         # calculate features
         logging.info("Calculating features")
-        events = self.custom_slim_features(time_map, event_map_path, split_events=split_events)
+        events = self.custom_slim_features(time_map, event_map_path, split_events=split_events, parallel=parallel)
 
         logging.info("Saving features")
         with open(self.output_directory.joinpath("meta.json"), 'w') as outfile:
@@ -339,7 +341,7 @@ class Detector:
 
         return time_map
 
-    def custom_slim_features(self, time_map, event_path, split_events: bool = True):
+    def custom_slim_features(self, time_map, event_path, split_events: bool = True, parallel=True):
 
         # print(event_map)
         # sh_em = shared_memory.SharedMemory(create=True, size=event_map.nbytes)
@@ -397,30 +399,42 @@ class Detector:
         logging.info("#tasks: {}".format(len(e_ids)))
         random.shuffle(e_ids)
         futures = []
-        with Client(memory_limit='auto', processes=False,
-                    silence_logs=logging.ERROR) as client:
-            for e_id in e_ids:
-                futures.append(
-                    client.submit(
-                        self.characterize_event,
-                        e_id, e_start[e_id], e_stop[e_id],
-                        data_info, event_info, out_path, split_events
+
+        if parallel:
+
+            with Client(memory_limit='auto', processes=False,
+                        silence_logs=logging.ERROR) as client:
+                for e_id in e_ids:
+                    futures.append(
+                        client.submit(
+                            self.characterize_event,
+                            e_id, e_start[e_id], e_stop[e_id],
+                            data_info, event_info, out_path, split_events
+                        )
                     )
-                )
-            progress(futures)
+                progress(futures)
 
-            client.gather(futures)
+                client.gather(futures)
 
-            # close shared memory
-            try:
-                data_sh.close()
-                data_sh.unlink()
+        else:
 
-                event_sh.close()
-                event_sh.unlink()
-            except FileNotFoundError as err:
-                print("An error occured during shared memory closing: ")
-                print(err)
+            for event_id in e_ids:
+                npy_path = self.characterize_event(event_id,
+                                                   t0=e_start[event_id], t1=e_stop[event_id],
+                                                   data_info=data_info, event_info=event_info,
+                                                   out_path=out_path.as_posix(), split_events=split_events)
+                futures.append(npy_path)
+
+        # close shared memory
+        try:
+            data_sh.close()
+            data_sh.unlink()
+
+            event_sh.close()
+            event_sh.unlink()
+        except FileNotFoundError as err:
+            print("An error occured during shared memory closing: ")
+            print(err)
 
         # combine results
         events = {}
@@ -435,6 +449,9 @@ class Detector:
                            event_info, out_path, split_events=True):
 
         # check if result already exists
+        if not isinstance(out_path, Path):
+            out_path = Path(out_path)
+
         res_path = out_path.joinpath(f"events{event_id}.npy")
         if os.path.isfile(res_path):
             return 2
@@ -460,8 +477,11 @@ class Detector:
         data = np.ndarray(d_shape, d_dtype, buffer=data_buffer.buf)
         data = data[t0:t1, gx0:gx1, gy0:gy1]
 
+        if data.shape != event_map.shape:
+            raise ValueError(f"data and event_map do not have the same size: {data.shape} vs. {event_map.shape}")
+
         if split_events:
-            mask = event_map == event_id
+            mask = np.where(event_map == event_id)
             event_map, _ = self.detect_subevents(data, mask)
 
         res = {}
@@ -604,13 +624,12 @@ class Detector:
             print("An error occured during shared memory closing: {}".format(err))
 
     @staticmethod
-    def detect_subevents(img, mask, sigma: int = 2,
+    def detect_subevents(img, mask_indices, sigma: int = 2,
                          min_local_max_distance: int = 5, local_max_threshold: float = 0.5, min_roi_frame_area: int = 5,
                          reject_if_original: bool = True):
-        assert img.shape == mask.shape, "image ({}) and mask ({}) don't have the same dimension!".format(img.shape,
-                                                                                                         mask.shape)
 
-        mask = ~mask
+        mask = np.ones(img.shape, dtype=bool)
+        mask[mask_indices] = 0 # TODO does this need to be inverted?
         Z, X, Y = mask.shape
 
         new_mask = np.zeros((Z, X, Y), dtype="i2")
@@ -731,6 +750,13 @@ class Detector:
                 # run watershed on inverse intensity image
                 basin = -1 * frame_raw
                 basin[frame_mask] = 0
+
+                # watershed requires type conversion
+                basin = basin.filled(fill_value=0).astype(int)
+                seeds = seeds.astype(np.int64)
+
+                logging.warning(f"basin: {type(basin)}, {basin.dtype}")
+                logging.warning(f"seeds: {type(seeds)}, {seeds.dtype}")
 
                 last_mask_frame = watershed(basin, seeds).astype("i2")
                 last_mask_frame[frame_mask] = 0
