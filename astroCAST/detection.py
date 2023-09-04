@@ -755,9 +755,6 @@ class Detector:
                 basin = basin.filled(fill_value=0).astype(int)
                 seeds = seeds.astype(np.int64)
 
-                logging.warning(f"basin: {type(basin)}, {basin.dtype}")
-                logging.warning(f"seeds: {type(seeds)}, {seeds.dtype}")
-
                 last_mask_frame = watershed(basin, seeds).astype("i2")
                 last_mask_frame[frame_mask] = 0
 
