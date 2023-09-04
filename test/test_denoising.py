@@ -48,6 +48,7 @@ class Test_Generators:
 
             gen.on_epoch_end()
 
+    @pytest.mark.xdist_group(name="tensorflow")
     @pytest.mark.parametrize("extension", [".h5", ".tiff"])
     def test_network(self, extension):
 
@@ -64,6 +65,7 @@ class Test_Generators:
         net = Network(train_generator=train_gen, val_generator=train_gen, n_stacks=1, kernel=4, batchNormalize=False, use_cpu=True)
         net.run(batch_size=train_gen.batch_size, num_epochs=2, patience=1, min_delta=0.01, save_model=None, load_weights=False)
 
+    @pytest.mark.xdist_group(name="tensorflow")
     @pytest.mark.parametrize("extension", [".h5", ".tiff"])
     def test_inference_full(self, extension, out_path=None):
 
@@ -85,12 +87,14 @@ class Test_Generators:
             assert os.path.isfile(out_path), "cannot find output tiff: {}".format(out_path)
             os.remove(out_path)
 
+    @pytest.mark.xdist_group(name="tensorflow")
     @pytest.mark.parametrize("extension", [".h5", ".tiff"])
     @pytest.mark.parametrize("output_file", [None, "inf.tiff", "inf.h5"])
-    def test_inference_sub(self, extension, output_file, loc="data/ch0"):
+    def test_inference_sub(self, extension, output_file):
 
         si = SampleInput()
         file_path = si.get_test_data(extension=extension)
+        loc = si.get_h5_loc()
 
         with tempfile.TemporaryDirectory() as tmpdir:
 
@@ -120,7 +124,8 @@ class Test_Generators:
                                         logging_level=logging.DEBUG,
                                         **param)
 
-            res = inf_gen.infer(model=model, output=out_path, out_loc=loc, rescale=False)
+            inf_loc = "inf/ch0"
+            res = inf_gen.infer(model=model, output=out_path, out_loc=inf_loc, rescale=False)
 
             # Check result
             io = IO()
@@ -128,7 +133,7 @@ class Test_Generators:
 
             if out_path is not None:
                 assert out_path.is_file(), "cannot find output file: {}".format(out_path)
-                res = io.load(out_path, h5_loc=loc, lazy=True)
+                res = io.load(out_path, h5_loc=inf_loc, lazy=True)
 
             assert res.shape == data.shape, f"inferred output has incorrect shape: " \
                                                 f"orig>{data.shape} vs. inf>{res.shape}"

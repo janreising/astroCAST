@@ -436,12 +436,21 @@ class IO:
         """
 
         if lazy:
-            data = h5py.File(path, "r")[h5_loc]
+            data = h5py.File(path, "r")
+
+            if h5_loc not in data:
+                raise ValueError(f"cannot find dataset in file ({path}): {list(data.keys())}")
+
+            data = data[h5_loc]
             data = da.from_array(data, chunks=chunks)
 
         else:
-            with h5py.File(path, "r") as h5:
-                data = h5[h5_loc][:] # Read all data from HDF5 file
+            with h5py.File(path, "r") as data:
+
+                if h5_loc not in data:
+                    raise ValueError(f"cannot find dataset in file ({path}): {list(data.keys())}")
+
+                data = data[h5_loc][:] # Read all data from HDF5 file
 
         return data
 
