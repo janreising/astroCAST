@@ -703,4 +703,4 @@ class Test_MotionCorrection:
         mcs = np.array(mc.shifts)[:, 0]
         mcs = np.mean(np.abs(np.diff(mcs)))
 
-        assert np.allclose(mcs, motion_speed, rtol=5)
+        assert np.allclose(mcs, motion_speed, atol=1.5)
