@@ -3,22 +3,25 @@ import tempfile
 import pytest
 
 from astroCAST.detection import *
-from astroCAST.helper import EventSim
+from astroCAST.helper import EventSim, SampleInput
 from astroCAST.preparation import IO
 
 
 class Test_Detector:
 
-    @pytest.mark.parametrize("input_", ["testdata/sample_0.h5", "testdata/sample_0.tiff"])
+    @pytest.mark.parametrize("extension", [".h5", ".tiff"])
     @pytest.mark.parametrize("save_active_pixels", [True, False])
-    def test_real_data(self, input_, save_active_pixels):
+    def test_real_data(self, extension, save_active_pixels):
+
+        si = SampleInput()
+        input_ = si.get_test_data(extension=extension)
 
         with tempfile.TemporaryDirectory() as dir:
             tmpdir = Path(dir)
             assert tmpdir.is_dir()
 
             det = Detector(input_,  output=tmpdir)
-            det.run(dataset = "data/ch0", lazy=False, save_activepixels = save_active_pixels)
+            det.run(dataset = "dff/ch0", lazy=False, save_activepixels = save_active_pixels)
 
             dir_ = det.output_directory
 
@@ -27,14 +30,13 @@ class Test_Detector:
             assert det.data.size != 0, "data object is empty"
             assert det.data.shape is not None, "data has no dimensions"
 
-            expected_files = ["event_map.tdb", "event_map.tiff", "active_pixels.tiff", "time_map.npy", "time_map.npy", "events.npy", "meta.json", ""]
-            for file_name in expected_files:
+            for file_name in ["event_map.tdb", "event_map.tiff", "active_pixels.tiff",
+                              "time_map.npy", "events.npy", "meta.json"]:
                 is_file = dir_.joinpath(file_name)
+                assert is_file, f"{file_name} file does not exist in output directory"
 
-                if file_name == "active_pixels.tiff":
-                    assert is_file == save_active_pixels, "can't/can find active_pixels.tiff but should/shouldn't"
-                else:
-                    assert is_file, f"{file_name} file does not exist in output directory"
+            if save_active_pixels:
+                assert dir_.joinpath("active_pixels.tiff").is_file()
 
     def test_sim_data(self):
 

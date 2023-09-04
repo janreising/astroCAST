@@ -3,6 +3,7 @@ import tempfile
 import pytest
 import dask
 
+from astroCAST.helper import SampleInput
 from astroCAST.preparation import *
 
 class Test_Delta:
@@ -663,11 +664,14 @@ class Test_MotionCorrection:
             data = mc.save(output=None, remove_mmap=True)
             assert type(data) == np.ndarray
 
-    @pytest.mark.parametrize("param", [{"input_":"testdata/sample_0.tiff"},
-                                            {"input_":"testdata/sample_0.h5", "h5_loc":"data/ch0"}])
-    def test_real_input(self, param):
+    @pytest.mark.parametrize("extension", [".h5", ".tiff"])
+    def test_real_input(self, extension, h5_loc="dff/ch0"):
+
+        si = SampleInput()
+        input_ = si.get_test_data(extension=extension)
+
         mc = MotionCorrection()
-        mc.run(**param, max_shifts=(6, 6))
+        mc.run(input_=input_, h5_loc=h5_loc, max_shifts=(6, 6))
 
         data = mc.save(output=None, remove_mmap=True)
         assert type(data) == np.ndarray
