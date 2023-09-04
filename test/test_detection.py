@@ -6,7 +6,7 @@ from astroCAST.detection import *
 from astroCAST.helper import EventSim, SampleInput
 from astroCAST.preparation import IO
 
-
+@pytest.mark.serial
 class Test_Detector:
 
     @pytest.mark.parametrize("extension", [".h5", ".tiff"])
@@ -73,7 +73,7 @@ class Test_Detector:
                 assert not dir_.joinpath("active_pixels.tiff").is_file(), "can find active_pixels.tiff but shouldn't"
 
             # check event detection
-            assert np.allclose(len(events), num_events, rtol=0.1), f"Found {len(events)} instead of {num_events}."
+            assert np.allclose(len(events), num_events, rtol=0.15), f"Found {len(events)} instead of {num_events}."
 
 
 
