@@ -54,6 +54,7 @@ class Test_FeatureExtraction:
             assert d2 < d1, f"caching is taking too long: {d2} > {d1}"
             assert features_1.equals(features_2)
 
+@pytest.mark.xdist_group(name="tensorflow")
 class Test_CNN:
 
     def test_training(self):
@@ -105,6 +106,7 @@ class Test_CNN:
         cnn_naive.load_model(tmp_path)
         cnn_naive.embed(X_test)
 
+@pytest.mark.xdist_group(name="tensorflow")
 class Test_UMAP:
 
     def test_training(self):
