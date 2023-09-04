@@ -1,6 +1,8 @@
 import glob
 import logging
 import pickle
+import shutil
+import tempfile
 import time
 import types
 from pathlib import Path
@@ -644,6 +646,34 @@ class EventSim:
         det.run(dataset=h5_loc, lazy=True, save_activepixels=save_active_pixels)
 
         return det.output_directory
+
+class SampleInput:
+
+    def __init__(self, test_data_dir="./testdata/"):
+        self.test_data_dir = Path(test_data_dir)
+        self.tmp_dir = tempfile.TemporaryDirectory()
+
+    def get_dir(self):
+        return Path(self.tmp_dir.name)
+
+    def get_test_data(self, extension=".h5"):
+
+        tmp_dir = self.get_dir()
+
+        # collect sample file
+        samples = list(self.test_data_dir.glob(f"sample_*{extension}"))
+        assert len(samples) > 0, f"cannot find sample with extension: {extension}"
+        sample = samples[0]
+
+        # copy to temporary directory
+        new_path = tmp_dir.joinpath(sample.name)
+        shutil.copy(sample, new_path)
+        assert new_path.exists()
+
+        return new_path
+
+    def __del__(self):
+        self.tmp_dir.cleanup()
 
 
 def is_ragged(data):

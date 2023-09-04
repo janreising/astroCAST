@@ -390,3 +390,22 @@ class Test_EventSim:
 
         assert event_map.shape == shape
         assert num_events >= 0
+
+class Test_SampleInput:
+
+    def test_load_and_delete(self):
+        si = SampleInput()
+
+        temp_dir = si.get_dir()
+        assert temp_dir.is_dir()
+
+        del si
+        assert not temp_dir.is_dir()
+    @pytest.mark.parametrize("extension", [".h5", ".tiff"])
+    def test_load_file(self, extension):
+        si = SampleInput()
+        input_path = si.get_test_data(extension=extension)
+        assert input_path.exists()
+
+        del si
+        assert not input_path.exists()
