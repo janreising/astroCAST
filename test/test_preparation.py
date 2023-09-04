@@ -1,65 +1,72 @@
+import tempfile
+
 import pytest
 import dask
 
+from astroCAST.helper import SampleInput
 from astroCAST.preparation import *
 
 class Test_Delta:
 
-    @pytest.mark.parametrize("input_type", [np.ndarray, "testdata/sample_0.tiff", "testdata/sample_0.h5", "tiledb"])
-    @pytest.mark.parametrize("in_memory", (True, False))
-    @pytest.mark.parametrize("parallel", (True, False))
-    def test_load(self, input_type, in_memory, parallel):
+    @pytest.mark.parametrize("input_type", [np.ndarray, ".tiff", ".h5", "tiledb"])
+    @pytest.mark.parametrize("lazy", (True, False))
+    def test_load(self, input_type, lazy, shape=(50, 10, 10)):
 
-        Z, X, Y = 50, 10, 10
+        Z, X, Y = shape
+        output_path = None
+        loc = None
 
-        if input_type == np.ndarray:
+        with tempfile.TemporaryDirectory() as tmpdir:
+
+            tmpdir = Path(tmpdir)
+
+            if input_type == np.ndarray:
+                data = np.random.randint(0, 100, (Z, X, Y), dtype=int)
+                output_path = tmpdir.joinpath("temp.tdb")
+
+            elif input_type == "tiledb":
+
+                arr = da.from_array(
+                    x=np.random.randint(0, 100, (Z, X, Y), dtype=int),
+                    chunks=(Z, "auto", "auto")
+                )
+
+                loc = None
+                path = tmpdir.joinpath("temp.tdb")
+                arr.to_tiledb(path.as_posix())
+                data = path
+
+            elif isinstance(input_type, str):
+
+                si = SampleInput()
+                data = si.get_test_data(extension=input_type)
+                loc = si.get_h5_loc()
+
+                output_path = tmpdir.joinpath("temp.tdb")
+
+            else:
+                raise TypeError
+
+            delta = Delta(data, loc=loc)
+
+            delta.run(method="background", window=5, output_path=output_path, lazy=lazy)
+
+    @pytest.mark.parametrize("method", ("background", "dF", "dFF"))
+    @pytest.mark.parametrize("lazy", (True, False))
+    def test_methods_run(self, method, lazy):
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+
+            tmp_path = Path(tmpdir).joinpath("out.tdb")
+
+            Z, X, Y = 25, 2, 2
+
             data = np.random.randint(0, 100, (Z, X, Y), dtype=int)
             loc = None
 
-        elif input_type == "tiledb":
+            delta = Delta(data, loc=loc)
 
-            arr = da.from_array(
-                x=np.random.randint(0, 100, (Z, X, Y), dtype=int),
-                chunks=(Z, "auto", "auto")
-            )
-
-            loc = None
-            tmpdir = Path(tempfile.mkdtemp()).joinpath("temp.tdb")
-            logging.warning(f"tmpdir: {tmpdir}, {type(tmpdir)}")
-
-            arr.to_tiledb(tmpdir.as_posix())
-            data = tmpdir
-
-        elif isinstance(input_type, str):
-
-            path = Path(input_type)
-            assert path.is_file()
-            data = path
-
-            loc = "data/ch0" if path.suffix == ".h5" else None
-
-        else:
-            raise TypeError
-
-        delta = Delta(data, loc=loc, in_memory=in_memory, parallel=parallel)
-
-        delta.run(method="background", window=5)
-
-    @pytest.mark.parametrize("method", ("background", "dF", "dFF"))
-    @pytest.mark.parametrize("parallel", (True, False))
-    @pytest.mark.parametrize("use_dask", (True, False))
-    @pytest.mark.parametrize("in_memory", (True, False))
-    def test_methods_run(self, method, parallel, use_dask, in_memory):
-
-        Z, X, Y = 25, 2, 2
-
-        data = np.random.randint(0, 100, (Z, X, Y), dtype=int)
-        loc = None
-
-        delta = Delta(data, loc=loc,
-                      in_memory=in_memory, parallel=parallel)
-
-        delta.run(method=method, window=5, use_dask=use_dask)
+            delta.run(method=method, output_path=tmp_path, window=5, lazy=lazy)
 
     @pytest.mark.parametrize("dim", [(100), (100, 5), (100, 5, 5), (100, 2, 10)])
     def test_background_dimensions(self, dim):
@@ -72,30 +79,29 @@ class Test_Delta:
         assert res.shape == orig_shape, f"dimensions are not the same input: {dim} vs output: {res.shape}"
 
     @pytest.mark.parametrize("method", ("background", "dF", "dFF"))
-    @pytest.mark.parametrize("parallel", (True, False))
-    @pytest.mark.parametrize("use_dask", (True, False))
-    @pytest.mark.parametrize("in_memory", (True, False))
-    def test_result_for_parallel(self, method, parallel, use_dask, in_memory):
+    @pytest.mark.parametrize("lazy", (True, False))
+    def test_result_for_parallel(self, method, lazy):
 
         dim = (250, 50, 50)
         window = 10
 
         arr = np.random.randint(0, 100, dim, dtype=int)
 
-        ctrl = Delta.calculate_delta_min_filter(arr.copy(), window, method=method)
-        logging.warning(f"sum of ctrl: {np.sum(ctrl)}")
+        with tempfile.TemporaryDirectory() as tmpdir:
 
-        delta = Delta(arr, loc=None, in_memory=in_memory, parallel=parallel)
-        res = delta.run(method=method, window=window, use_dask=use_dask, overwrite_first_frame=False)
+            tmp_path = Path(tmpdir).joinpath("out.tdb")
 
-        assert np.allclose(ctrl, res)
+            ctrl = Delta.calculate_delta_min_filter(arr.copy(), window, method=method)
+            logging.warning(f"sum of ctrl: {np.sum(ctrl)}")
+
+            delta = Delta(arr, loc=None)
+            res = delta.run(method=method, output_path=tmp_path,
+                            window=window, lazy=lazy, overwrite_first_frame=False)
+
+            assert np.allclose(ctrl, res)
 
     @pytest.mark.xfail(reason="Not implemented")
     def test_quality_of_dff(self):
-        raise NotImplementedError
-
-    @pytest.mark.xfail(reason="Not implemented")
-    def test_new_dFF_version(self):
         raise NotImplementedError
 
 class Test_Input:
@@ -557,11 +563,11 @@ class Test_IO:
 
 class Test_MotionCorrection:
 
-    @pytest.mark.parametrize("input_type", ["array", ".h5", ".tdb", ".tiff"])
+    @pytest.mark.parametrize("input_type", ["array", ".h5", ".tiff"])
     def test_random(self, input_type, shape=(100, 100, 100)):
 
         data = np.random.random(shape)
-        h5_loc = None
+        h5_loc = ""
 
         with tempfile.TemporaryDirectory() as dir:
             tmpdir = Path(dir)
@@ -573,7 +579,7 @@ class Test_MotionCorrection:
 
                 h5_loc = "mc/ch0"
                 temp_path = tmpdir.joinpath("test.h5")
-                io.save(temp_path, data={"ch0":data}, h5_loc="mc")
+                io.save(temp_path, data=data, h5_loc=h5_loc)
 
                 data = temp_path
 
@@ -587,7 +593,7 @@ class Test_MotionCorrection:
             elif input_type == ".tdb":
 
                 temp_path = tmpdir.joinpath("test.tdb")
-                temp_path = io.save(temp_path, data={"test/ch0":data}, h5_loc=None)
+                temp_path = io.save(temp_path, data=data)
 
                 assert temp_path.is_dir(), f"cannot find {temp_path}"
                 data = temp_path
@@ -598,7 +604,11 @@ class Test_MotionCorrection:
             else:
                 raise ValueError
 
-            mc = MotionCorrection()
+            wd = tmpdir.joinpath("wd/")
+            if not wd.exists():
+                wd.mkdir()
+
+            mc = MotionCorrection(working_directory=wd)
             mc.run(data, h5_loc=h5_loc, max_shifts=(6, 6))
 
             data = mc.save(output=None, remove_mmap=True)
@@ -653,11 +663,14 @@ class Test_MotionCorrection:
             data = mc.save(output=None, remove_mmap=True)
             assert type(data) == np.ndarray
 
-    @pytest.mark.parametrize("param", [{"input_":"testdata/sample_0.tiff"},
-                                            {"input_":"testdata/sample_0.h5", "h5_loc":"data/ch0"}])
-    def test_real_input(self, param):
+    @pytest.mark.parametrize("extension", [".h5", ".tiff"])
+    def test_real_input(self, extension, h5_loc="dff/ch0"):
+
+        si = SampleInput()
+        input_ = si.get_test_data(extension=extension)
+
         mc = MotionCorrection()
-        mc.run(**param, max_shifts=(6, 6))
+        mc.run(input_=input_, h5_loc=h5_loc, max_shifts=(6, 6))
 
         data = mc.save(output=None, remove_mmap=True)
         assert type(data) == np.ndarray
@@ -681,7 +694,7 @@ class Test_MotionCorrection:
             data[t] = shifted_structure
 
         mc = MotionCorrection()
-        mc.run(data, h5_loc=None, max_shifts=(int(X/2)-1, int(Y/2)-1))
+        mc.run(data, max_shifts=(int(X/2)-1, int(Y/2)-1))
 
         data = mc.save(output=None, remove_mmap=True)
         assert type(data) == np.ndarray
@@ -690,4 +703,4 @@ class Test_MotionCorrection:
         mcs = np.array(mc.shifts)[:, 0]
         mcs = np.mean(np.abs(np.diff(mcs)))
 
-        assert np.allclose(mcs, motion_speed, rtol=5)
+        assert np.allclose(mcs, motion_speed, atol=1.5)

@@ -98,9 +98,6 @@ class Test_LocalCache:
         assert n1 == n2, f"cached result is incorrect: {n1} != {n2}"
         assert d2 < d1, f"cached result took too long: {d1} <= {d2}"
 
-def test_get_data_dimensions():
-    raise NotImplementedError
-
 @pytest.mark.parametrize("typ", ["pandas", "list", "numpy", "dask", "events"])
 @pytest.mark.parametrize("ragged", ["equal", "ragged"])
 @pytest.mark.parametrize("num_rows", [1, 10])
@@ -261,7 +258,7 @@ class Test_normalization:
                 if value_mode == "std":
                     control = norm.data[l] / np.std(norm.data)
 
-            assert np.allclose(res[l], control)
+            assert np.allclose(res[l], control), f"res: {res[l]} \n {control}"
 
     @staticmethod
     @pytest.mark.parametrize("data_type", ["list", "dataframe", "array"])
@@ -305,64 +302,34 @@ class Test_normalization:
         norm.min_max()
 
     @staticmethod
-    @pytest.mark.parametrize("min_length", [None, 5, 20])
-    @pytest.mark.parametrize("max_length", [None, 5, 20])
-    def test_enforced_length(num_rows, ragged, min_length, max_length):
+    @pytest.mark.parametrize("fixed_value", [None, 999])
+    @pytest.mark.parametrize("nan_value", [np.nan])
+    def test_impute_nan(num_rows, nan_value, ragged, fixed_value):
 
-        if (min_length is not None) and (max_length is not None) and (min_length != max_length):
-            return None
-
-        DG = DummyGenerator(num_rows=num_rows, ragged=ragged)
+        DG = DummyGenerator(num_rows=num_rows, trace_length=25, ragged=ragged)
         data = DG.get_array()
+
+        for r in range(len(data)):
+
+            if len(data[r]) < 2:
+                pass
+
+            row = data[r]
+            rand_idx = np.random.randint(0, max(len(row), 1))
+            row[rand_idx] = nan_value
+            data[r] = row
 
         norm = Normalization(data)
-        res = norm.run({0: ["enforce_length", dict(min_length=min_length, max_length=max_length)]})
+        assert np.sum(np.isnan(norm.data if isinstance(norm.data, np.ndarray) else ak.ravel(norm.data))) > 0
 
-        for r in range(len(res)):
-            row = res[r]
+        imputed = norm.run({
+            0: ["impute_nan", dict(fixed_value=fixed_value)]
+        })
 
-            if min_length is not None:
-                assert len(row) >= min_length
+        if isinstance(imputed, ak.Array):
+            imputed = ak.ravel(imputed)
 
-            if max_length is not None:
-                assert len(row) <= max_length
-
-    @staticmethod
-    @pytest.mark.parametrize("fixed_value", [None, 999])
-    @pytest.mark.parametrize("enforced", [True, False])
-    def test_impute_nan(num_rows, ragged, fixed_value, enforced):
-
-        DG = DummyGenerator(num_rows=num_rows, trace_length=10, ragged=ragged)
-        data = DG.get_array()
-
-        if enforced:
-
-            norm = Normalization(data)
-            imputed = norm.run({
-                0: ["enforce_length", dict(min_length=14, max_length=None)],
-                1: ["impute_nan", dict(fixed_value=fixed_value)]
-            })
-
-        else:
-
-            for r in range(len(data)):
-
-                if len(data[r]) < 2:
-                    pass
-
-                row = data[r]
-                rand_idx = np.random.randint(0, max(len(row), 1))
-                row[rand_idx] = np.nan
-                data[r] = row
-
-            norm = Normalization(data)
-            assert np.sum(np.isnan(norm.data if isinstance(norm.data, np.ndarray) else ak.ravel(norm.data))) > 0
-
-            imputed = norm.run({
-                0: ["impute_nan", dict(fixed_value=fixed_value)]
-            })
-
-        assert np.sum(np.isnan(imputed if isinstance(imputed, np.ndarray) else ak.ravel(imputed))) == 0
+        assert np.sum(np.isnan(imputed)) == 0
 
     def test_column_wise(self, num_rows, ragged):
 
@@ -423,3 +390,32 @@ class Test_EventSim:
 
         assert event_map.shape == shape
         assert num_events >= 0
+
+class Test_SampleInput:
+
+    def test_load_and_delete(self):
+        si = SampleInput()
+
+        temp_dir = si.get_dir()
+        assert temp_dir.is_dir()
+
+        del si
+        assert not temp_dir.is_dir()
+
+    @pytest.mark.parametrize("extension", [".h5", ".tiff"])
+    def test_load_file(self, extension):
+        si = SampleInput()
+        input_path = si.get_test_data(extension=extension)
+        assert input_path.exists()
+
+        del si
+        assert not input_path.exists()
+
+    @pytest.mark.parametrize("loc", [None, "dff/ch0"])
+    def test_h5_loc(self, loc, extension=".h5"):
+
+        si = SampleInput()
+        input_path = si.get_test_data(extension=extension)
+
+        h5_loc = si.get_h5_loc(ref=loc)
+        assert isinstance(h5_loc, str), f"h5_loc is type: {type(h5_loc)}"

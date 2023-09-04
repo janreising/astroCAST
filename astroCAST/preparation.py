@@ -436,12 +436,21 @@ class IO:
         """
 
         if lazy:
-            data = h5py.File(path, "r")[h5_loc]
+            data = h5py.File(path, "r")
+
+            if h5_loc not in data:
+                raise ValueError(f"cannot find dataset in file ({path}): {list(data.keys())}")
+
+            data = data[h5_loc]
             data = da.from_array(data, chunks=chunks)
 
         else:
-            with h5py.File(path, "r") as h5:
-                data = h5[h5_loc][:] # Read all data from HDF5 file
+            with h5py.File(path, "r") as data:
+
+                if h5_loc not in data:
+                    raise ValueError(f"cannot find dataset in file ({path}): {list(data.keys())}")
+
+                data = data[h5_loc][:] # Read all data from HDF5 file
 
         return data
 
@@ -651,7 +660,7 @@ class IO:
                         loc = h5_loc[k]
 
                 elif h5_loc is None:
-                    loc = k if "/" in k else f"io/{k}"
+                    loc = k if "/" in str(k) else f"io/{k}"
 
                 elif len(data) == 1:
                         loc = f"{h5_loc}/{k}" if "/" not in h5_loc[:-1] else h5_loc
@@ -775,12 +784,11 @@ class MotionCorrection:
         # mmap location
         self.mmap_path = None
 
-    def run(self, input_, h5_loc=None,
+    def run(self, input_, h5_loc="",
             max_shifts=(50, 50), niter_rig=1, splits_rig=14, num_splits_to_process_rig=None,
             strides=(48, 48), overlaps=(24, 24), pw_rigid=False, splits_els=14,
             num_splits_to_process_els=None, upsample_factor_grid=4, max_deviation_rigid=3,
-            shifts_opencv=True, nonneg_movie=True, border_nan='copy', num_frames_split=80,
-            gSig_filt=(20, 20)):
+            nonneg_movie=True, gSig_filt=(20, 20)):
 
         """
 
@@ -822,21 +830,11 @@ class MotionCorrection:
         max_deviation_rigid:int
             maximum deviation allowed for patch with respect to rigid shift
 
-        shifts_opencv: Bool
-            apply shifts fast way (but smoothing results)
-
         nonneg_movie: boolean
             make the SAVED movie and template mostly nonnegative by removing min_mov from movie
 
         use_cuda : bool, optional
             Use skcuda.fft (if available). Default: False
-
-        border_nan : bool or string, optional
-            Specifies how to deal with borders. (True, False, 'copy', 'min')
-
-        num_frames_split: int, default: 80
-            Number of frames in each batch. Used when cosntructing the options
-            through the params object
 
         var_name_hdf5: str, default: 'mov'
             If loading from hdf5, name of the variable to load
@@ -861,19 +859,18 @@ class MotionCorrection:
                 num_splits_to_process_rig=num_splits_to_process_rig, strides=strides, overlaps=overlaps,
                 pw_rigid=pw_rigid, splits_els=splits_els, num_splits_to_process_els=num_splits_to_process_els,
                 upsample_factor_grid=upsample_factor_grid, max_deviation_rigid=max_deviation_rigid,
-                shifts_opencv=shifts_opencv, nonneg_movie=nonneg_movie, border_nan=border_nan,
-                num_frames_split=num_frames_split, gSig_filt=gSig_filt)
+                nonneg_movie=nonneg_movie, gSig_filt=gSig_filt)
 
         # Perform motion correction
         mc.motion_correct(save_movie=True)
         self.shifts = mc.shifts_rig
 
         # Check if the motion correction generated the mmap file
-        if len(mc.mmap_file) < 1 or not Path(mc.mmap_file[0]).is_file():
+        if len(mc.fname_tot_rig) < 1 or not Path(mc.fname_tot_rig[0]).is_file():
             raise FileNotFoundError(f"motion correction failed unexpectedly. mmap path: {mc.mmap}")
 
         # Set the mmap_path attribute to the generated mmap file
-        self.mmap_path = mc.mmap_file[0]
+        self.mmap_path = mc.fname_tot_rig[0]
 
     def _validate_input(self, input_, h5_loc):
         """
@@ -899,9 +896,9 @@ class MotionCorrection:
         if isinstance(input_, (str, Path)):
             # If input is a string or Path object
 
-            input_ = Path(input_) if isinstance(input_, str) else input_
+            input_ = Path(input_)
 
-            if not input_.is_file():
+            if not input_.exists():
                 raise FileNotFoundError(f"cannot find input_: {input_}")
 
             if input_.suffix in [".h5", ".hdf5"]:
@@ -924,9 +921,8 @@ class MotionCorrection:
                 # If input is a TIFF file
                 return input_
 
-            elif input_.suffix in [".tdb"]:
-                # If input is a TDB file (not implemented)
-                raise NotImplementedError
+            else:
+                raise ValueError(f"unknown input type. Please provide .h5 or .tiff file.")
 
         elif isinstance(input_, np.ndarray):
             # If input is a ndarray create a temporary TIFF file to run the motion correction on
@@ -936,7 +932,13 @@ class MotionCorrection:
             if self.working_directory is None:
                 self.working_directory = tempfile.TemporaryDirectory()
 
-            temp_h5_path = Path(self.working_directory.name) if isinstance(self.working_directory, tempfile.TemporaryDirectory) else Path(self.working_directory)
+            if isinstance(self.working_directory, tempfile.TemporaryDirectory):
+                temp_h5_path = Path(self.working_directory.name)
+            else:
+                temp_h5_path = Path(self.working_directory)
+
+            assert temp_h5_path.exists(), f"working directory doesn't exist: {temp_h5_path}"
+
             temp_h5_path = temp_h5_path.joinpath(f"{self.dummy_folder_name}.tiff").as_posix()
             tifffile.imwrite(temp_h5_path, input_)
 
@@ -1143,7 +1145,7 @@ class Delta:
 
     """
 
-    def __init__(self, input_, loc=None, in_memory=True, parallel=False):
+    def __init__(self, input_, loc=None):
         """
         Initializes a Delta object.
 
@@ -1164,16 +1166,11 @@ class Delta:
         # Get the dimensions and chunk size of the input data
         self.dim, self.chunksize = get_data_dimensions(self.input_, loc=loc)
 
-        # Flag indicating whether the data should be loaded into memory
-        self.in_memory = in_memory
-
-        # Flag indicating whether to use parallel processing
-        self.parallel = parallel
-
         # The location of the data in the HDF5 file (optional, only applicable for .h5 files)
         self.loc = loc
 
-    def run(self, method="background", window=None, overwrite_first_frame=True, use_dask=True):
+    def run(self, method="background", window=None, chunks="infer", output_path=None,
+            overwrite_first_frame=True, lazy=True):
         """
         Runs the delta calculation on the input data.
 
@@ -1195,7 +1192,7 @@ class Delta:
 
         """
         # Prepare the data for processing
-        data = self.prepare_data(self.input_, in_memory=self.in_memory, shared=self.parallel, use_dask=use_dask)
+        data = self.prepare_data(self.input_, h5_loc=self.loc, chunks=chunks, output_path=output_path, lazy=lazy)
 
         # Sequential execution
         if isinstance(data, np.ndarray):
@@ -1203,7 +1200,7 @@ class Delta:
             res = self.calculate_delta_min_filter(data, window, method=method, inplace=False)
 
         # Parallel from .tdb file
-        elif isinstance(data, str) and data.startswith("tdb:"):
+        elif isinstance(data, (str, Path)) and Path(data).suffix in (".tdb"):
             # Warning message for overwriting the .tdb file
             logging.warning("This function will overwrite the provided .tdb file!")
 
@@ -1223,7 +1220,7 @@ class Delta:
                     tdb[:, x0:x1, y0:y1] = calculate_delta_min_filter(data, window, method=method, inplace=False)
 
             # Extract the path from the input data
-            path = data[len("tdb:"):]
+            path = data.as_posix()
 
             # Get the dimensions and chunk size of the .tdb file
             (Z, X, Y), chunksize = get_data_dimensions(path, loc=None)
@@ -1243,7 +1240,8 @@ class Delta:
                     client.gather(futures)
 
             # Load the modified .tdb file into memory
-            res = self.load_to_memory(Path(path), loc=None)
+            io = IO()
+            res = io.load(Path(path))
 
         elif isinstance(data, da.core.Array):
             # Calculate delta using Dask array for lazy loading and computation
@@ -1254,7 +1252,7 @@ class Delta:
                                   dtype=float).compute()
 
         else:
-            raise NotImplementedError("Input data type not recognized!")
+            raise ValueError(f"Input data type not recognized: {type(data)}")
 
         # Overwrite the first frame with the second frame if required
         if overwrite_first_frame:
@@ -1263,37 +1261,12 @@ class Delta:
         self.res = res
         return res
 
-    @staticmethod
-    def load_to_memory(path, loc=None):
-        """
-        This function loads data from the specified path into memory and returns it.
-
-        Args:
-        - path: A path to the data to be loaded.
-        - loc: A string representing the location of the data in the HDF5 file. This parameter is optional
-          and only applicable when path has the .h5 extension.
-
-        Returns:
-        - The data loaded from the specified path.
-
-        Raises:
-        - TypeError: If the file type is not recognized.
-
-        """
-
-        # Check if the input is already a numpy ndarray
-        if isinstance(path, np.ndarray):
-            return path
-
-        io = IO()
-        return io.load(path, h5_loc=loc)
-
     def save(self, output_path, h5_loc="df", chunks=(-1, "auto", "auto"), compression=None):
 
         io = IO()
         io.save(output_path, data=self.res, h5_loc=h5_loc, chunks=chunks, compression=compression)
 
-    def prepare_data(self, input_, in_memory=True, shared=True, use_dask=True):
+    def prepare_data(self, input_, chunks="infer", h5_loc=None, output_path=None, lazy=True):
 
         """
         Preprocesses the input data by converting it to a TileDB array and optionally loading it into memory
@@ -1314,56 +1287,50 @@ class Delta:
         - TypeError: If the input data type is not recognized.
         """
 
+        io = IO()
+
+        if not lazy:
+            data = io.load(input_, h5_loc=h5_loc, lazy=lazy)
+
+            if not isinstance(data, da.Array):
+                data = da.from_array(data, chunks=(self.dim))
+            data = da.rechunk(data, chunks=(-1, "auto", "auto"))
+            return data
+
         # convert to .tdb
-        if not in_memory:
+        elif isinstance(input_, Path) and input_.suffix == ".tdb":
+            return io.load(input_, lazy=lazy)
 
-            if isinstance(input_, Path) and input_.suffix == ".tdb":
-                return f"tdb:{input_.as_posix()}"
+        elif isinstance(input_, Path):
+            # if the input is a file path, load it into memory and convert to TileDB array
 
-            elif isinstance(input_, Path):
-                # if the input is a file path, load it into memory and convert to TileDB array
-                data = self.load_to_memory(input_, loc=self.loc)
-                return self.save_to_tdb(data)
+            data = io.load(input_, h5_loc=self.loc)
 
-            elif isinstance(input_, np.ndarray):
-                # if the input is a numpy ndarray, convert to TileDB array
-                return self.save_to_tdb(input_)
+            new_path = input_.with_suffix(".tdb") if output_path is None else Path(output_path)
+            if not new_path.suffix in (".tdb"):
+                raise ValueError(f"Please provide an output_path with '.tdb' ending instead of {new_path.suffix}")
 
+            io.save(new_path, data=data, chunks=chunks)
+
+            return io.load(new_path, lazy=lazy)
+
+        elif isinstance(input_, (np.ndarray, da.Array)):
+            # if the input is a numpy ndarray, convert to TileDB array
+
+            if output_path is None:
+                raise ValueError("when providing an array as input, an output_path needs to be provided as well.")
             else:
-                # if the input data type is not recognized, raise an error
-                raise TypeError(f"do not recognize data type: {type(input_)}")
+                new_path = Path(output_path)
 
-        # simple load
-        elif in_memory and not shared:
-            return self.load_to_memory(input_, loc=self.loc)
+            if not new_path.suffix in (".tdb"):
+                raise ValueError(f"Please provide an output_path with '.tdb' ending instead of {new_path.suffix}")
 
-        # create dask.array
-        elif in_memory and use_dask:
-            # if 'in_memory' is True and 'shared' is True, load the data into memory as a Dask array
-            # TODO this should be lazy loading through dask array instead
-            arr = self.load_to_memory(input_, loc=self.loc)
+            io.save(new_path, data=input_, chunks=chunks)
 
-            if not isinstance(arr, da.Array):
-                arr = da.from_array(arr, chunks=(self.dim))
-
-            data = da.rechunk(arr, chunks=(-1, "auto", "auto"))
-
-        elif in_memory and not use_dask:
-
-            # TODO create VRAM shared memory
-            # if not use_dask:
-            #     shm_name = "my_shared_memory" # TODO dynamic
-            #     shm_length = arr.nbytes # TODO dynamic
-            #     shm_array = shm.SharedMemory(create=True, name=shm_name, size=shm_length)
-            #     shm_array_np = np.ndarray(arr.shape, dtype=arr.dtype, buffer=shm_array.buf)
-            #     shm_array_np[:] = arr[:]
-
-            raise NotImplementedError("implement shared memory option")
+            return io.load(new_path, lazy=lazy)
 
         else:
-            raise NotImplementedError
-
-        return data
+            raise TypeError(f"do not recognize data type: {type(input_)}")
 
     @staticmethod
     @deprecated(reason="faster implementation but superseded by: calculate_background_even_faster")

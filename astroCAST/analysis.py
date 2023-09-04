@@ -417,7 +417,7 @@ class Events(CachedClass):
         return events
 
     @wrapper_local_cache
-    def get_extended_events(self, video=None, dtype=np.half, extend=-1,
+    def get_extended_events(self, video=None, dtype=float, extend=-1,
                             return_array=False, in_place=False,
                             normalization_instructions=None, show_progress=True,
                             memmap_path=None, save_path=None, save_param={}):
