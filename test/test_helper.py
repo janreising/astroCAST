@@ -258,7 +258,7 @@ class Test_normalization:
                 if value_mode == "std":
                     control = norm.data[l] / np.std(norm.data)
 
-            assert np.allclose(res[l], control)
+            assert np.allclose(res[l], control), f"res: {res[l]} \n {control}"
 
     @staticmethod
     @pytest.mark.parametrize("data_type", ["list", "dataframe", "array"])

@@ -311,24 +311,28 @@ def get_data_dimensions(input_, loc=None, return_dtype=False):
 
 class DummyGenerator:
 
-    def __init__(self, num_rows=25, trace_length=12, ragged=False, offset=0, n_groups=None, n_clusters=None):
+    def __init__(self, num_rows=25, trace_length=12, ragged=False, offset=0, min_length=2, n_groups=None, n_clusters=None):
 
         self.data = self.get_data(num_rows=num_rows, trace_length=trace_length,
-                                  ragged=ragged, offset=offset)
+                                  ragged=ragged, offset=offset, min_length=min_length)
 
         self.groups = None if n_groups is None else np.random.randint(0, n_groups, size=len(self.data), dtype=int)
         self.clusters = None if n_clusters is None else np.random.randint(0, n_clusters, size=len(self.data), dtype=int)
 
     @staticmethod
-    def get_data(num_rows, trace_length, ragged, offset):
+    def get_data(num_rows, trace_length, ragged, offset, min_length):
 
         if isinstance(ragged, str):
             ragged = True if ragged == "ragged" else False
 
         if ragged:
-            data = [np.random.random(
-                size=trace_length + np.random.randint(low=-trace_length + 1, high=trace_length - 1)) + offset for _ in
-                    range(num_rows)]
+
+            data = []
+            for _ in range(num_rows):
+
+                random_length = max(min_length, trace_length + np.random.randint(low=-trace_length, high=trace_length) + offset)
+                data.append(np.random.random(size=(random_length)))
+
         else:
             data = np.random.random(size=(num_rows, trace_length)) + offset
 
