@@ -1,6 +1,7 @@
 import tempfile
 import time
 
+import numpy as np
 import pytest
 
 from astroCAST.reduction import *
@@ -54,9 +55,9 @@ class Test_FeatureExtraction:
             assert d2 < d1, f"caching is taking too long: {d2} > {d1}"
             assert features_1.equals(features_2)
 
-@pytest.mark.xdist_group(name="tensorflow")
 class Test_CNN:
 
+    @pytest.mark.xdist_group(name="tensorflow")
     def test_training(self):
 
         DG = DummyGenerator(num_rows=11, trace_length=16, ragged=False)
@@ -65,6 +66,7 @@ class Test_CNN:
         cnn = CNN()
         cnn.train(data, epochs=2)
 
+    @pytest.mark.xdist_group(name="tensorflow")
     def test_training_modified(self):
 
         DG = DummyGenerator(num_rows=11, trace_length=16, ragged=False)
@@ -73,6 +75,7 @@ class Test_CNN:
         cnn = CNN()
         cnn.train(data, epochs=2, dropout=0.1, regularize_latent=0.01)
 
+    @pytest.mark.xdist_group(name="tensorflow")
     def test_embeding(self):
         DG = DummyGenerator(num_rows=11, trace_length=16, ragged=False)
         data = DG.get_array()
@@ -82,6 +85,7 @@ class Test_CNN:
 
         Y_test = cnn.embed(X_test)
 
+    @pytest.mark.xdist_group(name="tensorflow")
     def test_plotting(self):
 
         DG = DummyGenerator(num_rows=11, trace_length=16, ragged=False)
@@ -93,6 +97,7 @@ class Test_CNN:
         cnn.plot_history()
         cnn.plot_examples(X_test, Y_test)
 
+    @pytest.mark.xdist_group(name="tensorflow")
     def test_save_load(self, tmp_path):
 
         DG = DummyGenerator(num_rows=11, trace_length=16, ragged=False)
@@ -106,9 +111,10 @@ class Test_CNN:
         cnn_naive.load_model(tmp_path)
         cnn_naive.embed(X_test)
 
-@pytest.mark.xdist_group(name="tensorflow")
+
 class Test_UMAP:
 
+    @pytest.mark.xdist_group(name="tensorflow")
     def test_training(self):
 
         data = np.random.random(size=(12, 25))
@@ -116,9 +122,10 @@ class Test_UMAP:
         um = UMAP()
         embedded = um.train(data)
 
+    @pytest.mark.xdist_group(name="tensorflow")
     def test_plotting(self):
 
-        data = np.random.random(size=(12, 25))
+        data = np.random.random(size=(12, 8))
 
         um = UMAP()
         embedded = um.train(data)
@@ -131,24 +138,30 @@ class Test_UMAP:
         um.plot(ax=ax, use_napari=False)
 
         # napari
+        um = UMAP()
+        embedded = um.train(data)
         um.plot(data=embedded)
 
         # napari
+        um = UMAP()
+        embedded = um.train(data)
         labels = np.random.randint(0, 5, size=len(data))
         um.plot(data=embedded, labels=labels)
 
+    @pytest.mark.xdist_group(name="tensorflow")
     def test_save_load(self, tmp_path):
 
         data = np.random.random(size=(12, 25))
 
         um = UMAP()
-        embedded = um.train(data)
+        embedded_1 = um.train(data)
 
         um.save(tmp_path)
 
         um = UMAP()
         um.load(tmp_path)
-        embedded = um.embed(data)
+        embedded_2 = um.embed(data)
 
+        assert np.allclose(embedded_1, embedded_2)
 
 
