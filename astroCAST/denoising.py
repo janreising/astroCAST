@@ -74,7 +74,7 @@ class FullFrameGenerator(keras.utils.Sequence):
         self.epoch_index = 0
 
         # read file dimensions
-        if file_path.endswith(".h5"):
+        if file_path.suffix in (".h5", ".hdf5"):
 
             assert loc is not None, "When using a .h5 file the 'loc' parameter needs to be provided"
 
@@ -93,7 +93,7 @@ class FullFrameGenerator(keras.utils.Sequence):
                 self.local_mean = np.mean(local_data)
                 self.local_std = np.std(local_data)
 
-        if file_path.endswith(".tiff") or file_path.endswith(".tif"):
+        if file_path.suffix in (".tiff", ".tif"):
 
             tif = tiff.TiffFile(file_path)
             self.total_frame_per_movie = len(tif.pages)
@@ -179,7 +179,7 @@ class FullFrameGenerator(keras.utils.Sequence):
             input_index = input_index[input_index !=
                                       index_frame + index_padding]
 
-        if self.file_path.endswith(".h5"):
+        if self.file_path.suffix in (".h5", ".hdf5"):
 
             with h5.File(self.file_path, "r") as movie_obj:
 
@@ -189,7 +189,7 @@ class FullFrameGenerator(keras.utils.Sequence):
 
                 data_img_output = movie_obj[self.loc][index_frame, :, :]
 
-        elif self.file_path.endswith(".tiff") or self.file_path.endswith(".tif"):
+        elif self.file_path.suffix in (".tiff", ".tif"):
 
             data_img_input = tiff.imread(self.file_path, key=input_index)
             # TODO this might not be necessary for TIFFs
@@ -349,10 +349,10 @@ class FullFrameGenerator(keras.utils.Sequence):
 
         final_shape.extend(indiv_shape[:-1])
 
-        if (output is None) or (output.endswith(".tiff")) or (output.endswith(".tiff")):
+        if (output is None) or (output.suffix in (".tiff", ".tif")):
             dset_out = np.zeros(tuple(final_shape), dtype=dtype)
 
-        elif output.endswith(".h5"):
+        elif output.suffix in (".h5", ".hdf5"):
 
             assert out_loc is not None, "when exporting results to .h5 file please provide 'out_loc' flag"
 
@@ -380,10 +380,10 @@ class FullFrameGenerator(keras.utils.Sequence):
         if output is None:
             return dset_out
 
-        elif output.endswith(".tiff") or output.endswith(".tif"):
+        elif output.suffix in (".tiff", ".tif"):
             tiff.imwrite(output, data=dset_out)
 
-        elif output.endswith(".h5"):
+        elif output.suffix in (".hdf5", ".h5"):
             f.close()
 
 # TODO inference on SubFrameGenerator

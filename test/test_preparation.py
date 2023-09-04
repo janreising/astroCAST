@@ -8,7 +8,7 @@ from astroCAST.preparation import *
 
 class Test_Delta:
 
-    @pytest.mark.parametrize("input_type", [np.ndarray, "testdata/sample_0.tiff", "testdata/sample_0.h5", "tiledb"])
+    @pytest.mark.parametrize("input_type", [np.ndarray, ".tiff", ".h5", "tiledb"])
     @pytest.mark.parametrize("lazy", (True, False))
     def test_load(self, input_type, lazy, shape=(50, 10, 10)):
 
@@ -38,12 +38,11 @@ class Test_Delta:
 
             elif isinstance(input_type, str):
 
-                path = Path(input_type)
-                assert path.is_file()
-                data = path
-                output_path = tmpdir.joinpath("temp.tdb")
+                si = SampleInput()
+                data = si.get_test_data(extension=input_type)
+                loc = si.get_h5_loc()
 
-                loc = "data/ch0"
+                output_path = tmpdir.joinpath("temp.tdb")
 
             else:
                 raise TypeError

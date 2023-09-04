@@ -19,8 +19,9 @@ class Test_Generators:
 
         si = SampleInput()
         file_path = si.get_test_data(extension=extension)
+        loc = si.get_h5_loc()
 
-        gen = FullFrameGenerator(file_path=file_path, loc="data/ch0", pre_post_frame=pre_post_frame,
+        gen = FullFrameGenerator(file_path=file_path, loc=loc, pre_post_frame=pre_post_frame,
                                  batch_size=25)
 
         for ep in range(2):
@@ -36,8 +37,9 @@ class Test_Generators:
 
         si = SampleInput()
         file_path = si.get_test_data(extension=extension)
+        loc = si.get_h5_loc()
 
-        gen = SubFrameGenerator(paths=file_path, loc="data/ch0", pre_post_frame=pre_post_frame,
+        gen = SubFrameGenerator(paths=file_path, loc=loc, pre_post_frame=pre_post_frame,
                                  input_size=(25, 25), batch_size=25, normalize=normalize)
 
         for ep in range(2):
@@ -51,8 +53,9 @@ class Test_Generators:
 
         si = SampleInput()
         file_path = si.get_test_data(extension=extension)
+        loc = si.get_h5_loc()
 
-        param = dict(paths=file_path, loc="data/ch0", input_size=(25, 25), pre_post_frame=5, gap_frames=0,
+        param = dict(paths=file_path, loc=loc, input_size=(25, 25), pre_post_frame=5, gap_frames=0,
                      normalize="global", cache_results=True, in_memory=True)
 
         train_gen = SubFrameGenerator(padding=None, batch_size=25, max_per_file=50,
@@ -66,8 +69,9 @@ class Test_Generators:
 
         si = SampleInput()
         file_path = si.get_test_data(extension=extension)
+        loc = si.get_h5_loc()
 
-        gen = FullFrameGenerator(file_path=file_path, loc="data/ch0", pre_post_frame=5,
+        gen = FullFrameGenerator(file_path=file_path, loc=loc, pre_post_frame=5,
                                  batch_size=25, total_samples=50)
 
         net = Network(train_generator=gen, val_generator=gen, n_stacks=1, kernel=8, batchNormalize=False, use_cpu=True)
