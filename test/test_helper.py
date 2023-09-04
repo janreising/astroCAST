@@ -401,6 +401,7 @@ class Test_SampleInput:
 
         del si
         assert not temp_dir.is_dir()
+
     @pytest.mark.parametrize("extension", [".h5", ".tiff"])
     def test_load_file(self, extension):
         si = SampleInput()
@@ -409,3 +410,12 @@ class Test_SampleInput:
 
         del si
         assert not input_path.exists()
+
+    @pytest.mark.parametrize("loc", [None, "dff/ch0"])
+    def test_h5_loc(self, loc, extension=".h5"):
+
+        si = SampleInput()
+        input_path = si.get_test_data(extension=extension)
+
+        h5_loc = si.get_h5_loc(ref=loc)
+        assert isinstance(h5_loc, str), f"h5_loc is type: {type(h5_loc)}"

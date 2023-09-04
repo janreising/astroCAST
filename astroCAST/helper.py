@@ -652,6 +652,7 @@ class SampleInput:
     def __init__(self, test_data_dir="./testdata/"):
         self.test_data_dir = Path(test_data_dir)
         self.tmp_dir = tempfile.TemporaryDirectory()
+        self.sample_path = None
 
     def get_dir(self):
         return Path(self.tmp_dir.name)
@@ -670,7 +671,51 @@ class SampleInput:
         shutil.copy(sample, new_path)
         assert new_path.exists()
 
+        self.sample_path = new_path
+
         return new_path
+
+    def get_h5_loc(self, ref=None):
+
+        if self.sample_path is None:
+            raise FileNotFoundError("please run 'get_test_data()' first")
+
+        if self.sample_path.suffix in [".h5", ".hdf5"]:
+
+            with h5py.File(self.sample_path.as_posix(), "r") as f:
+
+                # make sure reference dataset exists in sample file
+                if ref is not None and ref not in f:
+                    raise ValueError(f"cannot find {ref}")
+                elif ref is not None:
+                    return ref
+
+                # get dataset
+                def recursive_get_dataset(f, loc):
+
+                    # choose first location if none is provided
+                    if loc is None:
+
+                        locs = list(f.keys())
+
+                        if len(locs) < 2:
+                            raise ValueError(f"cannot find any datasets in sample file: {self.sample_path} ({locs})")
+
+                        loc = locs[1]
+
+                    if isinstance(f[loc], h5py.Group):
+
+                        locs = list(f[loc].keys())
+                        if len(loc) < 1:
+                            raise ValueError(f"cannot find any datasets in sample file: {self.sample_path}")
+
+                        loc = f"{loc}/{locs[0]}"
+                        return recursive_get_dataset(f, loc)
+
+                    if isinstance(f[loc], h5py.Dataset):
+                        return loc
+
+                return recursive_get_dataset(f, None)
 
     def __del__(self):
         self.tmp_dir.cleanup()
