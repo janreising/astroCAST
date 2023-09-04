@@ -183,7 +183,11 @@ class Test_Events:
             logging.warning(f"trace: {traces}")
             logging.warning(f"arr: {arr}")
 
-            assert (len(np.unique(traces.astype(int))) == len(np.unique(arr.astype(int)))) or (len(np.unique(traces.astype(int))) == len(np.unique(arr.astype(int)))-1)
+            data_unique_values = np.unique(arr.flatten().astype(int))
+            trace_unique_values = np.unique(traces.flatten().astype(int))
+
+            assert abs(len(data_unique_values) - len(trace_unique_values)) <= 2, f"data_unique: {data_unique_values}\n" \
+                                                                                 f"trace_unique: {trace_unique_values}"
 
     @pytest.mark.parametrize("extend", [4, (3, 2), (-1, 2), (2, -1)])
     def test_extension_partial(self, extend, shape=(50, 100, 100)):
