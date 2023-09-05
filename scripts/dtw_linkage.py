@@ -2,8 +2,8 @@ import argparse
 import json
 from pathlib import Path
 
-from astroCAST.analysis import Events
-from astroCAST.clustering import Linkage
+from astrocast.analysis import Events
+from astrocast.clustering import Linkage
 
 if __name__ == "__main__":
 

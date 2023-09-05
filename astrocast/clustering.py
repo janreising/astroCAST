@@ -24,8 +24,8 @@ from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
 from sklearn import metrics
 from tqdm import tqdm
 
-from astroCAST.analysis import Events
-from astroCAST.helper import wrapper_local_cache, is_ragged, CachedClass, Normalization
+from astrocast.analysis import Events
+from astrocast.helper import wrapper_local_cache, is_ragged, CachedClass, Normalization
 
 # from dtaidistance import dtw_visualisation as dtwvis
 # from dtaidistance import clustering

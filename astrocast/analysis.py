@@ -18,10 +18,10 @@ import napari
 from napari.utils.events import Event
 import awkward as ak
 
-import astroCAST.detection
-from astroCAST import helper
-from astroCAST.helper import get_data_dimensions, is_ragged, CachedClass, Normalization, wrapper_local_cache
-from astroCAST.preparation import IO
+import astrocast.detection
+from astrocast import helper
+from astrocast.helper import get_data_dimensions, is_ragged, CachedClass, Normalization, wrapper_local_cache
+from astrocast.preparation import IO
 
 
 class Events(CachedClass):
@@ -323,7 +323,7 @@ class Events(CachedClass):
                 time_map = np.load(time_map_path.as_posix(), allow_pickle=True)[()]
 
             elif event_map is not None:
-                time_map = astroCAST.detection.Detector.get_time_map(event_map=event_map, chunk=chunk)
+                time_map = astrocast.detection.Detector.get_time_map(event_map=event_map, chunk=chunk)
                 np.save(time_map_path.as_posix(), time_map)
 
             else:
@@ -334,7 +334,7 @@ class Events(CachedClass):
             if not isinstance(event_map, (np.ndarray, da.Array)):
                 raise ValueError(f"please provide 'event_map' as np.ndarray or da")
 
-            time_map = astroCAST.detection.Detector.get_time_map(event_map=event_map, chunk=chunk)
+            time_map = astrocast.detection.Detector.get_time_map(event_map=event_map, chunk=chunk)
 
         else:
             raise ValueError("Please provide either 'event_dir' or 'event_map'.")

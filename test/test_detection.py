@@ -2,9 +2,9 @@ import tempfile
 
 import pytest
 
-from astroCAST.detection import *
-from astroCAST.helper import EventSim, SampleInput
-from astroCAST.preparation import IO
+from astrocast.detection import *
+from astrocast.helper import EventSim, SampleInput
+from astrocast.preparation import IO
 
 @pytest.mark.serial
 class Test_Detector:

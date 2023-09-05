@@ -5,7 +5,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from astroCAST.helper import *
+from astrocast.helper import *
 
 class Test_LocalCache:
 

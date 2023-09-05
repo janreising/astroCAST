@@ -4,12 +4,12 @@ from pathlib import Path
 
 import pytest
 
-from astroCAST.denoising import FullFrameGenerator, SubFrameGenerator
-from astroCAST.denoising import Network
+from astrocast.denoising import FullFrameGenerator, SubFrameGenerator
+from astrocast.denoising import Network
 import os
 
-from astroCAST.helper import SampleInput
-from astroCAST.preparation import IO
+from astrocast.helper import SampleInput
+from astrocast.preparation import IO
 
 class Test_Generators:
 

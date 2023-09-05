@@ -24,7 +24,7 @@ from dask.diagnostics import ProgressBar
 from tqdm import tqdm
 from multiprocess import shared_memory
 
-from astroCAST.preparation import IO
+from astrocast.preparation import IO
 
 
 class Detector:
