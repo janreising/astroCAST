@@ -781,11 +781,12 @@ class MotionCorrection:
         # needed if only one dataset in .h5 files. Weird behavior from caiman.MotionCorrection
         self.dummy_folder_name = "delete_me"
 
-        # mmap location
+        # output location
         self.mmap_path = None
+        self.tiff_path = None
 
     def run(self, input_, h5_loc="",
-            max_shifts=(50, 50), niter_rig=1, splits_rig=14, num_splits_to_process_rig=None,
+            max_shifts=(50, 50), niter_rig=3, splits_rig=14, num_splits_to_process_rig=None,
             strides=(48, 48), overlaps=(24, 24), pw_rigid=False, splits_els=14,
             num_splits_to_process_els=None, upsample_factor_grid=4, max_deviation_rigid=3,
             nonneg_movie=True, gSig_filt=(20, 20)):
@@ -862,8 +863,10 @@ class MotionCorrection:
                 nonneg_movie=nonneg_movie, gSig_filt=gSig_filt)
 
         # Perform motion correction
-        mc.motion_correct(save_movie=True)
+        obj, registered_filename = mc.motion_correct(save_movie=True)
         self.shifts = mc.shifts_rig
+
+        logging.info(f"result saved to: {registered_filename}")
 
         # Check if the motion correction generated the mmap file
         if len(mc.fname_tot_rig) < 1 or not Path(mc.fname_tot_rig[0]).is_file():
@@ -871,6 +874,7 @@ class MotionCorrection:
 
         # Set the mmap_path attribute to the generated mmap file
         self.mmap_path = mc.fname_tot_rig[0]
+        self.tiff_path = registered_filename[0]
 
     def _validate_input(self, input_, h5_loc):
         """
@@ -973,8 +977,11 @@ class MotionCorrection:
                     del f[self.dummy_folder_name]
 
         # Remove mmap result
-        if Path(self.mmap_path).is_file():
+        if self.mmap_path is not None and Path(self.mmap_path).is_file():
             os.remove(self.mmap_path)
+
+        if self.tiff_path is not None and Path(self.tiff_path).is_file():
+            os.remove(self.tiff_path)
 
         # Remove temp .h5 if necessary
         if self.working_directory is not None:
@@ -1009,7 +1016,7 @@ class MotionCorrection:
 
         return frames_per_file
 
-    def save(self, output=None, h5_loc="mc", chunks=None, compression=None, remove_mmap=False):
+    def save(self, output=None, h5_loc="mc", chunks=None, compression=None, remove_intermediate=True):
 
         """
         Retrieve the motion-corrected data and optionally save it to a file.
@@ -1037,35 +1044,19 @@ class MotionCorrection:
 
         """
 
-        # Check if the mmap_path is available
-        if self.mmap_path is None:
-            raise ValueError("mmap_path is None. Please compute motion correction first by using the 'run()' function")
+        # Check if the tiff output is available
+        tiff_path = self.tiff_path
+        if tiff_path is None:
+            raise ValueError("tiff_path is None. Please compute motion correction first by using the 'run()' function")
 
-        # Convert the mmap_path to a Path object if it's provided as a string
-        path = Path(self.mmap_path) if isinstance(self.mmap_path, str) else self.mmap_path
+        tiff_path = Path(tiff_path)
+        if not tiff_path.is_file():
+            raise FileNotFoundError(f"could not find tiff file: {tiff_path}. Maybe the 'clean_up()' function was called too early?")
 
-        # Check if the mmap file exists
-        if not path.is_file():
-            raise FileNotFoundError(f"could not find mmap file: {path}. Maybe the 'clean_up()' function was called too early?")
-
-        # caiman's mmap naming convention:
-        #   ./{name}_d1_{X}_d2_{Y}_d3_{dim3}_order_{F/C}_frames_{Z}_.mmap
-        name = path.stem.split("_")
-
-        debug_names = {i:n for i, n in enumerate(name)}
-        logging.debug(f"mmap name elements: {debug_names}")
-
-        Z, order, Y, X = int(name[-2]), name[-4], int(name[-8]), int(name[-10])
-        logging.debug(f"Z: {Z}, order: {order}, X:{X}, Y:{Y}")
-
-        # TODO order and shape questionable
-        # Read the motion-corrected data from the mmap file as a memory-mapped array
-        data = np.memmap(path.as_posix(), shape=(Z, Y, X), dtype=float, order="C")
+        data = tifffile.imread(tiff_path.as_posix())
 
         # If output is None, return the motion-corrected data as a NumPy array
         if output is None:
-            data = np.array(data)
-            data = np.swapaxes(data, 1, 2)
             return data
 
         elif isinstance(output, (str, Path)):
@@ -1073,7 +1064,6 @@ class MotionCorrection:
 
             # Create a dask array from the memory-mapped data with specified chunking and compression
             data = da.from_array(data, chunks=chunks)
-            data = data.swapaxes(1, 2)
 
             # Check if the output file is an HDF5 file and loc is provided
             if output.suffix in [".h5", ".hdf5"] and h5_loc is None:
@@ -1095,10 +1085,10 @@ class MotionCorrection:
             self.io.save(output, data={channel:data}, h5_loc=loc, chunks=chunks, compression=compression)
 
         else:
-            raise ValueError(f"please provide output as None, str or pathlib.Path instead of {path}")
+            raise ValueError(f"please provide output as None, str or pathlib.Path instead of {output}")
 
         # If remove_mmap is True, delete the mmap file associated with motion correction
-        if remove_mmap:
+        if remove_intermediate:
             self.clean_up()
 
 class Delta:
