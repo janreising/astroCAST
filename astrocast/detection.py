@@ -24,7 +24,7 @@ from dask.diagnostics import ProgressBar
 from tqdm import tqdm
 from multiprocess import shared_memory
 
-from astroCAST.preparation import IO
+from astrocast.preparation import IO
 
 
 class Detector:
@@ -49,9 +49,9 @@ class Detector:
 
     """
     def __init__(self, input_path: str, output=None,
-                 indices: np.array = None, verbosity: int = 1):
+                 indices: np.array = None, logging_level=logging.INFO):
 
-        logging.basicConfig(format="%(asctime)s %(levelname)s: %(message)s", level=verbosity)
+        logging.basicConfig(format="%(asctime)s %(levelname)s: %(message)s", level=logging_level)
 
         # paths
         self.input_path = Path(input_path)
@@ -767,35 +767,3 @@ class Detector:
             return ~mask, None
         else:
             return new_mask, local_max_container
-
-
-if __name__ == "__main__":
-    # parse arguments
-    parser = argparse.ArgumentParser()
-    parser.add_argument("-i", "--input", required=True, type=str, default=None, help="Input file")
-    parser.add_argument("-k", "--key", type=str, default=None, help="dataset name")
-    parser.add_argument("-t", "--threshold", type=int, default=None, help="use -1 for automatic thresholding")
-    parser.add_argument("-v", "--verbosity", type=int, default=1)
-    parser.add_argument("--binarystruct", type=int, default=1)
-    parser.add_argument("--binaryconnect", type=int, default=2)
-    parser.add_argument("--splitevents", type=bool, const=True, default=True, nargs='?',
-                        help="splits detected events into smaller events if multiple peaks are detected")
-    parser.add_argument("--lazy", type=bool, default=True, help='Use lazy loading')
-    parser.add_argument("--output", type=str, default=None,
-                        help="output folder name. If output=None, output is set to input_path + .roi")  # Added option
-    parser.add_argument("--saveactpixels", type=bool, default=False, help="Save active pixels file")
-
-    args = parser.parse_args()
-
-    args.threshold = args.threshold if args.threshold != -1 else None
-
-    # logging
-    # TODO fill in
-
-    # deal with data input
-    ed = Detector(args.input, verbosity=args.verbosity, output=args.output)
-    ed.run(dataset=args.key, lazy=args.lazy, subset=None,
-           split_events=args.splitevents,
-           binary_struct_connectivity=args.binaryconnect,
-           binary_struct_iterations=args.binarystruct,
-           save_activepixels=args.saveactpixels)

@@ -3,8 +3,8 @@ import tempfile
 import pytest
 import dask
 
-from astroCAST.helper import SampleInput
-from astroCAST.preparation import *
+from astrocast.helper import SampleInput
+from astrocast.preparation import *
 
 class Test_Delta:
 

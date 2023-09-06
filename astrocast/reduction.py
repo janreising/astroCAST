@@ -16,8 +16,8 @@ from matplotlib import pyplot as plt
 import seaborn as sns
 from scipy.cluster import hierarchy
 
-from astroCAST.analysis import Events
-from astroCAST.helper import CachedClass, wrapper_local_cache
+from astrocast.analysis import Events
+from astrocast.helper import CachedClass, wrapper_local_cache
 
 
 class FeatureExtraction(CachedClass):

@@ -4,8 +4,8 @@ import time
 import numpy as np
 import pytest
 
-from astroCAST.reduction import *
-from astroCAST.helper import DummyGenerator
+from astrocast.reduction import *
+from astrocast.helper import DummyGenerator
 
 DG_equal = DummyGenerator()
 DG_ragged = DummyGenerator(ragged=True)

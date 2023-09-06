@@ -9,6 +9,7 @@ from pathlib import Path
 import awkward as ak
 import dask.array as da
 import h5py
+import yaml
 from skimage.util import img_as_uint
 
 import numpy as np
@@ -40,8 +41,8 @@ def wrapper_local_cache(f):
 
     def hash_arg(arg):
 
-        from astroCAST.analysis import Events, Video
-        from astroCAST.reduction import FeatureExtraction
+        from astrocast.analysis import Events, Video
+        from astrocast.reduction import FeatureExtraction
 
         if isinstance(arg, np.ndarray):
             return hash_from_ndarray(arg)
@@ -412,7 +413,7 @@ class DummyGenerator:
 
     def get_events(self):
 
-        from astroCAST.analysis import Events
+        from astrocast.analysis import Events
 
         ev = Events(event_dir=None)
         df = self.get_dataframe()
@@ -635,8 +636,8 @@ class EventSim:
                        z_fraction=0.2, xy_fraction=0.1, gap_space=1, gap_time=1,
                        blob_size_fraction=0.05, event_probability=0.2):
 
-        from astroCAST.analysis import IO
-        from astroCAST.detection import Detector
+        from astrocast.analysis import IO
+        from astrocast.detection import Detector
 
         h5_path = Path(h5_path)
 
@@ -980,3 +981,18 @@ class CachedClass:
         logging.warning(f"cache_path: {self.cache_path}")
         time.sleep(0.5)
         return np.random.random(1)
+
+
+def load_yaml_defaults(yaml_file_path):
+    """Load default values from a YAML file."""
+
+    logging.warning("loading configuration from yaml file. "
+                    "Be advised that command line parameters take priority over configurations in the yaml.")
+
+    with open(yaml_file_path, 'r') as file:
+        params = yaml.safe_load(file)
+
+        for key, value in params.items():
+            logging.info(f"yaml parameter >> {key}:{value}")
+
+        return params

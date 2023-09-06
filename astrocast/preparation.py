@@ -1,7 +1,6 @@
-import itertools
 import logging
-import multiprocessing
 import os
+import shutil
 import tempfile
 from collections import OrderedDict
 from pathlib import Path
@@ -26,9 +25,8 @@ from skimage.util import img_as_uint
 from deprecated import deprecated
 from scipy.ndimage import minimum_filter1d
 
-from astroCAST.helper import get_data_dimensions
+from astrocast.helper import get_data_dimensions
 from dask.diagnostics import ProgressBar
-
 
 class Input:
 
@@ -789,7 +787,7 @@ class MotionCorrection:
             max_shifts=(50, 50), niter_rig=3, splits_rig=14, num_splits_to_process_rig=None,
             strides=(48, 48), overlaps=(24, 24), pw_rigid=False, splits_els=14,
             num_splits_to_process_els=None, upsample_factor_grid=4, max_deviation_rigid=3,
-            nonneg_movie=True, gSig_filt=(20, 20)):
+            nonneg_movie=True, gSig_filt=(20, 20), bigtiff=True):
 
         """
 
@@ -860,7 +858,7 @@ class MotionCorrection:
                 num_splits_to_process_rig=num_splits_to_process_rig, strides=strides, overlaps=overlaps,
                 pw_rigid=pw_rigid, splits_els=splits_els, num_splits_to_process_els=num_splits_to_process_els,
                 upsample_factor_grid=upsample_factor_grid, max_deviation_rigid=max_deviation_rigid,
-                nonneg_movie=nonneg_movie, gSig_filt=gSig_filt)
+                nonneg_movie=nonneg_movie, gSig_filt=gSig_filt, bigtiff=bigtiff)
 
         # Perform motion correction
         obj, registered_filename = mc.motion_correct(save_movie=True)
@@ -913,7 +911,7 @@ class MotionCorrection:
 
                 with h5py.File(input_.as_posix(), "a") as f:
                     if h5_loc not in f:
-                        raise ValueError(f"cannot find dataset {h5_loc} in provided .h5 file.")
+                        raise ValueError(f"cannot find dataset {h5_loc} in provided in {input_}.")
 
                     # Motion Correction fails with custom h5_loc names in cases where there is only one folder (default behavior incorrect)
                     if len(f.keys()) < 2:
@@ -1044,6 +1042,9 @@ class MotionCorrection:
 
         """
 
+        # enforce path
+        output = Path(output)
+
         # Check if the tiff output is available
         tiff_path = self.tiff_path
         if tiff_path is None:
@@ -1063,6 +1064,9 @@ class MotionCorrection:
             output = Path(output) if isinstance(output, Path) else output
 
             # Create a dask array from the memory-mapped data with specified chunking and compression
+            if chunks is None:
+                chunks = tuple([max(1, int(dim/10)) for dim in data.shape])
+                logging.warning(f"No 'chunk' parameter provided. Choosing: {chunks}")
             data = da.from_array(data, chunks=chunks)
 
             # Check if the output file is an HDF5 file and loc is provided
@@ -1159,7 +1163,7 @@ class Delta:
         # The location of the data in the HDF5 file (optional, only applicable for .h5 files)
         self.loc = loc
 
-    def run(self, method="background", window=None, chunks="infer", output_path=None,
+    def run(self, window, method="background", chunks="infer", output_path=None,
             overwrite_first_frame=True, lazy=True):
         """
         Runs the delta calculation on the input data.
@@ -1203,7 +1207,7 @@ class Delta:
                 # Open the TileDB array and load the specified range
                 with tiledb.open(path, mode="r") as tdb:
                     data = tdb[:, x0:x1, y0:y1]
-                    res = calculate_delta_min_filter(data, window, method=method, inplace=False)
+                    res = calculate_delta_min_filter(data, window, method=method, inplace=False) # TODO does this make sense?
 
                 # Overwrite the range with the calculated delta values
                 with tiledb.open(path, mode="w") as tdb:
@@ -1299,6 +1303,10 @@ class Delta:
             new_path = input_.with_suffix(".tdb") if output_path is None else Path(output_path)
             if not new_path.suffix in (".tdb"):
                 raise ValueError(f"Please provide an output_path with '.tdb' ending instead of {new_path.suffix}")
+
+            if new_path.exists():
+                logging.warning(f"found previous result. Deleting {new_path}")
+                shutil.rmtree(new_path)
 
             io.save(new_path, data=data, chunks=chunks)
 

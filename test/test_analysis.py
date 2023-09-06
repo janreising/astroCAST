@@ -4,10 +4,10 @@ import time
 import dask.array
 import pytest
 
-from astroCAST.analysis import *
-from astroCAST.clustering import Distance
-from astroCAST.detection import Detector
-from astroCAST.helper import EventSim, DummyGenerator
+from astrocast.analysis import *
+from astrocast.clustering import Distance
+from astrocast.detection import Detector
+from astrocast.helper import EventSim, DummyGenerator
 
 import matplotlib
 matplotlib.use('Agg')  # Use the Agg backend
