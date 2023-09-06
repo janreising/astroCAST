@@ -49,9 +49,9 @@ class Detector:
 
     """
     def __init__(self, input_path: str, output=None,
-                 indices: np.array = None, verbosity: int = 1):
+                 indices: np.array = None, logging_level=logging.INFO):
 
-        logging.basicConfig(format="%(asctime)s %(levelname)s: %(message)s", level=verbosity)
+        logging.basicConfig(format="%(asctime)s %(levelname)s: %(message)s", level=logging_level)
 
         # paths
         self.input_path = Path(input_path)
