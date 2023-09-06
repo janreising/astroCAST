@@ -786,7 +786,7 @@ class MotionCorrection:
             max_shifts=(50, 50), niter_rig=3, splits_rig=14, num_splits_to_process_rig=None,
             strides=(48, 48), overlaps=(24, 24), pw_rigid=False, splits_els=14,
             num_splits_to_process_els=None, upsample_factor_grid=4, max_deviation_rigid=3,
-            nonneg_movie=True, gSig_filt=(20, 20)):
+            nonneg_movie=True, gSig_filt=(20, 20), bigtiff=True):
 
         """
 
@@ -857,7 +857,7 @@ class MotionCorrection:
                 num_splits_to_process_rig=num_splits_to_process_rig, strides=strides, overlaps=overlaps,
                 pw_rigid=pw_rigid, splits_els=splits_els, num_splits_to_process_els=num_splits_to_process_els,
                 upsample_factor_grid=upsample_factor_grid, max_deviation_rigid=max_deviation_rigid,
-                nonneg_movie=nonneg_movie, gSig_filt=gSig_filt)
+                nonneg_movie=nonneg_movie, gSig_filt=gSig_filt, bigtiff=bigtiff)
 
         # Perform motion correction
         obj, registered_filename = mc.motion_correct(save_movie=True)
