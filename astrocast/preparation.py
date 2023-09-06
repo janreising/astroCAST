@@ -1,5 +1,6 @@
 import logging
 import os
+import shutil
 import tempfile
 from collections import OrderedDict
 from pathlib import Path
@@ -1302,6 +1303,10 @@ class Delta:
             new_path = input_.with_suffix(".tdb") if output_path is None else Path(output_path)
             if not new_path.suffix in (".tdb"):
                 raise ValueError(f"Please provide an output_path with '.tdb' ending instead of {new_path.suffix}")
+
+            if new_path.exists():
+                logging.warning(f"found previous result. Deleting {new_path}")
+                shutil.rmtree(new_path)
 
             io.save(new_path, data=data, chunks=chunks)
 
