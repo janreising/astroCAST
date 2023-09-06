@@ -9,6 +9,8 @@ import humanize
 import numpy as np
 import yaml
 from functools import partial
+
+from astrocast.detection import Detector
 from astrocast.preparation import MotionCorrection, Delta, Input
 
 click_custom_option = partial(click.option, show_default=True)
@@ -189,6 +191,58 @@ def convert_input(logging_level, input_path, output_path, sep, channels, z_slice
     delta = humanize.naturaldelta(dt.timedelta(seconds=time.time() - t0))
     logging.info(f"Motion correction finished in {delta}")
 
+@click.command()
+@click_custom_option('input-path')
+@click_custom_option('--output-path', type=click.Path(), default=None, help='Path to the output file.')
+@click_custom_option('--indices', type=click.STRING, default=None, help='Indices in a numpy array format.')
+@click_custom_option('--logging-level', type=click.INT, default=logging.INFO, help='Logging level for messages.')
+@click_custom_option('--h5_loc', type=click.STRING, default=None, help='Name or identifier of the dataset in the h5 file.')
+@click_custom_option('--threshold', type=click.FLOAT, default=None, help='Threshold value to discriminate background from events.')
+@click_custom_option('--min-size', type=click.INT, default=20, help='Minimum size of an event region.')
+@click_custom_option('--lazy', type=click.BOOL, default=True, help='Whether to implement lazy loading.')
+@click_custom_option('--adjust-for-noise', type=click.BOOL, default=False, help='Whether to adjust event detection for background noise.')
+@click_custom_option('--subset', type=click.STRING, default=None, help='Subset of the dataset to process.')
+@click_custom_option('--split-events', type=click.BOOL, default=True, help='Whether to split detected events into smaller events if multiple peaks are detected.')
+@click_custom_option('--binary-struct-iterations', type=click.INT, default=1, help='Number of iterations for binary structuring element.')
+@click_custom_option('--binary-struct-connectivity', type=click.INT, default=2, help='Connectivity of binary structuring element.')
+@click_custom_option('--save-activepixels', type=click.BOOL, default=False, help='Save active pixels or not.')
+@click_custom_option('--parallel', type=click.BOOL, default=True, help='Parallel execution of event characterization.')
+@click_custom_option('--overwrite', type=click.BOOL, default=False, help='Flag for overwriting previous result in output location')
+def detect_events(input_path, output_path, indices, logging_level, h5_loc, threshold, min_size, lazy,
+                  adjust_for_noise, subset, split_events, binary_struct_iterations, binary_struct_connectivity,
+                  save_activepixels, parallel, overwrite):
+    """
+    Detect events using the Detector class.
+    """
+
+    logging.basicConfig(level=logging_level)
+    t0 = time.time()
+
+    # check output
+    if output_path is not None and Path(output_path).exists():
+
+        if overwrite:
+            logging.warning(f"overwrite is {overwrite}, deleting previous result")
+            Path(output_path).unlink()
+        else:
+            raise FileExistsError(f"Aborting detection because previous calculation exists ({output_path}."
+                                  f"Please provide an alternative output path or set '--overwrite True'")
+
+
+    # Initializing the Detector instance
+    detector = Detector(input_path=input_path, output=output_path,
+                        indices=np.array(eval(indices)) if indices else None, logging_level=logging_level)
+
+    # Running the detection
+    detector.run(dataset=h5_loc, threshold=threshold, min_size=min_size, lazy=lazy,
+                 adjust_for_noise=adjust_for_noise, subset=subset, split_events=split_events,
+                 binary_struct_iterations=binary_struct_iterations,
+                 binary_struct_connectivity=binary_struct_connectivity,
+                 save_activepixels=save_activepixels, parallel=parallel)
+
+    # Logging the time taken
+    delta = humanize.naturaldelta(dt.timedelta(seconds=time.time() - t0))
+    logging.info(f"Event detection finished in {delta}")
 
 if __name__ == '__main__':
     cli()
