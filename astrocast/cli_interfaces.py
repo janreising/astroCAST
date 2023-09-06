@@ -10,6 +10,7 @@ import numpy as np
 import yaml
 from functools import partial
 
+from astrocast.denoising import SubFrameGenerator
 from astrocast.detection import Detector
 from astrocast.preparation import MotionCorrection, Delta, Input
 
@@ -36,7 +37,7 @@ def check_output(output_path, input_path, h5_loc_save, overwrite):
 
     return output_path
 
-@click.group(context_settings={'auto_envvar_prefix': 'CLI'})
+@click.group(context_settings={'auto_envvar_prefix': 'CLI'}, chain=True)
 @click.option('--config', default=None, type=click.Path())  # this allows us to change config path
 @click.pass_context
 def cli(ctx, config):
@@ -109,13 +110,12 @@ def motion_correction(input_path, working_directory, logging_level, output_path,
 
 
 @cli.command()
-@click_custom_option('input-path')
-@click_custom_option('--config', type=click.Path(exists=True), help='Path to the configuration YAML file.')
+@click.argument('input-path', type=click.Path(exists=True))
 @click_custom_option('--window', type=click.INT, required=True, help='Size of the window for the minimum filter.')
 @click_custom_option('--output-path', type=None, help='Path to save the output data.')
 @click_custom_option('--loc', type=click.STRING, default="", help='Location of the data in the HDF5 file (if applicable).')
 @click_custom_option('--method', type=click.Choice(['background', 'dF', 'dFF']), default='background', help='Method to use for delta calculation.')
-@click_custom_option('--chunks', type=click.STRING, default='infer', help='Chunk size for data processing.')
+@click_custom_option('--chunks', type=click.Tuple([int, str, str]), default=(1, 100, 100), help='Chunk size for data processing.')
 @click_custom_option('--overwrite-first-frame', type=click.BOOL, default=True, help='Whether to overwrite the first frame with the second frame after delta calculation.')
 @click_custom_option('--lazy', type=click.BOOL, default=True, help='Flag for lazy data loading and computation.')
 @click_custom_option('--h5-loc', type=click.STRING, default="df", help='Location within the HDF5 file to save the data.')
@@ -152,9 +152,9 @@ def subtract_delta(input_path, output_path, loc, method, window, chunks, overwri
 
 
 @cli.command()
-@click_custom_option('--input-path')
+@click.argument('input-path', type=click.Path(exists=True))
 @click_custom_option('--logging-level', type=click.INT, default=logging.INFO, help='Logging level for messages.')
-@click_custom_option('--output-path', type=Path, help='Path to save the processed data. If None, the processed data is returned.')
+@click_custom_option('--output-path', type=click.Path(), help='Path to save the processed data. If None, the processed data is returned.')
 @click_custom_option('--sep', default="_", help='Separator used for sorting file names.')
 @click_custom_option('--channels', default=1, help='Number of channels or dictionary specifying channel names.')
 @click_custom_option('--z-slice', default=None, help='Z slice index.')
@@ -168,7 +168,7 @@ def subtract_delta(input_path, output_path, loc, method, window, chunks, overwri
 @click_custom_option('--chunks', default=None, help='Chunk size to use when saving to HDF5 or TileDB.')
 @click_custom_option('--compression', default=None, help='Compression method to use when saving to HDF5 or TileDB.')
 @click_custom_option('--overwrite', type=click.BOOL, default=False, help='Flag for overwriting previous result in output location')
-def convert_input(logging_level, input_path, output_path, sep, channels, z_slice, lazy, subtract_background,
+def convert_input(input_path, logging_level, output_path, sep, channels, z_slice, lazy, subtract_background,
                   subtract_func, rescale, dtype, in_memory, h5_loc, chunks, compression, overwrite):
 
     """
@@ -192,7 +192,78 @@ def convert_input(logging_level, input_path, output_path, sep, channels, z_slice
     logging.info(f"Motion correction finished in {delta}")
 
 @cli.command()
-@click_custom_option('input-path')
+@click.argument('input-path', type=click.Path(exists=True))
+@click_custom_option('--model', type=click.Path(exists=True), required=True, help='Path to the trained model file or the model object itself.')
+@click_custom_option('--output-file', type=click.Path(), required=True, help='Path to the output file where the results will be saved. If not provided, the result will be returned instead of being saved to a file.')
+@click_custom_option('--batch-size', type=click.INT, default=16, help='batch size processed in each step.')
+@click_custom_option('--input-size', type=(int, int), default=(100, 100), help='size of the denoising window')
+@click_custom_option('--pre-post-frame', type=click.INT, default=5, help='Number of frames before and after the central frame in each data chunk.')
+@click_custom_option('--gap-frames', type=click.INT, default=0, help='Number of frames to skip in the middle of each data chunk.')
+@click_custom_option('--z-select', type=(click.INT, click.INT), default=None, help='Range of frames to select in the Z dimension, given as a tuple (start, end).')
+@click_custom_option('--overlap', type=click.FLOAT, default=None, help='Overlap between data chunks.')
+@click_custom_option('--padding', type=click.STRING, default=None, help='Padding mode for the data chunks.')
+@click_custom_option('--normalize', type=click.STRING, default=None, help='Normalization mode for the data.')
+@click_custom_option('--loc', type=click.STRING, default="data/", help='Location in the input file(s) where the data is stored.')
+@click_custom_option('--in-memory', type=click.BOOL, default=False, help='Whether to store data in memory.')
+@click_custom_option('--logging-level', type=click.INT, default=logging.INFO, help='Logging level for messages.')
+@click_custom_option('--out-loc', type=click.STRING, default=None, help='Location in the output file where the results will be saved.')
+@click_custom_option('--dtype', type=click.STRING, default="same", help='Data type for the output. If "same", the data type of the input will be used.')
+@click_custom_option('--chunk-size', type=(int, int), default=None, help='Chunk size for saving the results in the output file. If not provided, a default chunk size will be used.')
+@click_custom_option('--rescale', type=click.BOOL, default=True, help='Whether to rescale the output values.')
+def denoise(input_file, batch_size, input_size, pre_post_frame, gap_frames, z_select,
+            logging_level, model, output, out_loc, dtype, chunk_size, rescale,
+            overlap, padding,
+            normalize, loc, in_memory):
+    """
+    Denoise the input data using the SubFrameGenerator class and infer method.
+    """
+
+    logging.basicConfig(level=logging_level)
+    t0 = time.time()
+
+    # Initializing the SubFrameGenerator instance
+    sub_frame_generator = SubFrameGenerator(
+        paths=input_file,
+        batch_size=batch_size,
+        input_size=input_size,
+        pre_post_frame=pre_post_frame,
+        gap_frames=gap_frames,
+        z_steps=None,
+        z_select=z_select,
+        allowed_rotation=[0],
+        allowed_flip=[-1],
+        random_offset=False,
+        add_noise=False,
+        drop_frame_probability=None,
+        max_per_file=None,
+        overlap=overlap,
+        padding=padding,
+        shuffle=False,
+        normalize=normalize,
+        loc=loc,
+        output_size=None,
+        cache_results=False,
+        in_memory=in_memory,
+        save_global_descriptive=False,
+        logging_level=logging_level
+    )
+
+    # Running the infer method
+    result = sub_frame_generator.infer(
+        model=model,
+        output=output,
+        out_loc=out_loc,
+        dtype=dtype,
+        chunk_size=chunk_size,
+        rescale=rescale
+    )
+
+    # Logging the time taken
+    delta = humanize.naturaldelta(dt.timedelta(seconds=time.time() - t0))
+    logging.info(f"Denoising finished in {delta}")
+
+@cli.command()
+@click.argument('input-path', type=click.Path(exists=True))
 @click_custom_option('--output-path', type=click.Path(), default=None, help='Path to the output file.')
 @click_custom_option('--indices', type=click.STRING, default=None, help='Indices in a numpy array format.')
 @click_custom_option('--logging-level', type=click.INT, default=logging.INFO, help='Logging level for messages.')
@@ -243,6 +314,7 @@ def detect_events(input_path, output_path, indices, logging_level, h5_loc, thres
     # Logging the time taken
     delta = humanize.naturaldelta(dt.timedelta(seconds=time.time() - t0))
     logging.info(f"Event detection finished in {delta}")
+
 
 if __name__ == '__main__':
     cli()
