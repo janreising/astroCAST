@@ -48,7 +48,8 @@ tslearn = "*"
 umap-learn = "*"
 xarray = "*"
 xxhash = "*"
-jnormcorre = "*"
+#jnormcorre = "*" # TODO uncomment once pull-request was accepted
+jnormcorre = { git = "https://github.com/janreising/jnormcorre.git", branch = "production" }
 numpy = "*"
 humanize = "*"
 pyyaml = "*"
@@ -59,7 +60,6 @@ pytest-xdist = "*"
 
 [tool.poetry.scripts]
 astrocast = 'astrocast.cli_interfaces:cli'
-
 
 [build-system]
 requires = ["poetry-core"]
