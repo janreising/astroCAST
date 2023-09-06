@@ -58,9 +58,6 @@ pytest-cov = "*"
 pytest-xdist = "*"
 
 [tool.poetry.scripts]
-#delta = 'astrocast.preparation:run_delta'
-#motion-correction = 'astrocast.preparation:run_motion_correction'
-#convert-input = 'astrocast.preparation:run_convert_input'
 astrocast = 'astrocast.cli_interfaces:cli'
 
 
