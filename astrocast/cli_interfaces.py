@@ -191,7 +191,7 @@ def convert_input(logging_level, input_path, output_path, sep, channels, z_slice
     delta = humanize.naturaldelta(dt.timedelta(seconds=time.time() - t0))
     logging.info(f"Motion correction finished in {delta}")
 
-@click.command()
+@cli.command()
 @click_custom_option('input-path')
 @click_custom_option('--output-path', type=click.Path(), default=None, help='Path to the output file.')
 @click_custom_option('--indices', type=click.STRING, default=None, help='Indices in a numpy array format.')
