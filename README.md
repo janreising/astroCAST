@@ -28,7 +28,7 @@ Please note that astroCAST has several dependencies. You can refer to the `requi
 Here's a minimal example of how to use astroCAST:
 
 ```python
-from astroCAST import preparation, detection, analysis, helper, clustering
+from astrocast import preparation, detection, analysis, helper, clustering
 
 # Prepare the data
 converter = preparation.Input()
@@ -48,11 +48,11 @@ events = analysis.Events('path/to/output.roi')
 events.get_summary_statistic()
 
 # Event preparation
-filter_instructions = {"event_column":(1,20)}
+filter_instructions = {"event_column": (1, 20)}
 events.filter(filter_instructions, inplace=True)
 
 normalization_instructions = {
-  0: ["subtract": {"mode":"mean"}], 1: ["divide": {"mode":"std"}]
+    0: ["subtract": {"mode": "mean"}], 1: ["divide": {"mode": "std"}]
 }
 events.normalize(normalization_instructions, inplace=True)
 
