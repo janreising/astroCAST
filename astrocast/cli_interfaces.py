@@ -1,15 +1,18 @@
 import datetime as dt
 import logging
+import os
 import time
 from pathlib import Path
 
 import click
 import h5py
 import humanize
+import napari
 import numpy as np
 import yaml
 from functools import partial
 
+from astrocast.analysis import Video
 from astrocast.denoising import SubFrameGenerator
 from astrocast.detection import Detector
 from astrocast.preparation import MotionCorrection, Delta, Input
@@ -115,7 +118,8 @@ def motion_correction(input_path, working_directory, logging_level, output_path,
 @click_custom_option('--output-path', type=None, help='Path to save the output data.')
 @click_custom_option('--loc', type=click.STRING, default="", help='Location of the data in the HDF5 file (if applicable).')
 @click_custom_option('--method', type=click.Choice(['background', 'dF', 'dFF']), default='background', help='Method to use for delta calculation.')
-@click_custom_option('--chunks', type=click.Tuple([int, str, str]), default=(1, 100, 100), help='Chunk size for data processing.')
+# @click_custom_option('--chunks', type=click.Tuple([int, str, str]), default=(1, 100, 100), help='Chunk size for data processing.')
+@click_custom_option('--chunks', default="infer", help='Chunk size for data processing.')
 @click_custom_option('--overwrite-first-frame', type=click.BOOL, default=True, help='Whether to overwrite the first frame with the second frame after delta calculation.')
 @click_custom_option('--lazy', type=click.BOOL, default=True, help='Flag for lazy data loading and computation.')
 @click_custom_option('--h5-loc', type=click.STRING, default="df", help='Location within the HDF5 file to save the data.')
@@ -144,7 +148,7 @@ def subtract_delta(input_path, output_path, loc, method, window, chunks, overwri
 
     # Save the results to the specified output path
     logging.info("saving result ...")
-    delta_instance.save(output_path=output_path, h5_loc=h5_loc, chunks=(1, "auto", "auto"), compression=compression)
+    delta_instance.save(output_path=output_path, h5_loc=h5_loc, chunks=chunks, compression=compression, overwrite=overwrite)
 
     # logging
     delta = humanize.naturaldelta(dt.timedelta(seconds=time.time() - t0))
@@ -314,6 +318,85 @@ def detect_events(input_path, output_path, indices, logging_level, h5_loc, thres
     # Logging the time taken
     delta = humanize.naturaldelta(dt.timedelta(seconds=time.time() - t0))
     logging.info(f"Event detection finished in {delta}")
+
+def visualize_h5_recursive(loc, indent='', prefix=''):
+    """Recursive part of the function to visualize the structure."""
+    items = list(loc.items())
+    for i, (name, item) in enumerate(items):
+        is_last = i == len(items) - 1
+        new_prefix = '│  ' if not is_last else '   '
+
+        if isinstance(item, h5py.Group):
+            print(f"{indent}{prefix}├─ {name}/")
+            visualize_h5_recursive(item, indent + new_prefix, prefix='├─ ')
+
+        elif isinstance(item, h5py.Dataset):
+            details = [
+                f"shape: {item.shape}",
+                f"dtype: {item.dtype}",
+            ]
+            if item.compression:
+                details.append(f"compression: {item.compression}")
+            if item.chunks:
+                details.append(f"chunks: {item.chunks}")
+
+            details_str = ', '.join(details)
+            print(f"{indent}{prefix}├─ {name} ({details_str})")
+
+@cli.command()
+@click.argument('input-path', type=click.Path(exists=True))
+def visualize_h5(input_path):
+    """
+    Visualizes the structure of a .h5 file in a tree format.
+
+    This function uses recursion to traverse through all groups and datasets in the .h5 file and
+    prints the structure in a pretty way. It can be used to quickly inspect the contents of a .h5 file.
+
+    Parameters:
+    input_path (str): The path to the .h5 file that needs to be visualized.
+
+    Returns:
+    None
+
+    Example:
+    visualize_h5('path/to/your/file.h5')
+    """
+
+    file_size = humanize.naturalsize(os.path.getsize(input_path))
+    print(f"\n> {os.path.basename(input_path)} ({file_size})")
+
+    with h5py.File(input_path, 'r') as f:
+        visualize_h5_recursive(f['/'])
+
+@cli.command()
+@click.argument('input-path', type=click.Path(exists=True))
+@click_custom_option('--h5-loc', type=click.STRING, default="", help='Name or identifier of the dataset in the h5 file.')
+@click_custom_option('--z-select', type=(click.INT, click.INT), default=None, help='Range of frames to select in the Z dimension, given as a tuple (start, end).')
+@click_custom_option('--lazy', type=click.BOOL, default=True, help='Whether to implement lazy loading.')
+def view_data(input_path, h5_loc, z_select, lazy):
+    """
+    Displays a video from a data file (.h5, .tiff, .tdb).
+
+    This function uses the Video class to create a video object from a dataset  and displays the video using napari.
+    The function provides options to select a specific dataset within the h5 file, a range of frames to display,
+    and whether to use lazy loading.
+
+    Parameters:
+    input_path (str): The path to the h5 file.
+    h5_loc (str): The name or identifier of the dataset within the h5 file. Defaults to an empty string, which indicates the root group.
+    z_select (tuple of int, optional): A tuple specifying the range of frames to select in the Z dimension. The tuple contains two elements: the start and end frame numbers. Defaults to None, which indicates that all frames should be selected.
+    lazy (bool): Whether to implement lazy loading, which can improve performance when working with large datasets by only loading data into memory as it is needed. Defaults to True.
+
+    Returns:
+    None
+
+    Examples:
+    view_data('path/to/your/file.h5', h5_loc='dataset_name', z_select=(10, 20), lazy=True)
+    """
+
+    vid = Video(data=input_path, z_slice=z_select, h5_loc=h5_loc, lazy=lazy)
+    vid.show()
+    napari.run()
 
 
 if __name__ == '__main__':
