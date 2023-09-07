@@ -26,6 +26,7 @@ def check_output(output_path, input_path, h5_loc_save, overwrite):
         output_path = input_path
 
     output_path = Path(output_path)
+    input_path = Path(input_path)
     if output_path.exists():
 
         if output_path.suffix in (".hdf5", ".h5"):
@@ -37,6 +38,10 @@ def check_output(output_path, input_path, h5_loc_save, overwrite):
         else:
             raise FileExistsError(f"file already exists {output_path}. Please choose a different output location "
                                   f"or use '--overwrite True'.")
+
+    if output_path.name.startswith("."):
+        output_path = input_path.with_suffix(output_path)
+        logging.warning(f"Output path inferred as: {output_path}")
 
     return output_path
 
