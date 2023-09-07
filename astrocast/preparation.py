@@ -24,6 +24,7 @@ from skimage.transform import resize
 from skimage.util import img_as_uint
 from deprecated import deprecated
 from scipy.ndimage import minimum_filter1d
+from tqdm import tqdm
 
 from astrocast.helper import get_data_dimensions
 from dask.diagnostics import ProgressBar
@@ -726,8 +727,44 @@ class IO:
                 saved_paths.append(fpath)
                 logging.info(f"saved data to {fpath}")
 
+            elif path.suffix in [".avi", ".AVI"]:
+
+                import cv2
+
+                fpath = path.with_suffix(f".{k}.avi") if len(data.keys()) > 1 else path
+                self.exists_and_clean(fpath, overwrite=overwrite)
+
+                # Get the dimensions of the numpy array
+                frames, X, Y = channel.shape
+
+                # Define the codec and create a VideoWriter object
+
+                if isinstance(fpath, Path):
+                    fpath = fpath.as_posix()
+
+                # fourcc = cv2.VideoWriter_fourcc(*'XVID')
+                out = cv2.VideoWriter(fpath, fourcc=cv2.VideoWriter_fourcc('M','J','P','G'),
+                                      fps=16, frameSize=(X, Y), isColor=True)
+
+                for i in tqdm(range(frames)):
+                    # Get the current frame
+                    frame = channel[i]
+
+                    # Since the array has only one channel, convert it to a 3-channel array (BGR)
+                    frame = cv2.normalize(frame, None, 0, 255, cv2.NORM_MINMAX, dtype=cv2.CV_8U)
+                    frame = cv2.cvtColor(frame, cv2.COLOR_GRAY2BGR)
+
+                    # Write the frame to the AVI file
+                    out.write(frame)
+
+                # Release the VideoWriter
+                out.release()
+
+                saved_paths.append(fpath)
+                logging.info(f"saved data to {fpath}")
+
             else:
-                raise TypeError("please provide output format as .h5, .tdb, .npy or .tiff file")
+                raise TypeError("please provide output format as .h5, .tdb, .npy, .avi or .tiff file")
 
         return saved_paths if len(saved_paths) > 1 else saved_paths[0]  # Return the list of saved file paths
 
