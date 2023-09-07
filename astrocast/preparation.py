@@ -583,8 +583,7 @@ class IO:
 
         return stack
 
-    @staticmethod
-    def save(path, data, h5_loc=None, chunks=None, compression=None):
+    def save(self, path, data, h5_loc=None, chunks=None, compression=None, overwrite=False):
 
         """
         Save data to a specified file format.
@@ -666,7 +665,7 @@ class IO:
                 else:
                     loc = f"{h5_loc}/{k}"
 
-                logging.warning(f"loc: {loc}")
+                self.exists_and_clean(fpath, h5_loc=loc, overwrite=overwrite)
                 logging.info(f"saving channel {k} to '{loc}'")
 
                 if isinstance(channel, da.Array):
@@ -691,6 +690,7 @@ class IO:
                     channel = da.from_array(channel, chunks=chunks if chunks is not None else "auto")
 
                 fpath = path.with_suffix(f".{k}.tdb") if len(data.keys()) > 1 else path
+                self.exists_and_clean(fpath, overwrite=overwrite)
                 with ProgressBar(minimum=10, dt=1):
                     da.to_tiledb(channel, fpath.as_posix(), compute=True)
 
@@ -701,6 +701,8 @@ class IO:
                 # Save as TIFF format
 
                 fpath = path.with_suffix(f".{k}.tiff") if len(data.keys()) > 1 else path
+                self.exists_and_clean(fpath, overwrite=overwrite)
+
                 tifffile.imwrite(fpath, data=channel)
 
                 saved_paths.append(fpath)
@@ -712,6 +714,7 @@ class IO:
             elif path.suffix in [".npy", ".NPY"]:
 
                 fpath = path.with_suffix(f".{k}.npy") if len(data.keys()) > 1 else path
+                self.exists_and_clean(fpath, overwrite=overwrite)
 
                 if isinstance(channel, np.ndarray):
                     np.save(file=fpath.as_posix(), arr=channel)
@@ -727,6 +730,46 @@ class IO:
                 raise TypeError("please provide output format as .h5, .tdb, .npy or .tiff file")
 
         return saved_paths if len(saved_paths) > 1 else saved_paths[0]  # Return the list of saved file paths
+
+    def exists_and_clean(self, path, h5_loc="", overwrite=False):
+
+        path=Path(path)
+
+        if not path.exists():
+            return True
+
+        # H5
+        if path.suffix in (".h5", ".hdf5"):
+
+            with h5py.File(path, "a") as f:
+
+                if h5_loc in ("", None):
+                    raise ValueError(f"Please provide a valid h5 dataset location instead of {h5_loc}")
+
+                if h5_loc in f:
+
+                    logging.warning(f"deleting previous result: {path} [{h5_loc}]")
+
+                    if overwrite:
+                        del f[h5_loc]
+                    else:
+                        raise FileExistsError(f"output dataset exists {path} [{h5_loc}]. "
+                                              f"Please choose a different dataset or set 'overwrite=True'")
+
+        # Everything else
+        else:
+
+            if overwrite:
+
+                logging.warning(f"deleting previous result: {path}")
+
+                if path.is_file():
+                    path.unlink()
+                elif path.is_dir():
+                    shutil.rmtree()
+
+            else:
+                raise FileExistsError(f"output exists ({path}). Please choose a different output or set 'overwrite=True'")
 
 class MotionCorrection:
 
@@ -1255,10 +1298,10 @@ class Delta:
         self.res = res
         return res
 
-    def save(self, output_path, h5_loc="df", chunks=(-1, "auto", "auto"), compression=None):
+    def save(self, output_path, h5_loc="df", chunks=(-1, "auto", "auto"), compression=None, overwrite=False):
 
         io = IO()
-        io.save(output_path, data=self.res, h5_loc=h5_loc, chunks=chunks, compression=compression)
+        io.save(output_path, data=self.res, h5_loc=h5_loc, chunks=chunks, compression=compression, overwrite=overwrite)
 
     def prepare_data(self, input_, chunks="infer", h5_loc=None, output_path=None, lazy=True):
 
