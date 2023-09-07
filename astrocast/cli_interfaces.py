@@ -15,7 +15,7 @@ from functools import partial
 from astrocast.analysis import Video
 from astrocast.denoising import SubFrameGenerator
 from astrocast.detection import Detector
-from astrocast.preparation import MotionCorrection, Delta, Input
+from astrocast.preparation import MotionCorrection, Delta, Input, IO
 
 click_custom_option = partial(click.option, show_default=True)
 
@@ -398,6 +398,48 @@ def view_data(input_path, h5_loc, z_select, lazy):
     vid.show()
     napari.run()
 
+@cli.command()
+@click.argument('input-path', type=click.Path(exists=True))
+@click_custom_option('--output-path', type=click.Path(), required=True, help='Path to the output file.')
+@click_custom_option('--h5-loc-in', type=click.STRING, default="", help='Name or identifier of the dataset in the h5 file.')
+@click_custom_option('--h5-loc-out', type=click.STRING, default="", help='Name or identifier of the dataset in the h5 file.')
+@click_custom_option('--z-select', type=(click.INT, click.INT), default=None, help='Range of frames to select in the Z dimension, given as a tuple (start, end).')
+@click_custom_option('--lazy', type=click.BOOL, default=True, help='Whether to implement lazy loading.')
+@click_custom_option('--chunk-size', type=(int, int), default=None, help='Chunk size for saving the results in the output file. If not provided, a default chunk size will be used.')
+@click_custom_option('--compression', default=None, help='Compression method to use when saving to HDF5 or TileDB.')
+@click_custom_option('--overwrite', type=click.BOOL, default=False, help='Flag for overwriting previous result in output location')
+def export_video(input_path, output_path, h5_loc_in, h5_loc_out, z_select, lazy, chunk_size, compression, overwrite):
+    """
+    Exports a video dataset from the input file to another file with various configurable options.
+
+    This function uses the IO class to load a dataset from an input h5 file and save it to another output file.
+    The dataset can be identified using the h5 location in both input and output files.
+    The function allows for various configurations including lazy loading, chunk size specification for saving,
+    and option to select a specific frame range in the Z dimension. It also allows for data compression and
+    overwriting existing data in the output location.
+
+    Parameters:
+    input_path (str): The path to the input h5 file containing the video dataset to export.
+    output_path (str): The path where the output file will be saved.
+    h5_loc_in (str, optional): The name or identifier of the dataset within the input h5 file. Defaults to an empty string, which indicates the root group.
+    h5_loc_out (str, optional): The name or identifier of the dataset within the output file. Defaults to an empty string, which indicates the root group.
+    z_select (tuple of int, optional): A tuple specifying the range of frames to select in the Z dimension. The tuple contains two elements: the start and end frame numbers. Defaults to None, which indicates that all frames should be selected.
+    lazy (bool, optional): Whether to implement lazy loading, which can improve performance when working with large datasets by only loading data into memory as it is needed. Defaults to True.
+    chunk_size (tuple of int, optional): A tuple specifying the chunk size for saving the results in the output file. If not provided, a default chunk size will be used. Defaults to None.
+    compression (str, optional): The compression method to use when saving data to the output file. If not provided, no compression is applied. Defaults to None.
+    overwrite (bool, optional): Whether to overwrite previous results in the output location if they exist. Defaults to False.
+
+    Returns:
+    None
+
+    Example:
+    export_video('input.h5', 'output.h5', h5_loc_in='dataset1', h5_loc_out='dataset2', z_select=(10, 20), lazy=True, chunk_size=(100, 100), compression='gzip', overwrite=True)
+    """
+
+    io = IO()
+    data = io.load(input_path, h5_loc=h5_loc_in, z_slice=z_select, lazy=lazy)
+
+    io.save(output_path, data=data, h5_loc=h5_loc_out, chunks=chunk_size, compression=compression, overwrite=overwrite)
 
 if __name__ == '__main__':
     cli()
