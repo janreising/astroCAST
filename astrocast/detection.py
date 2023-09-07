@@ -24,7 +24,7 @@ from dask.diagnostics import ProgressBar
 from tqdm import tqdm
 from multiprocess import shared_memory
 
-from astroCAST.preparation import IO
+from astrocast.preparation import IO
 
 
 class Detector:
@@ -49,9 +49,9 @@ class Detector:
 
     """
     def __init__(self, input_path: str, output=None,
-                 indices: np.array = None, verbosity: int = 1):
+                 indices: np.array = None, logging_level=logging.INFO):
 
-        logging.basicConfig(format="%(asctime)s %(levelname)s: %(message)s", level=verbosity)
+        logging.basicConfig(format="%(asctime)s %(levelname)s: %(message)s", level=logging_level)
 
         # paths
         self.input_path = Path(input_path)
@@ -81,7 +81,8 @@ class Detector:
             subset: Optional[str] = None, split_events: bool = True,
             binary_struct_iterations: int = 1,
             binary_struct_connectivity: int = 2,  # TODO better way to do this
-            save_activepixels: bool = False) -> None:
+            save_activepixels: bool = False,
+            parallel=True) -> None:
         """
         Runs the event detection process on the specified dataset.
 
@@ -98,6 +99,7 @@ class Detector:
                 if multiple peaks are detected.
             binary_struct_iterations (int): Number of iterations for binary structuring element. 
             binary_struct_connectivity (int): Connectivity of binary structuring element.
+            parallel: parallel execution of event characterization. Recommended to be true.
 
         Returns:
             dictionary of events
@@ -130,9 +132,6 @@ class Detector:
         pbar = ProgressBar(minimum=10)
         pbar.register()
 
-        # TODO save this information somewhere
-        # resources = ResourceProfiler()
-        # resources.register()
         # load data
         io = IO()
         data = io.load(path=self.input_path, h5_loc=dataset, z_slice=subset, lazy=lazy)  # todo: add chunks flag
@@ -149,7 +148,6 @@ class Detector:
             # TODO maybe should be adjusted since it might already be calculated
             noise = self.estimate_background(data) if adjust_for_noise else 1
 
-            # self.vprint("Thresholding events", 2)
             logging.info("Thresholding events")
             event_map = self.get_events(data, roi_threshold=threshold, var_estimate=noise,
                                         min_roi_size=min_size,
@@ -157,7 +155,6 @@ class Detector:
                                         binary_struct_connectivity=binary_struct_connectivity,
                                         save_activepixels=save_activepixels)
 
-            # self.vprint(f"Saving event map to: {event_map_path}", 2)
             logging.info(f"Saving event map to: {event_map_path}")
             event_map.rechunk((100, 100, 100)).to_tiledb(event_map_path.as_posix())
 
@@ -188,7 +185,7 @@ class Detector:
 
         # calculate features
         logging.info("Calculating features")
-        events = self.custom_slim_features(time_map, event_map_path, split_events=split_events)
+        events = self.custom_slim_features(time_map, event_map_path, split_events=split_events, parallel=parallel)
 
         logging.info("Saving features")
         with open(self.output_directory.joinpath("meta.json"), 'w') as outfile:
@@ -253,7 +250,7 @@ class Detector:
                             to define threshold dynamically...")
 
             # Executed when a roi_threshold has not been provided.
-            def dynamic_threshold(img):  # Add paramters #REVIEW @Jan, not sure what this parameter is.
+            def dynamic_threshold(img):
                 smooth = gaussian(img, sigma=smoXY, channel_axis=None)
                 thr = 1 if np.sum(img) == 0 else threshold_triangle(smooth)
                 img_thr = smooth > thr
@@ -261,17 +258,20 @@ class Detector:
 
                 return img_thr
 
-            data_rechunked = da.from_array(data).rechunk((1, -1, -1)) # Convert np.array to da array
+            if not isinstance(data, da.Array):
+                data = da.from_array(data)
+
+            data_rechunked = data.rechunk((1, -1, -1))
             active_pixels = data_rechunked.map_blocks(dynamic_threshold, dtype=np.bool_)
 
-            # TODO add flag whether to save or not
             if save_activepixels is True:
                 tiff_path = self.output_directory.joinpath("active_pixels.tiff")
                 logging.info(f"Saving active pixels to: {tiff_path}")
-                io.save(path=tiff_path, data=active_pixels, h5_loc=None, chunks=None, compression=None) # last two options only applicable for HDF5 format
+
+                io = IO()
+                io.save(path=tiff_path, data=active_pixels)
 
         logging.info("identified active pixels")
-
         # mask inactive pixels (accelerates subsequent computation)
         if mask_xy is not None:
             np.multiply(active_pixels, mask_xy, out=active_pixels)
@@ -307,21 +307,12 @@ class Detector:
             logging.info("removed small objects")
 
             # label connected pixels
-            event_map = da.from_array(np.zeros(data.shape, dtype=np.uintc))
+            event_map = da.from_array(np.zeros(data.shape, dtype=int))
             event_map[:], num_events = ndimage.label(active_pixels)
             logging.info("labelled connected pixel. #events: {}".format(num_events))
 
         # characterize each event
-
-        # event_properties = measure.regionprops(event_map, intensity_image=data, cache=True,
-        #                                        extra_properties=[self.trace, self.footprint]
-        #                                        )
-        # self.vprint("events collected", 3)
-
-        if num_events < 2 * 32767:
-            event_map = event_map.astype("uint16")
-        else:
-            event_map = event_map.astype("uint32")
+        event_map = event_map.astype(int)
 
         logging.info("event_map dype: {}".format(event_map.dtype))
 
@@ -350,7 +341,7 @@ class Detector:
 
         return time_map
 
-    def custom_slim_features(self, time_map, event_path, split_events: bool = True):
+    def custom_slim_features(self, time_map, event_path, split_events: bool = True, parallel=True):
 
         # print(event_map)
         # sh_em = shared_memory.SharedMemory(create=True, size=event_map.nbytes)
@@ -408,30 +399,42 @@ class Detector:
         logging.info("#tasks: {}".format(len(e_ids)))
         random.shuffle(e_ids)
         futures = []
-        with Client(memory_limit='auto', processes=False,
-                    silence_logs=logging.ERROR) as client:
-            for e_id in e_ids:
-                futures.append(
-                    client.submit(
-                        self.characterize_event,
-                        e_id, e_start[e_id], e_stop[e_id],
-                        data_info, event_info, out_path, split_events
+
+        if parallel:
+
+            with Client(memory_limit='auto', processes=False,
+                        silence_logs=logging.ERROR) as client:
+                for e_id in e_ids:
+                    futures.append(
+                        client.submit(
+                            self.characterize_event,
+                            e_id, e_start[e_id], e_stop[e_id],
+                            data_info, event_info, out_path, split_events
+                        )
                     )
-                )
-            progress(futures)
+                progress(futures)
 
-            client.gather(futures)
+                client.gather(futures)
 
-            # close shared memory
-            try:
-                data_sh.close()
-                data_sh.unlink()
+        else:
 
-                event_sh.close()
-                event_sh.unlink()
-            except FileNotFoundError as err:
-                print("An error occured during shared memory closing: ")
-                print(err)
+            for event_id in e_ids:
+                npy_path = self.characterize_event(event_id,
+                                                   t0=e_start[event_id], t1=e_stop[event_id],
+                                                   data_info=data_info, event_info=event_info,
+                                                   out_path=out_path.as_posix(), split_events=split_events)
+                futures.append(npy_path)
+
+        # close shared memory
+        try:
+            data_sh.close()
+            data_sh.unlink()
+
+            event_sh.close()
+            event_sh.unlink()
+        except FileNotFoundError as err:
+            print("An error occured during shared memory closing: ")
+            print(err)
 
         # combine results
         events = {}
@@ -446,6 +449,9 @@ class Detector:
                            event_info, out_path, split_events=True):
 
         # check if result already exists
+        if not isinstance(out_path, Path):
+            out_path = Path(out_path)
+
         res_path = out_path.joinpath(f"events{event_id}.npy")
         if os.path.isfile(res_path):
             return 2
@@ -471,8 +477,12 @@ class Detector:
         data = np.ndarray(d_shape, d_dtype, buffer=data_buffer.buf)
         data = data[t0:t1, gx0:gx1, gy0:gy1]
 
+        if data.shape != event_map.shape:
+            raise ValueError(f"data and event_map do not have the same size: {data.shape} vs. {event_map.shape}")
+
         if split_events:
-            event_map, _ = self.detect_subevents(data, event_map == event_id)
+            mask = np.where(event_map == event_id)
+            event_map, _ = self.detect_subevents(data, mask)
 
         res = {}
         for em_id in np.unique(event_map):
@@ -614,13 +624,12 @@ class Detector:
             print("An error occured during shared memory closing: {}".format(err))
 
     @staticmethod
-    def detect_subevents(img, mask, sigma: int = 2,
+    def detect_subevents(img, mask_indices, sigma: int = 2,
                          min_local_max_distance: int = 5, local_max_threshold: float = 0.5, min_roi_frame_area: int = 5,
                          reject_if_original: bool = True):
-        assert img.shape == mask.shape, "image ({}) and mask ({}) don't have the same dimension!".format(img.shape,
-                                                                                                         mask.shape)
 
-        mask = ~mask
+        mask = np.ones(img.shape, dtype=bool)
+        mask[mask_indices] = 0 # TODO does this need to be inverted?
         Z, X, Y = mask.shape
 
         new_mask = np.zeros((Z, X, Y), dtype="i2")
@@ -742,6 +751,10 @@ class Detector:
                 basin = -1 * frame_raw
                 basin[frame_mask] = 0
 
+                # watershed requires type conversion
+                basin = basin.filled(fill_value=0).astype(int)
+                seeds = seeds.astype(np.int64)
+
                 last_mask_frame = watershed(basin, seeds).astype("i2")
                 last_mask_frame[frame_mask] = 0
 
@@ -754,35 +767,3 @@ class Detector:
             return ~mask, None
         else:
             return new_mask, local_max_container
-
-
-if __name__ == "__main__":
-    # parse arguments
-    parser = argparse.ArgumentParser()
-    parser.add_argument("-i", "--input", required=True, type=str, default=None, help="Input file")
-    parser.add_argument("-k", "--key", type=str, default=None, help="dataset name")
-    parser.add_argument("-t", "--threshold", type=int, default=None, help="use -1 for automatic thresholding")
-    parser.add_argument("-v", "--verbosity", type=int, default=1)
-    parser.add_argument("--binarystruct", type=int, default=1)
-    parser.add_argument("--binaryconnect", type=int, default=2)
-    parser.add_argument("--splitevents", type=bool, const=True, default=True, nargs='?',
-                        help="splits detected events into smaller events if multiple peaks are detected")
-    parser.add_argument("--lazy", type=bool, default=True, help='Use lazy loading')
-    parser.add_argument("--output", type=str, default=None,
-                        help="output folder name. If output=None, output is set to input_path + .roi")  # Added option
-    parser.add_argument("--saveactpixels", type=bool, default=False, help="Save active pixels file")
-
-    args = parser.parse_args()
-
-    args.threshold = args.threshold if args.threshold != -1 else None
-
-    # logging
-    # TODO fill in
-
-    # deal with data input
-    ed = Detector(args.input, verbosity=args.verbosity, output=args.output)
-    ed.run(dataset=args.key, lazy=args.lazy, subset=None,
-           split_events=args.splitevents,
-           binary_struct_connectivity=args.binaryconnect,
-           binary_struct_iterations=args.binarystruct,
-           save_activepixels=args.saveactpixels)

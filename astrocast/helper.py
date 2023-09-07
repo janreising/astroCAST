@@ -1,12 +1,15 @@
 import glob
 import logging
 import pickle
+import shutil
+import tempfile
 import time
 import types
 from pathlib import Path
 import awkward as ak
 import dask.array as da
 import h5py
+import yaml
 from skimage.util import img_as_uint
 
 import numpy as np
@@ -38,8 +41,8 @@ def wrapper_local_cache(f):
 
     def hash_arg(arg):
 
-        from astroCAST.analysis import Events, Video
-        from astroCAST.reduction import FeatureExtraction
+        from astrocast.analysis import Events, Video
+        from astrocast.reduction import FeatureExtraction
 
         if isinstance(arg, np.ndarray):
             return hash_from_ndarray(arg)
@@ -309,24 +312,28 @@ def get_data_dimensions(input_, loc=None, return_dtype=False):
 
 class DummyGenerator:
 
-    def __init__(self, num_rows=25, trace_length=12, ragged=False, offset=0, n_groups=None, n_clusters=None):
+    def __init__(self, num_rows=25, trace_length=12, ragged=False, offset=0, min_length=2, n_groups=None, n_clusters=None):
 
         self.data = self.get_data(num_rows=num_rows, trace_length=trace_length,
-                                  ragged=ragged, offset=offset)
+                                  ragged=ragged, offset=offset, min_length=min_length)
 
         self.groups = None if n_groups is None else np.random.randint(0, n_groups, size=len(self.data), dtype=int)
         self.clusters = None if n_clusters is None else np.random.randint(0, n_clusters, size=len(self.data), dtype=int)
 
     @staticmethod
-    def get_data(num_rows, trace_length, ragged, offset):
+    def get_data(num_rows, trace_length, ragged, offset, min_length):
 
         if isinstance(ragged, str):
             ragged = True if ragged == "ragged" else False
 
         if ragged:
-            data = [np.random.random(
-                size=trace_length + np.random.randint(low=-trace_length + 1, high=trace_length - 1)) + offset for _ in
-                    range(num_rows)]
+
+            data = []
+            for _ in range(num_rows):
+
+                random_length = max(min_length, trace_length + np.random.randint(low=-trace_length, high=trace_length) + offset)
+                data.append(np.random.random(size=(random_length)))
+
         else:
             data = np.random.random(size=(num_rows, trace_length)) + offset
 
@@ -398,6 +405,7 @@ class DummyGenerator:
                     raise ValueError("unable to infer chunks for da. Please provide 'chunks' flag.")
 
                 chunks = (1, -1) if chunks is None else chunks
+
                 return da.from_array(data, chunks=chunks)
 
         else:
@@ -405,7 +413,7 @@ class DummyGenerator:
 
     def get_events(self):
 
-        from astroCAST.analysis import Events
+        from astrocast.analysis import Events
 
         ev = Events(event_dir=None)
         df = self.get_dataframe()
@@ -628,8 +636,8 @@ class EventSim:
                        z_fraction=0.2, xy_fraction=0.1, gap_space=1, gap_time=1,
                        blob_size_fraction=0.05, event_probability=0.2):
 
-        from astroCAST.analysis import IO
-        from astroCAST.detection import Detector
+        from astrocast.analysis import IO
+        from astrocast.detection import Detector
 
         h5_path = Path(h5_path)
 
@@ -640,9 +648,82 @@ class EventSim:
         IO.save(path=h5_path, data=data, h5_loc=h5_loc)
 
         det = Detector(h5_path.as_posix(),  output=None)
-        det.run(dataset=h5_loc, use_dask=True, save_activepixels=save_active_pixels)
+        det.run(dataset=h5_loc, lazy=True, save_activepixels=save_active_pixels)
 
         return det.output_directory
+
+class SampleInput:
+
+    def __init__(self, test_data_dir="./testdata/"):
+        self.test_data_dir = Path(test_data_dir)
+        self.tmp_dir = tempfile.TemporaryDirectory()
+        self.sample_path = None
+
+    def get_dir(self):
+        return Path(self.tmp_dir.name)
+
+    def get_test_data(self, extension=".h5"):
+
+        tmp_dir = self.get_dir()
+
+        # collect sample file
+        samples = list(self.test_data_dir.glob(f"sample_*{extension}"))
+        assert len(samples) > 0, f"cannot find sample with extension: {extension}"
+        sample = samples[0]
+
+        # copy to temporary directory
+        new_path = tmp_dir.joinpath(sample.name)
+        shutil.copy(sample, new_path)
+        assert new_path.exists()
+
+        self.sample_path = new_path
+
+        return new_path
+
+    def get_h5_loc(self, ref=None):
+
+        if self.sample_path is None:
+            raise FileNotFoundError("please run 'get_test_data()' first")
+
+        if self.sample_path.suffix in [".h5", ".hdf5"]:
+
+            with h5py.File(self.sample_path.as_posix(), "r") as f:
+
+                # make sure reference dataset exists in sample file
+                if ref is not None and ref not in f:
+                    raise ValueError(f"cannot find {ref}")
+                elif ref is not None:
+                    return ref
+
+                # get dataset
+                def recursive_get_dataset(f, loc):
+
+                    # choose first location if none is provided
+                    if loc is None:
+
+                        locs = list(f.keys())
+
+                        if len(locs) < 2:
+                            raise ValueError(f"cannot find any datasets in sample file: {self.sample_path} ({locs})")
+
+                        loc = locs[1]
+
+                    if isinstance(f[loc], h5py.Group):
+
+                        locs = list(f[loc].keys())
+                        if len(loc) < 1:
+                            raise ValueError(f"cannot find any datasets in sample file: {self.sample_path}")
+
+                        loc = f"{loc}/{locs[0]}"
+                        return recursive_get_dataset(f, loc)
+
+                    if isinstance(f[loc], h5py.Dataset):
+                        return loc
+
+                return recursive_get_dataset(f, None)
+
+    def __del__(self):
+        self.tmp_dir.cleanup()
 
 
 def is_ragged(data):
@@ -900,3 +981,18 @@ class CachedClass:
         logging.warning(f"cache_path: {self.cache_path}")
         time.sleep(0.5)
         return np.random.random(1)
+
+
+def load_yaml_defaults(yaml_file_path):
+    """Load default values from a YAML file."""
+
+    logging.warning("loading configuration from yaml file. "
+                    "Be advised that command line parameters take priority over configurations in the yaml.")
+
+    with open(yaml_file_path, 'r') as file:
+        params = yaml.safe_load(file)
+
+        for key, value in params.items():
+            logging.info(f"yaml parameter >> {key}:{value}")
+
+        return params

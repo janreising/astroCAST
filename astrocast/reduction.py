@@ -1,13 +1,11 @@
 import logging
 import multiprocessing
 import pickle
-from functools import lru_cache
 from pathlib import Path
 
 import keras.models
 import napari
 import numpy as np
-import pandas as pd
 import umap
 import umap.plot
 from keras import Input, Model
@@ -17,11 +15,9 @@ from keras.losses import mean_squared_error
 from matplotlib import pyplot as plt
 import seaborn as sns
 from scipy.cluster import hierarchy
-from tqdm import tqdm
-import tsfresh
 
-from astroCAST.analysis import Events
-from astroCAST.helper import CachedClass, wrapper_local_cache
+from astrocast.analysis import Events
+from astrocast.helper import CachedClass, wrapper_local_cache
 
 
 class FeatureExtraction(CachedClass):
@@ -33,6 +29,8 @@ class FeatureExtraction(CachedClass):
 
     @wrapper_local_cache
     def get_features(self, n_jobs=-1, show_progress=True, additional_columns=None):
+
+        import tsfresh
 
         # calculate features for long traces
         X = self.events.to_tsfresh(show_progress=show_progress)

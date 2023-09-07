@@ -1,10 +1,11 @@
 import tempfile
 import time
 
+import numpy as np
 import pytest
 
-from astroCAST.reduction import *
-from astroCAST.helper import DummyGenerator
+from astrocast.reduction import *
+from astrocast.helper import DummyGenerator
 
 DG_equal = DummyGenerator()
 DG_ragged = DummyGenerator(ragged=True)
@@ -54,6 +55,7 @@ class Test_FeatureExtraction:
             assert d2 < d1, f"caching is taking too long: {d2} > {d1}"
             assert features_1.equals(features_2)
 
+@pytest.mark.serial
 class Test_CNN:
 
     def test_training(self):
@@ -105,6 +107,7 @@ class Test_CNN:
         cnn_naive.load_model(tmp_path)
         cnn_naive.embed(X_test)
 
+@pytest.mark.serial
 class Test_UMAP:
 
     def test_training(self):
@@ -116,7 +119,7 @@ class Test_UMAP:
 
     def test_plotting(self):
 
-        data = np.random.random(size=(12, 25))
+        data = np.random.random(size=(12, 8))
 
         um = UMAP()
         embedded = um.train(data)
@@ -129,9 +132,13 @@ class Test_UMAP:
         um.plot(ax=ax, use_napari=False)
 
         # napari
+        um = UMAP()
+        embedded = um.train(data)
         um.plot(data=embedded)
 
         # napari
+        um = UMAP()
+        embedded = um.train(data)
         labels = np.random.randint(0, 5, size=len(data))
         um.plot(data=embedded, labels=labels)
 
@@ -140,13 +147,14 @@ class Test_UMAP:
         data = np.random.random(size=(12, 25))
 
         um = UMAP()
-        embedded = um.train(data)
+        embedded_1 = um.train(data)
 
         um.save(tmp_path)
 
         um = UMAP()
         um.load(tmp_path)
-        embedded = um.embed(data)
+        embedded_2 = um.embed(data)
 
+        assert np.allclose(embedded_1, embedded_2)
 
 

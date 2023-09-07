@@ -24,8 +24,8 @@ from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
 from sklearn import metrics
 from tqdm import tqdm
 
-from astroCAST.analysis import Events
-from astroCAST.helper import wrapper_local_cache, is_ragged, CachedClass, Normalization
+from astrocast.analysis import Events
+from astrocast.helper import wrapper_local_cache, is_ragged, CachedClass, Normalization
 
 # from dtaidistance import dtw_visualisation as dtwvis
 # from dtaidistance import clustering
@@ -299,7 +299,7 @@ class Linkage(CachedClass):
             zs = np.logspace(start=-1, stop=1, num=20, base=10, endpoint=True)
 
             # calculate the inclusion fraction for each log threshold
-            fraction = np.zeros((len(mcs), len(zs)), dtype=np.half)
+            fraction = np.zeros((len(mcs), len(zs)), dtype=float)
             for i, mc_ in enumerate(tqdm(mcs)):
                 for j, z_ in enumerate(zs):
 
@@ -394,6 +394,12 @@ class Distance(CachedClass):
         if is_ragged(events):
 
             logging.warning(f"Events are ragged (unequal length), default to slow correlation calculation.")
+
+            # todo find an elegant solution
+            #  dask natively cannot handle awkward arrays well. np.mean, map_blocks, etc. don't seem to work
+            #  there is a dask-awkward library, but it is not very mature
+            if isinstance(events, da.Array):
+                events = events.compute()
 
             N = len(events)
             corr = np.zeros((N, N), dtype=dtype)
@@ -665,12 +671,15 @@ class Distance(CachedClass):
             ev1 = ev1[0]
 
         # Choose z range
-        trace_0 = np.squeeze(events[ev0]).astype(float)
-        trace_1 = np.squeeze(events[ev1]).astype(float)
+        trace_0 = events[ev0]
+        trace_1 = events[ev1]
 
-        if isinstance(trace_0, da.Array):
+        if not isinstance(trace_0, np.ndarray):
             trace_0 = trace_0.compute()
             trace_1 = trace_1.compute()
+
+        trace_0 = np.squeeze(trace_0).astype(float)
+        trace_1 = np.squeeze(trace_1).astype(float)
 
         if z_range is not None:
             z0, z1 = z_range

@@ -138,3 +138,4 @@ temp_*
 
 # lock files
 dask-worker-space/*.lock
+/poetry.lock

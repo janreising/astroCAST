@@ -1,7 +1,6 @@
-import itertools
 import logging
-import multiprocessing
 import os
+import shutil
 import tempfile
 from collections import OrderedDict
 from pathlib import Path
@@ -26,9 +25,8 @@ from skimage.util import img_as_uint
 from deprecated import deprecated
 from scipy.ndimage import minimum_filter1d
 
-from astroCAST.helper import get_data_dimensions
+from astrocast.helper import get_data_dimensions
 from dask.diagnostics import ProgressBar
-
 
 class Input:
 
@@ -436,12 +434,21 @@ class IO:
         """
 
         if lazy:
-            data = h5py.File(path, "r")[h5_loc]
+            data = h5py.File(path, "r")
+
+            if h5_loc not in data:
+                raise ValueError(f"cannot find dataset in file ({path}): {list(data.keys())}")
+
+            data = data[h5_loc]
             data = da.from_array(data, chunks=chunks)
 
         else:
-            with h5py.File(path, "r") as h5:
-                data = h5[h5_loc][:] # Read all data from HDF5 file
+            with h5py.File(path, "r") as data:
+
+                if h5_loc not in data:
+                    raise ValueError(f"cannot find dataset in file ({path}): {list(data.keys())}")
+
+                data = data[h5_loc][:] # Read all data from HDF5 file
 
         return data
 
@@ -576,8 +583,7 @@ class IO:
 
         return stack
 
-    @staticmethod
-    def save(path, data, h5_loc=None, chunks=None, compression=None):
+    def save(self, path, data, h5_loc=None, chunks=None, compression=None, overwrite=False):
 
         """
         Save data to a specified file format.
@@ -651,7 +657,7 @@ class IO:
                         loc = h5_loc[k]
 
                 elif h5_loc is None:
-                    loc = k if "/" in k else f"io/{k}"
+                    loc = k if "/" in str(k) else f"io/{k}"
 
                 elif len(data) == 1:
                         loc = f"{h5_loc}/{k}" if "/" not in h5_loc[:-1] else h5_loc
@@ -659,7 +665,7 @@ class IO:
                 else:
                     loc = f"{h5_loc}/{k}"
 
-                logging.warning(f"loc: {loc}")
+                self.exists_and_clean(fpath, h5_loc=loc, overwrite=overwrite)
                 logging.info(f"saving channel {k} to '{loc}'")
 
                 if isinstance(channel, da.Array):
@@ -684,6 +690,7 @@ class IO:
                     channel = da.from_array(channel, chunks=chunks if chunks is not None else "auto")
 
                 fpath = path.with_suffix(f".{k}.tdb") if len(data.keys()) > 1 else path
+                self.exists_and_clean(fpath, overwrite=overwrite)
                 with ProgressBar(minimum=10, dt=1):
                     da.to_tiledb(channel, fpath.as_posix(), compute=True)
 
@@ -694,6 +701,8 @@ class IO:
                 # Save as TIFF format
 
                 fpath = path.with_suffix(f".{k}.tiff") if len(data.keys()) > 1 else path
+                self.exists_and_clean(fpath, overwrite=overwrite)
+
                 tifffile.imwrite(fpath, data=channel)
 
                 saved_paths.append(fpath)
@@ -705,6 +714,7 @@ class IO:
             elif path.suffix in [".npy", ".NPY"]:
 
                 fpath = path.with_suffix(f".{k}.npy") if len(data.keys()) > 1 else path
+                self.exists_and_clean(fpath, overwrite=overwrite)
 
                 if isinstance(channel, np.ndarray):
                     np.save(file=fpath.as_posix(), arr=channel)
@@ -720,6 +730,46 @@ class IO:
                 raise TypeError("please provide output format as .h5, .tdb, .npy or .tiff file")
 
         return saved_paths if len(saved_paths) > 1 else saved_paths[0]  # Return the list of saved file paths
+
+    def exists_and_clean(self, path, h5_loc="", overwrite=False):
+
+        path=Path(path)
+
+        if not path.exists():
+            return True
+
+        # H5
+        if path.suffix in (".h5", ".hdf5"):
+
+            with h5py.File(path, "a") as f:
+
+                if h5_loc in ("", None):
+                    raise ValueError(f"Please provide a valid h5 dataset location instead of {h5_loc}")
+
+                if h5_loc in f:
+
+                    logging.warning(f"deleting previous result: {path} [{h5_loc}]")
+
+                    if overwrite:
+                        del f[h5_loc]
+                    else:
+                        raise FileExistsError(f"output dataset exists {path} [{h5_loc}]. "
+                                              f"Please choose a different dataset or set 'overwrite=True'")
+
+        # Everything else
+        else:
+
+            if overwrite:
+
+                logging.warning(f"deleting previous result: {path}")
+
+                if path.is_file():
+                    path.unlink()
+                elif path.is_dir():
+                    shutil.rmtree()
+
+            else:
+                raise FileExistsError(f"output exists ({path}). Please choose a different output or set 'overwrite=True'")
 
 class MotionCorrection:
 
@@ -772,14 +822,15 @@ class MotionCorrection:
         # needed if only one dataset in .h5 files. Weird behavior from caiman.MotionCorrection
         self.dummy_folder_name = "delete_me"
 
-        # mmap location
+        # output location
         self.mmap_path = None
+        self.tiff_path = None
 
-    def run(self, input_, h5_loc=None,
-            max_shifts=(50, 50), niter_rig=1, splits_rig=14, num_splits_to_process_rig=None,
+    def run(self, input_, h5_loc="",
+            max_shifts=(50, 50), niter_rig=3, splits_rig=14, num_splits_to_process_rig=None,
             strides=(48, 48), overlaps=(24, 24), pw_rigid=False, splits_els=14,
             num_splits_to_process_els=None, upsample_factor_grid=4, max_deviation_rigid=3,
-            nonneg_movie=True, border_nan='copy', num_frames_split=80, gSig_filt=(20, 20)):
+            nonneg_movie=True, gSig_filt=(20, 20), bigtiff=True):
 
         """
 
@@ -827,13 +878,6 @@ class MotionCorrection:
         use_cuda : bool, optional
             Use skcuda.fft (if available). Default: False
 
-        border_nan : bool or string, optional
-            Specifies how to deal with borders. (True, False, 'copy', 'min')
-
-        num_frames_split: int, default: 80
-            Number of frames in each batch. Used when cosntructing the options
-            through the params object
-
         var_name_hdf5: str, default: 'mov'
             If loading from hdf5, name of the variable to load
 
@@ -857,19 +901,21 @@ class MotionCorrection:
                 num_splits_to_process_rig=num_splits_to_process_rig, strides=strides, overlaps=overlaps,
                 pw_rigid=pw_rigid, splits_els=splits_els, num_splits_to_process_els=num_splits_to_process_els,
                 upsample_factor_grid=upsample_factor_grid, max_deviation_rigid=max_deviation_rigid,
-                nonneg_movie=nonneg_movie, border_nan=border_nan,
-                num_frames_split=num_frames_split, gSig_filt=gSig_filt)
+                nonneg_movie=nonneg_movie, gSig_filt=gSig_filt, bigtiff=bigtiff)
 
         # Perform motion correction
-        mc.motion_correct(save_movie=True)
+        obj, registered_filename = mc.motion_correct(save_movie=True)
         self.shifts = mc.shifts_rig
 
+        logging.info(f"result saved to: {registered_filename}")
+
         # Check if the motion correction generated the mmap file
-        if len(mc.mmap_file) < 1 or not Path(mc.mmap_file[0]).is_file():
+        if len(mc.fname_tot_rig) < 1 or not Path(mc.fname_tot_rig[0]).is_file():
             raise FileNotFoundError(f"motion correction failed unexpectedly. mmap path: {mc.mmap}")
 
         # Set the mmap_path attribute to the generated mmap file
-        self.mmap_path = mc.mmap_file[0]
+        self.mmap_path = mc.fname_tot_rig[0]
+        self.tiff_path = registered_filename[0]
 
     def _validate_input(self, input_, h5_loc):
         """
@@ -895,9 +941,9 @@ class MotionCorrection:
         if isinstance(input_, (str, Path)):
             # If input is a string or Path object
 
-            input_ = Path(input_) if isinstance(input_, str) else input_
+            input_ = Path(input_)
 
-            if not input_.is_file():
+            if not input_.exists():
                 raise FileNotFoundError(f"cannot find input_: {input_}")
 
             if input_.suffix in [".h5", ".hdf5"]:
@@ -908,7 +954,7 @@ class MotionCorrection:
 
                 with h5py.File(input_.as_posix(), "a") as f:
                     if h5_loc not in f:
-                        raise ValueError(f"cannot find dataset {h5_loc} in provided .h5 file.")
+                        raise ValueError(f"cannot find dataset {h5_loc} in provided in {input_}.")
 
                     # Motion Correction fails with custom h5_loc names in cases where there is only one folder (default behavior incorrect)
                     if len(f.keys()) < 2:
@@ -920,9 +966,8 @@ class MotionCorrection:
                 # If input is a TIFF file
                 return input_
 
-            elif input_.suffix in [".tdb"]:
-                # If input is a TDB file (not implemented)
-                raise NotImplementedError
+            else:
+                raise ValueError(f"unknown input type. Please provide .h5 or .tiff file.")
 
         elif isinstance(input_, np.ndarray):
             # If input is a ndarray create a temporary TIFF file to run the motion correction on
@@ -932,7 +977,13 @@ class MotionCorrection:
             if self.working_directory is None:
                 self.working_directory = tempfile.TemporaryDirectory()
 
-            temp_h5_path = Path(self.working_directory.name) if isinstance(self.working_directory, tempfile.TemporaryDirectory) else Path(self.working_directory)
+            if isinstance(self.working_directory, tempfile.TemporaryDirectory):
+                temp_h5_path = Path(self.working_directory.name)
+            else:
+                temp_h5_path = Path(self.working_directory)
+
+            assert temp_h5_path.exists(), f"working directory doesn't exist: {temp_h5_path}"
+
             temp_h5_path = temp_h5_path.joinpath(f"{self.dummy_folder_name}.tiff").as_posix()
             tifffile.imwrite(temp_h5_path, input_)
 
@@ -967,8 +1018,11 @@ class MotionCorrection:
                     del f[self.dummy_folder_name]
 
         # Remove mmap result
-        if Path(self.mmap_path).is_file():
+        if self.mmap_path is not None and Path(self.mmap_path).is_file():
             os.remove(self.mmap_path)
+
+        if self.tiff_path is not None and Path(self.tiff_path).is_file():
+            os.remove(self.tiff_path)
 
         # Remove temp .h5 if necessary
         if self.working_directory is not None:
@@ -1003,7 +1057,7 @@ class MotionCorrection:
 
         return frames_per_file
 
-    def save(self, output=None, h5_loc="mc", chunks=None, compression=None, remove_mmap=False):
+    def save(self, output=None, h5_loc="mc", chunks=None, compression=None, remove_intermediate=True):
 
         """
         Retrieve the motion-corrected data and optionally save it to a file.
@@ -1031,43 +1085,32 @@ class MotionCorrection:
 
         """
 
-        # Check if the mmap_path is available
-        if self.mmap_path is None:
-            raise ValueError("mmap_path is None. Please compute motion correction first by using the 'run()' function")
+        # enforce path
+        output = Path(output)
 
-        # Convert the mmap_path to a Path object if it's provided as a string
-        path = Path(self.mmap_path) if isinstance(self.mmap_path, str) else self.mmap_path
+        # Check if the tiff output is available
+        tiff_path = self.tiff_path
+        if tiff_path is None:
+            raise ValueError("tiff_path is None. Please compute motion correction first by using the 'run()' function")
 
-        # Check if the mmap file exists
-        if not path.is_file():
-            raise FileNotFoundError(f"could not find mmap file: {path}. Maybe the 'clean_up()' function was called too early?")
+        tiff_path = Path(tiff_path)
+        if not tiff_path.is_file():
+            raise FileNotFoundError(f"could not find tiff file: {tiff_path}. Maybe the 'clean_up()' function was called too early?")
 
-        # caiman's mmap naming convention:
-        #   ./{name}_d1_{X}_d2_{Y}_d3_{dim3}_order_{F/C}_frames_{Z}_.mmap
-        name = path.stem.split("_")
-
-        debug_names = {i:n for i, n in enumerate(name)}
-        logging.debug(f"mmap name elements: {debug_names}")
-
-        Z, order, Y, X = int(name[-2]), name[-4], int(name[-8]), int(name[-10])
-        logging.debug(f"Z: {Z}, order: {order}, X:{X}, Y:{Y}")
-
-        # TODO order and shape questionable
-        # Read the motion-corrected data from the mmap file as a memory-mapped array
-        data = np.memmap(path.as_posix(), shape=(Z, Y, X), dtype=float, order="C")
+        data = tifffile.imread(tiff_path.as_posix())
 
         # If output is None, return the motion-corrected data as a NumPy array
         if output is None:
-            data = np.array(data)
-            data = np.swapaxes(data, 1, 2)
             return data
 
         elif isinstance(output, (str, Path)):
             output = Path(output) if isinstance(output, Path) else output
 
             # Create a dask array from the memory-mapped data with specified chunking and compression
+            if chunks is None:
+                chunks = tuple([max(1, int(dim/10)) for dim in data.shape])
+                logging.warning(f"No 'chunk' parameter provided. Choosing: {chunks}")
             data = da.from_array(data, chunks=chunks)
-            data = data.swapaxes(1, 2)
 
             # Check if the output file is an HDF5 file and loc is provided
             if output.suffix in [".h5", ".hdf5"] and h5_loc is None:
@@ -1089,10 +1132,10 @@ class MotionCorrection:
             self.io.save(output, data={channel:data}, h5_loc=loc, chunks=chunks, compression=compression)
 
         else:
-            raise ValueError(f"please provide output as None, str or pathlib.Path instead of {path}")
+            raise ValueError(f"please provide output as None, str or pathlib.Path instead of {output}")
 
         # If remove_mmap is True, delete the mmap file associated with motion correction
-        if remove_mmap:
+        if remove_intermediate:
             self.clean_up()
 
 class Delta:
@@ -1139,7 +1182,7 @@ class Delta:
 
     """
 
-    def __init__(self, input_, loc=None, in_memory=True, parallel=False):
+    def __init__(self, input_, loc=None):
         """
         Initializes a Delta object.
 
@@ -1160,16 +1203,11 @@ class Delta:
         # Get the dimensions and chunk size of the input data
         self.dim, self.chunksize = get_data_dimensions(self.input_, loc=loc)
 
-        # Flag indicating whether the data should be loaded into memory
-        self.in_memory = in_memory
-
-        # Flag indicating whether to use parallel processing
-        self.parallel = parallel
-
         # The location of the data in the HDF5 file (optional, only applicable for .h5 files)
         self.loc = loc
 
-    def run(self, method="background", window=None, overwrite_first_frame=True, use_dask=True):
+    def run(self, window, method="background", chunks="infer", output_path=None,
+            overwrite_first_frame=True, lazy=True):
         """
         Runs the delta calculation on the input data.
 
@@ -1191,7 +1229,7 @@ class Delta:
 
         """
         # Prepare the data for processing
-        data = self.prepare_data(self.input_, in_memory=self.in_memory, shared=self.parallel, use_dask=use_dask)
+        data = self.prepare_data(self.input_, h5_loc=self.loc, chunks=chunks, output_path=output_path, lazy=lazy)
 
         # Sequential execution
         if isinstance(data, np.ndarray):
@@ -1199,7 +1237,7 @@ class Delta:
             res = self.calculate_delta_min_filter(data, window, method=method, inplace=False)
 
         # Parallel from .tdb file
-        elif isinstance(data, str) and data.startswith("tdb:"):
+        elif isinstance(data, (str, Path)) and Path(data).suffix in (".tdb"):
             # Warning message for overwriting the .tdb file
             logging.warning("This function will overwrite the provided .tdb file!")
 
@@ -1212,14 +1250,14 @@ class Delta:
                 # Open the TileDB array and load the specified range
                 with tiledb.open(path, mode="r") as tdb:
                     data = tdb[:, x0:x1, y0:y1]
-                    res = calculate_delta_min_filter(data, window, method=method, inplace=False)
+                    res = calculate_delta_min_filter(data, window, method=method, inplace=False) # TODO does this make sense?
 
                 # Overwrite the range with the calculated delta values
                 with tiledb.open(path, mode="w") as tdb:
                     tdb[:, x0:x1, y0:y1] = calculate_delta_min_filter(data, window, method=method, inplace=False)
 
             # Extract the path from the input data
-            path = data[len("tdb:"):]
+            path = data.as_posix()
 
             # Get the dimensions and chunk size of the .tdb file
             (Z, X, Y), chunksize = get_data_dimensions(path, loc=None)
@@ -1239,7 +1277,8 @@ class Delta:
                     client.gather(futures)
 
             # Load the modified .tdb file into memory
-            res = self.load_to_memory(Path(path), loc=None)
+            io = IO()
+            res = io.load(Path(path))
 
         elif isinstance(data, da.core.Array):
             # Calculate delta using Dask array for lazy loading and computation
@@ -1250,7 +1289,7 @@ class Delta:
                                   dtype=float).compute()
 
         else:
-            raise NotImplementedError("Input data type not recognized!")
+            raise ValueError(f"Input data type not recognized: {type(data)}")
 
         # Overwrite the first frame with the second frame if required
         if overwrite_first_frame:
@@ -1259,37 +1298,12 @@ class Delta:
         self.res = res
         return res
 
-    @staticmethod
-    def load_to_memory(path, loc=None):
-        """
-        This function loads data from the specified path into memory and returns it.
-
-        Args:
-        - path: A path to the data to be loaded.
-        - loc: A string representing the location of the data in the HDF5 file. This parameter is optional
-          and only applicable when path has the .h5 extension.
-
-        Returns:
-        - The data loaded from the specified path.
-
-        Raises:
-        - TypeError: If the file type is not recognized.
-
-        """
-
-        # Check if the input is already a numpy ndarray
-        if isinstance(path, np.ndarray):
-            return path
+    def save(self, output_path, h5_loc="df", chunks=(-1, "auto", "auto"), compression=None, overwrite=False):
 
         io = IO()
-        return io.load(path, h5_loc=loc)
+        io.save(output_path, data=self.res, h5_loc=h5_loc, chunks=chunks, compression=compression, overwrite=overwrite)
 
-    def save(self, output_path, h5_loc="df", chunks=(-1, "auto", "auto"), compression=None):
-
-        io = IO()
-        io.save(output_path, data=self.res, h5_loc=h5_loc, chunks=chunks, compression=compression)
-
-    def prepare_data(self, input_, in_memory=True, shared=True, use_dask=True):
+    def prepare_data(self, input_, chunks="infer", h5_loc=None, output_path=None, lazy=True):
 
         """
         Preprocesses the input data by converting it to a TileDB array and optionally loading it into memory
@@ -1310,56 +1324,54 @@ class Delta:
         - TypeError: If the input data type is not recognized.
         """
 
+        io = IO()
+
+        if not lazy:
+            data = io.load(input_, h5_loc=h5_loc, lazy=lazy)
+
+            if not isinstance(data, da.Array):
+                data = da.from_array(data, chunks=(self.dim))
+            data = da.rechunk(data, chunks=(-1, "auto", "auto"))
+            return data
+
         # convert to .tdb
-        if not in_memory:
+        elif isinstance(input_, Path) and input_.suffix == ".tdb":
+            return io.load(input_, lazy=lazy)
 
-            if isinstance(input_, Path) and input_.suffix == ".tdb":
-                return f"tdb:{input_.as_posix()}"
+        elif isinstance(input_, Path):
+            # if the input is a file path, load it into memory and convert to TileDB array
 
-            elif isinstance(input_, Path):
-                # if the input is a file path, load it into memory and convert to TileDB array
-                data = self.load_to_memory(input_, loc=self.loc)
-                return self.save_to_tdb(data)
+            data = io.load(input_, h5_loc=self.loc)
 
-            elif isinstance(input_, np.ndarray):
-                # if the input is a numpy ndarray, convert to TileDB array
-                return self.save_to_tdb(input_)
+            new_path = input_.with_suffix(".tdb") if output_path is None else Path(output_path)
+            if not new_path.suffix in (".tdb"):
+                raise ValueError(f"Please provide an output_path with '.tdb' ending instead of {new_path.suffix}")
 
+            if new_path.exists():
+                logging.warning(f"found previous result. Deleting {new_path}")
+                shutil.rmtree(new_path)
+
+            io.save(new_path, data=data, chunks=chunks)
+
+            return io.load(new_path, lazy=lazy)
+
+        elif isinstance(input_, (np.ndarray, da.Array)):
+            # if the input is a numpy ndarray, convert to TileDB array
+
+            if output_path is None:
+                raise ValueError("when providing an array as input, an output_path needs to be provided as well.")
             else:
-                # if the input data type is not recognized, raise an error
-                raise TypeError(f"do not recognize data type: {type(input_)}")
+                new_path = Path(output_path)
 
-        # simple load
-        elif in_memory and not shared:
-            return self.load_to_memory(input_, loc=self.loc)
+            if not new_path.suffix in (".tdb"):
+                raise ValueError(f"Please provide an output_path with '.tdb' ending instead of {new_path.suffix}")
 
-        # create dask.array
-        elif in_memory and use_dask:
-            # if 'in_memory' is True and 'shared' is True, load the data into memory as a Dask array
-            # TODO this should be lazy loading through dask array instead
-            arr = self.load_to_memory(input_, loc=self.loc)
+            io.save(new_path, data=input_, chunks=chunks)
 
-            if not isinstance(arr, da.Array):
-                arr = da.from_array(arr, chunks=(self.dim))
-
-            data = da.rechunk(arr, chunks=(-1, "auto", "auto"))
-
-        elif in_memory and not use_dask:
-
-            # TODO create VRAM shared memory
-            # if not use_dask:
-            #     shm_name = "my_shared_memory" # TODO dynamic
-            #     shm_length = arr.nbytes # TODO dynamic
-            #     shm_array = shm.SharedMemory(create=True, name=shm_name, size=shm_length)
-            #     shm_array_np = np.ndarray(arr.shape, dtype=arr.dtype, buffer=shm_array.buf)
-            #     shm_array_np[:] = arr[:]
-
-            raise NotImplementedError("implement shared memory option")
+            return io.load(new_path, lazy=lazy)
 
         else:
-            raise NotImplementedError
-
-        return data
+            raise TypeError(f"do not recognize data type: {type(input_)}")
 
     @staticmethod
     @deprecated(reason="faster implementation but superseded by: calculate_background_even_faster")

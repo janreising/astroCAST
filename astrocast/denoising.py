@@ -8,20 +8,16 @@ from typing import Union
 
 from tqdm import tqdm
 
-from functools import lru_cache
-
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 import tensorflow as tf
 
 import keras
 from tensorflow.keras import backend as K
-# from tensorflow.keras.models import load_model
 
 from keras.callbacks import EarlyStopping, ModelCheckpoint
 from keras.layers import Input, Conv2D, MaxPooling2D, UpSampling2D, Concatenate, BatchNormalization
 from keras.models import Model, load_model
 from keras.optimizers import Adam
-from keras import mixed_precision
 
 import numpy as np
 import h5py as h5
@@ -29,7 +25,7 @@ import tifffile as tiff
 from skimage.transform import resize
 import pandas as pd
 
-from scipy.stats import bootstrap, DegenerateDataWarning
+from scipy.stats import bootstrap
 
 # TODO write plotting for generators
 # TODO write plotting for network history
@@ -78,7 +74,7 @@ class FullFrameGenerator(keras.utils.Sequence):
         self.epoch_index = 0
 
         # read file dimensions
-        if file_path.endswith(".h5"):
+        if file_path.suffix in (".h5", ".hdf5"):
 
             assert loc is not None, "When using a .h5 file the 'loc' parameter needs to be provided"
 
@@ -97,7 +93,7 @@ class FullFrameGenerator(keras.utils.Sequence):
                 self.local_mean = np.mean(local_data)
                 self.local_std = np.std(local_data)
 
-        if file_path.endswith(".tiff") or file_path.endswith(".tif"):
+        if file_path.suffix in (".tiff", ".tif"):
 
             tif = tiff.TiffFile(file_path)
             self.total_frame_per_movie = len(tif.pages)
@@ -183,7 +179,7 @@ class FullFrameGenerator(keras.utils.Sequence):
             input_index = input_index[input_index !=
                                       index_frame + index_padding]
 
-        if self.file_path.endswith(".h5"):
+        if self.file_path.suffix in (".h5", ".hdf5"):
 
             with h5.File(self.file_path, "r") as movie_obj:
 
@@ -193,7 +189,7 @@ class FullFrameGenerator(keras.utils.Sequence):
 
                 data_img_output = movie_obj[self.loc][index_frame, :, :]
 
-        elif self.file_path.endswith(".tiff") or self.file_path.endswith(".tif"):
+        elif self.file_path.suffix in (".tiff", ".tif"):
 
             data_img_input = tiff.imread(self.file_path, key=input_index)
             # TODO this might not be necessary for TIFFs
@@ -206,10 +202,10 @@ class FullFrameGenerator(keras.utils.Sequence):
         img_out_shape = data_img_output.shape
 
         data_img_input = (
-            data_img_input.astype("float") - self.local_mean
+            data_img_input.astype(float) - self.local_mean
         ) / self.local_std
         data_img_output = (
-            data_img_output.astype("float") - self.local_mean
+            data_img_output.astype(float) - self.local_mean
         ) / self.local_std
 
         input_full[0, : img_in_shape[0], : img_in_shape[1], :] = data_img_input
@@ -326,14 +322,23 @@ class FullFrameGenerator(keras.utils.Sequence):
                 model_path = models[0]
                 logging.info(f"directory provided. Selected most recent model: {model_path}")
 
-            elif os.path.isfile(model):
+            else:
                 model_path = model
 
             model = load_model(model_path,
                     custom_objects={"annealed_loss": Network.annealed_loss, "mean_squareroot_error":Network.mean_squareroot_error})
 
         else:
-            assert type(model) == keras.engine.functional.Functional, f"couldn't find 'model'. Please provide keras model, file_path or dire_path instead of {type(model)}"
+            logging.warning(f"providing model via parameter. Model type: {type(model)}")
+
+            # deals with keras.__version__ > 2.10.0
+            try:
+                expected_model_type = keras.engine.functional.Functional
+            except AttributeError:
+                expected_model_type = keras.src.engine.functional.Functional
+
+            assert type(model) == expected_model_type, f"Please provide keras model, " \
+                                                       f"file_path or dir_path instead of {type(model)}"
 
         # create output array
         num_datasets = len(self)
@@ -344,10 +349,10 @@ class FullFrameGenerator(keras.utils.Sequence):
 
         final_shape.extend(indiv_shape[:-1])
 
-        if (output is None) or (output.endswith(".tiff")) or (output.endswith(".tiff")):
+        if (output is None) or (output.suffix in (".tiff", ".tif")):
             dset_out = np.zeros(tuple(final_shape), dtype=dtype)
 
-        elif output.endswith(".h5"):
+        elif output.suffix in (".h5", ".hdf5"):
 
             assert out_loc is not None, "when exporting results to .h5 file please provide 'out_loc' flag"
 
@@ -375,10 +380,10 @@ class FullFrameGenerator(keras.utils.Sequence):
         if output is None:
             return dset_out
 
-        elif output.endswith(".tiff") or output.endswith(".tif"):
+        elif output.suffix in (".tiff", ".tif"):
             tiff.imwrite(output, data=dset_out)
 
-        elif output.endswith(".h5"):
+        elif output.suffix in (".hdf5", ".h5"):
             f.close()
 
 # TODO inference on SubFrameGenerator
@@ -482,17 +487,18 @@ class SubFrameGenerator(tf.keras.utils.Sequence):
             dw = iw
             dh = ih
 
-        # define prediction length (Z)
-        if type(self.signal_frames) == int:
+        # enforce tuples for signal and gap frames
+        if isinstance(self.signal_frames, int):
             signal_frames = (self.signal_frames, self.signal_frames)
         else:
             signal_frames = self.signal_frames
 
-        if type(self.gap_frames) == int:
+        if isinstance(self.gap_frames, int):
             gap_frames = (self.gap_frames, self.gap_frames)
         else:
             gap_frames = self.gap_frames
 
+        # define prediction length (Z)
         stack_len = signal_frames[0] + gap_frames[0] + 1 + gap_frames[1] + signal_frames[1]
         z_steps = max(1, int(self.z_steps * stack_len))
 
@@ -515,10 +521,7 @@ class SubFrameGenerator(tf.keras.utils.Sequence):
         for file in tqdm(self.paths, desc="file preprocessing"):
 
             file_container = []
-
-            if type(file) == str:
-                file = Path(file)
-
+            file = Path(file)
             assert file.is_file(), "can't find: {}".format(file)
 
             if file.suffix == ".h5":
@@ -546,9 +549,14 @@ class SubFrameGenerator(tf.keras.utils.Sequence):
             else:
                 Z0, Z1 = 0, Z
 
-            pad_z0, pad_z1 = (signal_frames[0]+gap_frames[0], signal_frames[1]+gap_frames[1]+1) if self.padding is not None else (0, 0)
-            pad_x1 = iw % X if self.padding else 0
-            pad_y1 = ih % Y if self.padding else 0
+            # Calculate padding (if applicable)
+            if self.padding is not None:
+                pad_z0 = signal_frames[0] + gap_frames[0]
+                pad_z1 = signal_frames[1] + gap_frames[1] + 1
+                pad_x1 = iw % X
+                pad_y1 = ih % Y
+            else:
+                pad_z0 = pad_z1 = pad_x1 = pad_y1 = 0
 
             zRange =list(range(Z0 + z_start - pad_z0, Z1 - stack_len - z_start + pad_z1, z_steps))
             xRange = list(range(x_start, X - x_start + pad_x1, dw))
@@ -573,24 +581,43 @@ class SubFrameGenerator(tf.keras.utils.Sequence):
                     for y0 in yRange:
                         y1 = y0 + ih
 
+                        # choose modification
                         rot = random.choice(allowed_rotation)
                         flip = random.choice(allowed_flip)
 
+                        # mark dropped frame (if applicable)
                         if (self.drop_frame_probability is not None) and (np.random.random() <= self.drop_frame_probability):
                             drop_frame = np.random.randint(0, np.sum(signal_frames))
                         else:
                             drop_frame = -1
-                        file_container.append(
-                            {"idx": idx, "path": file, "z0": z0, "z1": z1, "x0": x0, "x1": x1, "y0": y0,
-                             "y1": y1, "rot": rot, "flip": flip,
-                             "noise": self.add_noise, "drop_frame": drop_frame,
-                             "padding": (
-                                 0 if z0 > 0 else 0 - z0,
-                                 0 if z1 < Z1 else z1 - Z1,
-                                 0 if x1 < X else x1 - X,
-                                 0 if y1 < Y else y1 - Y
-                             )
-                             })
+
+                        # calculate necessary padding
+                        padding = np.zeros(4, dtype=int)
+
+                        if not z0 > 0:
+                            padding[0] = 0 - z0
+
+                        if not z1 < Z1:
+                            padding[1] = z1 - Z1
+
+                        if not x1 < X:
+                            padding[2] = x1 - X
+
+                        if not y1 < Y:
+                            padding[3] = y1 - Y
+
+                        # cannot pad on empty axis
+                        if (padding[0] >= stack_len) or (padding[1] >= stack_len) or (padding[2] >= dw) or (padding[3] >= dh):
+                            continue
+
+                        # create item
+                        item = {
+                            "idx": idx, "path": file, "z0": z0, "z1": z1, "x0": x0, "x1": x1, "y0": y0,
+                            "y1": y1, "rot": rot, "flip": flip,
+                            "noise": self.add_noise, "drop_frame": drop_frame,
+                            "padding": padding}
+
+                        file_container.append(item)
 
                         idx += 1
 
@@ -758,7 +785,8 @@ class SubFrameGenerator(tf.keras.utils.Sequence):
             data = self._load_row(row.path, row.z0, row.z1, row.x0, row.x1, row.y0, row.y1,
                                   padding=None if self.padding is None else row.padding)
 
-            assert data.shape == self.fov_size, f"loaded data does not match expected FOV size (fov: {self.fov_size}) vs. (load: {data.shape}"
+            assert data.shape == self.fov_size, f"loaded data does not match expected FOV size " \
+                                                f"(fov: {self.fov_size}) vs. (load: {data.shape}"
 
             if row.rot != 0:
 
@@ -813,6 +841,7 @@ class SubFrameGenerator(tf.keras.utils.Sequence):
     def __len__(self):
         # return self.n // self.batch_size
         return len(self.items.batch.unique())
+
     def __get_norm_parameters__(self, index):
 
         files = self.items[self.items.batch == index].path.unique()
@@ -834,6 +863,10 @@ class SubFrameGenerator(tf.keras.utils.Sequence):
             if os.path.isdir(model):
 
                 models = list(model.glob("*.h5"))
+
+                if len(models) < 1:
+                    raise FileNotFoundError(f"cannot find model in provided directory: {model}")
+
                 models.sort(key=lambda x: os.path.getmtime(x))
                 model_path = models[0]
                 logging.info(f"directory provided. Selected most recent model: {model_path}")
@@ -841,11 +874,27 @@ class SubFrameGenerator(tf.keras.utils.Sequence):
             elif os.path.isfile(model):
                 model_path = model
 
+            else:
+                raise FileNotFoundError(f"cannot find model: {model}")
+
             model = load_model(model_path,
                     custom_objects={"annealed_loss": Network.annealed_loss, "mean_squareroot_error":Network.mean_squareroot_error})
 
         else:
-            assert type(model) == keras.engine.functional.Functional, f"couldn't find 'model'. Please provide keras model, file_path or dire_path instead of {type(model)}"
+            logging.warning(f"providing model via parameter. Model type: {type(model)}")
+
+            # deals with keras.__version__ > 2.10.0
+            try:
+                expected_model_type = keras.engine.functional.Functional
+            except AttributeError:
+                expected_model_type = keras.src.engine.functional.Functional
+
+            assert type(model) == expected_model_type, f"Please provide keras model, " \
+                                                       f"file_path or dir_path instead of {type(model)}"
+
+        # enforce pathlib.Path
+        if output is not None:
+            output = Path(output)
 
         # create output arrays
         assert len(self.items.path.unique()) < 2, f"inference from multiple files is currently not implemented: {self.items.path.unique()}"
@@ -865,7 +914,7 @@ class SubFrameGenerator(tf.keras.utils.Sequence):
             dtype = x.dtype
             logging.warning(f"choosing dtype: {dtype}")
 
-        if output is not None and output.endswith(".h5"):
+        if output is not None and output.suffix in (".h5", ".hdf5"):
 
             assert out_loc is not None, "when exporting results to .h5 file please provide 'out_loc' flag"
 
@@ -911,11 +960,13 @@ class SubFrameGenerator(tf.keras.utils.Sequence):
         if output is None:
             return rec
 
-        elif output.endswith(".tiff") or output.endswith(".tif"):
+        elif output.suffix in (".tiff", ".tif"):
             tiff.imwrite(output, data=rec)
+            return output
 
-        elif output is not None and output.endswith(".h5"):
+        elif output.suffix in (".h5", ".hdf5"):
             f.close()
+            return output
 
     @staticmethod
     def get_local_descriptive(path, h5_loc):

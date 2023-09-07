@@ -3,8 +3,8 @@ import time
 import numpy as np
 import pytest
 
-from astroCAST.clustering import *
-from astroCAST.helper import DummyGenerator
+from astrocast.clustering import *
+from astrocast.helper import DummyGenerator
 
 class Test_hdbscan:
 

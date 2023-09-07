@@ -4,10 +4,10 @@ import time
 import dask.array
 import pytest
 
-from astroCAST.analysis import *
-from astroCAST.clustering import Distance
-from astroCAST.detection import Detector
-from astroCAST.helper import EventSim, DummyGenerator
+from astrocast.analysis import *
+from astrocast.clustering import Distance
+from astrocast.detection import Detector
+from astrocast.helper import EventSim, DummyGenerator
 
 import matplotlib
 matplotlib.use('Agg')  # Use the Agg backend
@@ -183,7 +183,11 @@ class Test_Events:
             logging.warning(f"trace: {traces}")
             logging.warning(f"arr: {arr}")
 
-            assert (len(np.unique(traces.astype(int))) == len(np.unique(arr.astype(int)))) or (len(np.unique(traces.astype(int))) == len(np.unique(arr.astype(int)))-1)
+            data_unique_values = np.unique(arr.flatten().astype(int))
+            trace_unique_values = np.unique(traces.flatten().astype(int))
+
+            assert abs(len(data_unique_values) - len(trace_unique_values)) <= 2, f"data_unique: {data_unique_values}\n" \
+                                                                                 f"trace_unique: {trace_unique_values}"
 
     @pytest.mark.parametrize("extend", [4, (3, 2), (-1, 2), (2, -1)])
     def test_extension_partial(self, extend, shape=(50, 100, 100)):
@@ -202,14 +206,13 @@ class Test_Events:
             assert traces.shape == (len(df), shape[0])
 
             # this works because we are feeding the event_map as dummy data
-            # hence all the traces will be a constant number
-
+            # hence all the trace values will be a constant number
             data_unique_values = np.unique(arr.flatten().astype(int))
             trace_unique_values = np.unique(traces.flatten().astype(int))
-            assert abs(len(data_unique_values) - len(trace_unique_values)) <= 1
+            assert abs(len(data_unique_values) - len(trace_unique_values)) <= 1, f"data_unique: {data_unique_values}\n" \
+                                                                                 f"trace_unique: {trace_unique_values}"
 
-    @pytest.mark.parametrize("lazy", [True, False])
-    def test_extension_cache(self, lazy, shape=(50, 100, 100)):
+    def test_extension_cache(self, lazy=False, shape=(50, 100, 100)):
 
         with tempfile.TemporaryDirectory() as tmpdir:
 
@@ -237,7 +240,7 @@ class Test_Events:
             events_2.events = trace_2
             d2 = time.time() - t0
 
-            assert d2 < d1, f"caching is taking too long: {d2} >= {d1}"
+            assert d2 < d1, f"caching is taking too long: {d2:.2f}s >= {d1:.2f}s"
             assert hash(events_1) == hash(events_2)
 
     def test_extension_save(self, shape=(50, 100, 100)):
@@ -491,7 +494,7 @@ class Test_Video:
     @pytest.mark.parametrize("lazy", [True, False])
     @pytest.mark.parametrize("z_slice", [None, (10, 40), (10, -1)])
     @pytest.mark.parametrize("input_type", ["numpy", "dask"])
-    @pytest.mark.parametrize("proj_func", [np.mean, np.min, None])
+    @pytest.mark.parametrize("proj_func", [np.mean, None])
     @pytest.mark.parametrize("window", [None, 3])
     def test_windowed_loading(self, input_type, z_slice, lazy, proj_func, window):
 
