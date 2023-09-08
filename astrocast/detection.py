@@ -62,13 +62,13 @@ class Detector:
         logging.info(f"input file: {self.input_path}")
 
         # quality check arguments
-        assert os.path.isfile(input_path) or os.path.isdir(input_path), \
-            f"input file does not exist: {input_path}"
-        assert (output is None) or (~ self.output.is_dir()), \
-            f"output file already exists: {output}"
-        assert indices is None or indices.shape == (3, 2), \
-            "indices must be np.arry of shape (3, 2) -> ((z0, z1), " \
-            "(x0, x1), (y0, y1)). Found: " + indices
+        if not self.input_path.exists():
+            raise FileNotFoundError(f"input file does not exist: {input_path}")
+        if (output is not None) and not self.output.exists():
+            raise FileExistsError(f"output folder already exists: {output}")
+        if indices is not None and indices.shape != (3, 2):
+            raise ValueError(f"indices must be np.array and dim: (3, 2) -> ((z0, z1), (x0, x1), (y0, y1)) not: {indices}")
+
         # shared variables
         self.file = None
         self.data = None
@@ -134,7 +134,8 @@ class Detector:
 
         # load data
         io = IO()
-        data = io.load(path=self.input_path, h5_loc=dataset, z_slice=subset, lazy=lazy)  # todo: add chunks flag
+        # todo: add chunks flag and/or re-chunking
+        data = io.load(path=self.input_path, h5_loc=dataset, z_slice=subset, lazy=lazy)
         self.Z, self.X, self.Y = data.shape
         self.data = data
         logging.info(f"data: {data.shape}") if lazy else logging.info(f"data: {data}")
