@@ -77,6 +77,7 @@ class Detector:
 
     def run(self, dataset: Optional[str] = None,
             threshold: Optional[float] = None, min_size: int = 20,
+            smoothing_kernel=2,
             lazy: bool = True, adjust_for_noise: bool = False,
             subset: Optional[str] = None, split_events: bool = True,
             binary_struct_iterations: int = 1,
@@ -152,6 +153,7 @@ class Detector:
             logging.info("Thresholding events")
             event_map = self.get_events(data, roi_threshold=threshold, var_estimate=noise,
                                         min_roi_size=min_size,
+                                        smoXY=smoothing_kernel,
                                         binary_struct_iterations=binary_struct_iterations,
                                         binary_struct_connectivity=binary_struct_connectivity,
                                         save_activepixels=save_activepixels)
@@ -216,7 +218,8 @@ class Detector:
         return stdEst
 
     def get_events(self, data: np.array, roi_threshold: float, var_estimate: float,
-                   min_roi_size: int = 10, mask_xy: np.array = None, smoXY=2,
+                   min_roi_size: int = 10, mask_xy: np.array = None,
+                   smoXY=2,
                    remove_small_object_framewise=False,
                    binary_struct_iterations=1,
                    binary_struct_connectivity=2,
