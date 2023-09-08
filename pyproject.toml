@@ -49,10 +49,11 @@ umap-learn = "*"
 xarray = "*"
 xxhash = "*"
 #jnormcorre = "*" # TODO uncomment once pull-request was accepted
-jnormcorre = { git = "https://github.com/janreising/jnormcorre.git", branch = "production" }
+#jnormcorre = { git = "https://github.com/janreising/jnormcorre.git", branch = "production" }
 numpy = "*"
 humanize = "*"
 pyyaml = "*"
+colorama = "^0.4.6"
 
 [tool.poetry.dev-dependencies]
 pytest-cov = "*"

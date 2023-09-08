@@ -46,6 +46,7 @@ class Events(CachedClass):
             else:
 
                 event_dir = Path(event_dir)
+                self.event_dir = event_dir
                 if not event_dir.is_dir():
                     raise FileNotFoundError(f"cannot find provided event directory: {event_dir}")
 
@@ -91,7 +92,23 @@ class Events(CachedClass):
 
             # get data
             if isinstance(data, (str, Path)):
-                self.data = Video(data, z_slice=z_slice, h5_loc=h5_loc, lazy=False)
+
+                if data == "infer":
+                    parent = self.event_dir.parent
+                    root_guess = parent.joinpath(f"{self.event_dir.stem}")
+                    for suffix in (".h5", ".hdf5", ".tiff", ".tif", ".tdb"):
+
+                        video_path_guess = root_guess.with_suffix(suffix)
+                        if video_path_guess.exists():
+                            logging.info(f"inferring video file as: {video_path_guess}")
+                            data = video_path_guess
+                            break
+
+                    if data is None:
+                        logging.warning(f"unable to infer video path with {root_guess}.tiff/h5/tdb")
+
+                if data is not None:
+                    self.data = Video(data, z_slice=z_slice, h5_loc=h5_loc, lazy=False)
 
             elif isinstance(data, (np.ndarray, da.Array)):
 
@@ -696,7 +713,15 @@ class Events(CachedClass):
 
         viewer = napari.Viewer()
 
-        if video is not None:
+        # check if video was loaded at initialization
+        if video is None and self.data is not None:
+            logging.info(f"loading video from path provided during initialization."
+                         f" Users need to ensure that the z_slice parameters matches.")
+            data = self.data.get_data()
+            logging.warning("data: ", type(data))
+            viewer.add_image(data, )
+
+        else:
             io = IO()
             data = io.load(path=video, h5_loc=h5_loc, z_slice=z_slice, lazy=lazy)
 
@@ -1027,7 +1052,7 @@ class Video:
 
         return proj
 
-    def show(self, viewer=None, colormap=None,
+    def show(self, viewer=None, colormap="red",
              show_trace=False, window=160, indices=None, viewer1d=None, xlabel="frames", ylabel="Intensity", reset_y=False):
 
         if viewer is None:
@@ -1041,18 +1066,6 @@ class Video:
             # get trace
             Y = self.get_image_project(agg_func=np.mean, axis=(1, 2))
             X = range(len(Y)) if indices is None else indices
-
-            # create 1D viewer
-            # v1d = None
-            # if attach:
-            #
-            #     for widget in viewer.window._dock_widgets.values():
-            #         potential_widget = widget.widget()
-            #         print(potential_widget)
-            #         print(potential_widget.children())
-            #         if isinstance(potential_widget, napari_plot._qt.qt_viewer.QtViewer):
-            #             v1d = potential_widget
-            #             break
 
             if viewer1d is None:
                 v1d = napari_plot.ViewerModel1D()
@@ -1068,26 +1081,69 @@ class Video:
             v1d.set_y_view(np.min(Y) * 0.9, np.max(Y) * 1.1)
 
             # create attachable qtviewer
-            # qt_viewer = QtViewer(v1d)
             line = v1d.add_line(np.c_[X, Y], name=self.name, color=colormap)
 
+            # def update_line(event: Event):
+            #     Z, _, _ = event.value
+            #     z0, z1 = Z-window, Z
+            #
+            #     if z0 < 0:
+            #         z0 = 0
+            #
+            #     y_ = Y[z0:z1]
+            #     x_ = X[z0:z1]
+            #     # y1 = np.pad(y1, (-z0, 0), 'constant', constant_values=0)
+            #
+            #     line.data = np.c_[x_, y_]
+            #
+            #     v1d.reset_x_view()
+            #
+            #     if reset_y:
+            #         v1d.reset_y_view()
+
+            current_frame_line = None
+
             def update_line(event: Event):
+                nonlocal current_frame_line
+
                 Z, _, _ = event.value
-                z0, z1 = Z-window, Z
+                z0, z1 = Z - window//2, Z + window//2  # Adjusting to center the current frame
+
+                left_padding = 0
+                right_padding = 0
 
                 if z0 < 0:
+                    left_padding = abs(z0)
                     z0 = 0
+
+                if z1 > len(Y):
+                    right_padding = z1 - len(Y)
+                    z1 = len(Y)
 
                 y_ = Y[z0:z1]
                 x_ = X[z0:z1]
-                # y1 = np.pad(y1, (-z0, 0), 'constant', constant_values=0)
+
+                # Padding with zeros on the left and/or right if necessary
+                y_ = np.pad(y_, (left_padding, right_padding), 'constant', constant_values=0)
+
+                # Adjusting x_ to match the length of y_
+                x_ = np.arange(z0, z0 + len(y_))
 
                 line.data = np.c_[x_, y_]
+
+                # Remove the previous yellow line
+                if current_frame_line:
+                    v1d.layers.remove(current_frame_line)
+
+                # Add a yellow vertical line at the current frame
+                current_frame_line_data = np.array([[Z, np.min(Y)], [Z, np.max(Y)]])
+                current_frame_line = v1d.add_line(current_frame_line_data, color='yellow')
 
                 v1d.reset_x_view()
 
                 if reset_y:
                     v1d.reset_y_view()
+
 
             viewer.dims.events.current_step.connect(update_line)
 

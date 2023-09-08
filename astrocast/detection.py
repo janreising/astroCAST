@@ -62,13 +62,13 @@ class Detector:
         logging.info(f"input file: {self.input_path}")
 
         # quality check arguments
-        assert os.path.isfile(input_path) or os.path.isdir(input_path), \
-            f"input file does not exist: {input_path}"
-        assert (output is None) or (~ self.output.is_dir()), \
-            f"output file already exists: {output}"
-        assert indices is None or indices.shape == (3, 2), \
-            "indices must be np.arry of shape (3, 2) -> ((z0, z1), " \
-            "(x0, x1), (y0, y1)). Found: " + indices
+        if not self.input_path.exists():
+            raise FileNotFoundError(f"input file does not exist: {input_path}")
+        if (output is not None) and self.output.exists():
+            raise FileExistsError(f"output folder already exists: {output}")
+        if indices is not None and indices.shape != (3, 2):
+            raise ValueError(f"indices must be np.array and dim: (3, 2) -> ((z0, z1), (x0, x1), (y0, y1)) not: {indices}")
+
         # shared variables
         self.file = None
         self.data = None
@@ -77,6 +77,7 @@ class Detector:
 
     def run(self, dataset: Optional[str] = None,
             threshold: Optional[float] = None, min_size: int = 20,
+            smoothing_kernel=2,
             lazy: bool = True, adjust_for_noise: bool = False,
             subset: Optional[str] = None, split_events: bool = True,
             binary_struct_iterations: int = 1,
@@ -134,7 +135,8 @@ class Detector:
 
         # load data
         io = IO()
-        data = io.load(path=self.input_path, h5_loc=dataset, z_slice=subset, lazy=lazy)  # todo: add chunks flag
+        # todo: add chunks flag and/or re-chunking
+        data = io.load(path=self.input_path, h5_loc=dataset, z_slice=subset, lazy=lazy)
         self.Z, self.X, self.Y = data.shape
         self.data = data
         logging.info(f"data: {data.shape}") if lazy else logging.info(f"data: {data}")
@@ -151,6 +153,7 @@ class Detector:
             logging.info("Thresholding events")
             event_map = self.get_events(data, roi_threshold=threshold, var_estimate=noise,
                                         min_roi_size=min_size,
+                                        smoXY=smoothing_kernel,
                                         binary_struct_iterations=binary_struct_iterations,
                                         binary_struct_connectivity=binary_struct_connectivity,
                                         save_activepixels=save_activepixels)
@@ -215,7 +218,8 @@ class Detector:
         return stdEst
 
     def get_events(self, data: np.array, roi_threshold: float, var_estimate: float,
-                   min_roi_size: int = 10, mask_xy: np.array = None, smoXY=2,
+                   min_roi_size: int = 10, mask_xy: np.array = None,
+                   smoXY=2,
                    remove_small_object_framewise=False,
                    binary_struct_iterations=1,
                    binary_struct_connectivity=2,
