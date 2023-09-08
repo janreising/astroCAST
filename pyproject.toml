@@ -49,7 +49,8 @@ umap-learn = "*"
 xarray = "*"
 xxhash = "*"
 #jnormcorre = "*" # TODO uncomment once pull-request was accepted
-jnormcorre = { git = "https://github.com/janreising/jnormcorre.git", branch = "production" }
+#jnormcorre = { git = "https://github.com/janreising/jnormcorre.git", branch = "production" }
+jnormcorre = { git = "https://github.com/janreising/jnormcorre.git"}
 numpy = "*"
 humanize = "*"
 pyyaml = "*"
