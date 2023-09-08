@@ -13,7 +13,7 @@ import numpy as np
 import yaml
 from functools import partial
 
-from astrocast.analysis import Video
+from astrocast.analysis import Video, Events
 from astrocast.denoising import SubFrameGenerator
 from astrocast.detection import Detector
 from astrocast.preparation import MotionCorrection, Delta, Input, IO
@@ -60,18 +60,102 @@ def parse_chunks(chunks):
             raise ValueError(f"please provide 'chunks' parameter as None, infer or comma-separated list of 3 int values.")
         return chunks
 
+from colorama import init as init_colorama
+from colorama import Fore, Back, Style
+import inspect
+from prettytable import PrettyTable
+init_colorama(autoreset=True)
+
+
+class UserFeedback:
+
+    def __init__(self, params=None, logging_level=logging.WARNING, max_value_len=25,
+                 box_color=Fore.BLUE, msg_color=Fore.GREEN, table_color=Fore.CYAN):
+
+        logging.basicConfig(level=logging_level)
+
+        self.t0 = None
+        self.params = params
+        self.max_value_len = max_value_len
+        self.box_color = box_color
+        self.msg_color = msg_color
+        self.table_color = table_color
+
+    def _collect_parameters(self):
+        if self.params:
+
+            params = self.params.copy()
+            if 'feedback' in params:
+                del params['feedback']
+
+            table = PrettyTable()
+            table.field_names = ["Parameter", "Value"]
+            v_len = self.max_value_len  # Maximum length of the value
+            overridden = False
+
+            # Find the frame where ctx is defined
+            for frame_info in inspect.stack():
+                frame = frame_info.frame
+                if '_Context__self' in frame.f_locals:
+                    ctx = frame.f_locals['_Context__self']
+                    break
+            else:
+                ctx = None
+
+            default_map = ctx.default_map if ctx else {}
+
+            for key, value in params.items():
+                str_value = str(value)
+                if key in default_map and default_map[key] != value:
+                    overridden = True
+                    str_value += " *"
+
+                if len(str_value) > v_len:
+                    str_value = "..." + str_value[-v_len:]
+
+                table.add_row([key, str_value])
+
+            table_str = f"\n{self.table_color}{table.get_string()}"
+            print(table_str)
+
+            if overridden:
+                print(self.table_color + "  * config value was replaced by user input\n")
+
+    def start(self, level=1):
+        module_name = inspect.stack()[level].function
+        module_name = module_name.replace("_", " ")
+
+        print(self.box_color + "┌─" + "─" * len(module_name) + "─┐")
+        print(self.box_color + "│ " + module_name + " │")
+        print(self.box_color + "└─" + "─" * len(module_name) + "─┘")
+        print(self.msg_color + "Starting module: " + module_name)
+
+        self._collect_parameters()
+        self.t0 = time.time()
+
+    def end(self, level=1):
+        module_name = inspect.stack()[level].function
+        module_name = module_name.replace("_", " ")
+
+        delta = humanize.naturaldelta(dt.timedelta(seconds=time.time() - self.t0))
+        print(f"{self.msg_color}Completed module: {module_name} (runtime: {delta})")
+        print()
+
+    def __enter__(self):
+        self.start(level=2)
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        self.end(level=2)
+
 @click.group(context_settings={'auto_envvar_prefix': 'CLI'}, chain=True)
 @click.option('--config', default=None, type=click.Path())  # this allows us to change config path
 @click.pass_context
 def cli(ctx, config):
     if config is not None:
 
-        logging.warning(f"Loading configurations from '{config}'. Please note that parameters specified directly in the command line will override the settings in the YAML configuration file.")
-
         with open(config, 'r') as file:
             config = yaml.safe_load(file)
-
-        logging.warning(f"yaml-config: {config}")
 
         ctx.default_map = config
 
@@ -99,27 +183,22 @@ def convert_input(input_path, logging_level, output_path, sep, channels, z_slice
     Convert user files to astroCAST compatible format using the Input class.
     """
 
-    logging.basicConfig(level=logging_level)
-    t0 = time.time()
+    with UserFeedback(params=locals(), logging_level=logging_level):
 
-    # check output
-    output_path = check_output(output_path, input_path, h5_loc, overwrite)
-    if output_path == 0:
-        logging.warning("skipping this step because output exists.")
-        return 0
+        # check output
+        output_path = check_output(output_path, input_path, h5_loc, overwrite)
+        if output_path == 0:
+            logging.warning("skipping this step because output exists.")
+            return 0
 
-    # check chunks
-    chunks = parse_chunks(chunks)
+        # check chunks
+        chunks = parse_chunks(chunks)
 
-    # convert input
-    input_instance = Input(logging_level=logging_level)
-    input_instance.run(input_path=input_path, output_path=output_path, sep=sep, channels=channels, z_slice=z_slice,
-                       lazy=lazy, subtract_background=subtract_background, subtract_func=subtract_func, rescale=rescale,
-                       dtype=dtype, in_memory=in_memory, h5_loc=h5_loc, chunks=chunks, compression=compression)
-
-    # logging
-    delta = humanize.naturaldelta(dt.timedelta(seconds=time.time() - t0))
-    logging.info(f"Motion correction finished in {delta}")
+        # convert input
+        input_instance = Input(logging_level=logging_level)
+        input_instance.run(input_path=input_path, output_path=output_path, sep=sep, channels=channels, z_slice=z_slice,
+                           lazy=lazy, subtract_background=subtract_background, subtract_func=subtract_func, rescale=rescale,
+                           dtype=dtype, in_memory=in_memory, h5_loc=h5_loc, chunks=chunks, compression=compression)
 
 @cli.command()
 @click.argument('input-path', type=click.Path())
@@ -152,36 +231,32 @@ def motion_correction(input_path, working_directory, logging_level, output_path,
     Correct motion artifacts of input data using the MotionCorrection class.
     """
 
-    logging.basicConfig(level=logging_level)
-    t0 = time.time()
+    with UserFeedback(params=locals(), logging_level=logging_level):
 
-    # check output
-    output_path = check_output(output_path, input_path, h5_loc_save, overwrite)
-    if output_path == 0:
-        logging.warning("skipping this step because output exists.")
-        return 0
+        # check output
+        output_path = check_output(output_path, input_path, h5_loc_save, overwrite)
+        if output_path == 0:
+            logging.warning("skipping this step because output exists.")
+            return 0
 
-    # check chunks
-    chunks = parse_chunks(chunks)
+        # check chunks
+        chunks = parse_chunks(chunks)
 
-    # Initialize the MotionCorrection instance
-    logging.info("creating motion correction instance ...")
-    mc = MotionCorrection(working_directory=working_directory, logging_level=logging_level)
+        # Initialize the MotionCorrection instance
+        logging.info("creating motion correction instance ...")
+        mc = MotionCorrection(working_directory=working_directory, logging_level=logging_level)
 
-    # Call the run method with the necessary parameters
-    logging.info("applying motion correction ...")
-    mc.run(input_=input_path, h5_loc=h5_loc, max_shifts=max_shifts, niter_rig=niter_rig,
-           splits_rig=splits_rig, num_splits_to_process_rig=num_splits_to_process_rig,
-           strides=strides, overlaps=overlaps, pw_rigid=pw_rigid, splits_els=splits_els,
-           num_splits_to_process_els=num_splits_to_process_els, upsample_factor_grid=upsample_factor_grid,
-           max_deviation_rigid=max_deviation_rigid, nonneg_movie=nonneg_movie, gSig_filt=gsig_filt)
+        # Call the run method with the necessary parameters
+        logging.info("applying motion correction ...")
+        mc.run(input_=input_path, h5_loc=h5_loc, max_shifts=max_shifts, niter_rig=niter_rig,
+               splits_rig=splits_rig, num_splits_to_process_rig=num_splits_to_process_rig,
+               strides=strides, overlaps=overlaps, pw_rigid=pw_rigid, splits_els=splits_els,
+               num_splits_to_process_els=num_splits_to_process_els, upsample_factor_grid=upsample_factor_grid,
+               max_deviation_rigid=max_deviation_rigid, nonneg_movie=nonneg_movie, gSig_filt=gsig_filt)
 
-    # Save the results to the specified output path
-    logging.info("saving result ...")
-    mc.save(output_path, h5_loc=h5_loc_save, chunks=chunks, compression=compression)
-
-    delta = humanize.naturaldelta(dt.timedelta(seconds=time.time() - t0))
-    logging.info(f"Motion correction finished in {delta}")
+        # Save the results to the specified output path
+        logging.info("saving result ...")
+        mc.save(output_path, h5_loc=h5_loc_save, chunks=chunks, compression=compression)
 
 @cli.command()
 @click.argument('input-path', type=click.Path())
@@ -202,33 +277,28 @@ def subtract_delta(input_path, output_path, loc, method, window, chunks, overwri
     Subtract baseline of input using the Delta class.
     """
 
-    logging.basicConfig(level=logging_level)
-    t0 = time.time()
+    with UserFeedback(params=locals(), logging_level=logging_level):
 
-    # check output
-    output_path = check_output(output_path, input_path, h5_loc, overwrite)
-    if output_path == 0:
-        logging.warning("skipping this step because output exists.")
-        return 0
+        # check output
+        output_path = check_output(output_path, input_path, h5_loc, overwrite)
+        if output_path == 0:
+            logging.warning("skipping this step because output exists.")
+            return 0
 
-    # check chunks
-    chunks = parse_chunks(chunks)
+        # check chunks
+        chunks = parse_chunks(chunks)
 
-    # Initialize the Delta instance
-    logging.info("creating delta instance ...")
-    delta_instance = Delta(input_=input_path, loc=loc)
+        # Initialize the Delta instance
+        logging.info("creating delta instance ...")
+        delta_instance = Delta(input_=input_path, loc=loc)
 
-    # Run the delta calculation
-    logging.info("subtracting background ...")
-    result = delta_instance.run(method=method, window=window, chunks=chunks, output_path=None, overwrite_first_frame=overwrite_first_frame, lazy=lazy)
+        # Run the delta calculation
+        logging.info("subtracting background ...")
+        result = delta_instance.run(method=method, window=window, chunks=chunks, output_path=None, overwrite_first_frame=overwrite_first_frame, lazy=lazy)
 
-    # Save the results to the specified output path
-    logging.info("saving result ...")
-    delta_instance.save(output_path=output_path, h5_loc=h5_loc, chunks=chunks, compression=compression, overwrite=overwrite)
-
-    # logging
-    delta = humanize.naturaldelta(dt.timedelta(seconds=time.time() - t0))
-    logging.info(f"Motion correction finished in {delta}")
+        # Save the results to the specified output path
+        logging.info("saving result ...")
+        delta_instance.save(output_path=output_path, h5_loc=h5_loc, chunks=chunks, compression=compression, overwrite=overwrite)
 
 @cli.command()
 @click.argument('input-path', type=click.Path())
@@ -257,49 +327,44 @@ def denoise(input_file, batch_size, input_size, pre_post_frame, gap_frames, z_se
     Denoise the input data using the SubFrameGenerator class and infer method.
     """
 
-    logging.basicConfig(level=logging_level)
-    t0 = time.time()
+    with UserFeedback(params=locals(), logging_level=logging_level):
 
-    # Initializing the SubFrameGenerator instance
-    sub_frame_generator = SubFrameGenerator(
-        paths=input_file,
-        batch_size=batch_size,
-        input_size=input_size,
-        pre_post_frame=pre_post_frame,
-        gap_frames=gap_frames,
-        z_steps=None,
-        z_select=z_select,
-        allowed_rotation=[0],
-        allowed_flip=[-1],
-        random_offset=False,
-        add_noise=False,
-        drop_frame_probability=None,
-        max_per_file=None,
-        overlap=overlap,
-        padding=padding,
-        shuffle=False,
-        normalize=normalize,
-        loc=loc,
-        output_size=None,
-        cache_results=False,
-        in_memory=in_memory,
-        save_global_descriptive=False,
-        logging_level=logging_level
-    )
+        # Initializing the SubFrameGenerator instance
+        sub_frame_generator = SubFrameGenerator(
+            paths=input_file,
+            batch_size=batch_size,
+            input_size=input_size,
+            pre_post_frame=pre_post_frame,
+            gap_frames=gap_frames,
+            z_steps=None,
+            z_select=z_select,
+            allowed_rotation=[0],
+            allowed_flip=[-1],
+            random_offset=False,
+            add_noise=False,
+            drop_frame_probability=None,
+            max_per_file=None,
+            overlap=overlap,
+            padding=padding,
+            shuffle=False,
+            normalize=normalize,
+            loc=loc,
+            output_size=None,
+            cache_results=False,
+            in_memory=in_memory,
+            save_global_descriptive=False,
+            logging_level=logging_level
+        )
 
-    # Running the infer method
-    result = sub_frame_generator.infer(
-        model=model,
-        output=output,
-        out_loc=out_loc,
-        dtype=dtype,
-        chunk_size=chunk_size,
-        rescale=rescale
-    )
-
-    # Logging the time taken
-    delta = humanize.naturaldelta(dt.timedelta(seconds=time.time() - t0))
-    logging.info(f"Denoising finished in {delta}")
+        # Running the infer method
+        result = sub_frame_generator.infer(
+            model=model,
+            output=output,
+            out_loc=out_loc,
+            dtype=dtype,
+            chunk_size=chunk_size,
+            rescale=rescale
+        )
 
 @cli.command()
 @click.argument('input-path', type=click.Path())
@@ -325,35 +390,34 @@ def detect_events(input_path, output_path, indices, logging_level, h5_loc, thres
     Detect events using the Detector class.
     """
 
-    logging.basicConfig(level=logging_level)
-    t0 = time.time()
+    with UserFeedback(params=locals(), logging_level=logging_level):
 
-    # check output
-    if output_path is not None and Path(output_path).exists():
+        if output_path == "infer":
+            output_path = Path(input_path)
+            output_path = output_path.with_suffix(".roi")
 
-        if overwrite:
-            logging.warning(f"overwrite is {overwrite}, deleting previous result")
-            shutil.rmtree(output_path)
-        else:
-            raise FileExistsError(f"Aborting detection because previous calculation exists ({output_path}."
-                                  f"Please provide an alternative output path or set '--overwrite True'")
+        # check output
+        if output_path is not None and Path(output_path).exists():
 
-    logging.warning(f"input: {input_path}")
+            if overwrite:
+                logging.warning(f"overwrite is {overwrite}, deleting previous result")
+                shutil.rmtree(output_path)
+            else:
+                raise FileExistsError(f"Aborting detection because previous calculation exists ({output_path}."
+                                      f"Please provide an alternative output path or set '--overwrite True'")
 
-    # Initializing the Detector instance
-    detector = Detector(input_path=input_path, output=output_path,
-                        indices=np.array(eval(indices)) if indices else None, logging_level=logging_level)
+        logging.warning(f"input: {input_path}")
 
-    # Running the detection
-    detector.run(dataset=h5_loc, threshold=threshold, min_size=min_size, lazy=lazy,
-                 adjust_for_noise=adjust_for_noise, subset=subset, split_events=split_events,
-                 binary_struct_iterations=binary_struct_iterations,
-                 binary_struct_connectivity=binary_struct_connectivity,
-                 save_activepixels=save_activepixels, parallel=parallel)
+        # Initializing the Detector instance
+        detector = Detector(input_path=input_path, output=output_path,
+                            indices=np.array(eval(indices)) if indices else None, logging_level=logging_level)
 
-    # Logging the time taken
-    delta = humanize.naturaldelta(dt.timedelta(seconds=time.time() - t0))
-    logging.info(f"Event detection finished in {delta}")
+        # Running the detection
+        detector.run(dataset=h5_loc, threshold=threshold, min_size=min_size, lazy=lazy,
+                     adjust_for_noise=adjust_for_noise, subset=subset, split_events=split_events,
+                     binary_struct_iterations=binary_struct_iterations,
+                     binary_struct_connectivity=binary_struct_connectivity,
+                     save_activepixels=save_activepixels, parallel=parallel)
 
 def visualize_h5_recursive(loc, indent='', prefix=''):
     """Recursive part of the function to visualize the structure."""
@@ -432,6 +496,37 @@ def view_data(input_path, h5_loc, z_select, lazy):
 
     vid = Video(data=input_path, z_slice=z_select, h5_loc=h5_loc, lazy=lazy)
     vid.show()
+    napari.run()
+
+@cli.command()
+@click.argument('event_dir', type=click.Path(exists=True))
+@click_custom_option('--video-path', type=click.STRING, default="infer", help='Path to the data used for detection.')
+@click_custom_option('--h5-loc', type=click.STRING, default="", help='Name or identifier of the dataset used for detection.')
+@click_custom_option('--z-select', type=(click.INT, click.INT), default=None, help='Range of frames to select in the Z dimension, given as a tuple (start, end).')
+@click_custom_option('--lazy', type=click.BOOL, default=True, help='Whether to implement lazy loading.')
+def view_detection_results(event_dir, video_path, h5_loc, z_select, lazy):
+    """
+    view the detection results; optionally overlayed on the input video.
+
+    Parameters:
+    event_dir (str): The path to the directory where the event data is stored. This path must exist.
+    video_path (str, optional): The path to the data used for detection. If "infer", the path will be inferred. Defaults to "infer".
+    h5_loc (str, optional): The name or identifier of the dataset used for detection within the HDF5 file. Defaults to an empty string.
+    z_select (tuple of int, optional): The range of frames to select in the Z dimension, specified as a tuple of start and end frame indices. Defaults to None, indicating that all frames will be selected.
+    lazy (bool, optional): Indicates whether to implement lazy loading, which defers data loading until necessary, potentially saving memory. Defaults to True.
+
+    Returns:
+    None: The function initiates a Napari viewer instance to visualize the detection results but does not return any value.
+
+    Usage:
+    To use this command, specify the necessary parameters as described above. For example:
+    $ astrocast -view-detection-results --lazy False /path/to/event_dir
+
+    """
+
+    event = Events(event_dir=event_dir, data=video_path, h5_loc=h5_loc, z_slice=z_select, lazy=lazy)
+    viewer = event.show_event_map(video=None, h5_loc=None, z_slice=z_select)
+    viewer.show()
     napari.run()
 
 @cli.command()
