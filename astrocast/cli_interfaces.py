@@ -18,6 +18,12 @@ from astrocast.denoising import SubFrameGenerator
 from astrocast.detection import Detector
 from astrocast.preparation import MotionCorrection, Delta, Input, IO
 
+from colorama import init as init_colorama
+from colorama import Fore, Back, Style
+import inspect
+from prettytable import PrettyTable
+init_colorama(autoreset=True)
+
 click_custom_option = partial(click.option, show_default=True)
 
 def check_output(output_path, input_path, h5_loc_save, overwrite):
@@ -42,10 +48,20 @@ def check_output(output_path, input_path, h5_loc_save, overwrite):
                                           f"Please choose a different output location or use '--overwrite True'")
                     return 0
 
+                elif h5_loc_save in f:
+                    logging.warning(f"{h5_loc_save} already exists in {output_path}. Deleting previous output.")
+                    del f[h5_loc_save]
+
         else:
-            logging.error(f"file already exists {output_path}. Please choose a different output location "
-                                  f"or use '--overwrite True'.")
-            return 0
+
+            if overwrite:
+                logging.warning(f"{h5_loc_save} already exists in {output_path}. Deleting previous output.")
+                output_path.unlink()
+
+            else:
+                logging.error(f"file already exists {output_path}. Please choose a different output location "
+                                      f"or use '--overwrite True'.")
+                return 0
 
     return output_path
 
@@ -59,13 +75,6 @@ def parse_chunks(chunks):
         if len(chunks) != 3:
             raise ValueError(f"please provide 'chunks' parameter as None, infer or comma-separated list of 3 int values.")
         return chunks
-
-from colorama import init as init_colorama
-from colorama import Fore, Back, Style
-import inspect
-from prettytable import PrettyTable
-init_colorama(autoreset=True)
-
 
 class UserFeedback:
 
@@ -267,7 +276,7 @@ def motion_correction(input_path, working_directory, logging_level, output_path,
 @click_custom_option('--chunks', type=click.STRING, default="infer", help='Chunk size for data processing.')
 @click_custom_option('--overwrite-first-frame', type=click.BOOL, default=True, help='Whether to overwrite the first frame with the second frame after delta calculation.')
 @click_custom_option('--lazy', type=click.BOOL, default=True, help='Flag for lazy data loading and computation.')
-@click_custom_option('--h5-loc', type=click.STRING, default="df", help='Location within the HDF5 file to save the data.')
+@click_custom_option('--h5-loc', type=click.STRING, default="dff", help='Location within the HDF5 file to save the data.')
 @click_custom_option('--compression', type=click.STRING, default=None, help='Compression algorithm to use when saving to an HDF5 file.')
 @click_custom_option('--logging-level', type=click.INT, default=logging.INFO, help='Logging level for messages.')
 @click_custom_option('--overwrite', type=click.BOOL, default=False, help='Flag for overwriting previous result in output location')
@@ -444,7 +453,7 @@ def visualize_h5_recursive(loc, indent='', prefix=''):
             print(f"{indent}{prefix}├─ {name} ({details_str})")
 
 @cli.command()
-@click.argument('input-path', type=click.Path(exists=True))
+@click.argument('input-path', type=click.Path())
 def visualize_h5(input_path):
     """
     Visualizes the structure of a .h5 file in a tree format.
@@ -469,11 +478,13 @@ def visualize_h5(input_path):
         visualize_h5_recursive(f['/'])
 
 @cli.command()
-@click.argument('input-path', type=click.Path(exists=True))
+@click.argument('input-path', type=click.Path())
 @click_custom_option('--h5-loc', type=click.STRING, default="", help='Name or identifier of the dataset in the h5 file.')
+@click_custom_option('--show-trace', type=click.BOOL, default=False, help='Display trace of the video')
+@click_custom_option('--window', type=click.INT, default=160, help='window of trace to be shown')
 @click_custom_option('--z-select', type=(click.INT, click.INT), default=None, help='Range of frames to select in the Z dimension, given as a tuple (start, end).')
 @click_custom_option('--lazy', type=click.BOOL, default=True, help='Whether to implement lazy loading.')
-def view_data(input_path, h5_loc, z_select, lazy):
+def view_data(input_path, h5_loc, z_select, lazy, show_trace, window):
     """
     Displays a video from a data file (.h5, .tiff, .tdb).
 
@@ -495,11 +506,11 @@ def view_data(input_path, h5_loc, z_select, lazy):
     """
 
     vid = Video(data=input_path, z_slice=z_select, h5_loc=h5_loc, lazy=lazy)
-    vid.show()
+    vid.show(show_trace=show_trace, window=window)
     napari.run()
 
 @cli.command()
-@click.argument('event_dir', type=click.Path(exists=True))
+@click.argument('event_dir', type=click.Path())
 @click_custom_option('--video-path', type=click.STRING, default="infer", help='Path to the data used for detection.')
 @click_custom_option('--h5-loc', type=click.STRING, default="", help='Name or identifier of the dataset used for detection.')
 @click_custom_option('--z-select', type=(click.INT, click.INT), default=None, help='Range of frames to select in the Z dimension, given as a tuple (start, end).')
