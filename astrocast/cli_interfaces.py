@@ -42,7 +42,7 @@ def check_output(output_path, input_path, h5_loc_save, overwrite):
     if output_path.exists():
 
         if output_path.suffix in (".hdf5", ".h5"):
-            with h5py.File(output_path.as_posix(), "r") as f:
+            with h5py.File(output_path.as_posix(), "a") as f:
                 if h5_loc_save in f and not overwrite:
                     logging.error(f"{h5_loc_save} already exists in {output_path}. "
                                           f"Please choose a different output location or use '--overwrite True'")
