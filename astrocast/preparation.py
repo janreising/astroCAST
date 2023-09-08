@@ -1518,8 +1518,8 @@ class Delta:
                 z = arr[:, x, y]
 
                 # Pad the signal with the edge values and apply the minimum filter
-                MIN = minimum_filter1d(np.pad(z, pad_width=(0, window), mode='edge'), size=window + 1, mode="nearest",
-                                       origin=int(window / 2))
+                MIN = minimum_filter1d(np.pad(z, pad_width=(int(window/2), int(window/2)), mode='edge'),
+                                       size=window + 1, mode="nearest", origin=int(window / 2))
 
                 # Shift the minimum signal by window/2 and take the max of the two signals
                 background = np.zeros((2, len(z)))
