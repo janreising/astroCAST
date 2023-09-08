@@ -80,7 +80,7 @@ class Input:
         # rechunk
         if chunks is not None:
             for k in data:
-                if data[k].chunksize != chunks:
+                if not isinstance(data[k], np.ndarray) and data[k].chunksize != chunks:
                     data[k] = da.rechunk(data[k], chunks=chunks)
 
         # return result
@@ -610,7 +610,7 @@ class IO:
         if isinstance(path, (str, Path)):
             path = Path(path)
         else:
-            raise TypeError("please provide 'path' as str or pathlib.Path data type")
+            raise TypeError(f"please provide 'path' as str or pathlib.Path data type not: {type(path)}")
 
         # Check if the data is a dictionary or data array, otherwise raise an error
         if isinstance(data, (np.ndarray, da.Array)):
@@ -862,6 +862,7 @@ class MotionCorrection:
         # output location
         self.mmap_path = None
         self.tiff_path = None
+        self.frames = self.X = self.Y = None
 
     def run(self, input_, h5_loc="",
             max_shifts=(50, 50), niter_rig=3, splits_rig=14, num_splits_to_process_rig=None,
@@ -932,6 +933,19 @@ class MotionCorrection:
         input_ = self._validate_input(input_, h5_loc=h5_loc)
         self.input_ = input_
 
+        # validate parameters
+        if max_shifts[0] >= int(self.X/2):
+            max_shifts_adj = int(self.X/2) - 1
+            logging.warning(f"dimension 1 of max_shifts parameter > 1/2 img.X ({max_shifts[0]}>{int(self.X/2)}."
+                            f"Automatically adjusting to: {max_shifts_adj}")
+            max_shifts = tuple((max_shifts_adj, max_shifts[1]))
+
+        if max_shifts[1] >= int(self.Y/2):
+            max_shifts_adj = int(self.Y/2) - 1
+            logging.warning(f"dimension 1 of max_shifts parameter > 1/2 img.X ({max_shifts[1]}>{int(self.Y/2)}."
+                            f"Automatically adjusting to: {max_shifts_adj}")
+            max_shifts = tuple((max_shifts[0], max_shifts_adj))
+
         # Create MotionCorrect instance
         mc = motion_correction.MotionCorrect(input_, var_name_hdf5=h5_loc,
                 max_shifts=max_shifts, niter_rig=niter_rig, splits_rig=splits_rig,
@@ -993,6 +1007,9 @@ class MotionCorrection:
                     if h5_loc not in f:
                         raise ValueError(f"cannot find dataset {h5_loc} in provided in {input_}.")
 
+                    self.frames, self.X, self.Y = f[h5_loc].shape
+
+                    # TODO after pull request is accepted, this should no longer be true
                     # Motion Correction fails with custom h5_loc names in cases where there is only one folder (default behavior incorrect)
                     if len(f.keys()) < 2:
                         f.create_group(self.dummy_folder_name)
@@ -1001,6 +1018,13 @@ class MotionCorrection:
 
             elif input_.suffix in [".tiff", ".TIFF", ".tif", ".TIF"]:
                 # If input is a TIFF file
+
+                with tifffile.TiffFile('temp.tif') as tif:
+
+                 self.frames = len(tif.pages)  # number of pages in the file
+                 page = tif.pages[0]  # get shape and dtype of image in first page
+                 self.X, self.Y = page.shape
+
                 return input_
 
             else:
@@ -1008,6 +1032,8 @@ class MotionCorrection:
 
         elif isinstance(input_, np.ndarray):
             # If input is a ndarray create a temporary TIFF file to run the motion correction on
+
+            self.frames, self.X, self.Y = input_.shape
 
             logging.warning("caiman.motion_correction requires a .tiff or .h5 file to perform the correction. A temporary .tiff file is created which needs to be deleted later by calling the 'clean_up()' method of this module.")
 
