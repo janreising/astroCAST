@@ -64,7 +64,7 @@ class Detector:
         # quality check arguments
         if not self.input_path.exists():
             raise FileNotFoundError(f"input file does not exist: {input_path}")
-        if (output is not None) and not self.output.exists():
+        if (output is not None) and self.output.exists():
             raise FileExistsError(f"output folder already exists: {output}")
         if indices is not None and indices.shape != (3, 2):
             raise ValueError(f"indices must be np.array and dim: (3, 2) -> ((z0, z1), (x0, x1), (y0, y1)) not: {indices}")
