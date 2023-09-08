@@ -1052,7 +1052,7 @@ class Video:
 
         return proj
 
-    def show(self, viewer=None, colormap=None,
+    def show(self, viewer=None, colormap="red",
              show_trace=False, window=160, indices=None, viewer1d=None, xlabel="frames", ylabel="Intensity", reset_y=False):
 
         if viewer is None:
@@ -1066,18 +1066,6 @@ class Video:
             # get trace
             Y = self.get_image_project(agg_func=np.mean, axis=(1, 2))
             X = range(len(Y)) if indices is None else indices
-
-            # create 1D viewer
-            # v1d = None
-            # if attach:
-            #
-            #     for widget in viewer.window._dock_widgets.values():
-            #         potential_widget = widget.widget()
-            #         print(potential_widget)
-            #         print(potential_widget.children())
-            #         if isinstance(potential_widget, napari_plot._qt.qt_viewer.QtViewer):
-            #             v1d = potential_widget
-            #             break
 
             if viewer1d is None:
                 v1d = napari_plot.ViewerModel1D()
@@ -1093,7 +1081,6 @@ class Video:
             v1d.set_y_view(np.min(Y) * 0.9, np.max(Y) * 1.1)
 
             # create attachable qtviewer
-            # qt_viewer = QtViewer(v1d)
             line = v1d.add_line(np.c_[X, Y], name=self.name, color=colormap)
 
             def update_line(event: Event):
