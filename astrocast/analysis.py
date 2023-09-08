@@ -46,6 +46,7 @@ class Events(CachedClass):
             else:
 
                 event_dir = Path(event_dir)
+                self.event_dir = event_dir
                 if not event_dir.is_dir():
                     raise FileNotFoundError(f"cannot find provided event directory: {event_dir}")
 
@@ -91,7 +92,23 @@ class Events(CachedClass):
 
             # get data
             if isinstance(data, (str, Path)):
-                self.data = Video(data, z_slice=z_slice, h5_loc=h5_loc, lazy=False)
+
+                if data == "infer":
+                    parent = self.event_dir.parent
+                    root_guess = parent.joinpath(f"{self.event_dir.stem}")
+                    for suffix in (".h5", ".hdf5", ".tiff", ".tif", ".tdb"):
+
+                        video_path_guess = root_guess.with_suffix(suffix)
+                        if video_path_guess.exists():
+                            logging.info(f"inferring video file as: {video_path_guess}")
+                            data = video_path_guess
+                            break
+
+                    if data is None:
+                        logging.warning(f"unable to infer video path with {root_guess}.tiff/h5/tdb")
+
+                if data is not None:
+                    self.data = Video(data, z_slice=z_slice, h5_loc=h5_loc, lazy=False)
 
             elif isinstance(data, (np.ndarray, da.Array)):
 
@@ -696,7 +713,15 @@ class Events(CachedClass):
 
         viewer = napari.Viewer()
 
-        if video is not None:
+        # check if video was loaded at initialization
+        if video is None and self.data is not None:
+            logging.info(f"loading video from path provided during initialization."
+                         f" Users need to ensure that the z_slice parameters matches.")
+            data = self.data.get_data()
+            logging.warning("data: ", type(data))
+            viewer.add_image(data, )
+
+        else:
             io = IO()
             data = io.load(path=video, h5_loc=h5_loc, z_slice=z_slice, lazy=lazy)
 
