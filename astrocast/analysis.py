@@ -1083,23 +1083,67 @@ class Video:
             # create attachable qtviewer
             line = v1d.add_line(np.c_[X, Y], name=self.name, color=colormap)
 
+            # def update_line(event: Event):
+            #     Z, _, _ = event.value
+            #     z0, z1 = Z-window, Z
+            #
+            #     if z0 < 0:
+            #         z0 = 0
+            #
+            #     y_ = Y[z0:z1]
+            #     x_ = X[z0:z1]
+            #     # y1 = np.pad(y1, (-z0, 0), 'constant', constant_values=0)
+            #
+            #     line.data = np.c_[x_, y_]
+            #
+            #     v1d.reset_x_view()
+            #
+            #     if reset_y:
+            #         v1d.reset_y_view()
+
+            current_frame_line = None
+
             def update_line(event: Event):
+                nonlocal current_frame_line
+
                 Z, _, _ = event.value
-                z0, z1 = Z-window, Z
+                z0, z1 = Z - window//2, Z + window//2  # Adjusting to center the current frame
+
+                left_padding = 0
+                right_padding = 0
 
                 if z0 < 0:
+                    left_padding = abs(z0)
                     z0 = 0
+
+                if z1 > len(Y):
+                    right_padding = z1 - len(Y)
+                    z1 = len(Y)
 
                 y_ = Y[z0:z1]
                 x_ = X[z0:z1]
-                # y1 = np.pad(y1, (-z0, 0), 'constant', constant_values=0)
+
+                # Padding with zeros on the left and/or right if necessary
+                y_ = np.pad(y_, (left_padding, right_padding), 'constant', constant_values=0)
+
+                # Adjusting x_ to match the length of y_
+                x_ = np.arange(z0, z0 + len(y_))
 
                 line.data = np.c_[x_, y_]
+
+                # Remove the previous yellow line
+                if current_frame_line:
+                    v1d.layers.remove(current_frame_line)
+
+                # Add a yellow vertical line at the current frame
+                current_frame_line_data = np.array([[Z, np.min(Y)], [Z, np.max(Y)]])
+                current_frame_line = v1d.add_line(current_frame_line_data, color='yellow')
 
                 v1d.reset_x_view()
 
                 if reset_y:
                     v1d.reset_y_view()
+
 
             viewer.dims.events.current_step.connect(update_line)
 
