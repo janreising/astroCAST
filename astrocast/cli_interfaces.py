@@ -383,6 +383,7 @@ def denoise(input_file, batch_size, input_size, pre_post_frame, gap_frames, z_se
 @click_custom_option('--h5-loc', type=click.STRING, default=None, help='Name or identifier of the dataset in the h5 file.')
 @click_custom_option('--threshold', type=click.FLOAT, default=None, help='Threshold value to discriminate background from events.')
 @click_custom_option('--min-size', type=click.INT, default=20, help='Minimum size of an event region.')
+@click_custom_option('--smoothing-kernel', type=click.INT, default=2, help='Somthing kernel in XY')
 @click_custom_option('--lazy', type=click.BOOL, default=True, help='Whether to implement lazy loading.')
 @click_custom_option('--adjust-for-noise', type=click.BOOL, default=False, help='Whether to adjust event detection for background noise.')
 @click_custom_option('--subset', type=click.STRING, default=None, help='Subset of the dataset to process.')
@@ -394,7 +395,7 @@ def denoise(input_file, batch_size, input_size, pre_post_frame, gap_frames, z_se
 @click_custom_option('--overwrite', type=click.BOOL, default=False, help='Flag for overwriting previous result in output location')
 def detect_events(input_path, output_path, indices, logging_level, h5_loc, threshold, min_size, lazy,
                   adjust_for_noise, subset, split_events, binary_struct_iterations, binary_struct_connectivity,
-                  save_activepixels, parallel, overwrite):
+                  save_activepixels, parallel, overwrite, smoothing_kernel):
     """
     Detect events using the Detector class.
     """
@@ -422,7 +423,7 @@ def detect_events(input_path, output_path, indices, logging_level, h5_loc, thres
                             indices=np.array(eval(indices)) if indices else None, logging_level=logging_level)
 
         # Running the detection
-        detector.run(dataset=h5_loc, threshold=threshold, min_size=min_size, lazy=lazy,
+        detector.run(dataset=h5_loc, threshold=threshold, min_size=min_size, lazy=lazy, smoothing_kernel=smoothing_kernel,
                      adjust_for_noise=adjust_for_noise, subset=subset, split_events=split_events,
                      binary_struct_iterations=binary_struct_iterations,
                      binary_struct_connectivity=binary_struct_connectivity,
@@ -480,11 +481,12 @@ def visualize_h5(input_path):
 @cli.command()
 @click.argument('input-path', type=click.Path())
 @click_custom_option('--h5-loc', type=click.STRING, default="", help='Name or identifier of the dataset in the h5 file.')
+@click_custom_option('--colormap', type=click.STRING, default="red", help='Color of the video layer.')
 @click_custom_option('--show-trace', type=click.BOOL, default=False, help='Display trace of the video')
 @click_custom_option('--window', type=click.INT, default=160, help='window of trace to be shown')
 @click_custom_option('--z-select', type=(click.INT, click.INT), default=None, help='Range of frames to select in the Z dimension, given as a tuple (start, end).')
 @click_custom_option('--lazy', type=click.BOOL, default=True, help='Whether to implement lazy loading.')
-def view_data(input_path, h5_loc, z_select, lazy, show_trace, window):
+def view_data(input_path, h5_loc, z_select, lazy, show_trace, window, colormap):
     """
     Displays a video from a data file (.h5, .tiff, .tdb).
 
@@ -506,7 +508,7 @@ def view_data(input_path, h5_loc, z_select, lazy, show_trace, window):
     """
 
     vid = Video(data=input_path, z_slice=z_select, h5_loc=h5_loc, lazy=lazy)
-    vid.show(show_trace=show_trace, window=window)
+    vid.show(show_trace=show_trace, window=window, colormap=colormap)
     napari.run()
 
 @cli.command()
