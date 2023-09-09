@@ -353,39 +353,47 @@ class Detector:
 
         def threshold(arr, min_ratio=min_ratio, depth=threshold_z_depth):
 
-                # calculate threshold
-                threshold = threshold_triangle(arr)
+                Z, X, Y = arr.shape
+                binary_mask = np.zeros(arr.shape, dtype=np.bool_)
 
-                # threshold image
-                center_index = (len(arr) - 1) // 2
-                imc = arr[center_index, :, :]
-                binary_mask = imc > threshold
+                for i in range(depth, Z-depth):
+                    z0, z1 = i-depth, i+depth+1
+                    arr_s = arr[z0:z1, :, :]
 
-                # calculate ratio foreground/background
-                active_ind = np.where(binary_mask == 1) # TODO more efficient solution?
-                inactive_ind = np.where(binary_mask == 0)
+                    # calculate threshold
+                    threshold = threshold_triangle(arr_s)
 
-                fg = np.mean(imc[active_ind])
-                bg = abs(np.mean(imc[inactive_ind]))
-                ratio = fg/bg
+                    # threshold image
+                    center_index = (len(arr_s) - 1) // 2
+                    imc = arr_s[center_index, :, :]
+                    binary_mask_s = imc > threshold
 
-                # adjust axis
-                binary_mask = binary_mask.reshape((1,) + binary_mask.shape)
+                    # calculate ratio foreground/background
+                    active_ind = np.where(binary_mask_s == 1) # TODO more efficient solution?
+                    inactive_ind = np.where(binary_mask_s == 0)
 
-                if ratio > min_ratio:
-                    return binary_mask
-                else:
-                    return np.zeros(binary_mask.shape, np.bool_)
+                    fg = np.mean(imc[active_ind])
+                    bg = abs(np.mean(imc[inactive_ind]))
+                    ratio = fg/bg
+
+                    # adjust axis
+                    # binary_mask = binary_mask.reshape((1,) + binary_mask.shape)
+
+                    if ratio > min_ratio:
+                        binary_mask[i, :, :] = binary_mask_s
+
+                return binary_mask
 
         data = arr.rechunk((1, -1, -1))
-        display(data)
         depth = {0:threshold_z_depth, 1:0, 2:0} #(threshold_z_depth, 0, 0)
-        display(depth)
 
-        overlap = da.overlap.overlap(data, depth=depth, boundary="nearest", allow_rechunk=True)
-        display(overlap)
-        binary_mask = overlap.map_blocks(threshold,
-                                           chunks=(1, data.shape[1], data.shape[2]), dtype=data.dtype, trim=True)
+        # overlap = da.overlap.overlap(data, depth=depth, boundary="nearest", allow_rechunk=True)
+        # c_size = overlap.chunksize
+        # display(c_size, overlap)
+        # binary_mask = overlap.map_blocks(threshold,
+        #                                    chunks=(c_size[0]-2*threshold_z_depth, data.shape[1], data.shape[2]), dtype=data.dtype)
+
+        binary_mask = data.map_overlap(threshold, boundary="nearest", depth=depth, trim=True, dtype=np.bool_)
 
         return binary_mask
 
