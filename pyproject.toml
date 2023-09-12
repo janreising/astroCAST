@@ -54,6 +54,7 @@ numpy = "*"
 humanize = "*"
 pyyaml = "*"
 colorama = "^0.4.6"
+prettytable = "*"
 
 [tool.poetry.dev-dependencies]
 pytest-cov = "*"
