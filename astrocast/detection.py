@@ -417,23 +417,83 @@ class Detector:
         :return: binary mask
         """
 
-        def find_peaks(x, prominence=prominence, width=width, rel_height=rel_height, wlen=wlen, plateau_size=plateau_size):
+        def find_peaks(arr, prominence=prominence, width=width, rel_height=rel_height, wlen=wlen, plateau_size=plateau_size):
 
-            peaks, prominences = signal.find_peaks(np.squeeze(x), prominence=prominence, wlen=wlen,
-                                                   width=width, rel_height=rel_height, plateau_size=plateau_size)
+            binary_mask = np.zeros(arr.shape, dtype=int)
 
-            binary_mask = np.zeros(x.shape, dtype=int)
-            for (left, right, prom) in list(zip(prominences['left_ips'], prominences['right_ips'], prominences['prominences'])):
-                binary_mask[int(left):int(right)] = prom
+            _, X, Y = arr.shape
+            for x in range(X):
+                for y in range(Y):
+
+                    peaks, prominences = signal.find_peaks(arr[:, x, y], prominence=prominence, wlen=wlen,
+                                                           width=width, rel_height=rel_height, plateau_size=plateau_size)
+
+
+                    for (left, right, prom) in list(zip(prominences['left_ips'], prominences['right_ips'], prominences['prominences'])):
+                        binary_mask[int(left):int(right), x, y] = 1 # prom
 
             return binary_mask
 
         if not isinstance(arr, da.Array):
             arr = da.from_array(arr)
 
-        arr = arr.rechunk((-1, 1, 1))
+        arr = arr.rechunk((-1, "auto", "auto"))
 
         binary_mask = da.map_blocks(find_peaks, arr, dtype=int)
+        return binary_mask
+
+    @staticmethod
+    def remove_objects(arr, min_size=10, connectivity=1, depth=0, dtype=np.bool_):
+
+        if not isinstance(arr, da.Array):
+            arr = da.from_array(arr)
+
+
+        arr = arr.astype(dtype)
+
+        arr = arr.rechunk(("auto", -1, -1))
+        depth_dict = {0: 1 + depth, 1: 0, 2: 0}
+
+        def rm_small(frame):
+
+            Z, X, Y = frame.shape
+            binary_mask = np.zeros(frame.shape, dtype=dtype)
+
+            for i in range(depth, Z-depth):
+                z0, z1 = i-depth, i+depth+1
+                binary_mask[i, :, :] = morphology.remove_small_objects(frame[z0:z1, :, :],
+                                                                       min_size=min_size, connectivity=connectivity)
+
+            return binary_mask
+
+        binary_mask = arr.map_overlap(rm_small, boundary="nearest", depth=depth_dict, trim=True, dtype=dtype)
+
+        return binary_mask
+
+    @staticmethod
+    def remove_holes(arr, area_threshold=10, connectivity=1, depth=0, dtype=np.bool_):
+
+        if not isinstance(arr, da.Array):
+            arr = da.from_array(arr)
+
+        arr = arr.astype(dtype)
+        arr = arr.rechunk(("auto", -1, -1))
+        depth_dict = {0: 1 + depth, 1: 0, 2: 0}
+
+        def rm_small(frame):
+
+            Z, X, Y = frame.shape
+            binary_mask = np.zeros(frame.shape, dtype=dtype)
+
+            for i in range(depth, Z-depth):
+                z0, z1 = i-depth, i+depth+1
+                binary_mask[i, :, :] = morphology.remove_small_holes(frame[z0:z1, :, :],
+                                                                       area_threshold=area_threshold, connectivity=connectivity)
+
+            return binary_mask
+
+        binary_mask = arr.map_overlap(rm_small, boundary="nearest", depth=depth_dict, trim=True, dtype=dtype)
+
         return binary_mask
 
     @staticmethod
