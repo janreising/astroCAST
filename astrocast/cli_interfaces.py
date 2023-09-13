@@ -333,18 +333,19 @@ def motion_correction(
 @click.argument('input-path', type=click.Path())
 @click_custom_option('--window', type=click.INT, required=True, help='Size of the window for the minimum filter.')
 @click_custom_option('--output-path', type=None, help='Path to save the output data.')
-@click_custom_option('--loc', type=click.STRING, default="",
+@click_custom_option('--h5-loc-in', type=click.STRING, default="",
                      help='Location of the data in the HDF5 file (if applicable).'
                      )
 @click_custom_option('--method', type=click.Choice(['background', 'dF', 'dFF']), default='background',
                      help='Method to use for delta calculation.'
                      )
-@click_custom_option('--chunks', type=click.STRING, default="infer", help='Chunk size for data processing.')
+@click_custom_option('--processing-chunks', type=click.STRING, default="infer", help='Chunk size for data processing.')
+@click_custom_option('--save-chunks', type=click.STRING, default="infer", help='Chunk size for saving.')
 @click_custom_option('--overwrite-first-frame', type=click.BOOL, default=True,
                      help='Whether to overwrite the first frame with the second frame after delta calculation.'
                      )
 @click_custom_option('--lazy', type=click.BOOL, default=True, help='Flag for lazy data loading and computation.')
-@click_custom_option('--h5-loc', type=click.STRING, default="dff",
+@click_custom_option('--h5-loc-out', type=click.STRING, default="dff",
                      help='Location within the HDF5 file to save the data.'
                      )
 @click_custom_option('--compression', type=click.STRING, default=None,
@@ -355,7 +356,7 @@ def motion_correction(
                      help='Flag for overwriting previous result in output location'
                      )
 def subtract_delta(
-        input_path, output_path, loc, method, window, chunks, overwrite_first_frame, lazy, h5_loc,
+        input_path, output_path, h5_loc_in, method, window, processing_chunks, save_chunks, overwrite_first_frame, lazy, h5_loc_out,
         compression, logging_level, overwrite
         ):
     """
@@ -364,27 +365,28 @@ def subtract_delta(
 
     with UserFeedback(params=locals(), logging_level=logging_level):
         # check output
-        output_path = check_output(output_path, input_path, h5_loc, overwrite)
+        output_path = check_output(output_path, input_path, h5_loc_out, overwrite)
         if output_path == 0:
             logging.warning("skipping this step because output exists.")
             return 0
 
         # check chunks
-        chunks = parse_chunks(chunks)
+        processing_chunks = parse_chunks(processing_chunks)
+        save_chunks = parse_chunks(save_chunks)
 
         # Initialize the Delta instance
         logging.info("creating delta instance ...")
-        delta_instance = Delta(input_=input_path, loc=loc)
+        delta_instance = Delta(input_=input_path, loc=h5_loc_in)
 
         # Run the delta calculation
         logging.info("subtracting background ...")
-        result = delta_instance.run(method=method, window=window, chunks=chunks, output_path=None,
+        result = delta_instance.run(method=method, window=window, processing_chunks=processing_chunks, output_path=None,
                                     overwrite_first_frame=overwrite_first_frame, lazy=lazy
                                     )
 
         # Save the results to the specified output path
         logging.info("saving result ...")
-        delta_instance.save(output_path=output_path, h5_loc=h5_loc, chunks=chunks, compression=compression,
+        delta_instance.save(output_path=output_path, h5_loc=h5_loc_out, chunks=save_chunks, compression=compression,
                             overwrite=overwrite
                             )
 
@@ -649,10 +651,8 @@ def visualize_h5(input_path):
 
 @cli.command()
 @click.argument('input-path', type=click.Path())
-@click_custom_option('--h5-loc', type=click.STRING, default="",
-                     help='Name or identifier of the dataset in the h5 file.'
-                     )
-@click_custom_option('--colormap', type=click.STRING, default="red", help='Color of the video layer.')
+@click.argument('h5-loc', nargs=-1)
+@click_custom_option('--colormap', type=click.STRING, default="gray", help='Color of the video layer.')
 @click_custom_option('--show-trace', type=click.BOOL, default=False, help='Display trace of the video')
 @click_custom_option('--window', type=click.INT, default=160, help='window of trace to be shown')
 @click_custom_option('--z-select', type=(click.INT, click.INT), default=None,
