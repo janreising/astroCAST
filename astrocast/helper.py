@@ -270,6 +270,9 @@ def get_data_dimensions(input_, loc=None, return_dtype=False):
     elif isinstance(input_, str):
         path = Path(input_)
 
+    elif isinstance(input_, (np.ndarray, da.Array)):
+        return input_.shape, None
+
     else:
         raise TypeError(f"data type not recognized: {type(input_)}")
 
@@ -981,7 +984,6 @@ class CachedClass:
         logging.warning(f"cache_path: {self.cache_path}")
         time.sleep(0.5)
         return np.random.random(1)
-
 
 def load_yaml_defaults(yaml_file_path):
     """Load default values from a YAML file."""
