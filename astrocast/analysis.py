@@ -713,6 +713,8 @@ class Events(CachedClass):
 
         viewer = napari.Viewer()
 
+        io = IO()
+
         # check if video was loaded at initialization
         if video is None and self.data is not None:
             logging.info(f"loading video from path provided during initialization."
@@ -722,16 +724,31 @@ class Events(CachedClass):
             viewer.add_image(data, )
 
         else:
-            io = IO()
             data = io.load(path=video, h5_loc=h5_loc, z_slice=z_slice, lazy=lazy)
 
-            viewer.add_image(data, )
+            viewer.add_image(data, name="data")
 
+        for debug_file in ["debug_smoothed_input.tiff", "debug_active_pixels.tiff",
+                            "debug_active_pixels_morphed.tiff"]:
+
+            dpath = self.event_dir.joinpath(debug_file)
+            if dpath.is_file():
+
+                debug = io.load(path=dpath, h5_loc="", z_slice=z_slice, lazy=lazy)
+
+                if "active" in debug_file:
+                    lbl_layer = viewer.add_labels(debug, name=debug_file.replace(".tiff", "").replace("debug_", ""))
+                    lbl_layer.contour = 1
+                else:
+                    viewer.add_image(debug, name=debug_file.replace(".tiff", "").replace("debug_", ""))
+
+        # add final labels
         event_map = self.event_map
         if z_slice is not None:
             event_map = event_map[z_slice[0]:z_slice[1], :, :]
 
-        viewer.add_labels(event_map)
+        lbl_layer = viewer.add_labels(event_map, name="event_labels")
+        lbl_layer.contour = 1
 
         return viewer
 
