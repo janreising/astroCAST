@@ -51,8 +51,7 @@ class Detector:
         binary_struct_connectivity (int): Connectivity of binary structuring element.
 
     """
-    def __init__(self, input_path: str, output=None,
-                 indices: np.array = None, logging_level=logging.INFO):
+    def __init__(self, input_path: str, output=None, logging_level=logging.INFO):
 
         logging.basicConfig(format="%(asctime)s %(levelname)s: %(message)s", level=logging_level)
 
@@ -69,8 +68,6 @@ class Detector:
             raise FileNotFoundError(f"input file does not exist: {input_path}")
         if (output is not None) and self.output.exists():
             raise FileExistsError(f"output folder already exists: {output}")
-        if indices is not None and indices.shape != (3, 2):
-            raise ValueError(f"indices must be np.array and dim: (3, 2) -> ((z0, z1), (x0, x1), (y0, y1)) not: {indices}")
 
         # shared variables
         self.file = None
@@ -78,20 +75,26 @@ class Detector:
         self.Z, self.X, self.Y = None, None, None
         self.meta = {}
 
-    def run(self, dataset: Optional[str] = None,
-            threshold: Optional[float] = None, min_size: int = 20,
-            radius = 2, sigma = 2, min_foreground_to_background_ratio=1, threshold_z_depth=1,
+    def run(self, h5_loc: Optional[str] = None, exclude_border=0,
+            threshold: Optional[float] = None,
+            use_smoothing=True, smooth_radius=2, smooth_sigma=2,
+            use_spatial=True, spatial_min_ratio=1, spatial_z_depth=1,
+            use_temporal=True, temporal_prominence=10, temporal_width=3, temporal_rel_height=0.9, temporal_wlen=60,
+            temporal_plateau_size=None,
+            comb_type="&",
+            fill_holes=True, area_threshold=10, holes_connectivity=1, holes_depth=1,
+            remove_objects=True, min_size=20, object_connectivity=1, objects_depth=1,
+            fill_holes_first=True,
             lazy: bool = True, adjust_for_noise: bool = False,
-            subset: Optional[str] = None, split_events: bool = True,
-            binary_struct_iterations: int = 1,
-            binary_struct_connectivity: int = 2,  # TODO better way to do this
+            subset: Optional[str] = None, split_events: bool = False,
             debug: bool = False,
-            parallel=True) -> None:
+            parallel=True
+            ) -> None:
         """
         Runs the event detection process on the specified dataset.
 
         Args:
-            dataset (Optional[str]): Name or identifier of the dataset in the h5 file.
+            h5_loc (Optional[str]): Name or identifier of the dataset in the h5 file.
             threshold (Optional[float]): Threshold value to discriminate background from events. 
                 If None, automatic thresholding is performed.
             min_size (int): Minimum size of an event region. 
@@ -125,8 +128,8 @@ class Detector:
 
         # output folder
         self.output_directory = self.output if self.output is not None \
-            else self.input_path.with_suffix(".roi") if dataset is None \
-            else self.input_path.with_suffix(".{}.roi".format(dataset.split("/")[-1]))
+            else self.input_path.with_suffix(".roi") if h5_loc is None \
+            else self.input_path.with_suffix(".{}.roi".format(h5_loc.split("/")[-1]))
 
         if not self.output_directory.is_dir():
             self.output_directory.mkdir()
@@ -139,12 +142,10 @@ class Detector:
         # load data
         io = IO()
         # todo: add chunks flag and/or re-chunking
-        data = io.load(path=self.input_path, h5_loc=dataset, z_slice=subset, lazy=lazy)
+        data = io.load(path=self.input_path, h5_loc=h5_loc, z_slice=subset, lazy=lazy)
         self.Z, self.X, self.Y = data.shape
         self.data = data
         logging.info(f"data: {data.shape}") if lazy else logging.info(f"data: {data}")
-
-
 
         # calculate event map
         event_map_path = self.output_directory.joinpath("event_map.tdb")
@@ -154,13 +155,17 @@ class Detector:
             noise = self.estimate_background(data) if adjust_for_noise else 1
 
             logging.info("Thresholding events")
-            event_map = self.get_events(data, roi_threshold=threshold, var_estimate=noise,
-                                        min_roi_size=min_size,
-                                        radius = radius, sigma = sigma, threshold_z_depth=threshold_z_depth,
-                                        min_foreground_to_background_ratio=min_foreground_to_background_ratio,
-                                        binary_struct_iterations=binary_struct_iterations,
-                                        binary_struct_connectivity=binary_struct_connectivity,
-                                        debug=debug)
+            event_map = self.get_events(data, exclude_border=exclude_border, roi_threshold=threshold, var_estimate=noise,
+                                        use_smoothing=use_smoothing, smooth_radius=smooth_radius, smooth_sigma=smooth_sigma,
+                                        use_spatial=use_spatial, spatial_min_ratio=spatial_min_ratio, spatial_z_depth=spatial_z_depth,
+                                        use_temporal=use_temporal, temporal_prominence=temporal_prominence, temporal_width=temporal_width,
+                                        temporal_rel_height=temporal_rel_height, temporal_wlen=temporal_wlen, temporal_plateau_size=temporal_plateau_size,
+                                        comb_type=comb_type,
+                                        fill_holes=fill_holes, area_threshold=area_threshold, holes_connectivity=holes_connectivity, holes_depth=holes_depth,
+                                        remove_objects=remove_objects, min_size=min_size, object_connectivity=object_connectivity, objects_depth=objects_depth,
+                                        fill_holes_first=fill_holes_first, morph_dtype=np.bool_,
+                                        debug=debug
+                                        )
 
             logging.info(f"Saving event map to: {event_map_path}")
             event_map.rechunk((100, 100, 100)).to_tiledb(event_map_path.as_posix())
@@ -222,11 +227,14 @@ class Detector:
         return stdEst
 
     def get_events(self, data: np.array, roi_threshold: float, var_estimate: float,
-                   min_roi_size: int = 10, mask_xy: np.array = None,
-                   radius = 2, sigma = 2, min_foreground_to_background_ratio=1, threshold_z_depth=1,
-                   remove_small_object_framewise=False,
-                   binary_struct_connectivity=0,
-                   binary_struct_iterations=1,
+                   mask_xy: np.array = None, exclude_border=0,
+                   use_smoothing=True, smooth_radius = 2, smooth_sigma = 2,
+                   use_spatial=True, spatial_min_ratio=1, spatial_z_depth=1,
+                   use_temporal=True, temporal_prominence=10, temporal_width=3, temporal_rel_height=0.9, temporal_wlen=60, temporal_plateau_size=None,
+                   comb_type="&",
+                   fill_holes=True, area_threshold=10, holes_connectivity=1, holes_depth=1,
+                   remove_objects=True, min_size=0, object_connectivity=1, objects_depth=1,
+                   fill_holes_first=True, morph_dtype=np.bool_,
                    debug: bool = False) -> (np.array, dict):
 
         """ identifies events in data based on threshold
@@ -239,7 +247,6 @@ class Detector:
         :param mask_xy: (optional) 2D binary array masking pixels.
         :return:
             event_map: 3D array in which pixels are labelled with event identifier.
-            event_properties: list of scipy.regionprops items.
         """
 
         io = IO()
@@ -253,80 +260,113 @@ class Detector:
                 if var_estimate is not None else roi_threshold
             # Active pixels are those whose gaussian filter-processed intensities, sigma=smoXY
             # are higher than then calculated absolute threshold.
-            active_pixels[:] = ndfilters.gaussian_filter(data, sigma) > absolute_threshold
+            active_pixels[:] = ndfilters.gaussian_filter(data, smooth_sigma) > absolute_threshold
 
         else:
-            logging.warning("Dynamically choosing filtering threshold (threshold: None)")
+            logging.info("Dynamically choosing filtering threshold (threshold: None)")
 
             if not isinstance(data, da.Array):
                 data = da.from_array(data)
 
             # 3D smooth
-            data = self.gaussian_smooth_3d(data, sigma=sigma, radius=radius, mode='nearest', rechunk=True)
+            if use_smoothing:
+                data = self.gaussian_smooth_3d(data, sigma=smooth_sigma, radius=smooth_radius, mode='nearest', rechunk=True)
 
-            if debug:
-                io.save(self.output_directory.joinpath("debug_smoothed_input.tiff"), data=data)
+                if debug:
+                    io.save(self.output_directory.joinpath("debug_smoothed_input.tiff"), data=data)
 
             # Threshold
-            active_pixels = self.spatial_threshold(data, min_ratio=min_foreground_to_background_ratio,
-                                                   threshold_z_depth=threshold_z_depth)
+            if use_spatial:
+                active_pixels_spatial = self.spatial_threshold(data, min_ratio=spatial_min_ratio,
+                                                               threshold_z_depth=spatial_z_depth)
+            if use_temporal:
+                active_pixels_temporal = self.temporal_threshold(data, prominence=temporal_prominence, width=temporal_width, rel_height=temporal_rel_height,
+                                                                 wlen=temporal_wlen, plateau_size=temporal_plateau_size)
+
+            if use_spatial and use_temporal:
+
+                if comb_type == "&":
+                    active_pixels = np.minimum(active_pixels_spatial, active_pixels_temporal)
+                elif comb_type == "|":
+                    active_pixels = np.maximum(active_pixels_spatial, active_pixels_temporal)
+                else:
+                    raise ValueError(f"please provide comb_type as one of: ('&', '|')")
+
+                active_pixels = active_pixels.astype(morph_dtype)
+
+            elif use_spatial:
+                active_pixels = active_pixels_spatial
+
+            elif use_temporal:
+                active_pixels = active_pixels_temporal
+            else:
+                raise ValueError(f"please choose at least one of (use_spatial, use_temporal) or roi_threshold ")
 
             if debug:
+                logging.warning(f"dtype active pixels: {active_pixels}")
                 io.save(self.output_directory.joinpath("debug_active_pixels.tiff"), data=active_pixels)
 
         logging.info("identified active pixels")
+
         # mask inactive pixels (accelerates subsequent computation)
+        if exclude_border > 0:
+
+            if mask_xy is None:
+                mask_xy = np.ones((active_pixels.shape[1], active_pixels.shape[2]), dtype=morph_dtype)
+
+            mask_xy[:exclude_border, :] = 0
+            mask_xy[-exclude_border:, :] = 0
+            mask_xy[:, :exclude_border] = 0
+            mask_xy[:, -exclude_border:] = 0
+
         if mask_xy is not None:
             np.multiply(active_pixels, mask_xy, out=active_pixels)
+            active_pixels = active_pixels.astype(morph_dtype)
             logging.info("Masked inactive pixels")
 
-        # subsequent analysis hard to parallelize; save in memory
-        if remove_small_object_framewise:
-            active_pixels = active_pixels.compute() if type(active_pixels) == \
-                                                       da.core.Array else active_pixels
+        # Morphological operation
+        if fill_holes and remove_objects:
 
-            # remove small objects
-            for cz in range(active_pixels.shape[0]):
-                active_pixels[cz, :, :] = morphology.remove_small_objects(
-                    active_pixels[cz, :, :], min_size=min_roi_size, connectivity=4)
-            logging.info("Removed small objects framewise")
+            if fill_holes_first:
+                active_pixels = self.fill_holes(active_pixels, area_threshold=area_threshold, connectivity=holes_connectivity,
+                                                depth=holes_depth, dtype=np.bool_)
+                active_pixels = self.remove_objects(active_pixels, min_size=min_size, connectivity=object_connectivity,
+                                                depth=objects_depth, dtype=morph_dtype)
 
-            # label connected pixels
-            # event_map, num_events = measure.label(active_pixels, return_num=True)
+                logging.info("Applied morphologic operations")
 
-            # TODO this fails for very large images
-            event_map = np.zeros(data.shape, dtype=np.uintc)
-            event_map[:], num_events = ndimage.label(active_pixels)
-            logging.info("labelled connected pixel framewise. #events: {}".format(num_events))
+            else:
+                active_pixels = self.remove_objects(active_pixels, min_size=min_size, connectivity=object_connectivity,
+                                                depth=objects_depth, dtype=morph_dtype)
+                active_pixels = self.fill_holes(active_pixels, area_threshold=area_threshold, connectivity=holes_connectivity,
+                                                depth=holes_depth, dtype=morph_dtype)
+                logging.info("Applied morphologic operations")
 
-        else:
+        elif fill_holes:
+            active_pixels = self.fill_holes(active_pixels, area_threshold=area_threshold, connectivity=holes_connectivity,
+                                                depth=holes_depth, dtype=morph_dtype)
+            logging.info("Applied morphologic operations")
 
-            # remove small objects
-            struct = ndimage.generate_binary_structure(3, binary_struct_connectivity)
-            struct = ndimage.iterate_structure(struct, binary_struct_iterations).astype(int)
+        elif remove_objects:
+            active_pixels = self.remove_objects(active_pixels, min_size=min_size, connectivity=object_connectivity,
+                                            depth=objects_depth, dtype=morph_dtype)
+            logging.info("Applied morphologic operations")
 
-            if debug:
-                io.save(self.output_directory.joinpath("debug_binary_struct.tiff"), data=struct.astype(bool))
+        if debug and (fill_holes or remove_objects):
+            logging.warning(f"dtype active pixels: {active_pixels}")
+            io.save(self.output_directory.joinpath("debug_active_pixels_morphed.tiff"), data=active_pixels)
 
-            active_pixels = ndmorph.binary_opening(active_pixels, structure=struct)
-            active_pixels = ndmorph.binary_closing(active_pixels, structure=struct)
-
-            if debug:
-                io.save(self.output_directory.joinpath("debug_active_pixels_small_eliminated.tiff"), data=active_pixels)
-
-            logging.info("removed small objects")
-
-            # label connected pixels
-            event_map = da.from_array(np.zeros(data.shape, dtype=int))
-            event_map[:], num_events = ndimage.label(active_pixels)
-            logging.info("labelled connected pixel. #events: {}".format(num_events))
+        # label connected pixels
+        event_map = da.from_array(np.zeros(data.shape, dtype=int))
+        event_map[:], num_events = ndimage.label(active_pixels)
+        logging.info("labelled connected pixel. #events: {}".format(num_events))
 
         # characterize each event
         event_map = event_map.astype(int)
 
         logging.info("event_map dype: {}".format(event_map.dtype))
 
-        return event_map  # , event_properties
+        return event_map
 
     @staticmethod
     def gaussian_smooth_3d(arr, sigma=3, radius=2, mode='nearest',
@@ -439,7 +479,6 @@ class Detector:
         if not isinstance(arr, da.Array):
             arr = da.from_array(arr)
 
-
         arr = arr.astype(dtype)
 
         arr = arr.rechunk(("auto", -1, -1))
@@ -452,8 +491,9 @@ class Detector:
 
             for i in range(depth, Z-depth):
                 z0, z1 = i-depth, i+depth+1
-                binary_mask[i, :, :] = morphology.remove_small_objects(frame[z0:z1, :, :],
-                                                                       min_size=min_size, connectivity=connectivity)
+                removed = morphology.remove_small_objects(frame[z0:z1, :, :],
+                                                          min_size=min_size, connectivity=connectivity)
+                binary_mask[i, :, :] = removed[depth:-depth, :, :]
 
             return binary_mask
 
@@ -462,7 +502,7 @@ class Detector:
         return binary_mask
 
     @staticmethod
-    def remove_holes(arr, area_threshold=10, connectivity=1, depth=0, dtype=np.bool_):
+    def fill_holes(arr, area_threshold=10, connectivity=1, depth=0, dtype=np.bool_):
 
         if not isinstance(arr, da.Array):
             arr = da.from_array(arr)
@@ -478,8 +518,9 @@ class Detector:
 
             for i in range(depth, Z-depth):
                 z0, z1 = i-depth, i+depth+1
-                binary_mask[i, :, :] = morphology.remove_small_holes(frame[z0:z1, :, :],
-                                                                       area_threshold=area_threshold, connectivity=connectivity)
+                removed = morphology.remove_small_holes(frame[z0:z1, :, :],
+                                                        area_threshold=area_threshold, connectivity=connectivity)
+                binary_mask[i, :, :] = removed[depth:-depth, :, :]
 
             return binary_mask
 
