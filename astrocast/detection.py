@@ -5,12 +5,15 @@ import json
 import numpy as np
 from pathlib import Path
 from typing import Optional
+
 import tifffile as tf
 import dask.array as da
 import random
 import shutil
 import tiledb
 import warnings
+
+from scipy import signal
 from skimage import morphology
 from skimage.filters import threshold_triangle, gaussian
 from skimage.feature import peak_local_max
@@ -77,12 +80,12 @@ class Detector:
 
     def run(self, dataset: Optional[str] = None,
             threshold: Optional[float] = None, min_size: int = 20,
-            smoothing_kernel=2,
+            radius = 2, sigma = 2, min_foreground_to_background_ratio=1, threshold_z_depth=1,
             lazy: bool = True, adjust_for_noise: bool = False,
             subset: Optional[str] = None, split_events: bool = True,
             binary_struct_iterations: int = 1,
             binary_struct_connectivity: int = 2,  # TODO better way to do this
-            save_activepixels: bool = False,
+            debug: bool = False,
             parallel=True) -> None:
         """
         Runs the event detection process on the specified dataset.
@@ -153,10 +156,11 @@ class Detector:
             logging.info("Thresholding events")
             event_map = self.get_events(data, roi_threshold=threshold, var_estimate=noise,
                                         min_roi_size=min_size,
-                                        smoXY=smoothing_kernel,
+                                        radius = radius, sigma = sigma, threshold_z_depth=threshold_z_depth,
+                                        min_foreground_to_background_ratio=min_foreground_to_background_ratio,
                                         binary_struct_iterations=binary_struct_iterations,
                                         binary_struct_connectivity=binary_struct_connectivity,
-                                        save_activepixels=save_activepixels)
+                                        debug=debug)
 
             logging.info(f"Saving event map to: {event_map_path}")
             event_map.rechunk((100, 100, 100)).to_tiledb(event_map_path.as_posix())
@@ -219,11 +223,11 @@ class Detector:
 
     def get_events(self, data: np.array, roi_threshold: float, var_estimate: float,
                    min_roi_size: int = 10, mask_xy: np.array = None,
-                   smoXY=2,
+                   radius = 2, sigma = 2, min_foreground_to_background_ratio=1, threshold_z_depth=1,
                    remove_small_object_framewise=False,
+                   binary_struct_connectivity=0,
                    binary_struct_iterations=1,
-                   binary_struct_connectivity=2,
-                   save_activepixels: bool = False) -> (np.array, dict):
+                   debug: bool = False) -> (np.array, dict):
 
         """ identifies events in data based on threshold
 
@@ -238,6 +242,8 @@ class Detector:
             event_properties: list of scipy.regionprops items.
         """
 
+        io = IO()
+
         # threshold data by significance value
         if roi_threshold is not None:
             active_pixels = da.from_array(np.zeros(data.shape, dtype=np.bool_))
@@ -247,33 +253,26 @@ class Detector:
                 if var_estimate is not None else roi_threshold
             # Active pixels are those whose gaussian filter-processed intensities, sigma=smoXY
             # are higher than then calculated absolute threshold.
-            active_pixels[:] = ndfilters.gaussian_filter(data, smoXY) > absolute_threshold
+            active_pixels[:] = ndfilters.gaussian_filter(data, sigma) > absolute_threshold
 
         else:
-            logging.warning("no threshold defined. Using skimage.threshold \
-                            to define threshold dynamically...")
-
-            # Executed when a roi_threshold has not been provided.
-            def dynamic_threshold(img):
-                smooth = gaussian(img, sigma=smoXY, channel_axis=None)
-                thr = 1 if np.sum(img) == 0 else threshold_triangle(smooth)
-                img_thr = smooth > thr
-                img_thr = img_thr.astype(np.bool_)
-
-                return img_thr
+            logging.warning("Dynamically choosing filtering threshold (threshold: None)")
 
             if not isinstance(data, da.Array):
                 data = da.from_array(data)
 
-            data_rechunked = data.rechunk((1, -1, -1))
-            active_pixels = data_rechunked.map_blocks(dynamic_threshold, dtype=np.bool_)
+            # 3D smooth
+            data = self.gaussian_smooth_3d(data, sigma=sigma, radius=radius, mode='nearest', rechunk=True)
 
-            if save_activepixels is True:
-                tiff_path = self.output_directory.joinpath("active_pixels.tiff")
-                logging.info(f"Saving active pixels to: {tiff_path}")
+            if debug:
+                io.save(self.output_directory.joinpath("debug_smoothed_input.tiff"), data=data)
 
-                io = IO()
-                io.save(path=tiff_path, data=active_pixels)
+            # Threshold
+            active_pixels = self.spatial_threshold(data, min_ratio=min_foreground_to_background_ratio,
+                                                   threshold_z_depth=threshold_z_depth)
+
+            if debug:
+                io.save(self.output_directory.joinpath("debug_active_pixels.tiff"), data=active_pixels)
 
         logging.info("identified active pixels")
         # mask inactive pixels (accelerates subsequent computation)
@@ -306,8 +305,15 @@ class Detector:
             struct = ndimage.generate_binary_structure(3, binary_struct_connectivity)
             struct = ndimage.iterate_structure(struct, binary_struct_iterations).astype(int)
 
+            if debug:
+                io.save(self.output_directory.joinpath("debug_binary_struct.tiff"), data=struct.astype(bool))
+
             active_pixels = ndmorph.binary_opening(active_pixels, structure=struct)
             active_pixels = ndmorph.binary_closing(active_pixels, structure=struct)
+
+            if debug:
+                io.save(self.output_directory.joinpath("debug_active_pixels_small_eliminated.tiff"), data=active_pixels)
+
             logging.info("removed small objects")
 
             # label connected pixels
@@ -321,6 +327,174 @@ class Detector:
         logging.info("event_map dype: {}".format(event_map.dtype))
 
         return event_map  # , event_properties
+
+    @staticmethod
+    def gaussian_smooth_3d(arr, sigma=3, radius=2, mode='nearest',
+                           rechunk=True, chunks=('auto', 'auto', 'auto')):
+
+        if not isinstance(arr, da.Array):
+            arr = da.from_array(arr)
+
+        if rechunk:
+            arr = arr.rechunk(chunks)
+
+
+        depth = {i:radius*2+1 for i in range(3)}
+        overlap = da.overlap.overlap(arr, depth=depth, boundary=mode)
+        mapped = overlap.map_blocks(lambda x: ndimage.gaussian_filter(x,
+                                                                      sigma=sigma, radius=radius, mode=mode),
+                                    dtype=arr.dtype)
+        arr = da.overlap.trim_internal(mapped, depth, boundary=mode)
+
+        return arr
+
+    @staticmethod
+    def spatial_threshold(arr, min_ratio=1, threshold_z_depth=1):
+
+        def threshold(arr, min_ratio=min_ratio, depth=threshold_z_depth):
+
+                Z, X, Y = arr.shape
+                binary_mask = np.zeros(arr.shape, dtype=np.bool_)
+
+                for i in range(depth, Z-depth):
+                    z0, z1 = i-depth, i+depth+1
+                    arr_s = arr[z0:z1, :, :]
+
+                    # calculate threshold
+                    threshold = threshold_triangle(arr_s)
+
+                    # threshold image
+                    center_index = (len(arr_s) - 1) // 2
+                    imc = arr_s[center_index, :, :]
+                    binary_mask_s = imc > threshold
+
+                    # calculate ratio foreground/background
+                    active_ind = np.where(binary_mask_s == 1) # TODO more efficient solution?
+                    inactive_ind = np.where(binary_mask_s == 0)
+
+                    fg = np.mean(imc[active_ind])
+                    bg = abs(np.mean(imc[inactive_ind]))
+                    ratio = fg/bg
+
+                    # adjust axis
+                    # binary_mask = binary_mask.reshape((1,) + binary_mask.shape)
+
+                    if ratio > min_ratio:
+                        binary_mask[i, :, :] = binary_mask_s
+
+                return binary_mask
+
+        data = arr.rechunk((1, -1, -1))
+        depth = {0:threshold_z_depth, 1:0, 2:0} #(threshold_z_depth, 0, 0)
+
+        # overlap = da.overlap.overlap(data, depth=depth, boundary="nearest", allow_rechunk=True)
+        # c_size = overlap.chunksize
+        # display(c_size, overlap)
+        # binary_mask = overlap.map_blocks(threshold,
+        #                                    chunks=(c_size[0]-2*threshold_z_depth, data.shape[1], data.shape[2]), dtype=data.dtype)
+
+        binary_mask = data.map_overlap(threshold, boundary="nearest", depth=depth, trim=True, dtype=np.bool_)
+
+        return binary_mask
+
+    @staticmethod
+    def temporal_threshold(arr,  prominence=10, width=3, rel_height=0.9, wlen=60, plateau_size=None):
+
+        """
+
+        :param arr: numpy.ndarray or da.Array
+        :param prominence:prominencenumber or ndarray or sequence, optional
+                Required prominence of peaks. Either a number, None, an array matching x or a 2-element sequence of the former. The first element is always interpreted as the minimal and the second, if supplied, as the maximal required prominence.
+        :param width: number or ndarray or sequence, optional
+                Required width of peaks in samples. Either a number, None, an array matching x or a 2-element sequence of the former. The first element is always interpreted as the minimal and the second, if supplied, as the maximal required width.
+        :param rel_height: float, optional
+                Used for calculation of the peaks width, thus it is only used if width is given. See argument rel_height in peak_widths for a full description of its effects.
+        :param wlen: int, optional
+                Used for calculation of the peaks prominences, thus it is only used if one of the arguments prominence or width is given. See argument wlen in peak_prominences for a full description of its effects.
+        :param plateau_size: number or ndarray or sequence, optional
+                Required size of the flat top of peaks in samples. Either a number, None, an array matching x or a 2-element sequence of the former. The first element is always interpreted as the minimal and the second, if supplied as the maximal required plateau size.
+
+        :return: binary mask
+        """
+
+        def find_peaks(arr, prominence=prominence, width=width, rel_height=rel_height, wlen=wlen, plateau_size=plateau_size):
+
+            binary_mask = np.zeros(arr.shape, dtype=int)
+
+            _, X, Y = arr.shape
+            for x in range(X):
+                for y in range(Y):
+
+                    peaks, prominences = signal.find_peaks(arr[:, x, y], prominence=prominence, wlen=wlen,
+                                                           width=width, rel_height=rel_height, plateau_size=plateau_size)
+
+
+                    for (left, right, prom) in list(zip(prominences['left_ips'], prominences['right_ips'], prominences['prominences'])):
+                        binary_mask[int(left):int(right), x, y] = 1 # prom
+
+            return binary_mask
+
+        if not isinstance(arr, da.Array):
+            arr = da.from_array(arr)
+
+        arr = arr.rechunk((-1, "auto", "auto"))
+
+        binary_mask = da.map_blocks(find_peaks, arr, dtype=int)
+        return binary_mask
+
+    @staticmethod
+    def remove_objects(arr, min_size=10, connectivity=1, depth=0, dtype=np.bool_):
+
+        if not isinstance(arr, da.Array):
+            arr = da.from_array(arr)
+
+
+        arr = arr.astype(dtype)
+
+        arr = arr.rechunk(("auto", -1, -1))
+        depth_dict = {0: 1 + depth, 1: 0, 2: 0}
+
+        def rm_small(frame):
+
+            Z, X, Y = frame.shape
+            binary_mask = np.zeros(frame.shape, dtype=dtype)
+
+            for i in range(depth, Z-depth):
+                z0, z1 = i-depth, i+depth+1
+                binary_mask[i, :, :] = morphology.remove_small_objects(frame[z0:z1, :, :],
+                                                                       min_size=min_size, connectivity=connectivity)
+
+            return binary_mask
+
+        binary_mask = arr.map_overlap(rm_small, boundary="nearest", depth=depth_dict, trim=True, dtype=dtype)
+
+        return binary_mask
+
+    @staticmethod
+    def remove_holes(arr, area_threshold=10, connectivity=1, depth=0, dtype=np.bool_):
+
+        if not isinstance(arr, da.Array):
+            arr = da.from_array(arr)
+
+        arr = arr.astype(dtype)
+        arr = arr.rechunk(("auto", -1, -1))
+        depth_dict = {0: 1 + depth, 1: 0, 2: 0}
+
+        def rm_small(frame):
+
+            Z, X, Y = frame.shape
+            binary_mask = np.zeros(frame.shape, dtype=dtype)
+
+            for i in range(depth, Z-depth):
+                z0, z1 = i-depth, i+depth+1
+                binary_mask[i, :, :] = morphology.remove_small_holes(frame[z0:z1, :, :],
+                                                                       area_threshold=area_threshold, connectivity=connectivity)
+
+            return binary_mask
+
+        binary_mask = arr.map_overlap(rm_small, boundary="nearest", depth=depth_dict, trim=True, dtype=dtype)
+
+        return binary_mask
 
     @staticmethod
     def get_time_map(event_map, chunk: int = 200):

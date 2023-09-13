@@ -387,19 +387,22 @@ def denoise(input_file, batch_size, input_size, pre_post_frame, gap_frames, z_se
 @click_custom_option('--h5-loc', type=click.STRING, default=None, help='Name or identifier of the dataset in the h5 file.')
 @click_custom_option('--threshold', type=click.FLOAT, default=None, help='Threshold value to discriminate background from events.')
 @click_custom_option('--min-size', type=click.INT, default=20, help='Minimum size of an event region.')
-@click_custom_option('--smoothing-kernel', type=click.INT, default=2, help='Somthing kernel in XY')
+@click_custom_option('--radius', type=click.INT, default=2, help='Radius of gaussian smoothing kernel')
+@click_custom_option('--min-signal-ratio', type=click.INT, default=2, help='Minimum ratio of active pixels to inactive pixels.')
+@click_custom_option('--threshold-z-depth', type=click.INT, default=1, help='Number of padded frames (+/- depth) in the threshold calculation.')
+@click_custom_option('--sigma', type=click.INT, default=2, help='Sigma of gaussian smoothing kernel')
 @click_custom_option('--lazy', type=click.BOOL, default=True, help='Whether to implement lazy loading.')
 @click_custom_option('--adjust-for-noise', type=click.BOOL, default=False, help='Whether to adjust event detection for background noise.')
 @click_custom_option('--subset', type=click.STRING, default=None, help='Subset of the dataset to process.')
 @click_custom_option('--split-events', type=click.BOOL, default=True, help='Whether to split detected events into smaller events if multiple peaks are detected.')
 @click_custom_option('--binary-struct-iterations', type=click.INT, default=1, help='Number of iterations for binary structuring element.')
 @click_custom_option('--binary-struct-connectivity', type=click.INT, default=2, help='Connectivity of binary structuring element.')
-@click_custom_option('--save-activepixels', type=click.BOOL, default=False, help='Save active pixels or not.')
+@click_custom_option('--debug', type=click.BOOL, default=False, help='Save active pixels or not.')
 @click_custom_option('--parallel', type=click.BOOL, default=True, help='Parallel execution of event characterization.')
 @click_custom_option('--overwrite', type=click.BOOL, default=False, help='Flag for overwriting previous result in output location')
 def detect_events(input_path, output_path, indices, logging_level, h5_loc, threshold, min_size, lazy,
                   adjust_for_noise, subset, split_events, binary_struct_iterations, binary_struct_connectivity,
-                  save_activepixels, parallel, overwrite, smoothing_kernel):
+                  debug, parallel, overwrite, radius, sigma, min_signal_ratio, threshold_z_depth):
     """
     Detect events using the Detector class.
     """
@@ -427,11 +430,13 @@ def detect_events(input_path, output_path, indices, logging_level, h5_loc, thres
                             indices=np.array(eval(indices)) if indices else None, logging_level=logging_level)
 
         # Running the detection
-        detector.run(dataset=h5_loc, threshold=threshold, min_size=min_size, lazy=lazy, smoothing_kernel=smoothing_kernel,
+        detector.run(dataset=h5_loc, threshold=threshold, min_size=min_size, lazy=lazy,
+                     radius=radius, sigma=sigma, threshold_z_depth=threshold_z_depth,
+                     min_foreground_to_background_ratio=min_signal_ratio,
                      adjust_for_noise=adjust_for_noise, subset=subset, split_events=split_events,
                      binary_struct_iterations=binary_struct_iterations,
                      binary_struct_connectivity=binary_struct_connectivity,
-                     save_activepixels=save_activepixels, parallel=parallel)
+                     debug=debug, parallel=parallel)
 
 def visualize_h5_recursive(loc, indent='', prefix=''):
     """Recursive part of the function to visualize the structure."""

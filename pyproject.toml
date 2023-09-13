@@ -55,6 +55,7 @@ humanize = "*"
 pyyaml = "*"
 colorama = "^0.4.6"
 prettytable = "*"
+shiny = "^0.5.1"
 
 [tool.poetry.dev-dependencies]
 pytest-cov = "*"
