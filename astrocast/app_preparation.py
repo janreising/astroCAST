@@ -5,6 +5,7 @@ from itertools import combinations, permutations
 from pathlib import Path
 
 import click
+import dask.array as da
 import numpy as np
 import pandas as pd
 import yaml
@@ -34,6 +35,7 @@ class Explorer:
                                ui.h5(""),
                                ui.input_text("path", "Path", value=self.path),
                                ui.input_text("h5_loc", "dataset", value=self.h5_loc),
+                               ui.input_switch("lazy", "lazy loading", value=True),
                                ui.output_text("data_shape"),
                                ui.h5(""),
                                ui.panel_conditional(
@@ -67,33 +69,42 @@ class Explorer:
                            )
                        )
                        )),
-                ui.nav("Spatial Thresholding", ui.layout_sidebar(
+                ui.nav("Thresholding", ui.layout_sidebar(
                        ui.panel_sidebar(
                            ui.h5(""),
+                           ui.h5("Spatial Thresholding"),
                            ui.input_switch("use_spatial", "activate"),
                            ui.input_numeric("min_ratio", "Min Ratio", value=1),
                            ui.input_numeric("z_depth", "Z-Depth", value=1),
-                       ),
-                       ui.panel_main(
-                           ui.panel_conditional(
-                               "input.use_spatial",
-                               ui.output_plot("spatial"),
-                           )
-                       )
-                       )),
-                ui.nav("Temporal Thresholding", ui.layout_sidebar(
-                       ui.panel_sidebar(
                            ui.h5(""),
+                           ui.h5("Temporal Thresholding"),
                            ui.input_switch("use_temporal", "activate"),
                            ui.input_numeric("prominence", "Prominence", value=10),
                            ui.input_numeric("width", "Width", value=3),
                            ui.input_numeric("rel_height", "Relative Height", value=0.9),
-                           ui.input_numeric("wlen", "Wlen", value=60)
+                           ui.input_numeric("wlen", "Wlen", value=60),
+                           ui.panel_conditional(
+                               "input.use_spatial & input.use_temporal",
+                               ui.h5(""),
+                               ui.h5("Combine Spatial and Temporal"),
+                               ui.input_radio_buttons("comb_type", "Union type", ["&", "|"]),
+                           )
                        ),
                        ui.panel_main(
                            ui.panel_conditional(
+                               "input.use_spatial",
+                               ui.h3("Spatial Thresholding"),
+                               ui.output_plot("spatial"),
+                           ),
+                           ui.panel_conditional(
                                "input.use_temporal",
+                               ui.h3("Temporal Thresholding"),
                                ui.output_plot("temporal"),
+                           ),
+                           ui.panel_conditional(
+                               "input.use_spatial & input.use_temporal",
+                               ui.h4("Combined image"),
+                               ui.output_plot("combined_"),
                            )
                        )
                        )),
@@ -104,20 +115,17 @@ class Explorer:
                            ui.input_switch("use_holes", "fill"),
                            ui.input_numeric("area_threshold", "Area Threshold", value=10),
                            ui.input_numeric("connectivity_holes", "Connectivity", value=1),
+                           ui.input_numeric("holes_depth", "z_depth", value=1),
                            ui.h5("Remove Small Objects"),
                            ui.input_switch("use_objects", "remove"),
                            ui.input_numeric("min_size", "Min Size", value=10),
                            ui.input_numeric("connectivity_objects", "Connectivity", value=1),
+                           ui.input_numeric("objects_depth", "z_depth", value=1),
                            ui.panel_conditional(
                                "input.use_holes & input.use_objects",
                                ui.h5("Sequential Operation"),
                                ui.input_radio_buttons("comb_options", "Combination order",
                                                       ["None", "holes > objects", "objects > holes"]),
-                           ),
-                           ui.panel_conditional(
-                               "input.use_spatial & input.use_temporal",
-                               ui.h5("Combine Spatial and Temporal"),
-                               ui.input_radio_buttons("comb_type", "Union type", ["None", "&", "|"]),
                            )
                        ),
                        ui.panel_main(
@@ -127,12 +135,6 @@ class Explorer:
                                ui.output_plot("morph")
                            ),
 
-                           # Combination
-                           ui.panel_conditional(
-                               "input.comb_type !== 'None'",
-                               ui.h4("Combined image"),
-                               ui.output_plot("combined_"),
-                           )
                        )
                        )),
                 ui.nav("Export", ui.layout_sidebar(
@@ -140,9 +142,10 @@ class Explorer:
                         ui.h5(""),
                         ui.h5("Additional parameters"),
                         ui.input_text("output_path", "Output path", value="infer"),
+                        ui.input_numeric("exclude_border", "Border exclusion", value=0),
                         ui.input_switch("split_events", "Split events", value=False),
                         ui.input_switch("overwrite", "Overwrite Output", value=False),
-                        ui.input_numeric("logging_level", "Logging level", value=30),
+                        ui.input_numeric("logging_level", "Logging level", value=20),
                         ui.input_switch("debug", "Debugging", value=False),
                         ui.h5(""),
                         ui.h5("Export"),
@@ -150,7 +153,12 @@ class Explorer:
                         ui.input_action_button("btn_save", "Save arguments", class_="btn-primary"),
                     ),
                     ui.panel_main(
-                        ui.output_ui("argument_file")
+                        ui.h4("Config file:"),
+                        ui.output_ui("argument_file"),
+                        ui.h4("Run detection with:"),
+                        ui.output_ui("run_command"),
+                        ui.h4("Visualize results with:"),
+                        ui.output_ui("visualize_command")
                     )
                 ))
             )
@@ -168,7 +176,11 @@ class Explorer:
 
                 try:
 
-                    data = io.load(path, h5_loc=input.h5_loc(), z_slice=input.z_select(), lazy=True)
+                    data = io.load(path, h5_loc=input.h5_loc(), z_slice=input.z_select(), lazy=input.lazy)
+
+                    if not isinstance(data, da.Array):
+                        data = da.from_array(data)
+
                 except Exception as e:
                     ui.notification_show(f"Error: {e}: {traceback.print_exc()}", type="warning")
                     return None
@@ -239,6 +251,26 @@ class Explorer:
                 return temporal
 
         @reactive.Calc
+        def get_union():
+
+            if not (input.use_spatial and input.use_temporal):
+                return None
+
+            with ui.Progress(min=0, max=12) as p:
+                i = 0
+                p.set(i, message="Loading data", detail="")
+
+                spatial = get_spatial()
+                temporal = get_temporal()
+
+                if input.comb_type() == "&":
+                    arr = np.minimum(spatial, temporal)
+                else:
+                    arr = np.maximum(spatial, temporal)
+
+                return arr, f"SPATIAL {input.comb_type()} TEMPORAL"
+
+        @reactive.Calc
         def get_morph():
 
             with ui.Progress(min=0, max=3) as p:
@@ -248,13 +280,18 @@ class Explorer:
                 data = []
                 lbls = []
 
-                if input.use_spatial():
+                if input.use_spatial() and not input.use_temporal():
                     data.append(get_spatial())
-                    lbls.append("S")
+                    lbls.append("SPATIAL")
 
-                if input.use_temporal():
+                elif not input.use_spatial() and input.use_temporal():
                     data.append(get_temporal())
-                    lbls.append("T")
+                    lbls.append("TEMPORAL")
+
+                else:
+                    dat, lbl = get_union()
+                    data.append(dat)
+                    lbls.append(lbl)
 
                 res = []
                 res_lbls = []
@@ -263,27 +300,31 @@ class Explorer:
                     if input.comb_options() == "None":
 
                         if input.use_holes():
-                            filled = detection.Detector.remove_holes(dat,
-                                                                     area_threshold=input.area_threshold(),
-                                                                     connectivity=input.connectivity_holes())
+                            filled = detection.Detector.fill_holes(dat,
+                                                                   area_threshold=input.area_threshold(),
+                                                                   connectivity=input.connectivity_holes(),
+                                                                   depth=input.holes_depth())
                             res.append(filled)
                             res_lbls.append(lbl + "_fill")
 
                         if input.use_objects():
                             rem = detection.Detector.remove_objects(dat,
                                                                     min_size=input.min_size(),
-                                                                    connectivity=input.connectivity_holes())
+                                                                    connectivity=input.connectivity_holes(),
+                                                                    depth=input.objects_depth())
                             res.append(rem)
                             res_lbls.append(lbl + "_rem")
 
                     elif input.comb_options() == "holes > objects":
 
-                        filled = detection.Detector.remove_holes(dat,
-                                                                 area_threshold=input.area_threshold(),
-                                                                 connectivity=input.connectivity_holes())
+                        filled = detection.Detector.fill_holes(dat,
+                                                               area_threshold=input.area_threshold(),
+                                                               connectivity=input.connectivity_holes(),
+                                                               depth=input.objects_depth())
                         rem = detection.Detector.remove_objects(filled,
                                                                 min_size=input.min_size(),
-                                                                connectivity=input.connectivity_holes())
+                                                                connectivity=input.connectivity_holes(),
+                                                                depth=input.holes_depth())
 
                         res.append(rem)
                         res_lbls.append(lbl + "_fill_rem")
@@ -292,43 +333,18 @@ class Explorer:
 
                         rem = detection.Detector.remove_objects(dat,
                                                                 min_size=input.min_size(),
-                                                                connectivity=input.connectivity_holes())
+                                                                connectivity=input.connectivity_holes(),
+                                                                depth=input.objects_depth())
 
-                        filled = detection.Detector.remove_holes(rem,
-                                                                 area_threshold=input.area_threshold(),
-                                                                 connectivity=input.connectivity_holes())
+                        filled = detection.Detector.fill_holes(rem,
+                                                               area_threshold=input.area_threshold(),
+                                                               connectivity=input.connectivity_holes(),
+                                                               depth=input.holes_depth())
 
                         res.append(filled)
                         res_lbls.append(lbl + "_rem_fill")
 
                 return res, res_lbls
-
-        @reactive.Calc
-        def get_union():
-
-            if input.comb_type() == "None" or not (input.use_spatial and input.use_temporal):
-                return None
-
-            with ui.Progress(min=0, max=12) as p:
-                i = 0
-                p.set(i, message="Loading data", detail="")
-
-                data, lbls = get_morph()
-                res_array = []
-                res_lbls = []
-                for ((d1, l1), (d2, l2)) in combinations(list(zip(data, lbls)), 2):
-
-                    if input.comb_type() == "&":
-                        rarr = np.minimum(d1, d2)
-                    else:
-                        rarr = np.maximum(d1, d2)
-
-                    rarr = rarr.astype(np.bool_)
-
-                    res_array.append(rarr)
-                    res_lbls.append(f"{l1}_{l2}")
-
-                return res_array, res_lbls
 
         @reactive.Calc
         def get_frames():
@@ -407,6 +423,20 @@ class Explorer:
 
         @output
         @render.plot
+        def combined_():
+
+            if input.use_temporal() and input.use_spatial():
+
+                frames = get_frames()
+                arr, lbls = get_union()
+
+                return self.plot_images(arr, frames, lbls=lbls)
+
+            else:
+                return None
+
+        @output
+        @render.plot
         def morph():
 
             if input.use_holes() or input.use_objects():
@@ -419,22 +449,8 @@ class Explorer:
                 return None
 
         @output
-        @render.plot
-        def combined_():
-
-            if input.use_temporal() and input.use_spatial() and input.comb_type != "None":
-
-                frames = get_frames()
-                arr, lbls = get_union()
-
-                return self.plot_images(arr, frames, lbls=lbls)
-
-            else:
-                return None
-
-        @output
         @render.text
-        @reactive.event(input.btn_save) # Take a dependency on the button
+        @reactive.event(input.btn_save)
         async def argument_file():
 
             save_path = Path(input.save_path())
@@ -443,29 +459,33 @@ class Explorer:
                 # file params
                 "h5_loc": input.h5_loc(),
                 # smoothing
-                "sigma": input.sigma(),
-                "radius": input.radius(),
+                "use_smoothing": input.use_smoothing(),
+                "smooth_sigma": input.sigma(),
+                "smooth_radius": input.radius(),
                 # Spatial
                 "use_spatial": input.use_spatial(),
-                "min_ratio": input.min_ratio(),
-                "z_depth": input.z_depth(),
+                "spatial_min_ratio": input.min_ratio(),
+                "spatial_z_depth": input.z_depth(),
                 # Temporal
                 "use_temporal": input.use_temporal(),
-                "prominence": input.prominence(),
-                "width": input.width(),
-                "rel_height": input.rel_height(),
-                "wlen": input.wlen(),
+                "temporal_prominence": input.prominence(),
+                "temporal_width": input.width(),
+                "temporal_rel_height": input.rel_height(),
+                "temporal_wlen": input.wlen(),
                 # Morphological operations
-                "use_holes": input.use_holes(),
+                "fill_holes": input.use_holes(),
                 "area_threshold": input.area_threshold(),
-                "connectivity_holes": input.connectivity_holes(),
-                "use_objects": input.use_objects(),
+                "holes_connectivity": input.connectivity_holes(),
+                "holes_depth": input.holes_depth(),
+                "remove_objects": input.use_objects(),
                 "min_size": input.min_size(),
-                "connectivity_objects": input.connectivity_objects(),
-                "comb_options": input.comb_options() if not input.comb_options() == 'None' else None,
-                "comb_type": input.comb_type() if not input.comb_type() == 'None' else None,
+                "object_connectivity": input.connectivity_objects(),
+                "objects_depth": input.objects_depth(),
+                "fill_holes_first": True if  input.comb_options() == "holes > objects" else False,
+                "comb_type": str(input.comb_type()),
                 # additional
                 "output_path": input.output_path(),
+                "exclude_border": input.exclude_border(),
                 "split_events": input.split_events(),
                 "overwrite": input.overwrite(),
                 "logging_level": input.logging_level(),
@@ -490,7 +510,26 @@ class Explorer:
 
             return config_string
 
+        @output
+        @render.text
+        @reactive.event(input.btn_save)
+        async def run_command():
+            return f"astrocast --config {input.save_path()} detect-events {input.path()}"
+
+        @output
+        @render.text
+        @reactive.event(input.btn_save)
+        async def visualize_command():
+            return f"astrocast view-detection-results " \
+                   f"--lazy False --h5-loc {input.h5_loc()} {input.path().replace('.h5', '.roi')}"
+
     def plot_images(self, arr, frames, lbls=None, figsize=(10, 5), vmin=None, vmax=None):
+
+        if not isinstance(arr, list):
+            arr = [arr]
+
+        if lbls is not None and not isinstance(lbls, list):
+            lbls = [lbls]
 
         N, M = len(arr), len(frames)
 
