@@ -303,7 +303,6 @@ class Detector:
                 raise ValueError(f"please choose at least one of (use_spatial, use_temporal) or roi_threshold ")
 
             if debug:
-                logging.warning(f"dtype active pixels: {active_pixels}")
                 io.save(self.output_directory.joinpath("debug_active_pixels.tiff"), data=active_pixels)
 
         logging.info("identified active pixels")
@@ -353,7 +352,6 @@ class Detector:
             logging.info("Applied morphologic operations")
 
         if debug and (fill_holes or remove_objects):
-            logging.warning(f"dtype active pixels: {active_pixels}")
             io.save(self.output_directory.joinpath("debug_active_pixels_morphed.tiff"), data=active_pixels)
 
         # label connected pixels
@@ -448,6 +446,11 @@ class Detector:
         :return: binary mask
         """
 
+        if not isinstance(arr, da.Array):
+            arr = da.from_array(arr)
+
+        arr = arr.rechunk((-1, "auto", "auto"))
+
         def find_peaks(arr, prominence=prominence, width=width, rel_height=rel_height, wlen=wlen, plateau_size=plateau_size):
 
             binary_mask = np.zeros(arr.shape, dtype=int)
@@ -464,11 +467,6 @@ class Detector:
                         binary_mask[int(left):int(right), x, y] = 1 # prom
 
             return binary_mask
-
-        if not isinstance(arr, da.Array):
-            arr = da.from_array(arr)
-
-        arr = arr.rechunk((-1, "auto", "auto"))
 
         binary_mask = da.map_blocks(find_peaks, arr, dtype=int)
         return binary_mask
