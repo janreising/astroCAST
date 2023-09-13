@@ -14,6 +14,7 @@ import yaml
 from functools import partial
 
 from astrocast.analysis import Video, Events
+from astrocast.app_preparation import Explorer
 from astrocast.denoising import SubFrameGenerator
 from astrocast.detection import Detector
 from astrocast.preparation import MotionCorrection, Delta, Input, IO
@@ -161,6 +162,9 @@ class UserFeedback:
 @click.option('--config', default=None, type=click.Path())  # this allows us to change config path
 @click.pass_context
 def cli(ctx, config):
+
+    """Command Line Interface for the astroCAST package."""
+
     if config is not None:
 
         with open(config, 'r') as file:
@@ -590,6 +594,14 @@ def export_video(input_path, output_path, h5_loc_in, h5_loc_out, z_select, lazy,
     data = io.load(input_path, h5_loc=h5_loc_in, z_slice=z_select, lazy=lazy)
 
     io.save(output_path, data=data, h5_loc=h5_loc_out, chunks=chunk_size, compression=compression, overwrite=overwrite)
+
+@cli.command()
+@click_custom_option('--input-path', type=click.Path(), default=None, help='Path to input file.')
+@click_custom_option('--h5-loc', type=click.STRING, default=None, help='Name or identifier of the dataset in the h5 file.')
+def explorer(input_path, h5_loc):
+
+    app_instance = Explorer(input_path=input_path, h5_loc=h5_loc)
+    app_instance.run()
 
 if __name__ == '__main__':
     cli()
