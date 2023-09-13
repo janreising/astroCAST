@@ -376,9 +376,6 @@ class Detector:
                     bg = abs(np.mean(imc[inactive_ind]))
                     ratio = fg/bg
 
-                    # adjust axis
-                    # binary_mask = binary_mask.reshape((1,) + binary_mask.shape)
-
                     if ratio > min_ratio:
                         binary_mask[i, :, :] = binary_mask_s
 
@@ -386,12 +383,6 @@ class Detector:
 
         data = arr.rechunk((1, -1, -1))
         depth = {0:threshold_z_depth, 1:0, 2:0} #(threshold_z_depth, 0, 0)
-
-        # overlap = da.overlap.overlap(data, depth=depth, boundary="nearest", allow_rechunk=True)
-        # c_size = overlap.chunksize
-        # display(c_size, overlap)
-        # binary_mask = overlap.map_blocks(threshold,
-        #                                    chunks=(c_size[0]-2*threshold_z_depth, data.shape[1], data.shape[2]), dtype=data.dtype)
 
         binary_mask = data.map_overlap(threshold, boundary="nearest", depth=depth, trim=True, dtype=np.bool_)
 
