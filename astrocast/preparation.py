@@ -1269,7 +1269,7 @@ class Delta:
         # The location of the data in the HDF5 file (optional, only applicable for .h5 files)
         self.loc = loc
 
-    def run(self, window, method="background", chunks="infer", output_path=None,
+    def run(self, window, method="background", processing_chunks="infer", output_path=None,
             overwrite_first_frame=True, lazy=True):
         """
         Runs the delta calculation on the input data.
@@ -1292,7 +1292,7 @@ class Delta:
 
         """
         # Prepare the data for processing
-        data = self.prepare_data(self.input_, h5_loc=self.loc, chunks=chunks, output_path=output_path, lazy=lazy)
+        data = self.prepare_data(self.input_, h5_loc=self.loc, chunks=processing_chunks, output_path=output_path, lazy=lazy)
 
         # Sequential execution
         if isinstance(data, np.ndarray):
@@ -1343,25 +1343,25 @@ class Delta:
             io = IO()
             res = io.load(Path(path))
 
-        elif isinstance(data, da.core.Array):
+        elif isinstance(data, da.Array):
             # Calculate delta using Dask array for lazy loading and computation
-            res = data.map_blocks(self.calculate_delta_min_filter,
-                                  window=window,
-                                  method=method,
-                                  inplace=False,
-                                  dtype=float).compute()
+
+            def xy_delta(x):
+                return self.calculate_delta_min_filter(x, window=window, method=method, inplace=False)
+
+            res = data.map_blocks(xy_delta, dtype=float)
 
         else:
             raise ValueError(f"Input data type not recognized: {type(data)}")
 
         # Overwrite the first frame with the second frame if required
         if overwrite_first_frame:
-            res[0] = res[1]
+            res[0, :, :] = res[1, :, :]
 
         self.res = res
         return res
 
-    def save(self, output_path, h5_loc="df", chunks=(-1, "auto", "auto"), compression=None, overwrite=False):
+    def save(self, output_path, h5_loc="df", chunks=("auto", "auto", "auto"), compression=None, overwrite=False):
 
         io = IO()
         io.save(output_path, data=self.res, h5_loc=h5_loc, chunks=chunks, compression=compression, overwrite=overwrite)
@@ -1418,20 +1418,21 @@ class Delta:
 
             return io.load(new_path, lazy=lazy)
 
-        elif isinstance(input_, (np.ndarray, da.Array)):
-            # if the input is a numpy ndarray, convert to TileDB array
+        elif isinstance(input_, np.ndarray):
 
-            if output_path is None:
-                raise ValueError("when providing an array as input, an output_path needs to be provided as well.")
-            else:
-                new_path = Path(output_path)
+            if chunks == "infer":
+                chunks = (-1, "auto", "auto")
 
-            if not new_path.suffix in (".tdb"):
-                raise ValueError(f"Please provide an output_path with '.tdb' ending instead of {new_path.suffix}")
+            input_ = da.from_array(input_, chunks=chunks)
+            return input_
 
-            io.save(new_path, data=input_, chunks=chunks)
+        elif isinstance(input_, da.Array):
 
-            return io.load(new_path, lazy=lazy)
+            if chunks == "infer":
+                chunks = (-1, "auto", "auto")
+
+            input_ = input_.rechunk(chunks)
+            return input_
 
         else:
             raise TypeError(f"do not recognize data type: {type(input_)}")
@@ -1518,14 +1519,37 @@ class Delta:
                 z = arr[:, x, y]
 
                 # Pad the signal with the edge values and apply the minimum filter
-                MIN = minimum_filter1d(np.pad(z, pad_width=(int(window/2), int(window/2)), mode='edge'),
-                                       size=window + 1, mode="nearest", origin=int(window / 2))
+                shift = int(window/2)
+                z_padded = np.pad(z, pad_width=(shift, shift), mode='edge')
+                z_even = z_padded[::2]
+                z_odd = z_padded[1::2]
+
+                # MIN = minimum_filter1d(z_padded, size=window+1, mode="nearest", origin=0)
+                MIN_even = minimum_filter1d(z_even, size=window+1, mode="nearest", origin=0)
+                MIN_odd = minimum_filter1d(z_odd, size=window+1, mode="nearest", origin=0)
+
+                # Duplicate each value in the even and odd series to make them the same length as the original series
+                MIN_even_expanded = np.repeat(MIN_even, 2)[:len(z_padded)]
+                MIN_odd_expanded = np.repeat(MIN_odd, 2)[:len(z_padded)]
+
+                # padding
+                if len(MIN_even_expanded) < len(z_padded):
+                    MIN_even_expanded = np.pad(MIN_even_expanded,
+                                               pad_width=(0, len(z_padded)-len(MIN_even_expanded)), mode="edge")
+
+                if len(MIN_odd_expanded) < len(z_padded):
+                    MIN_odd_expanded = np.pad(MIN_odd_expanded,
+                                               pad_width=(0, len(z_padded)-len(MIN_odd_expanded)), mode="edge")
+
+                # Get the maximum value at each point from the two expanded series to get the new baseline
+                MIN = np.maximum(MIN_even_expanded, MIN_odd_expanded)
 
                 # Shift the minimum signal by window/2 and take the max of the two signals
-                background = np.zeros((2, len(z)))
-                background[0, :] = MIN[:-window]
-                background[1, :] = MIN[window:]
-                background = np.nanmax(background, axis=0)
+                # background = np.zeros((2, len(z)))
+                # background[0, :] = MIN[:-window]
+                # background[1, :] = MIN[window:]
+                # background = np.nanmax(background, axis=0)
+                background = MIN[shift:-shift]
 
                 if inplace:
                     arr[:, x, y] = delta_func(z, background)
