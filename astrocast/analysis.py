@@ -1004,10 +1004,22 @@ class Video:
 
     def __init__(self, data, z_slice=None, h5_loc=None, lazy=False, name=None):
 
+        if isinstance(h5_loc, (tuple, list)):
+            if len(h5_loc) == 1:
+                h5_loc = h5_loc[0]
+
         if isinstance(data, (Path, str)):
 
             io = IO()
-            self.data = io.load(data, h5_loc=h5_loc, lazy=lazy, z_slice=z_slice)
+
+            if isinstance(h5_loc, str):
+                self.data = io.load(data, h5_loc=h5_loc, lazy=lazy, z_slice=z_slice)
+                self.Z, self.X, self.Y = self.data.shape
+
+            elif isinstance(h5_loc, (tuple, list)):
+                self.data = {}
+                for loc in h5_loc:
+                    self.data[loc] = io.load(data, h5_loc=loc, lazy=lazy, z_slice=z_slice)
 
         elif isinstance(data, (np.ndarray, da.Array)):
 
@@ -1017,8 +1029,13 @@ class Video:
             else:
                 self.data = data
 
+            self.Z, self.X, self.Y = self.data.shape
+
+        else:
+            raise ValueError(f"unknown data type: {type(data)}")
+
         self.z_slice = z_slice
-        self.Z, self.X, self.Y = self.data.shape
+
         self.name = name
 
     def __hash__(self):
@@ -1069,12 +1086,20 @@ class Video:
 
         return proj
 
-    def show(self, viewer=None, colormap="red",
-             show_trace=False, window=160, indices=None, viewer1d=None, xlabel="frames", ylabel="Intensity", reset_y=False):
+    def show(self, viewer=None, colormap="gray",
+             show_trace=False, window=160, indices=None, viewer1d=None,
+             xlabel="frames", ylabel="Intensity", reset_y=False):
+
+        if show_trace and isinstance(self.data, (tuple, list)):
+            raise ValueError(f"'show_trace' is currently not implemented for multiple datasets.")
 
         if viewer is None:
-            viewer = napari.view_image(self.data, name=self.name, colormap=colormap)
+            viewer = napari.Viewer()
 
+        if isinstance(self.data, dict):
+
+            for key in self.data.keys():
+                viewer.add_image(self.data[key], name=key, colormap=colormap)
         else:
             viewer.add_image(self.data, name=self.name, colormap=colormap)
 
@@ -1099,24 +1124,6 @@ class Video:
 
             # create attachable qtviewer
             line = v1d.add_line(np.c_[X, Y], name=self.name, color=colormap)
-
-            # def update_line(event: Event):
-            #     Z, _, _ = event.value
-            #     z0, z1 = Z-window, Z
-            #
-            #     if z0 < 0:
-            #         z0 = 0
-            #
-            #     y_ = Y[z0:z1]
-            #     x_ = X[z0:z1]
-            #     # y1 = np.pad(y1, (-z0, 0), 'constant', constant_values=0)
-            #
-            #     line.data = np.c_[x_, y_]
-            #
-            #     v1d.reset_x_view()
-            #
-            #     if reset_y:
-            #         v1d.reset_y_view()
 
             current_frame_line = None
 
@@ -1160,7 +1167,6 @@ class Video:
 
                 if reset_y:
                     v1d.reset_y_view()
-
 
             viewer.dims.events.current_step.connect(update_line)
 
