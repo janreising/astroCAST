@@ -13,8 +13,8 @@ from matplotlib import pyplot as plt, gridspec
 from shiny import App, ui, render, reactive
 
 from astrocast import detection
-from astrocast.preparation import IO
-
+from astrocast.preparation import IO, Delta
+import seaborn as sns
 
 class Explorer:
 
@@ -46,7 +46,7 @@ class Explorer:
                                ui.h5("Points of Interest"),
                                ui.input_text("frames", "frames", value=""),
                                ui.input_text("pixel", "pixels",
-                                             value='(41, 185, "blue"), (57, 43, "red"), (104, 24, "green")')
+                                             value='323,239')
                            ),
                            ui.panel_main(
                                ui.panel_conditional(
@@ -55,6 +55,25 @@ class Explorer:
                                )
                            ))
                        ),
+                ui.nav("Delta", ui.layout_sidebar(
+                    ui.panel_sidebar(
+                        ui.h5(""),
+                        ui.input_switch("use_delta", "calculate", value=False),
+                        ui.input_select("delta_method", "method", choices=["background", "dF", "dFF"]),
+                        ui.input_numeric("delta_window", "window", 10),
+                        ui.input_switch("delta_overwrite_first_frame", "Overwrite 1st frame", False),
+                        ui.h5("Plotting options"),
+                        ui.input_switch("delta_plot_original", "Plot original", value=True),
+                        ui.input_switch("delta_twinx", "Twin axis", value=False),
+                        ui.input_numeric("delta_alpha", "Original: alpha", value=0.7),
+                    ),
+                    ui.panel_main(
+                        ui.panel_conditional(
+                               "input.use_delta",
+                               ui.output_plot("delta")
+                           )
+                    )
+                )),
                 ui.nav("Smoothing", ui.layout_sidebar(
                        ui.panel_sidebar(
                            ui.h5(""),
@@ -72,17 +91,27 @@ class Explorer:
                 ui.nav("Thresholding", ui.layout_sidebar(
                        ui.panel_sidebar(
                            ui.h5(""),
-                           ui.h5("Spatial Thresholding"),
+                           ui.h3("Spatial Thresholding"),
                            ui.input_switch("use_spatial", "activate"),
                            ui.input_numeric("min_ratio", "Min Ratio", value=1),
                            ui.input_numeric("z_depth", "Z-Depth", value=1),
                            ui.h5(""),
-                           ui.h5("Temporal Thresholding"),
-                           ui.input_switch("use_temporal", "activate"),
+                           ui.h3("Temporal Thresholding"),
                            ui.input_numeric("prominence", "Prominence", value=10),
                            ui.input_numeric("width", "Width", value=3),
                            ui.input_numeric("rel_height", "Relative Height", value=0.9),
                            ui.input_numeric("wlen", "Wlen", value=60),
+                           ui.row(
+                               ui.column(6,
+                                         ui.h6("Time Series"),
+                                         ui.input_switch("temp_show_trace", "activate"),
+                                         ui.input_switch("temp_show_separate", "separate panels"),
+                                         ),
+                               ui.column(6,
+                                         ui.h6("Frames"),
+                                         ui.input_switch("use_temporal", "activate"),
+                                         )
+                           ),
                            ui.panel_conditional(
                                "input.use_spatial & input.use_temporal",
                                ui.h5(""),
@@ -97,8 +126,13 @@ class Explorer:
                                ui.output_plot("spatial"),
                            ),
                            ui.panel_conditional(
+                               "input.temp_show_trace",
+                               ui.h3("Temporal Thresholding (timeseries)"),
+                               ui.output_plot("temporal_timeseries"),
+                           ),
+                           ui.panel_conditional(
                                "input.use_temporal",
-                               ui.h3("Temporal Thresholding"),
+                               ui.h3("Temporal Thresholding (images)"),
                                ui.output_plot("temporal"),
                            ),
                            ui.panel_conditional(
@@ -205,9 +239,59 @@ class Explorer:
                 return None
 
         @reactive.Calc
+        def get_pixel():
+
+            color_palette = sns.color_palette("husl", 8)
+            color_counter = 0
+
+            px_str = input.pixel().replace(" ", "")
+            px_str = px_str.split(";")
+
+            pixels = []
+            colors = []
+            for px in px_str:
+
+                px = px.split(",")
+
+                if len(px) not in (2, 3):
+                    ui.notification_show(f"incorrect pixel dimension: {len(px)}", type="error")
+                    continue
+
+                pixels.append((int(px[0]), int(px[1])))
+
+                if len(px) == 3:
+                    colors.append(px[2])
+                else:
+
+                    if color_counter > 7:
+                        color_counter = 0
+
+                    colors.append(color_palette[color_counter])
+                    color_counter += 1
+
+            return pixels, colors
+
+        @reactive.Calc
+        def get_delta():
+
+            data = load_data()
+
+            deltaObj = Delta(input_=data, loc="")
+            result = deltaObj.run(method=input.delta_method(), window=input.delta_window(),
+                                  chunks=(-1, 1, 1),
+                                  overwrite_first_frame=input.delta_overwrite_first_frame())
+
+            return result#.compute()
+
+        @reactive.Calc
         def get_smooth():
             data = load_data()
             smooth = detection.Detector.gaussian_smooth_3d(data, sigma=input.sigma(), radius=input.radius())
+
+            if input.lazy():
+                smooth = smooth.compute()
+                smooth = da.from_array(smooth, chunks=("auto", "auto", "auto"))
+
             return smooth
 
         @reactive.Calc
@@ -216,7 +300,7 @@ class Explorer:
             with ui.Progress(min=0, max=2) as p:
                 p.set(0, message="Loading data", detail="")
 
-                if input.use_smoothing:
+                if input.use_smoothing():
                     data = get_smooth()
                 else:
                     data = load_data()
@@ -236,7 +320,7 @@ class Explorer:
             with ui.Progress(min=0, max=2) as p:
                 p.set(0, message="Loading data", detail="")
 
-                if input.use_smoothing:
+                if input.use_smoothing():
                     data = get_smooth()
                 else:
                     data = load_data()
@@ -392,6 +476,33 @@ class Explorer:
 
         @output
         @render.plot
+        def delta():
+
+            delta = get_delta()
+            pixels, colors = get_pixel()
+
+            fig, ax = plt.subplots(1, 1, figsize=(20, 5))
+            for i in range(len(pixels)):
+                x, y = pixels[i]
+                color = colors[i]
+
+                ax.plot(delta[:, x, y], color=color)
+
+            if input.delta_plot_original():
+                original = load_data()
+
+                if input.delta_twinx():
+                    ax = ax.twinx()
+
+                for i in range(len(pixels)):
+                    x, y = pixels[i]
+                    color = colors[i]
+                    ax.plot(original[:, x, y], color=color, linestyle="--", alpha=input.delta_alpha())
+
+            return fig
+
+        @output
+        @render.plot
         def smooth():
             smooth = get_smooth()
             frames = get_frames()
@@ -412,12 +523,57 @@ class Explorer:
 
         @output
         @render.plot
+        def temporal_timeseries():
+
+            if input.temp_show_trace():
+
+                pixels, colors = get_pixel()
+
+                if input.use_smoothing():
+                    data = get_smooth()
+                else:
+                    data = load_data()
+
+                traces = np.zeros((data.shape[0], len(pixels), 1))
+                for i, (x, y) in enumerate(pixels):
+                    traces[:, i, 0] = data[:, x, y]
+
+                mask = detection.Detector.temporal_threshold(traces,
+                                                             prominence=input.prominence(), width=input.width(),
+                                                             rel_height=input.rel_height(), wlen=input.wlen())
+
+                if input.temp_show_separate():
+                    fig, axx = plt.subplots(len(pixels), 1, figsize=(5*len(pixels), 20))
+                    for i in range(len(pixels)):
+
+                        x,y = pixels[i]
+                        axx[i].plot(data[:, x, y], linestyle="-", color=colors[i])
+                        axx[i].set_ylabel(f"{pixels[i]}")
+                        axx[i].twinx().plot(mask[:, i, 0], linestyle="--", color=colors[i])
+
+                else:
+
+                    fig, ax = plt.subplots(1, 1)
+                    twin_ax = ax.twinx()
+                    for i in range(len(pixels)):
+
+                        ax.plot(traces[:, i, 0], linestyle="-", color=colors[i])
+                        twin_ax.plot(mask[:, i, 0], linestyle="--", color=colors[i])
+
+                return fig
+
+            else:
+                return None
+
+        @output
+        @render.plot
         def temporal():
             if input.use_temporal():
                 temporal = get_temporal()
                 frames = get_frames()
 
                 return self.plot_images([temporal], frames, lbls=["> TEMPORAL"])
+
             else:
                 return None
 
