@@ -14,9 +14,10 @@ astroCAST is a Python package designed for analyzing calcium fluorescence events
 Astrocytic calcium event analysis is challenging due to its complex nature, spatiotemporally overlapping events, and variable lengths. Our Astrocytic Calcium Signaling Toolkit (astroCAST) addresses these challenges by efficiently implementing event detection and variable length clustering. Leveraging dynamic thresholding, astroCAST captures diverse calcium fluctuations effectively. Designed for modularity, parallelization, and memory-efficiency, it enables fast and scalable event detection on large datasets.
 
 ## Installation
-[//]: # (You can install astroCAST using pip: ```shell pip install astrocast ```)
+You can install astroCAST using pip: 
+```shell pip install astrocast ```
 
-You can install astroCAST by cloning the github repository and installing it locally. We will making it available through pip soon.
+Alternatively, this repository and install it locally:
 ```shell
 pip install poetry
 poetry install
