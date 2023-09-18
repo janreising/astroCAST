@@ -88,7 +88,7 @@ class Events(CachedClass):
                 # add group columns
                 self.events["group"] = group
                 self.events["subject_id"] = subject_id
-                self.events["name"] = event_dir.stem
+                self.events["file_name"] = event_dir.stem
 
             # get data
             if isinstance(data, (str, Path)):
@@ -149,6 +149,11 @@ class Events(CachedClass):
             self.events = pd.concat([ev.events for ev in event_objects])
             self.events.reset_index(drop=False, inplace=True, names="idx")
             self.z_slice = z_slice
+
+        # make categorical
+        for col in ('file_name', 'subject_id', 'group'):
+            if col in self.events.columns:
+                self.events[col] = self.events[col].astype("category")
 
     def __len__(self):
         return len(self.events)
@@ -754,7 +759,7 @@ class Events(CachedClass):
 
     @wrapper_local_cache
     def get_summary_statistics(self, decimals=2, groupby=None,
-        columns_excluded=('name', 'subject_id', 'group', 'z0', 'z1', 'x0', 'x1', 'y0', 'y1', 'mask', 'contours', 'footprint', 'fp_cx', 'fp_cy', 'trace', 'error',  'cx', 'cy')):
+        columns_excluded=('file_name', 'subject_id', 'group', 'z0', 'z1', 'x0', 'x1', 'y0', 'y1', 'mask', 'contours', 'footprint', 'fp_cx', 'fp_cy', 'trace', 'error',  'cx', 'cy')):
 
         events = self.events
 

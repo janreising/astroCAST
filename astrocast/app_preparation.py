@@ -46,7 +46,7 @@ class Explorer:
                                ui.h5("Points of Interest"),
                                ui.input_text("frames", "frames", value=""),
                                ui.input_text("pixel", "pixels",
-                                             value='323,239')
+                                             value='')
                            ),
                            ui.panel_main(
                                ui.panel_conditional(
@@ -64,8 +64,15 @@ class Explorer:
                         ui.input_switch("delta_overwrite_first_frame", "Overwrite 1st frame", False),
                         ui.h5("Plotting options"),
                         ui.input_switch("delta_plot_original", "Plot original", value=True),
+                        ui.input_switch("delta_show_separate", "separate panels"),
                         ui.input_switch("delta_twinx", "Twin axis", value=False),
                         ui.input_numeric("delta_alpha", "Original: alpha", value=0.7),
+                        ui.row(
+                            ui.h6("Figsize"),
+                            ui.column(5, ui.input_numeric("delta_figsize_x", "", 20)),
+                            ui.column(2, ui.h6(" x ")),
+                            ui.column(5, ui.input_numeric("delta_figsize_y", "", 5))
+                        )
                     ),
                     ui.panel_main(
                         ui.panel_conditional(
@@ -278,7 +285,7 @@ class Explorer:
 
             deltaObj = Delta(input_=data, loc="")
             result = deltaObj.run(method=input.delta_method(), window=input.delta_window(),
-                                  chunks=(-1, 1, 1),
+                                  processing_chunks=(-1, 1, 1),
                                   overwrite_first_frame=input.delta_overwrite_first_frame())
 
             return result#.compute()
@@ -288,7 +295,7 @@ class Explorer:
             data = load_data()
             smooth = detection.Detector.gaussian_smooth_3d(data, sigma=input.sigma(), radius=input.radius())
 
-            if input.lazy():
+            if not input.lazy():
                 smooth = smooth.compute()
                 smooth = da.from_array(smooth, chunks=("auto", "auto", "auto"))
 
@@ -481,22 +488,29 @@ class Explorer:
             delta = get_delta()
             pixels, colors = get_pixel()
 
-            fig, ax = plt.subplots(1, 1, figsize=(20, 5))
-            for i in range(len(pixels)):
-                x, y = pixels[i]
-                color = colors[i]
-
-                ax.plot(delta[:, x, y], color=color)
-
             if input.delta_plot_original():
                 original = load_data()
+            else:
+                original = None
 
-                if input.delta_twinx():
-                    ax = ax.twinx()
+            if input.delta_show_separate():
+                fig, axx = plt.subplots(len(pixels), 1, figsize=(input.delta_figsize_x(), input.delta_figsize_y()))
+                axx = list(axx.flatten())
+                twin_axx = [ax.twinx() for ax in axx]
 
-                for i in range(len(pixels)):
-                    x, y = pixels[i]
-                    color = colors[i]
+            else:
+                fig, ax = plt.subplots(1, 1, figsize=(input.delta_figsize_x(), input.delta_figsize_y()))
+                axx = [ax for _ in range(len(pixels))]
+
+                twinx = ax.twinx()
+                twin_axx = [twinx for _ in range(len(pixels))]
+
+            for (x, y), color, ax, twinx in list(zip(pixels, colors, axx, twin_axx)):
+                ax.plot(delta[:, x, y], color=color)
+
+                if input.delta_plot_original() and input.delta_twinx():
+                    twinx.plot(original[:, x, y], color=color, linestyle="--", alpha=input.delta_alpha())
+                elif input.delta_plot_original():
                     ax.plot(original[:, x, y], color=color, linestyle="--", alpha=input.delta_alpha())
 
             return fig

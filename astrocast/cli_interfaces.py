@@ -14,6 +14,7 @@ import yaml
 from functools import partial
 
 from astrocast.analysis import Video, Events
+from astrocast.app_analysis import Analysis
 from astrocast.app_preparation import Explorer
 from astrocast.denoising import SubFrameGenerator
 from astrocast.detection import Detector
@@ -789,6 +790,15 @@ def export_video(input_path, output_path, h5_loc_in, h5_loc_out, z_select, lazy,
                      )
 def explorer(input_path, h5_loc):
     app_instance = Explorer(input_path=input_path, h5_loc=h5_loc)
+    app_instance.run()
+
+@cli.command()
+@click_custom_option('--input-path', type=click.Path(), default=None, help='Path to event detection output (.roi).')
+def analysis(input_path):
+
+    """Run interactive analysis of events."""
+
+    app_instance = Analysis(input_path=input_path)
     app_instance.run()
 
 
