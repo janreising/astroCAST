@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "astrocast"
-version = "0.2.1.3"
+version = "0.2.2.0"
 description = "Package to analyze calcium fluorescence events in astrocytes"
 authors = ["Jan Philipp Reising <jan.reising@ki.se>", "Ana Cristina González"]
 
@@ -48,14 +48,14 @@ tslearn = "*"
 umap-learn = "*"
 xarray = "*"
 xxhash = "*"
-#jnormcorre = "*" # TODO uncomment once pull-request was accepted
-#jnormcorre = { git = "https://github.com/janreising/jnormcorre.git", branch = "production" }
 numpy = "*"
 humanize = "*"
 pyyaml = "*"
 colorama = "^0.4.6"
 prettytable = "*"
 shiny = "^0.5.1"
+torch = "2.0.0"
+jnormcorre = "^0.0.7"
 
 [tool.poetry.dev-dependencies]
 pytest-cov = "*"
