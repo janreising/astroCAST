@@ -15,9 +15,11 @@ Astrocytic calcium event analysis is challenging due to its complex nature, spat
 
 ## Installation
 You can install astroCAST using pip: 
-```shell pip install astrocast ```
+```shell 
+pip install astrocast
+```
 
-Alternatively, this repository and install it locally:
+Alternatively, clone this repository and install it locally:
 ```shell
 pip install poetry
 poetry install
