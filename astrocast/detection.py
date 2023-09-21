@@ -808,6 +808,23 @@ class Detector:
                 masked_signal = np.ma.masked_array(signal, mask)
                 res[event_id_key]["trace"] = np.ma.filled(np.nanmean(masked_signal, axis=(1, 2)), fill_value=0)
 
+                # trace characteristics
+                trace = res[event_id_key]["trace"]
+                res[event_id_key]["max_height"] = np.max(trace) - np.min(trace)
+                res[event_id_key]["max_gradient"] = np.max(np.diff(trace))
+
+                # approximating noise
+                masked_noise = np.ma.masked_array(signal, np.invert(mask))
+                res[event_id_key]["noise_mask_trace"] = np.ma.filled(np.nanmean(masked_noise, axis=(1, 2)), fill_value=0)
+
+                noise_mask_trace = res[event_id_key]["noise_mask_trace"]
+                res[event_id_key]["noise_mask_mean"] = np.mean(noise_mask_trace)
+                res[event_id_key]["noise_mask_std"] = np.std(noise_mask_trace)
+
+                # signal to noise characteristics
+                res[event_id_key]["signal_to_noise_ratio"] = res[event_id_key]["max_height"] / res[event_id_key]["noise_mask_mean"]
+                res[event_id_key]["signal_to_noise_ratio_fold"] = (res[event_id_key]["max_height"] - res[event_id_key]["noise_mask_mean"]) / res[event_id_key]["noise_mask_std"]
+
                 # clean up
                 del signal
                 del masked_signal
