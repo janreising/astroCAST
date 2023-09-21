@@ -832,6 +832,14 @@ class Normalization:
         }
         return self.run(instructions)
 
+    def mean_std(self):
+
+        instructions = {
+            0: ["subtract", {"mode": "mean"}],
+            1: ["divide", {"mode": "std"}]
+        }
+        return self.run(instructions)
+
     @staticmethod
     def get_value(data, mode, population_wide=False, axis=1):
 
