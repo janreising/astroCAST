@@ -12,7 +12,7 @@ from numba import NumbaDeprecationWarning
 from shiny import App, ui, render, reactive, req
 import shiny.experimental.ui as xui
 
-from astrocast.analysis import Events
+from astrocast.analysis import Events, Video
 from astrocast.helper import Normalization
 from astrocast.preparation import IO
 import seaborn as sns
@@ -23,9 +23,11 @@ with warnings.catch_warnings():
 
 class Analysis:
 
-    def __init__(self, input_path=None):
+    def __init__(self, input_path=None, video_path=None, h5_loc=None):
 
         self.path = input_path
+        self.video_path = video_path
+        self.h5_loc = h5_loc
 
         self.app_ui = self.create_ui()
         self.app = App(self.app_ui, self.server)
@@ -40,6 +42,7 @@ class Analysis:
                                 ui.h3("Settings"),
                                 ui.input_text("path", "Event directory", value=self.path),
                                 ui.input_text("frames", "frames", value=""),
+                                ui.input_switch("in_switch_dummy_groups", "dummy groups", value=False),
                                 ui.h3("Information"),
                                 ui.output_text("out_txt_shape"),
                                 ui.output_text("out_txt_number_events"),
@@ -123,7 +126,7 @@ class Analysis:
                         width=3),
                         ui.panel_main(
                             ui.output_plot("out_plot_umap"),
-                            ui.output_plot("out_plot_traces", height="600px"),
+                            ui.output_plot("out_plot_traces", height="600px", width="600px"),
                         )
                     )
         )
@@ -131,8 +134,38 @@ class Analysis:
         nav_extension = ui.nav(
                             "Extension",
                             ui.layout_sidebar(
-                                ui.panel_sidebar(),
-                                ui.panel_main()
+                                ui.panel_sidebar(
+                                    xui.card(
+                                        xui.card_header("Settings"),
+                                        ui.input_text("video_path", "Video", value=self.video_path),
+                                        ui.input_text("h5_loc", "h5 location", value=self.h5_loc),
+                                        ui.input_switch("in_switch_extend", "extend traces", value=False),
+                                        ui.row(
+                                            ui.column(6, ui.input_numeric("in_numeric_extend_left", "extension left", value=0)),
+                                            ui.column(6, ui.input_numeric("in_numeric_extend_right", "extension right", value=0)),
+                                        ),
+                                        ui.input_switch("in_switch_use_footprint", "use footprint", value=True)
+                                    ),
+                                    xui.card(
+                                        xui.card_header("Plotting"),
+                                        ui.input_switch("in_switch_ext_random", "random selection", value=True),
+                                        ui.input_switch("in_switch_ext_original", "show original", value=True),
+                                        ui.panel_conditional(
+                                            "input.in_switch_ext_random",
+                                            ui.input_numeric("in_numeric_ext_num", "num_traces", value=3),
+                                        ),
+                                        ui.input_text("in_text_ext_ids", "events ids", value=""),
+                                        ui.input_numeric("in_numeric_panel_height_ext", "panel height", value=100),
+                                        ui.input_numeric("in_numeric_plot_columns_ext", "plot columns", value=1),
+                                        ui.row(
+                                            ui.column(6, ui.input_switch("in_switch_ext_sharex", "share x", value=False)),
+                                            ui.column(6, ui.input_switch("in_switch_ext_sharey", "share y", value=False)),
+                                        )
+                                    )
+                                ),
+                                ui.panel_main(
+                                    ui.output_ui("out_ext_dyn_plot")
+                                )
                             )
         )
 
@@ -147,7 +180,7 @@ class Analysis:
                                     "input.in_switch_norm_default",
                                     ui.input_select("in_select_norm_mode", "mode",
                                                         choices=["", "min_max", "mean_std"],
-                                                        selected=""),
+                                                        selected="min_max"),
                                 ),
                                 ui.panel_conditional(
                                     "input.in_switch_norm_default == 0",
@@ -245,83 +278,192 @@ class Analysis:
 
     def server(self, input, output, session):
 
+        ###############
+        # Event Objects
+
         @reactive.Calc
         def get_events_obj():
             path = Path(input.path())
 
             if path.exists():
                 events = Events(path)
-            else:
-                events = None
+
+                if input.in_switch_dummy_groups():
+
+                    lut_group = {idx:np.random.randint(1, 3) for idx in events.events.index.tolist()}
+                    events.add_clustering(lut_group, column_name="group")
+
+                    lut_subject_id = {idx:np.random.randint(1, 4) for idx in events.events.index.tolist()}
+                    events.add_clustering(lut_subject_id, column_name="subject_id")
+
+                    events.events.group = events.events.group.astype("category")
+                    events.events.subject_id = events.events.subject_id.astype("category")
+
+                return events
+            return None
+
+        @reactive.Calc
+        def get_events_obj_filtered():
+
+            events = get_events_obj().copy()
+            df = events.events
+            filter_string = input.in_textarea_filter()
+
+            if events is not None and len(df)>0 and filter_string is not None and filter_string != "":
+
+                filters = {}
+                for i, filter_ in enumerate(filter_string.split("\n")):
+
+                    try:
+
+                        key, value = filter_.split(":")
+
+                        # define dtype
+                        typ = df[key].dtype
+                        if typ == "object":
+                            typ = type(df[key].dropna().iloc[0])
+
+                        if "(" in value:
+
+                            value = value.replace("(", "").replace(")", "")
+                            min_, max_ = value.split(",")
+                            value = (float(min_), float(max_))
+
+                        elif "[" in value:
+
+                            value = value.replace("[", "").replace("]", "").replace("'", "")
+                            value = list(value.split(","))
+
+                            if typ in [str]:
+                                value = [str(v) for v in value]
+
+                            elif typ in [int, np.int64]:
+                                value = [int(v) for v in value]
+
+                            elif typ in [float, np.float64]:
+                                value = [float(v) for v in value]
+
+                            else:
+                                ui.notification_show(f"unknown datatype ({i}) type: {typ}", type="error", duration=5)
+
+                        else:
+                            ui.notification_show(f"unknown filter ({i}) type: {type(value)}", type="error", duration=5)
+
+                        filters[key] = value
+
+                    except Exception as e:
+                        ui.notification_show(f"exception ({i}): {e}")
+
+                events.filter(filters=filters, inplace=True)
 
             return events
 
-        def filter_df(df, filter_string):
+        @reactive.Calc
+        def get_events_obj_extended():
 
-            if filter_string == "" or filter_string is None or df is None or len(df) < 1:
-                return df
+            events = get_events_obj_filtered().copy()
+            use_extend = input.in_switch_extend()
+            extend = (input.in_numeric_extend_left(), input.in_numeric_extend_right())
+            use_footprint = input.in_switch_use_footprint()
+            video = input.video_path()
+            h5_loc = input.h5_loc()
 
-            for i, filter_ in enumerate(filter_string.split("\n")):
+            if events is not None and len(events)>0 and use_extend and video != "" and extend != (0, 0) and\
+                    input.in_numeric_extend_left() is not None and input.in_numeric_extend_right() is not None:
 
-                try:
+                video = Video(data=video, h5_loc=h5_loc, lazy=True)
+                events.get_extended_events(video=video, extend=extend, in_place=True, use_footprint=use_footprint)
 
-                    key, value = filter_.split(":")
-                    r0 = df[key].dropna().iloc[0]
+            elif use_extend:
+                ui.notification_show("cannot extend videos", type="error", duration=5)
 
-                    if "(" in value:
-
-                        value = value.replace("(", "").replace(")", "")
-                        min_, max_ = value.split(",")
-                        min_, max_ = float(min_), float(max_)
-
-                        df = df[df[key].between(min_, max_)]
-
-                    elif "[" in value:
-
-                        value = value.replace("[", "").replace("]", "").replace("'", "")
-                        value = list(value.split(","))
-
-                        if isinstance(r0, str):
-                            value = [str(v) for v in value]
-
-                        elif isinstance(r0, (int, np.int64)):
-                            value = [int(v) for v in value]
-
-                        elif isinstance(r0, (float, np.float64)):
-                            value = [float(v) for v in value]
-
-                        else:
-                            ui.notification_show(f"unknown datatype ({i}) type: {type(r0)}", type="error", duration=5)
-
-                        df = df[df[key].isin(value)]
-
-                    else:
-                        ui.notification_show(f"unknown filter ({i}) type: {type(value)}", type="error", duration=5)
-
-                except Exception as e:
-                    ui.notification_show(f"exception ({i}): {e}")
-
-            return df
+            return events
 
         @reactive.Calc
-        def get_events_table():
+        def get_events_obj_normalized():
 
-            events_obj = get_events_obj()
+            events = get_events_obj_extended().copy()
 
-            if events_obj is None:
-                return None
+            if events is not None and len(events)>0 and True: # TODO fix
 
-            df = events_obj.events
-            df["group"] = np.random.randint(1, 3, size=(len(df)))
-            df["subject_id"] = np.random.randint(1, 4, size=(len(df)))
+                instructions = {}
 
-            df.group = df.group.astype("category")
-            df.subject_id = df.subject_id.astype("category")
+                if input.in_switch_norm_default():
 
-            # filters
-            df = filter_df(df, input.in_textarea_filter())
+                    mode = input.in_select_norm_mode()
+                    if mode is not None:
 
-            return df
+                        try:
+                            instructions["default"] = mode
+
+                        except Exception as err:
+                            ui.notification_show(f"No valid mode: {mode}", duration=5, type="error")
+
+                else:
+
+                    order = [("subtract", input.in_select_subtract_order()),
+                            ("divide", input.in_select_divide_order()),
+                            ("impute_nan", input.in_select_impute_order()),
+                            ("diff", input.in_select_gradient_order())]
+
+                    # Filter out tuples where the second item is an empty string
+                    filtered_temp = [t for t in order if t[1] != ""]
+
+                    # Check for duplicates in the second items
+                    second_items = [t[1] for t in filtered_temp]
+                    if len(second_items) != len(set(second_items)):
+                        raise ValueError("Error: Duplicate numbers found.")
+
+                    # Sort the list by the second item in each tuple
+                    sorted_temp = sorted(filtered_temp, key=lambda x: x[1])
+
+                    # Extract the first items from the sorted list
+                    sorted_keys = [t[0] for t in sorted_temp]
+
+                    instructions = {}
+                    for i, key in enumerate(sorted_keys):
+
+                        if key == "subtract":
+                            instructions[i] = [key, {
+                                "mode": input.in_select_subtract_mode(),
+                                "population_wide":input.in_switch_subtract_pop(),
+                                "rows":input.in_select_subtract_rows()
+                            }]
+
+                        elif key == "divide":
+                            instructions[i] = [key, {
+                                "mode": input.in_select_divide_mode(),
+                                "population_wide":input.in_switch_divide_pop(),
+                                "rows":input.in_select_divide_rows()
+                            }]
+
+                        elif key == "impute_nan":
+                            instructions[i] = [key, {
+                                "fixed_value": input.in_numeric_impute_val() if input.in_switch_impute_fixed() else None
+                            }]
+
+                        elif key == "diff":
+                            instructions[i] = [key, {}]
+
+                events.normalize(instructions, inplace=True)
+
+            return events
+
+        @reactive.Calc
+        def get_summary_table():
+            events = get_events_obj_filtered().events
+
+            if events is not None:
+
+                events = self.get_table_excl(events, excl_columns=('contours', 'trace', 'noise_mask_trace', 'mask', 'footprint',
+                                                                   'group', 'file_name', 'z0', 'z1', 'x0', 'x1', 'y0', 'y1', 'subject_id'))
+
+                mean = events.mean(axis=0, skipna=True)
+                std = events.std(axis=0, skipna=True)
+                summary = pd.DataFrame({"mean":mean, "std":std})
+
+                return summary
+            return None
 
         @reactive.Calc
         def get_event_map():
@@ -341,6 +483,9 @@ class Analysis:
             except Exception as e:
                 ui.notification_show(f"Error: {e}: {traceback.print_exc()}", type="warning")
                 return None
+
+        ###################
+        # Event information
 
         @reactive.Calc
         def get_data_dimension():
@@ -363,34 +508,20 @@ class Analysis:
 
             return frames
 
-        def custom_formatter(x):
-
-            if isinstance(x, (float, np.float64)):
-                x = np.round(x, decimals=2)
-
-                if (x is None) or np.isnan(x):
-                    x = "N/A"
-
-            return x
-
-        def get_table_excl(df, excl_columns=('contours', 'trace', 'mask', 'footprint')):
-            cols = [col for col in df.columns if col not in excl_columns]
-            return df[cols]
-
-        def get_table_rounded(df):
-                return df.map(custom_formatter)
+        ########
+        # EVENTS
 
         @output
         @render.data_frame()
         def out_table_events():
-            events = get_events_table()
+            events = get_events_obj_filtered().events
 
             if events is not None:
 
                 events = events.reset_index()
 
-                events = get_table_excl(events)
-                events = get_table_rounded(events)
+                # events = self.get_table_excl(events)
+                events = self.get_table_rounded(events)
 
                 events = render.DataTable(events, height="500px", summary=True,
                                           filters=False, row_selection_mode="single")
@@ -410,11 +541,12 @@ class Analysis:
         def out_txt_number_events():
 
             events = get_events_obj().events
+            events_filtered = get_events_obj_filtered().events
 
             item = None
-            if events is not None:
+            if events is not None and events_filtered is not None:
                 N = len(events)
-                Nf = len(filter_df(events, input.in_textarea_filter()))
+                Nf = len(events_filtered)
 
                 if N != Nf:
                     item = f"#events: {Nf}/{N} ({Nf/N*100:.1f}%)"
@@ -423,21 +555,56 @@ class Analysis:
 
             return item
 
-        @reactive.Calc
-        def get_summary_table():
-            events = get_events_table()
-            if events is not None:
+        @reactive.Effect
+        def update_columns():
+            events = get_events_obj().events
+            if events is not None and len(events) > 0:
 
-                events = get_table_excl(events, excl_columns=('contours', 'trace', 'mask', 'footprint', 'group',
-                                                              'file_name', 'z0', 'z1', 'x0', 'x1', 'y0', 'y1', 'subject_id'))
+                columns = events.columns.tolist()
+                for i, col in enumerate(columns):
+                    if isinstance(events[col].head(1).values[0], np.ndarray):
+                        del columns[i]
 
-                mean = events.mean(axis=0, skipna=True)
-                std = events.std(axis=0, skipna=True)
-                summary = pd.DataFrame({"mean":mean, "std":std})
+                ui.update_select("in_select_columns", choices=[""] + columns)
 
-                return summary
-            return None
+        @reactive.Effect
+        def update_filter_template():
+            column = input.in_select_columns()
+            events = get_events_obj().events
 
+            if column != "" and column is not None and events is not None and len(events) > 0:
+
+                col = events[column]
+                col = col.dropna()
+                v0 = col.iloc[0]
+
+                if col.dtype == "category" or isinstance(v0, str):
+                    options = col.unique().tolist()
+                    filter_string = f"{column}:{options}"
+
+                elif isinstance(v0, (int, float, np.int64)):
+
+                    min_, max_ = np.round(col.min(), 2), np.round(col.max(), 2)
+                    filter_string = f"{column}:({min_}, {max_})"
+
+                else:
+                    filter_string = f"{column}: {type(v0)}"
+
+                prev_filters = input.in_textarea_filter()
+                if prev_filters.startswith("\n"):
+                    prev_filters = prev_filters[1:]
+
+                if prev_filters == "":
+                    new_filter = filter_string
+                else:
+                    new_filter = f"{prev_filters}\n{filter_string}"
+
+                ui.update_select("in_select_columns", selected="")
+                ui.update_text_area("in_textarea_filter", value=new_filter)
+                ui.update_text_area("")
+
+        #########
+        # SUMMARY
         @output
         @render.data_frame
         def out_table_summary():
@@ -445,7 +612,7 @@ class Analysis:
             summary = get_summary_table()
 
             if summary is not None:
-                summary = get_table_rounded(summary)
+                summary = self.get_table_rounded(summary)
                 summary = summary.reset_index()
 
                 summary = render.DataTable(summary, height=None, summary=False, row_selection_mode="multiple")
@@ -453,21 +620,21 @@ class Analysis:
                 return summary
             return None
 
-        # SUMMARY
-
         @reactive.Effect
         def update_in_select_hue():
 
-            events = get_events_table()
-            cols = [col for col in events.columns if events[col].dtype =="category" and len(np.unique(events[col].dropna())) > 1]
+            events = get_events_obj_filtered().events
 
-            ui.update_select("in_select_hue", choices=[""] + cols)
+            if events is not None:
+                cols = [col for col in events.columns if events[col].dtype =="category" and len(np.unique(events[col].dropna())) > 1]
+
+                ui.update_select("in_select_hue", choices=[""] + cols)
 
         @output
         @render.plot()
         def out_plot_boxplot():
 
-            events = get_events_table()
+            events = get_events_obj_filtered().copy().events
             summary = get_summary_table()
 
             indices = list(req(input.out_table_summary_selected_rows()))
@@ -487,7 +654,7 @@ class Analysis:
                         if len(col) == 2:
 
                             events[col[0]] = events[col[0]].astype(float)
-                            events[col[1]] = events[col[0]].astype(float)
+                            events[col[1]] = events[col[1]].astype(float)
 
                             fig = seaborn.jointplot(data=events, x=col[0], y=col[1], hue=hue,
                                                     kind="reg" if hue is None else 'scatter')
@@ -550,14 +717,20 @@ class Analysis:
             else:
                 return None
 
+        ##########
+        # OUTLIERS
+
         @reactive.Calc
         def get_table_no_nan():
 
-            events = get_events_table()
+            events_obj = get_events_obj_filtered().copy()
 
-            if events is not None:
-                events = get_table_excl(events, excl_columns=('contours', 'trace', 'mask', 'footprint', 'group',
-                                      'file_name', 'z0', 'z1', 'x0', 'x1', 'y0', 'y1', 'subject_id'))
+            if events_obj is not None:
+
+                events = events_obj.events
+                events = self.get_table_excl(events, excl_columns=('contours', 'trace', 'noise_mask_trace', 'mask',
+                                                                   'footprint', 'group', 'file_name', 'z0', 'z1', 'x0',
+                                                                   'x1', 'y0', 'y1', 'subject_id'))
 
                 if events.isnull().values.any():
                     ui.notification_show("None values present. Trying to fix automatically.",
@@ -575,8 +748,9 @@ class Analysis:
                     elif input.in_select_nan_settings() == "rows":
                         events = events.dropna(axis=0, how='any')
 
-                return events
-            return None
+                events_obj.events = events
+
+            return events_obj
 
         @reactive.Calc
         def get_embedding():
@@ -584,6 +758,9 @@ class Analysis:
             events = get_table_no_nan()
 
             if events is not None:
+
+                events = events.events
+
                 # embed
                 reducer = umap.UMAP(
                     n_neighbors=input.in_numeric_neighbors(),
@@ -651,7 +828,7 @@ class Analysis:
             hdb_labels = np.array(hdb_labels)
             indices = np.where(hdb_labels == int(lbl_selected))[0]
 
-            events = get_events_table()
+            events = get_events_obj_filtered().events
             events = events.iloc[indices]
 
             if len(events) > input.in_numeric_plot_max_cluster():
@@ -673,171 +850,146 @@ class Analysis:
                     axx[i].plot(range(row.dz.astype(int)), row.trace)
                     axx[i].set_ylabel(f"idx: {events.index.tolist()}")
 
-        ## FILTERING
-        @reactive.Effect
-        def update_columns():
-            events = get_events_table()
-            if events is not None and len(events) > 0:
-
-                columns = events.columns.tolist()
-                for i, col in enumerate(columns):
-                    if isinstance(events[col].head(1).values[0], np.ndarray):
-                        del columns[i]
-
-                ui.update_select("in_select_columns", choices=[""] + columns)
+        ###########
+        # EXTENSION
 
         @reactive.Effect
-        def update_filter_template():
-            column = input.in_select_columns()
-            events = get_events_table()
+        def update_ext_ids():
 
-            if column != "" and column is not None and events is not None and len(events) > 0:
+            events = get_events_obj_filtered().events
 
-                col = events[column]
-                col = col.dropna()
-                v0 = col.iloc[0]
+            if events is not None and len(events) > 0 and input.in_switch_ext_random() and input.in_numeric_ext_num() is not None:
 
-                if col.dtype == "category" or isinstance(v0, str):
-                    options = col.unique().tolist()
-                    filter_string = f"{column}:{options}"
+                traces = events.trace
 
-                elif isinstance(v0, (int, float, np.int64)):
+                num_traces = min(len(traces), input.in_numeric_ext_num())
+                traces = traces.sample(num_traces)
 
-                    min_, max_ = np.round(col.min(), 2), np.round(col.max(), 2)
-                    filter_string = f"{column}:({min_}, {max_})"
+                ids = ""
+                for idx in traces.index.tolist():
+                    ids += f"{idx},"
 
-                else:
-                    filter_string = f"{column}: {type(v0)}"
+                ids = ids[:-1]
 
-                prev_filters = input.in_textarea_filter()
-                if prev_filters.startswith("\n"):
-                    prev_filters = prev_filters[1:]
+                ui.update_text("in_text_ext_ids", value=ids)
 
-                if prev_filters == "":
-                    new_filter = filter_string
-                else:
-                    new_filter = f"{prev_filters}\n{filter_string}"
+        @output
+        @render.ui
+        def out_ext_dyn_plot():
 
-                ui.update_select("in_select_columns", selected="")
-                ui.update_text_area("in_textarea_filter", value=new_filter)
-                ui.update_text_area("")
-                # ui.update_text_area("in_textarea_filter", value=filter_string)
+            dyn_height = f"{200+input.in_numeric_panel_height()*input.in_numeric_norm_num()}px"
+            return xui.output_plot("out_plot_ext", width="100%", height=dyn_height)
 
-        @reactive.Calc
-        def get_event_trace():
-            events = get_events_table()
-            return events.trace
+        @output
+        @render.plot()
+        def out_plot_ext():
 
-        # Normalization
-        @reactive.Calc
-        def get_norm_traces():
-            traces = get_event_trace()
+            events = get_events_obj_filtered().events
+            ext = get_events_obj_extended().events
 
-            if traces is not None:
+            if events is not None:
 
-                norm = Normalization(data=traces, inplace=False)
-
-                if input.in_switch_norm_default():
-
-                    mode = input.in_select_norm_mode()
-                    if mode is not None:
-
-                        if mode == "min_max":
-                            return norm.min_max()
-
-                        elif mode == "mean_std":
-                            return norm.mean_std()
-
-                        else:
-                            ui.notification_show(f"No valid mode: {mode}", duration=5, type="error")
+                # get ids
+                ids = input.in_text_ext_ids()
+                if len(ids) < 1:
+                    ids = []
 
                 else:
+                    ids = ids.replace(" ", "")
+                    ids = [int(idx) for idx in ids.split(",")]
 
-                    order = [("subtract", input.in_select_subtract_order()),
-                            ("divide", input.in_select_divide_order()),
-                            ("impute_nan", input.in_select_impute_order()),
-                            ("diff", input.in_select_gradient_order())]
+                if len(ids) < 1:
+                    return None
 
-                    # Filter out tuples where the second item is an empty string
-                    filtered_temp = [t for t in order if t[1] != ""]
+                # create figure
+                fig, axx = plt.subplots(len(ids), input.in_numeric_plot_columns_ext(),
+                                        sharex=input.in_switch_ext_sharex(), sharey=input.in_switch_ext_sharey())
 
-                    # Check for duplicates in the second items
-                    second_items = [t[1] for t in filtered_temp]
-                    if len(second_items) != len(set(second_items)):
-                        raise ValueError("Error: Duplicate numbers found.")
+                axx = list(axx.flatten()) if len(ids) > 1 else [axx]
 
-                    # Sort the list by the second item in each tuple
-                    sorted_temp = sorted(filtered_temp, key=lambda x: x[1])
+                for i_ in range(len(ids)+1, len(axx)):
+                        fig.delaxes(axx[i_])
 
-                    # Extract the first items from the sorted list
-                    sorted_keys = [t[0] for t in sorted_temp]
+                # plot original
+                if input.in_switch_ext_original():
 
-                    instructions = {}
-                    for i, key in enumerate(sorted_keys):
+                    for i, idx in enumerate(ids):
 
-                        if key == "subtract":
-                            instructions[i] = [key, {
-                                "mode": input.in_select_subtract_mode(),
-                                "population_wide":input.in_switch_subtract_pop(),
-                                "rows":input.in_select_subtract_rows()
-                            }]
+                        row = events.loc[idx]
 
-                        elif key == "divide":
-                            instructions[i] = [key, {
-                                "mode": input.in_select_divide_mode(),
-                                "population_wide":input.in_switch_divide_pop(),
-                                "rows":input.in_select_divide_rows()
-                            }]
+                        X = range(row.z0, row.z1)
+                        Y = np.array(row.trace)
 
-                        elif key == "impute_nan":
-                            instructions[i] = [key, {
-                                "fixed_value": input.in_numeric_impute_val() if input.in_switch_impute_fixed() else None
-                            }]
+                        axx[i].plot(X, Y, color="black", alpha=0.5, label="data")
+                        axx[i].set_ylabel(f"idx: {idx}")
 
-                        elif key == "diff":
-                            instructions[i] = [key, {}]
+                # plot extended
+                if ext is not None and input.in_switch_extend():
 
-                    return norm.run(instructions)
+                    for i, idx in enumerate(ids):
+
+                        row = ext.loc[idx]
+
+                        X = range(row.z0, row.z1)
+                        Y = np.array(row.trace)
+
+                        axx[i].plot(X, Y, linestyle="--", color="red", alpha=0.5, label="extended")
+                        axx[i].set_ylabel(f"idx: {idx}")
+
+
+                handles, labels = axx[-1].get_legend_handles_labels()
+                fig.legend(handles, labels, loc='upper right',
+                           framealpha=1, facecolor="white", borderaxespad=2)
+
+                return fig
+
             return None
+
+        ###############
+        # NORMALIZATION
 
         @reactive.Effect
         def update_norm_ids():
 
-            traces = get_event_trace()
-            if input.in_switch_norm_random() and traces is not None:
-                if input.in_numeric_norm_num() is not None:
+            events = get_events_obj_extended().events
 
-                    num_traces = min(len(traces), input.in_numeric_norm_num())
-                    traces = traces.sample(num_traces)
+            if events is not None and len(events) > 0 and input.in_switch_norm_random() and input.in_numeric_norm_num() is not None:
 
-                    ids = ""
-                    for idx in traces.index.tolist():
-                        ids += f"{idx},"
+                traces = events.trace
 
-                    ids = ids[:-1]
+                num_traces = min(len(traces), input.in_numeric_norm_num())
+                traces = traces.sample(num_traces)
 
-                    ui.update_text("in_text_norm_ids", value=ids)
+                ids = ""
+                for idx in traces.index.tolist():
+                    ids += f"{idx},"
 
-            return None
+                ids = ids[:-1]
+
+                ui.update_text("in_text_norm_ids", value=ids)
 
         @output
         @render.ui
         def out_dyn_plot():
-            return xui.output_plot("out_plot_norm", width="100%",
-                                   height=f"{200+input.in_numeric_panel_height()*input.in_numeric_norm_num()}px")
+
+            dyn_height = f"{200+input.in_numeric_panel_height()*input.in_numeric_norm_num()}px"
+            return xui.output_plot("out_plot_norm", width="100%", height=dyn_height)
 
         @output
         @render.plot()
         def out_plot_norm():
 
-            traces = get_event_trace()
-            norm = get_norm_traces()
+            events = get_events_obj_extended().events
+            norm = get_events_obj_normalized().events
 
-            if norm is not None and traces is not None:
+            if events is not None and norm is not None and len(events) > 0:
 
-                # convert to nupy array
-                norm = [np.array(x) for x in norm.tolist()]
-                norm = pd.Series(data=norm, index=traces.index)
+                # traces = events.trace
+                # norm_traces = norm.trace
+                #
+                # # convert to nupy array
+                # norm_traces = [np.array(x) for x in norm_traces.tolist()]
+                # norm_traces = pd.Series(data=norm_traces, index=traces.index)
 
                 # get ids
                 ids = input.in_text_norm_ids()
@@ -848,27 +1000,54 @@ class Analysis:
                     ids = ids.replace(" ", "")
                     ids = [int(idx) for idx in ids.split(",")]
 
-                if len(ids) > 0:
+                if len(ids) < 1:
+                    return None
 
-                    fig, axx = plt.subplots(len(ids), input.in_numeric_plot_columns(),
-                                            sharex=input.in_switch_norm_sharex(), sharey=input.in_switch_norm_sharey())
+                # create figure
+                fig, axx = plt.subplots(len(ids), input.in_numeric_plot_columns(),
+                                        sharex=input.in_switch_norm_sharex(), sharey=input.in_switch_norm_sharey())
 
-                    if len(ids) > 1:
-                        axx = list(axx.flatten())
-                    else:
-                        axx = [axx]
+                axx = list(axx.flatten()) if len(ids) > 1 else [axx]
 
-                    for i, idx in enumerate(ids):
-                        axx[i].plot(norm[idx])
-                        axx[i].set_ylabel(f"idx: {idx}")
-
-                        if input.in_switch_norm_original():
-                            axx[i].twinx().plot(traces[idx], linestyle="--", color="red")
-
-                    for i_ in range(i+1, len(axx)):
+                for i_ in range(len(ids)+1, len(axx)):
                         fig.delaxes(axx[i_])
 
-                    return fig
+                # plot original
+                if input.in_switch_norm_original():
+
+                    axx_twin = [ax.twinx() for ax in axx]
+
+                    if input.in_switch_norm_sharey():
+                        for ax in axx_twin[1:]:
+                            ax.sharey(axx_twin[0])
+
+                    for i, idx in enumerate(ids):
+
+                        row = events.loc[idx]
+
+                        X = range(row.z0, row.z1)
+                        Y = np.array(row.trace)
+
+                        axx_twin[i].plot(X, Y, color="black", alpha=0.5, label="data")
+                        axx[i].set_ylabel(f"idx: {idx}")
+
+                if (input.in_switch_norm_default() and input.in_select_norm_mode() != "") or not input.in_switch_norm_default():
+
+                    for i, idx in enumerate(ids):
+
+                        row = norm.loc[idx]
+
+                        X = range(row.z0, row.z1)
+                        Y = np.array(row.trace)
+
+                        axx[i].plot(X, Y, linestyle="--", color="red", alpha=0.5, label="normalized")
+                        axx[i].set_ylabel(f"idx: {idx}")
+
+                handles, labels = axx[-1].get_legend_handles_labels()
+                fig.legend(handles, labels, loc='upper right',
+                           framealpha=1, facecolor="white", borderaxespad=2)
+
+                return fig
 
             return None
 
@@ -907,6 +1086,41 @@ class Analysis:
                     ax.set_ylabel(f"{lbls[x]}")
 
         return fig
+
+    def get_table_excl(self, df, excl_columns=('contours', 'trace', 'mask', 'footprint')):
+        cols = [col for col in df.columns if col not in excl_columns]
+        return df[cols]
+
+    def get_table_rounded(self, df):
+
+            def custom_formatter(x):
+
+                try:
+
+                    if isinstance(x, (float, np.float64, np.float32)):
+                        x = f"{x:.2f}"
+
+                    elif isinstance(x, (int, np.int32, np.int64)):
+                        x = x
+
+                    elif isinstance(x, np.ndarray):
+                        x = "[...]"
+
+                    elif isinstance(x, list):
+                        x = "[...]"
+
+                    elif isinstance(x, str):
+                        x = x
+
+                    else:
+                        print(f"unknown datatype: {type(x)}")
+
+                except Exception:
+                    x = "N/A"
+
+                return x
+
+            return df.map(custom_formatter)
 
     def run(self):
         self.app.run()

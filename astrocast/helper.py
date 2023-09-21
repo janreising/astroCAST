@@ -964,11 +964,14 @@ class Normalization:
     @staticmethod
     def diff(data):
 
+        def get_diff(x, axis=1):
+            return np.concatenate([np.array([0]), np.diff(x, axis=axis)])
+
         if isinstance(data, ak.Array):
-            return ak.Array([np.diff(data[i]) for i in range(len(data))])
+            return ak.Array([get_diff(data[i], axis=0) for i in range(len(data))])
 
         else:
-            return np.diff(data, axis=1)
+            return get_diff(data, axis=1)
 
 class CachedClass:
 

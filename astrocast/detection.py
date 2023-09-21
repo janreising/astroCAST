@@ -2,6 +2,8 @@ import argparse
 import os
 import logging
 import json
+import traceback
+
 import numpy as np
 from pathlib import Path
 from typing import Optional
@@ -811,7 +813,7 @@ class Detector:
                 # trace characteristics
                 trace = res[event_id_key]["trace"]
                 res[event_id_key]["max_height"] = np.max(trace) - np.min(trace)
-                res[event_id_key]["max_gradient"] = np.max(np.diff(trace))
+                res[event_id_key]["max_gradient"] = np.max(np.diff(trace)) if len(trace) > 1 else np.nan
 
                 # approximating noise
                 masked_noise = np.ma.masked_array(signal, np.invert(mask))
@@ -821,9 +823,13 @@ class Detector:
                 res[event_id_key]["noise_mask_mean"] = np.mean(noise_mask_trace)
                 res[event_id_key]["noise_mask_std"] = np.std(noise_mask_trace)
 
-                # signal to noise characteristics
-                res[event_id_key]["signal_to_noise_ratio"] = res[event_id_key]["max_height"] / res[event_id_key]["noise_mask_mean"]
-                res[event_id_key]["signal_to_noise_ratio_fold"] = (res[event_id_key]["max_height"] - res[event_id_key]["noise_mask_mean"]) / res[event_id_key]["noise_mask_std"]
+                # signal-to-noise characteristics
+                res[event_id_key]["signal_to_noise_ratio"] = abs(res[event_id_key]["max_height"] / res[event_id_key]["noise_mask_mean"])
+
+                if res[event_id_key]["noise_mask_std"] != 0:
+                    res[event_id_key]["signal_to_noise_ratio_fold"] = (res[event_id_key]["max_height"] - res[event_id_key]["noise_mask_mean"]) / res[event_id_key]["noise_mask_std"]
+                else:
+                    res[event_id_key]["signal_to_noise_ratio_fold"] = np.nan
 
                 # clean up
                 del signal
@@ -835,8 +841,7 @@ class Detector:
                 res[event_id_key]["error"] = 0
 
             except ValueError as err:
-                print("\t Error in ", event_id_key)
-                print("\t", err)
+                logging.error(f"{event_id_key} failed: {err}\n{traceback.format_exc()}")
                 res[event_id_key]["error"] = 1
 
         np.save(res_path.as_posix(), res)

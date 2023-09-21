@@ -202,15 +202,27 @@ class Events(CachedClass):
 
         for column in filters:
 
-            min_, max_ = filters[column]
+            typ = events[column].dtype
+            if typ == "object":
+                typ = type(events[column].dropna().iloc[0])
 
-            if min_ in [-1, None]:
-                min_ = events[column].min() + 1
+            if typ in [int, float, np.int64, np.float64]:
 
-            if max_ in [-1, None]:
-                max_ = events[column].max() + 1
+                min_, max_ = filters[column]
 
-            events = events[events[column].between(min_, max_, inclusive="both")]
+                if min_ in [-1, None]:
+                    min_ = events[column].min() -1
+
+                if max_ in [-1, None]:
+                    max_ = events[column].max() + 1
+
+                events = events[events[column].between(min_, max_, inclusive="both")]
+
+            elif typ in [str, "category"]:
+                events = events[events[column].isin(filters[column])]
+
+            else:
+                raise ValueError(f"unknown column dtype: {column}>{typ}")
 
         if inplace:
             self.events = events
@@ -439,7 +451,7 @@ class Events(CachedClass):
         return events
 
     @wrapper_local_cache
-    def get_extended_events(self, video=None, dtype=float, extend=-1,
+    def get_extended_events(self, video=None, dtype=float, extend=-1, use_footprint=False,
                             return_array=False, in_place=False,
                             normalization_instructions=None, show_progress=True,
                             memmap_path=None, save_path=None, save_param={}):
@@ -496,12 +508,30 @@ class Events(CachedClass):
         iterator = tqdm(events.iterrows(), total=len(events), desc="gathering footprints") if show_progress else events.iterrows()
         for i, event in iterator:
 
-            # get z extend
+            # select event pixel # TODO flag to switch between footprint and last frame
+            if use_footprint:
+                footprint = np.invert(np.reshape(event["footprint"], (event.dx, event.dy)))
+                mask_begin, mask_end = footprint, footprint
+
+            else:
+                mask_volume = np.invert(np.reshape(event["mask"], (event.dz, event.dx, event.dy)))
+                mask_begin, mask_end = mask_volume[0, :, :], mask_volume[-1, :, :]
+
+            z0, z1 = event.z0, event.z1
+
             if extend == -1:
-                z0, z1 = 0, n_frames
+                dz0 = z0
+                dz1 = n_frames - z1
+
+                full_z0, full_z1 = 0, n_frames
+
             elif isinstance(extend, (int)):
-                dz0 = dz1 = extend
-                z0, z1 = max(0, event.z0-dz0), min(event.z1+dz1, n_frames)
+
+                dz0 = extend
+                dz1 = extend
+
+                full_z0, full_z1 = max(0, z0-dz0), min(z1+dz1, n_frames)
+
             elif isinstance(extend, (list, tuple)):
 
                 if len(extend) != 2:
@@ -509,35 +539,47 @@ class Events(CachedClass):
 
                 dz0, dz1 = extend
 
-                dz0 = n_frames if dz0 == -1 else dz0
-                dz1 = n_frames if dz1 == -1 else dz1
+                if dz0 == -1:
+                    dz0 = z0
 
-                z0, z1 = max(0, event.z0-dz0), min(event.z1+dz1, n_frames)
+                if dz1 == -1:
+                    dz1 = n_frames - z1
+
+                full_z0, full_z1 = max(0, event.z0-dz0), min(event.z1+dz1, n_frames)
+
             else:
                 raise ValueError("provide 'extend' flag as int or tuple (ext_left, ext_right")
 
-            # extract requested volume
-            event_trace = video[z0:z1, event.x0:event.x1, event.y0:event.y1]
 
-            # select event pixel
-            footprint = np.invert(np.reshape(event["footprint"], (event.dx, event.dy)))
-            mask = np.broadcast_to(footprint, event_trace.shape)
 
-            # project to trace
-            projection = np.ma.masked_array(data=event_trace, mask=mask)
-            p = np.nanmean(projection, axis=(1, 2))
+            # extend beginning
+            pre_volume = video[z0-dz0:z0, event.x0:event.x1, event.y0:event.y1]
+            mask = np.broadcast_to(mask_begin, pre_volume.shape)
+
+            projection = np.ma.masked_array(data=pre_volume, mask=mask)
+            pre_trace = np.nanmean(projection, axis=(1, 2))
+
+            # extend end
+            post_volume = video[z1:z1+dz1, event.x0:event.x1, event.y0:event.y1]
+            mask = np.broadcast_to(mask_end, post_volume.shape)
+
+            projection = np.ma.masked_array(data=post_volume, mask=mask)
+            post_trace = np.nanmean(projection, axis=(1, 2))
+
+            # combine
+            trace = np.concatenate([pre_trace, event.trace, post_trace])
 
             if normalization_instructions is not None:
-                norm = helper.Normalization(data=p, inplace=True)
+                norm = helper.Normalization(data=trace, inplace=True)
                 norm.run(normalization_instructions)
 
             if return_array:
-                arr_ext[c, z0:z1] = p
+                arr_ext[c, full_z0:full_z1] = trace
             else:
-                extended.append(p)
+                extended.append(trace)
 
-            z0_container.append(z0)
-            z1_container.append(z1)
+            z0_container.append(full_z0)
+            z1_container.append(full_z1)
 
             c += 1
 
@@ -565,6 +607,8 @@ class Events(CachedClass):
             events.z0 = z0_container
             events.z1 = z1_container
             events.dz = events["z1"] - events["z0"]
+
+            self.events = events
 
             return events
 
@@ -989,7 +1033,13 @@ class Events(CachedClass):
         traces = self.events.trace
 
         norm = Normalization(traces)
-        norm_traces = norm.run(normalize_instructions)
+
+        if "default" in normalize_instructions.keys():
+            def_func = getattr(norm, normalize_instructions["default"])
+            norm_traces = def_func()
+
+        else:
+            norm_traces = norm.run(normalize_instructions)
 
         # update events
         if inplace:

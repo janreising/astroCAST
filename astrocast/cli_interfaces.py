@@ -794,11 +794,13 @@ def explorer(input_path, h5_loc):
 
 @cli.command()
 @click_custom_option('--input-path', type=click.Path(), default=None, help='Path to event detection output (.roi).')
-def analysis(input_path):
+@click_custom_option('--video-path', type=click.Path(), default=None, help='Path to video file.')
+@click_custom_option('--h5-loc', type=click.STRING, default="", help='dataset location for .h5 files')
+def analysis(input_path, video_path, h5_loc):
 
     """Run interactive analysis of events."""
 
-    app_instance = Analysis(input_path=input_path)
+    app_instance = Analysis(input_path=input_path, video_path=video_path, h5_loc=h5_loc)
     app_instance.run()
 
 
