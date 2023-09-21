@@ -249,7 +249,17 @@ class Analysis:
         nav_encoding = ui.nav(
                     "Encoding",
                     ui.layout_sidebar(
-                        ui.panel_sidebar(),
+                        ui.panel_sidebar(
+                            # ui.h5("Encoders"),
+                            xui.accordion(
+                                xui.accordion_panel(
+                                    "Feature Extraction",
+                                ),
+                                xui.accordion_panel(
+                                    "CNN",
+                                ),
+                            open=False),
+                        ),
                         ui.panel_main()
                     )
         )

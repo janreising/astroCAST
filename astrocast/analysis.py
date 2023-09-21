@@ -414,10 +414,10 @@ class Events(CachedClass):
 
         # Dictionary of custom column functions
         custom_column_functions = {
-            "area_norm": lambda events: events.area / events.dz,
+            "area_norm": lambda events: events.v_area / events.dz,
             "area_footprint": lambda events: events.footprint.apply(sum),
-            "cx": lambda events: events.x0 + events.dx * events["fp_centroid_local-0"],
-            "cy": lambda events: events.y0 + events.dy * events["fp_centroid_local-1"]
+            "cx": lambda events: events.x0 + events.dx * events["v_fp_centroid_local-0"],
+            "cy": lambda events: events.y0 + events.dy * events["v_fp_centroid_local-1"]
         }
 
         if custom_columns is not None:

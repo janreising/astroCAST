@@ -55,6 +55,7 @@ class FeatureExtraction(CachedClass):
     def __hash__(self):
         return hash(self.events)
 
+
 class UMAP:
     def __init__(self, n_neighbors=30, min_dist=0, n_components=2, metric="euclidean",):
         self.reducer = umap.UMAP(n_neighbors=n_neighbors, min_dist=min_dist, n_components=n_components, metric=metric)
