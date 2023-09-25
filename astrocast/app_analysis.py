@@ -1,3 +1,4 @@
+import logging
 import time
 import traceback
 import warnings
@@ -13,9 +14,11 @@ from shiny import App, ui, render, reactive, req
 import shiny.experimental.ui as xui
 
 from astrocast.analysis import Events, Video
-from astrocast.helper import Normalization
+from astrocast.helper import Normalization, is_ragged
 from astrocast.preparation import IO
 import seaborn as sns
+
+from astrocast.reduction import CNN
 
 with warnings.catch_warnings():
     warnings.simplefilter(action='ignore', category=NumbaDeprecationWarning)
@@ -23,11 +26,54 @@ with warnings.catch_warnings():
 
 class Analysis:
 
-    def __init__(self, input_path=None, video_path=None, h5_loc=None):
+    def __init__(self, input_path=None, video_path=None, h5_loc=None, default_settings=None):
 
         self.path = input_path
         self.video_path = video_path
         self.h5_loc = h5_loc
+
+
+        settings = {
+            "Events": {"frames": "", "in_switch_dummy_groups":False, "in_textarea_filter":""},
+            "Extension": {
+                "in_switch_extend":False,
+                "video_path":"", "h5_loc":"",
+                "in_numeric_extend_left":0, "in_numeric_extend_right":0,
+                "in_numeric_enforce_min":None, "in_numeric_enforce_max":None,
+                "in_switch_use_padding":False, "in_switch_use_footprint":True,
+            },
+            "Normalization":{
+                "in_switch_norm_default":True, "in_select_norm_mode":"min_max",
+                "in_select_subtract_order":"", "in_select_subtract_mode":"min", "in_switch_subtract_pop":False, "in_select_subtract_rows":True,
+                "in_select_divide_order":"", "in_select_divide_mode":"max_abs", "in_switch_divide_pop":False, "in_select_divide_rows":True,
+                "in_select_impute_order":"", "in_switch_impute_fixed":False, "in_numeric_impute_val":0,
+                "in_select_gradient_order":""
+            },
+            "CNN":{
+                "in_switch_cnn_use_cnn":False,
+                "in_slider_cnn_split":0.9,
+                "in_select_cnn_loss":"mse",
+                "in_numeric_cnn_dropout":None,
+                "in_numeric_cnn_regularize":None,
+                "in_numeric_cnn_epochs":50,
+                "in_numeric_cnn_batch_size":64,
+                "in_numeric_cnn_patience":5,
+                "in_numeric_cnn_min_delta":0.005,
+            }
+        }
+
+        if default_settings is not None:
+
+            if not isinstance(default_settings, dict):
+                raise ValueError(f"Please provide default_settings as dictionary, not {type(default_settings)}")
+
+            for nav_key in default_settings.keys():
+
+                nav_settings = default_settings[nav_key]
+                for ui_key in nav_settings.keys():
+                    settings[nav_key][ui_key] = nav_settings[ui_key]
+
+        self.settings = settings
 
         self.app_ui = self.create_ui()
         self.app = App(self.app_ui, self.server)
@@ -41,15 +87,15 @@ class Analysis:
                                 ui.h3(""),
                                 ui.h3("Settings"),
                                 ui.input_text("path", "Event directory", value=self.path),
-                                ui.input_text("frames", "frames", value=""),
-                                ui.input_switch("in_switch_dummy_groups", "dummy groups", value=False),
+                                ui.input_text("frames", "frames", value=self.settings["Events"]["frames"]),
+                                ui.input_switch("in_switch_dummy_groups", "dummy groups", value=self.settings["Events"]["in_switch_dummy_groups"]),
                                 ui.h3("Information"),
                                 ui.output_text("out_txt_shape"),
                                 ui.output_text("out_txt_number_events"),
                                 ui.br(),
                                 ui.h3("Filters"),
                                 ui.input_select("in_select_columns", label="", choices=[]),
-                                xui.input_text_area("in_textarea_filter", "active filters:", "",
+                                xui.input_text_area("in_textarea_filter", "active filters:", self.settings["Events"]["in_textarea_filter"],
                                                     rows=5, autoresize=True),
                                 width=3),
                             ui.panel_main(
@@ -137,14 +183,26 @@ class Analysis:
                                 ui.panel_sidebar(
                                     xui.card(
                                         xui.card_header("Settings"),
-                                        ui.input_text("video_path", "Video", value=self.video_path),
-                                        ui.input_text("h5_loc", "h5 location", value=self.h5_loc),
-                                        ui.input_switch("in_switch_extend", "extend traces", value=False),
+                                        ui.input_switch("in_switch_extend", "use extension",
+                                                        value=self.settings["Extension"]["in_switch_extend"]),
+                                        ui.input_text("video_path", "Video", value=self.settings["Extension"]["video_path"]),
+                                        ui.input_text("h5_loc", "h5 location", value=self.settings["Extension"]["h5_loc"]),
                                         ui.row(
-                                            ui.column(6, ui.input_numeric("in_numeric_extend_left", "extension left", value=0)),
-                                            ui.column(6, ui.input_numeric("in_numeric_extend_right", "extension right", value=0)),
+                                            ui.column(6, ui.input_numeric("in_numeric_extend_left", "fixed extension left",
+                                                                          value=self.settings["Extension"]["in_numeric_extend_left"])),
+                                            ui.column(6, ui.input_numeric("in_numeric_extend_right", "fixed extension right",
+                                                                          value=self.settings["Extension"]["in_numeric_extend_right"])),
                                         ),
-                                        ui.input_switch("in_switch_use_footprint", "use footprint", value=True)
+                                        ui.row(
+                                            ui.column(4, ui.input_numeric("in_numeric_enforce_min", "enforce min length",
+                                                                          value=self.settings["Extension"]["in_numeric_enforce_min"])),
+                                            ui.column(4, ui.input_numeric("in_numeric_enforce_max", "enforce max length",
+                                                                          value=self.settings["Extension"]["in_numeric_enforce_max"])),
+                                            ui.column(4, ui.input_switch("in_switch_use_padding", "use padding",
+                                                                         value=self.settings["Extension"]["in_switch_use_padding"]),)
+                                        ),
+                                        ui.input_switch("in_switch_use_footprint", "use footprint",
+                                                        value=self.settings["Extension"]["in_switch_use_footprint"])
                                     ),
                                     xui.card(
                                         xui.card_header("Plotting"),
@@ -175,47 +233,58 @@ class Analysis:
                         ui.panel_sidebar(
                             xui.card(
                                 xui.card_header("Normalization settings"),
-                                ui.input_switch("in_switch_norm_default", "default", value=True),
+                                ui.input_switch("in_switch_norm_default", "default",
+                                                value=self.settings["Normalization"]["in_switch_norm_default"]),
                                 ui.panel_conditional(
                                     "input.in_switch_norm_default",
                                     ui.input_select("in_select_norm_mode", "mode",
                                                         choices=["", "min_max", "mean_std"],
-                                                        selected="min_max"),
+                                                        selected=self.settings["Normalization"]["in_select_norm_mode"]),
                                 ),
                                 ui.panel_conditional(
                                     "input.in_switch_norm_default == 0",
                                     xui.accordion(
                                         xui.accordion_panel(
                                             "Subtract",
-                                            [ui.input_select("in_select_subtract_order", "order", choices=[""]+list(range(4))),
+                                            [ui.input_select("in_select_subtract_order", "order", choices=[""]+list(range(4)),
+                                                             selected=self.settings["Normalization"]["in_select_subtract_order"]),
                                             ui.input_select("in_select_subtract_mode", "mode",
                                                             choices=["first", "mean", "min", "min_abs", "max", "max_abs", "std"],
-                                                            selected="min"),
-                                            ui.input_switch("in_switch_subtract_pop", "population_wide", value=False),
-                                            ui.input_switch("in_select_subtract_rows", "rows", value=True)]
+                                                            selected=self.settings["Normalization"]["in_select_subtract_mode"]),
+                                            ui.input_switch("in_switch_subtract_pop", "population_wide",
+                                                            value=self.settings["Normalization"]["in_switch_subtract_pop"]),
+                                            ui.input_switch("in_select_subtract_rows", "rows",
+                                                            value=self.settings["Normalization"]["in_select_subtract_rows"])]
                                         ),
                                         xui.accordion_panel(
                                             "Divide",
-                                            [ui.input_select("in_select_divide_order", "order", choices=[""]+list(range(4))),
+                                            [ui.input_select("in_select_divide_order", "order", choices=[""]+list(range(4)),
+                                                             selected=self.settings["Normalization"]["in_select_divide_order"]),
                                             ui.input_select("in_select_divide_mode", "mode",
                                                             choices=["first", "mean", "min", "min_abs", "max", "max_abs", "std"],
-                                                            selected="max_abs"),
-                                            ui.input_switch("in_switch_divide_pop", "population_wide", value=False),
-                                            ui.input_switch("in_select_divide_rows", "rows", value=True)]
+                                                            selected=self.settings["Normalization"]["in_select_divide_mode"]),
+                                            ui.input_switch("in_switch_divide_pop", "population_wide",
+                                                            value=self.settings["Normalization"]["in_switch_divide_pop"]),
+                                            ui.input_switch("in_select_divide_rows", "rows",
+                                                            value=self.settings["Normalization"]["in_select_divide_rows"])]
                                         ),
                                         xui.accordion_panel(
                                            "Impute NaN",
-                                            [ui.input_select("in_select_impute_order", "order", choices=[""]+list(range(4))),
+                                            [ui.input_select("in_select_impute_order", "order", choices=[""]+list(range(4)),
+                                                             selected=self.settings["Normalization"]["in_select_impute_order"]),
                                             ui.row(
-                                                ui.column(6, ui.input_switch("in_switch_impute_fixed", "fixed value", value=False)),
+                                                ui.column(6, ui.input_switch("in_switch_impute_fixed", "fixed value",
+                                                                             value=self.settings["Normalization"]["in_switch_impute_fixed"])),
                                                 ui.column(6, ui.panel_conditional(
                                                     "input.in_switch_impute_fixed",
-                                                    ui.input_numeric("in_numeric_impute_val", "value", value=0))
+                                                    ui.input_numeric("in_numeric_impute_val", "value",
+                                                                     value=self.settings["Normalization"]["in_numeric_impute_val"]))
                                                 )),]
                                         ),
                                         xui.accordion_panel(
                                             "Gradient",
-                                            [ui.input_select("in_select_gradient_order", "order", choices=[""]+list(range(4))),]
+                                            ui.input_select("in_select_gradient_order", "order", choices=[""]+list(range(4)),
+                                                            selected=self.settings["Normalization"]["in_select_gradient_order"]),
                                         ),
                                     open=False)
                                 ),
@@ -239,28 +308,65 @@ class Analysis:
                         ),
                         ui.panel_main(
                             ui.output_ui("out_dyn_plot")
-                            # xui.output_plot("out_plot_norm", width=self.get_size())
                         )
                     )
         )
-
-
 
         nav_encoding = ui.nav(
                     "Encoding",
                     ui.layout_sidebar(
                         ui.panel_sidebar(
-                            # ui.h5("Encoders"),
                             xui.accordion(
                                 xui.accordion_panel(
                                     "Feature Extraction",
                                 ),
                                 xui.accordion_panel(
                                     "CNN",
+                                    ui.input_switch("in_switch_cnn_use_cnn", "use cnn encoding",
+                                                    value=self.settings["CNN"]["in_switch_cnn_use_cnn"]),
+                                    ui.output_text("out_text_cnn_warning_ragged"),
+                                    ui.br(),
+                                    xui.card(
+                                        xui.card_header("Settings"),
+                                        ui.input_file("in_file_cnn_encoder", "encoder path"),
+                                        ui.row(
+                                            ui.column(8, ui.input_slider("in_slider_cnn_split", "Train split", min=0.01, max=0.99,
+                                                                         value=self.settings["CNN"]["in_slider_cnn_split"]),),
+                                            ui.column(4, ui.input_select("in_select_cnn_loss", "loss", choices=['mse'],
+                                                                         selected=self.settings["CNN"]["in_select_cnn_loss"]),),
+                                        ),
+                                        ui.row(
+                                            ui.column(6, ui.input_numeric("in_numeric_cnn_dropout", "dropout",
+                                                                          value=self.settings["CNN"]["in_numeric_cnn_dropout"], max=0.99)),
+                                            ui.column(6, ui.input_numeric("in_numeric_cnn_regularize", "regularize latent",
+                                                                          value=self.settings["CNN"]["in_numeric_cnn_regularize"], max=0.99)),
+                                        ),
+                                        ui.row(
+                                            ui.column(6, ui.input_numeric("in_numeric_cnn_epochs", "epochs",
+                                                                          value=self.settings["CNN"]["in_numeric_cnn_epochs"], min=1),),
+                                            ui.column(6, ui.input_numeric("in_numeric_cnn_batch_size", "batch size",
+                                                                          value=self.settings["CNN"]["in_numeric_cnn_batch_size"], min=1),),
+                                        ),
+                                        ui.h6("Early stopping"),
+                                        ui.row(
+                                            ui.column(6, ui.input_numeric("in_numeric_cnn_patience", "patience",
+                                                                          value=self.settings["CNN"]["in_numeric_cnn_patience"], min=1),),
+                                            ui.column(6, ui.input_numeric("in_numeric_cnn_min_delta", "min_delta",
+                                                                          value=self.settings["CNN"]["in_numeric_cnn_min_delta"]),),
+                                        ),
+                                    ),
+                                    xui.card(
+                                        xui.card_header("Plotting"),
+
+                                    )
                                 ),
                             open=False),
                         ),
-                        ui.panel_main()
+                        ui.panel_main(
+                            ui.output_plot("out_plot_cnn_history"),
+                            ui.output_plot("out_plot_cnn_examples"),
+                            ui.output_plot("out_plot_cnn_latent"),
+                        )
                     )
         )
 
@@ -373,16 +479,38 @@ class Analysis:
 
             events = get_events_obj_filtered().copy()
             use_extend = input.in_switch_extend()
-            extend = (input.in_numeric_extend_left(), input.in_numeric_extend_right())
             use_footprint = input.in_switch_use_footprint()
             video = input.video_path()
             h5_loc = input.h5_loc()
 
-            if events is not None and len(events)>0 and use_extend and video != "" and extend != (0, 0) and\
-                    input.in_numeric_extend_left() is not None and input.in_numeric_extend_right() is not None:
+            fix_ext_left, fix_ext_right = input.in_numeric_extend_left(), input.in_numeric_extend_right()
+            extend = (fix_ext_left, fix_ext_right)
+            enforce_min, enforce_max = input.in_numeric_enforce_min(), input.in_numeric_enforce_max()
+            use_padding = input.in_switch_use_padding()
+
+            if events is not None and len(events)>0 and use_extend and video != "" and \
+                    (fix_ext_left != 0 or fix_ext_right != 0 or enforce_min is not None or enforce_max is not None):
 
                 video = Video(data=video, h5_loc=h5_loc, lazy=True)
-                events.get_extended_events(video=video, extend=extend, in_place=True, use_footprint=use_footprint)
+                events.get_extended_events(video=video, in_place=True, use_footprint=use_footprint,
+                                           extend=extend, ensure_min=enforce_min, ensure_max=enforce_max,
+                                           pad_borders=use_padding)
+
+                if not use_padding:
+
+                    df = events.events
+
+                    if enforce_min is not None:
+                        df = df[df.dz >= enforce_min]
+
+                    if enforce_max is not None:
+                        df = df[df.dz <= enforce_max]
+
+                    if (enforce_max is not None or enforce_min is not None) and len(events.events) != len(df):
+                        logging.warning("Events with incorrect size were removed.")
+                        ui.notification_show("Events with incorrect size were removed.")
+
+                    events.events = df
 
             elif use_extend:
                 ui.notification_show("cannot extend videos", type="error", duration=5)
@@ -887,7 +1015,8 @@ class Analysis:
         @render.ui
         def out_ext_dyn_plot():
 
-            dyn_height = f"{200+input.in_numeric_panel_height()*input.in_numeric_norm_num()}px"
+            dyn_height = f"{200+input.in_numeric_panel_height_ext()*input.in_numeric_norm_num()}px"
+            print(f"dyn height: {dyn_height}")
             return xui.output_plot("out_plot_ext", width="100%", height=dyn_height)
 
         @output
@@ -1059,6 +1188,106 @@ class Analysis:
 
                 return fig
 
+            return None
+
+        ##########
+        # ENCODERS
+
+        @output
+        @render.text
+        def out_text_cnn_warning_ragged():
+
+            event_obj = get_events_obj_normalized().copy()
+
+            if event_obj is not None:
+
+                traces = event_obj.events.trace
+
+                if is_ragged(traces):
+                    return f"Warning! Traces are of unequal length and cannot be used with CNN encoding."
+            return None
+
+        @reactive.Calc
+        def get_CNN():
+
+            if input.in_switch_cnn_use_cnn():
+                cnn = CNN()
+
+                path = input.in_file_cnn_encoder()
+                if path is not None:
+                    cnn.load_model(path)
+
+                event_obj = get_events_obj_normalized()
+                if event_obj is not None:
+
+                    data = np.array(event_obj.events.trace.tolist())
+                    print(f"\n\ndata: {data.shape}, {np.unique([len(data[i]) for i in range(len(data))])}")
+
+                    _ = cnn.train(data,
+                              train_split=input.in_slider_cnn_split(),
+                              validation_split=1-input.in_slider_cnn_split(),
+                              loss=input.in_select_cnn_loss(),
+                              dropout=input.in_numeric_cnn_dropout(),
+                              regularize_latent=input.in_numeric_cnn_regularize(),
+                              epochs=input.in_numeric_cnn_epochs(),
+                              batch_size=input.in_numeric_cnn_batch_size(),
+                              patience=input.in_numeric_cnn_patience(),
+                              min_delta=input.in_numeric_cnn_min_delta()
+                              )
+
+                    return cnn
+            return None
+
+        @reactive.Calc
+        def embedd_cnn():
+
+            if input.in_switch_cnn_use_cnn():
+                cnn = get_CNN()
+                event_obj = get_events_obj_normalized()
+
+                if event_obj is not None:
+
+                    data = np.array(event_obj.events.trace.tolist())
+                    latent = cnn.embed(data)
+                    return latent
+            return None
+
+        @output
+        @render.plot
+        def out_plot_cnn_history():
+
+            if input.in_switch_cnn_use_cnn():
+                cnn = get_CNN()
+                if cnn.history is not None:
+                    return cnn.plot_history()
+            return None
+
+        @output
+        @render.plot
+        def out_plot_cnn_examples():
+
+            if input.in_switch_cnn_use_cnn():
+                cnn = get_CNN()
+                if cnn.X_test is not None:
+                    return cnn.plot_examples(X_test=cnn.X_test)
+            return None
+
+        @output
+        @render.plot
+        def out_plot_cnn_latent():
+
+            latent = embedd_cnn()
+
+            if latent is not None:
+
+                N = 6
+                indices = np.random.randint(0, len(latent), size=(N))
+                matrix = latent[indices].transpose()
+
+                fig, ax = plt.subplots(1, 1)
+                sns.heatmap(matrix, ax=ax)
+
+                return fig
             return None
 
     def plot_images(self, arr, frames, lbls=None, figsize=(10, 5), vmin=None, vmax=None):

@@ -145,6 +145,9 @@ class CNN:
         self.autoencoder = autoencoder
 
         self.history = None
+        self.X_test = None
+        self.Y_test = None
+        self.MSE = None
 
     def train(self, data, train_split=0.9, validation_split=0.1,
               loss='mse', dropout=None, regularize_latent=None,
@@ -189,7 +192,7 @@ class CNN:
         encoder = Model(input_window, encoded)
         autoencoder = Model(input_window, decoded)
 
-        logging.info("Model architecture:\n", autoencoder.summary)
+        autoencoder.summary(line_length=100)
 
         # train
         autoencoder.compile(optimizer='adam', loss=loss)
@@ -210,7 +213,11 @@ class CNN:
         # TODO for some reason this is an array and not a float?!
         Y_test = autoencoder.predict(X_test)
         MSE = mean_squared_error(np.squeeze(X_test), np.squeeze(Y_test))
-        logging.info(f"Quality of encoding > MSE: {MSE}") # :.4f
+        logging.info(f"Quality of encoding > MSE: {np.mean(MSE)}") # :.4f
+
+        self.X_test = X_test
+        self.Y_test = Y_test
+        self.MSE = MSE
 
         return history, X_test, Y_test, MSE
 
@@ -244,6 +251,8 @@ class CNN:
         ax1.set_title("Validation loss")
 
         plt.tight_layout()
+
+        return fig
 
     def plot_examples(self, X_test, Y_test=None, num_samples=9, figsize=(10, 3)):
 
@@ -287,6 +296,8 @@ class CNN:
 
             axx[0, 0].set_ylabel("IN/OUT", fontweight=600)
             axx[1, 0].set_ylabel("error", fontweight=600)
+
+            return fig
 
     def save_model(self, path, model=None):
 

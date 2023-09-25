@@ -702,6 +702,7 @@ class Detector:
 
             em_id = int(em_id)
             event_id_key = None
+            error = 0
             try:
                 event_id_key = f"{event_id}_{em_id}" if split_events else event_id
                 res[event_id_key] = {}
@@ -724,8 +725,10 @@ class Detector:
                 # bbox dimensions
                 dz, dx, dy = z1 - z0, x1 - x0, y1 - y0
                 res[event_id_key]["dz"] = dz
+                res[event_id_key]["v_length"] = dz
                 res[event_id_key]["dx"] = dx
                 res[event_id_key]["dy"] = dy
+                res[event_id_key]["v_diameter"] = np.sqrt(dx**2 + dy**2)
 
                 # area
                 res[event_id_key]["v_area"] = len(z)
@@ -755,8 +758,7 @@ class Detector:
                                 res[event_id_key][f"v_mask_{k}"] = props[k][0]
 
                         except ValueError as err:
-                            print("\t Error in ", event_id_key)
-                            print("\t", err)
+                            error = 1
 
                 # contour
                 mask_padded = np.pad(np.invert(mask), pad_width=((1, 1), (1, 1), (1, 1)), mode="constant",
@@ -838,7 +840,7 @@ class Detector:
                 del mask
 
                 # error messages
-                res[event_id_key]["error"] = 0
+                res[event_id_key]["error"] = error
 
             except ValueError as err:
                 logging.error(f"{event_id_key} failed: {err}\n{traceback.format_exc()}")

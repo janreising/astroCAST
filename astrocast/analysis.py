@@ -27,7 +27,7 @@ from astrocast.preparation import IO
 class Events(CachedClass):
 
     def __init__(self, event_dir, lazy=True, data=None, h5_loc=None, group=None, subject_id=None,
-                 z_slice=None, index_prefix=None, custom_columns=("area_norm", "cx", "cy"), frame_to_time_mapping=None,
+                 z_slice=None, index_prefix=None, custom_columns=("v_area_norm", "cx", "cy"), frame_to_time_mapping=None,
                  frame_to_time_function=None, cache_path=None, seed=1):
 
         super().__init__(cache_path=cache_path)
@@ -172,6 +172,15 @@ class Events(CachedClass):
 
     def _repr_html_(self):
         return self.events._repr_html_()
+
+    # def save(self, path):
+    #     from joblib import dump
+    #     dump(self, path)
+    #
+    # @staticmethod
+    # def load(path):
+    #     from joblib import load
+    #     return load(path)
 
     def is_multi_subject(self):
         if len(self.events.subject_id.unique()) > 1:
@@ -382,7 +391,7 @@ class Events(CachedClass):
         return time_map, events_start_frame, events_end_frame
 
     @staticmethod
-    def load_events(event_dir:Path, z_slice=None, index_prefix=None, custom_columns=("area_norm", "cx", "cy")):
+    def load_events(event_dir:Path, z_slice=None, index_prefix=None, custom_columns=("v_area_norm", "cx", "cy")):
 
         """
         Load events from the specified directory and perform optional preprocessing.
@@ -414,8 +423,8 @@ class Events(CachedClass):
 
         # Dictionary of custom column functions
         custom_column_functions = {
-            "area_norm": lambda events: events.v_area / events.dz,
-            "area_footprint": lambda events: events.footprint.apply(sum),
+            "v_area_norm": lambda events: events.v_area / events.dz,
+            "v_area_footprint": lambda events: events.footprint.apply(sum),
             "cx": lambda events: events.x0 + events.dx * events["v_fp_centroid_local-0"],
             "cy": lambda events: events.y0 + events.dy * events["v_fp_centroid_local-1"]
         }
@@ -450,167 +459,6 @@ class Events(CachedClass):
 
         return events
 
-    @wrapper_local_cache
-    def get_extended_events(self, video=None, dtype=float, extend=-1, use_footprint=False,
-                            return_array=False, in_place=False,
-                            normalization_instructions=None, show_progress=True,
-                            memmap_path=None, save_path=None, save_param={}):
-
-        """ takes the footprint of each individual event and extends it over the whole z-range
-
-        example standardizing:
-
-        normalization_instructions =
-            0: ["subtract", {"mode": "mean"}],
-            1: ["divide", {"mode": "std"}]
-        }
-
-        """
-
-        events = self.events if in_place else self.events.copy()
-        n_events = len(events)
-
-        # load data
-        if video is not None:
-            video = video.get_data()
-        elif self.data is not None:
-            video = self.data.get_data()
-        else:
-            raise ValueError("to extend the event traces you either have to provide the 'video' argument "
-                             "when calling this function or the 'data' argument during Event creation.")
-
-        # get video dimensions
-        n_frames, X, Y = video.shape
-
-        # create container to save extended events in
-        arr_ext, extended = None, None
-        if return_array:
-
-            # create array
-            if memmap_path:
-                memmap_path = Path(memmap_path).with_suffix(f".dtype_{np.dtype(dtype).name}_shape_{n_events}x{n_frames}.mmap")
-                arr_ext = np.memmap(memmap_path.as_posix(), dtype=dtype, mode='w+', shape=(n_events, n_frames))
-            else:
-                arr_ext = np.zeros((n_events, n_frames), dtype=dtype)
-
-            arr_size = arr_ext.itemsize*n_events*n_frames
-            ram_size = psutil.virtual_memory().total
-            if arr_size > 0.9 * ram_size:
-                logging.warning(f"array size ({n_events}, {n_frames}) is larger than 90% RAM size ({arr_size*1e-9:.2f}GB, {arr_size/ram_size*100}%). Consider using smaller dtype or providing a 'mmemap_path'")
-
-        else:
-            extended = list()
-
-        z0_container, z1_container = list(), list()
-
-        # extract footprints
-        c = 0
-        iterator = tqdm(events.iterrows(), total=len(events), desc="gathering footprints") if show_progress else events.iterrows()
-        for i, event in iterator:
-
-            # select event pixel # TODO flag to switch between footprint and last frame
-            if use_footprint:
-                footprint = np.invert(np.reshape(event["footprint"], (event.dx, event.dy)))
-                mask_begin, mask_end = footprint, footprint
-
-            else:
-                mask_volume = np.invert(np.reshape(event["mask"], (event.dz, event.dx, event.dy)))
-                mask_begin, mask_end = mask_volume[0, :, :], mask_volume[-1, :, :]
-
-            z0, z1 = event.z0, event.z1
-
-            if extend == -1:
-                dz0 = z0
-                dz1 = n_frames - z1
-
-                full_z0, full_z1 = 0, n_frames
-
-            elif isinstance(extend, (int)):
-
-                dz0 = extend
-                dz1 = extend
-
-                full_z0, full_z1 = max(0, z0-dz0), min(z1+dz1, n_frames)
-
-            elif isinstance(extend, (list, tuple)):
-
-                if len(extend) != 2:
-                    raise ValueError("provide 'extend' flag as int or tuple (ext_left, ext_right")
-
-                dz0, dz1 = extend
-
-                if dz0 == -1:
-                    dz0 = z0
-
-                if dz1 == -1:
-                    dz1 = n_frames - z1
-
-                full_z0, full_z1 = max(0, event.z0-dz0), min(event.z1+dz1, n_frames)
-
-            else:
-                raise ValueError("provide 'extend' flag as int or tuple (ext_left, ext_right")
-
-
-
-            # extend beginning
-            pre_volume = video[z0-dz0:z0, event.x0:event.x1, event.y0:event.y1]
-            mask = np.broadcast_to(mask_begin, pre_volume.shape)
-
-            projection = np.ma.masked_array(data=pre_volume, mask=mask)
-            pre_trace = np.nanmean(projection, axis=(1, 2))
-
-            # extend end
-            post_volume = video[z1:z1+dz1, event.x0:event.x1, event.y0:event.y1]
-            mask = np.broadcast_to(mask_end, post_volume.shape)
-
-            projection = np.ma.masked_array(data=post_volume, mask=mask)
-            post_trace = np.nanmean(projection, axis=(1, 2))
-
-            # combine
-            trace = np.concatenate([pre_trace, event.trace, post_trace])
-
-            if normalization_instructions is not None:
-                norm = helper.Normalization(data=trace, inplace=True)
-                norm.run(normalization_instructions)
-
-            if return_array:
-                arr_ext[c, full_z0:full_z1] = trace
-            else:
-                extended.append(trace)
-
-            z0_container.append(full_z0)
-            z1_container.append(full_z1)
-
-            c += 1
-
-        if return_array:
-
-            if memmap_path is not None:
-                logging.info(f"'save_path' ignored. Extended array saved as memmap to :{memmap_path}")
-
-            elif save_path is not None:
-                io = IO()
-                io.save(path=save_path, data=arr_ext, **save_param)
-
-            return arr_ext, z0_container, z1_container
-
-        else:
-
-            events.trace = extended
-
-            # save a copy of original z frames
-            events["z0_orig"] = events.z0
-            events["z1_orig"] = events.z1
-            events["dz_orig"] = events.dz
-
-            # update current z frames
-            events.z0 = z0_container
-            events.z1 = z1_container
-            events.dz = events["z1"] - events["z0"]
-
-            self.events = events
-
-            return events
 
     def to_numpy(self, events=None, empty_as_nan=True, simple=False):
 
@@ -936,6 +784,232 @@ class Events(CachedClass):
             res = array
 
         return res
+    @wrapper_local_cache
+    def get_extended_events(self, events=None, video=None, dtype=float, use_footprint=False,
+                            extend=-1, ensure_min=None, ensure_max=None, pad_borders=False,
+                            return_array=False, in_place=False,
+                            normalization_instructions=None, show_progress=True,
+                            memmap_path=None, save_path=None, save_param={}):
+
+        """ takes the footprint of each individual event and extends it over the whole z-range
+
+        example standardizing:
+
+        normalization_instructions =
+            0: ["subtract", {"mode": "mean"}],
+            1: ["divide", {"mode": "std"}]
+        }
+
+        """
+
+        if events is None:
+            events = self.events
+
+        if not in_place:
+            events = events.copy()
+
+        n_events = len(events)
+
+        # load data
+        if video is not None:
+            video = video.get_data()
+        elif self.data is not None:
+            video = self.data.get_data()
+        else:
+            raise ValueError("to extend the event traces you either have to provide the 'video' argument "
+                             "when calling this function or the 'data' argument during Event creation.")
+
+        # get video dimensions
+        n_frames, X, Y = video.shape
+
+        # create container to save extended events in
+        arr_ext, extended = None, None
+        if return_array:
+
+            # create array
+            if memmap_path:
+                memmap_path = Path(memmap_path).with_suffix(f".dtype_{np.dtype(dtype).name}_shape_{n_events}x{n_frames}.mmap")
+                arr_ext = np.memmap(memmap_path.as_posix(), dtype=dtype, mode='w+', shape=(n_events, n_frames))
+            else:
+                arr_ext = np.zeros((n_events, n_frames), dtype=dtype)
+
+            arr_size = arr_ext.itemsize*n_events*n_frames
+            ram_size = psutil.virtual_memory().total
+            if arr_size > 0.9 * ram_size:
+                logging.warning(f"array size ({n_events}, {n_frames}) is larger than 90% RAM size ({arr_size*1e-9:.2f}GB, {arr_size/ram_size*100}%). Consider using smaller dtype or providing a 'mmemap_path'")
+
+        else:
+            extended = list()
+
+        z0_container, z1_container = list(), list()
+
+        # extract footprints
+        c = 0
+        iterator = tqdm(events.iterrows(), total=len(events), desc="extending events") if show_progress else events.iterrows()
+        for i, event in iterator:
+
+            # select event pixel # TODO flag to switch between footprint and last frame
+            if use_footprint:
+                footprint = np.invert(np.reshape(event["footprint"], (event.dx, event.dy)))
+                mask_begin, mask_end = footprint, footprint
+
+            else:
+                mask_volume = np.invert(np.reshape(event["mask"], (event.dz, event.dx, event.dy)))
+                mask_begin, mask_end = mask_volume[0, :, :], mask_volume[-1, :, :]
+
+            z0, z1 = event.z0, event.z1
+
+            # get new boundaries
+            if extend == -1:
+                dz0 = z0
+                dz1 = n_frames - z1
+
+                full_z0, full_z1 = 0, n_frames
+
+            elif isinstance(extend, int):
+
+                dz0 = extend
+                dz1 = extend
+
+                if dz0 > z0:
+                    dz0 = z0
+
+                if z1 + dz1 > n_frames:
+                    dz1 = n_frames - z1
+
+                full_z0, full_z1 = z0-dz0, z1+dz1
+
+            elif isinstance(extend, (list, tuple)):
+
+                if len(extend) != 2:
+                    raise ValueError("provide 'extend' flag as int or tuple (ext_left, ext_right")
+
+                dz0, dz1 = extend
+
+                if dz0 == -1:
+                    dz0 = z0
+
+                elif dz0 > z0:
+                    dz0 = z0
+
+                if dz1 == -1:
+                    dz1 = n_frames - z1
+
+                elif z1 + dz1 > n_frames:
+                    dz1 = n_frames - z1
+
+                full_z0, full_z1 = z0-dz0, z1+dz1
+
+            else:
+                raise ValueError("provide 'extend' flag as int or tuple (ext_left, ext_right")
+
+            # ensure max and min criteria
+            full_dz = full_z1 - full_z0
+            if ensure_min is not None and full_dz < ensure_min:
+                diff = ensure_min - full_dz
+                left, right = diff // 2, diff // 2 + diff % 2
+
+                dz0 += left
+                dz1 += right
+
+                if dz0 > z0:
+                    dz0 = z0
+
+                if z1 + dz1 > n_frames:
+                    dz1 = n_frames - z1
+
+                full_z0, full_z1 = z0-dz0, z1+dz1
+
+            elif ensure_max is not None and full_dz > ensure_max:
+
+                diff = full_dz - ensure_max
+                left, right = diff // 2, diff // 2 + diff % 2
+
+                dz0 -= left
+                dz1 -= right
+
+                full_z0, full_z1 = z0-dz0, z1+dz1
+
+            # extract new signal
+
+            # beginning
+            pre_volume = video[full_z0:z0, event.x0:event.x1, event.y0:event.y1]
+            mask = np.broadcast_to(mask_begin, pre_volume.shape)
+
+            projection = np.ma.masked_array(data=pre_volume, mask=mask)
+            pre_trace = np.nanmean(projection, axis=(1, 2))
+
+            # end
+            post_volume = video[z1:full_z1, event.x0:event.x1, event.y0:event.y1]
+            mask = np.broadcast_to(mask_end, post_volume.shape)
+
+            projection = np.ma.masked_array(data=post_volume, mask=mask)
+            post_trace = np.nanmean(projection, axis=(1, 2))
+
+            # combine
+            trace = np.concatenate([pre_trace, event.trace, post_trace])
+
+            if ensure_max is not None and len(trace) > ensure_max:
+
+                c0 = max(0, full_z0-z0)
+                c1 = len(trace) - max(0, z1-full_z1)
+                trace = trace[c0:c1]
+
+            # padding to enforce equal length
+            if pad_borders:
+                full_dz = len(trace)
+
+                if ensure_min is not None and full_dz < ensure_min:
+                    diff = ensure_min - full_dz
+                    left, right = diff // 2, diff // 2 + diff % 2
+
+                    full_z0 -= left
+                    full_z1 += right
+                    trace = np.pad(trace, pad_width=(left, right), mode="edge")
+
+            # normalize
+            if normalization_instructions is not None:
+                norm = helper.Normalization(data=trace, inplace=True)
+                norm.run(normalization_instructions)
+
+            if return_array:
+                arr_ext[c, full_z0:full_z1] = trace
+            else:
+                extended.append(trace)
+
+            z0_container.append(full_z0)
+            z1_container.append(full_z1)
+
+            c += 1
+
+        if return_array:
+
+            if memmap_path is not None:
+                logging.info(f"'save_path' ignored. Extended array saved as memmap to :{memmap_path}")
+
+            elif save_path is not None:
+                io = IO()
+                io.save(path=save_path, data=arr_ext, **save_param)
+
+            return arr_ext, z0_container, z1_container
+
+        else:
+
+            events.trace = extended
+
+            # save a copy of original z frames
+            events["z0_orig"] = events.z0
+            events["z1_orig"] = events.z1
+            events["dz_orig"] = events.dz
+
+            # update current z frames
+            events.z0 = z0_container
+            events.z1 = z1_container
+            events.dz = events["z1"] - events["z0"]
+
+            self.events = events
+
+            return events
 
     def enforce_length(self, min_length=None, pad_mode="edge", max_length=None, inplace=False):
 
