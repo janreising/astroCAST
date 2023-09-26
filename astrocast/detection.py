@@ -810,28 +810,44 @@ class Detector:
                 # trace
                 signal = data[z0:z1, x0:x1, y0:y1]
                 masked_signal = np.ma.masked_array(signal, mask)
-                res[event_id_key]["trace"] = np.ma.filled(np.nanmean(masked_signal, axis=(1, 2)), fill_value=0)
+                temp_trace = np.ma.filled(np.nanmean(masked_signal, axis=(1, 2)), fill_value=0)
+                res[event_id_key]["trace"] = temp_trace
 
                 # trace characteristics
-                trace = res[event_id_key]["trace"]
-                res[event_id_key]["v_max_height"] = np.max(trace) - np.min(trace)
-                res[event_id_key]["v_max_gradient"] = np.max(np.diff(trace)) if len(trace) > 1 else np.nan
+                trace = temp_trace
+                temp_v_max_height = np.max(trace) - np.min(trace)
+                res[event_id_key]["v_max_height"] = temp_v_max_height
+
+                temp_v_max_gradient = np.max(np.diff(trace)) if len(trace) > 1 else np.nan
+                res[event_id_key]["v_max_gradient"] = temp_v_max_gradient
 
                 # approximating noise
                 masked_noise = np.ma.masked_array(signal, np.invert(mask))
-                res[event_id_key]["noise_mask_trace"] = np.ma.filled(np.nanmean(masked_noise, axis=(1, 2)), fill_value=0)
+                temp_noise_mask_trace = np.ma.filled(np.nanmean(masked_noise, axis=(1, 2)), fill_value=0)
+                res[event_id_key]["noise_mask_trace"] = temp_noise_mask_trace
 
-                noise_mask_trace = res[event_id_key]["noise_mask_trace"]
-                res[event_id_key]["v_noise_mask_mean"] = np.mean(noise_mask_trace)
-                res[event_id_key]["v_noise_mask_std"] = np.std(noise_mask_trace)
+                # noise characteristics
+                noise_mask_trace = temp_noise_mask_trace
+                temp_v_noise_mask_mean = np.mean(noise_mask_trace)
+                res[event_id_key]["v_noise_mask_mean"] = temp_v_noise_mask_mean
+
+                temp_v_noise_mask_std = np.std(noise_mask_trace)
+                res[event_id_key]["v_noise_mask_std"] = temp_v_noise_mask_std
 
                 # signal-to-noise characteristics
-                res[event_id_key]["v_signal_to_noise_ratio"] = abs(res[event_id_key]["v_max_height"] / res[event_id_key]["v_noise_mask_mean"])
+                temp_v_signal_to_noise_ratio = abs(temp_v_max_height / temp_v_noise_mask_mean)
 
-                if res[event_id_key]["v_noise_mask_std"] != 0:
-                    res[event_id_key]["v_signal_to_noise_ratio_fold"] = abs((res[event_id_key]["v_max_height"] - res[event_id_key]["v_noise_mask_mean"]) / res[event_id_key]["v_noise_mask_std"])
+                if np.isnan(temp_v_signal_to_noise_ratio) or np.isinf(temp_v_signal_to_noise_ratio):
+                    temp_v_signal_to_noise_ratio = np.nan
+
+                res[event_id_key]["v_signal_to_noise_ratio"] = temp_v_signal_to_noise_ratio
+
+                if temp_v_noise_mask_std != 0:
+                    temp_v_signal_to_noise_ratio_fold = abs((temp_v_max_height - temp_v_noise_mask_mean) / temp_v_noise_mask_std)
+                    res[event_id_key]["v_signal_to_noise_ratio_fold"] = temp_v_signal_to_noise_ratio_fold
                 else:
                     res[event_id_key]["v_signal_to_noise_ratio_fold"] = np.nan
+
 
                 # clean up
                 del signal

@@ -866,9 +866,7 @@ class Analysis:
             if events_obj is not None:
 
                 events = events_obj.events
-                events = self.get_table_excl(events, excl_columns=('contours', 'trace', 'noise_mask_trace', 'mask',
-                                                                   'footprint', 'group', 'file_name', 'z0', 'z1', 'x0',
-                                                                   'x1', 'y0', 'y1', 'subject_id'))
+                events = events[[col for col in events.columns if col.startswith("v")]]
 
                 if events.isnull().values.any():
                     ui.notification_show("None values present. Trying to fix automatically.",
