@@ -3,15 +3,10 @@ from pathlib import Path
 import torch
 import torch.nn as nn
 import torch.optim as optim
-import torch.nn.functional as F
 
 import numpy as np
-import timeit
-import random
-import datetime
 
 from matplotlib import pyplot as plt
-from sklearn.metrics import mean_squared_error
 from sklearn.model_selection import train_test_split
 from torch.nn.utils.rnn import pad_packed_sequence, pack_padded_sequence, pad_sequence
 from torch.utils.data import Dataset, DataLoader
@@ -23,35 +18,12 @@ class RnnType:
     LSTM = 2
 
 
-class ActivationFunction:
-    RELU = 1
-    TANH = 2
-    SIGMOID = 3
-
-
-class Token:
-    PAD = 0
-    UKN = 1
-    SOS = 2
-    EOS = 3
-
-
 class Parameters:
 
     def __init__(self, data_dict):
         for k, v in data_dict.items():
             exec(f"self.{k}={v}")
 
-class TimeSeries():
-
-    def __init__(self, data):
-        self.data = data
-
-    def __len__(self):
-        return len(self.data)
-
-    def __getitem__(self, batch_idx):
-        return self.data[batch_idx]
 
 class TimeSeriesRnnAE:
 
@@ -117,9 +89,10 @@ class TimeSeriesRnnAE:
             return False
         return True
 
-    def train_epochs(self, dataloader_train, dataloader_val=None,  num_epochs=10, diminish_learning_rate=0.99,
-                     patience=5, min_delta=0.001, smooth_loss_len=3,
-                     safe_after_epoch=None, show_mode=None):
+    def train_epochs(
+            self, dataloader_train, dataloader_val=None, num_epochs=10, diminish_learning_rate=0.99, patience=5,
+            min_delta=0.001, smooth_loss_len=3, safe_after_epoch=None, show_mode=None
+            ):
         """
         Train one epoch of the TimeSeriesRnnAE model.
 
@@ -153,13 +126,14 @@ class TimeSeriesRnnAE:
 
             batch_losses = []
             for batch_data, batch_lengths in dataloader_train:
-
                 batch_data = batch_data.unsqueeze(-1)
                 batch_data = batch_data.to(dtype=torch.float32).to(self.device)  # Move to device and ensure it's float
                 batch_lengths = torch.tensor(batch_lengths, dtype=torch.float32, device=self.device)
 
                 # Pack the batch
-                packed_batch_data = pack_padded_sequence(batch_data, batch_lengths.cpu().numpy(), batch_first=True)#.to(self.device)
+                packed_batch_data = pack_padded_sequence(
+                    batch_data, batch_lengths.cpu().numpy(), batch_first=True
+                    )  # .to(self.device)
 
                 # Your existing code for training on a single batch
                 batch_loss = self.train_batch(packed_batch_data, batch_lengths)
@@ -173,9 +147,11 @@ class TimeSeriesRnnAE:
             learning_rates.append([self.encoder_lr, self.decoder_lr])
 
             if show_mode == "progress":
-                iterator.set_description(f"loss: {epoch_loss:.4f} "
-                                         f"lr: ({self.encoder_lr:.5f}, {self.decoder_lr:.5f}) "
-                                         f"P:{patience_counter}")
+                iterator.set_description(
+                    f"loss: {epoch_loss:.4f} "
+                    f"lr: ({self.encoder_lr:.5f}, {self.decoder_lr:.5f}) "
+                    f"P:{patience_counter}"
+                    )
                 iterator.update(1)
 
             elif show_mode == "notebook":
@@ -223,14 +199,15 @@ class TimeSeriesRnnAE:
                 val_loss = self.evaluate_batch(dataloader_val)
                 val_losses.append(val_loss)
 
-            # early stopping
-            # Calculate smoothed loss
+            # Early stopping
             if dataloader_val is not None:
                 losses = val_losses
             else:
                 losses = train_losses
 
-            smoothed_loss = np.sum(np.array(losses[-smooth_loss_len:])) / min(len(losses), smooth_loss_len)  # last 5 epochs
+            smoothed_loss = np.sum(np.array(losses[-smooth_loss_len:])) / min(
+                len(losses), smooth_loss_len
+                )  # last 5 epochs
             if best_loss - smoothed_loss > min_delta:
                 best_loss = smoothed_loss
                 patience_counter = 0
@@ -295,7 +272,9 @@ class TimeSeriesRnnAE:
             batch_lengths = torch.tensor(batch_lengths, dtype=torch.float32, device=self.device)
 
             # Pack the batch
-            packed_batch_data = pack_padded_sequence(batch_data, batch_lengths.cpu().numpy(), batch_first=True)#.to(self.device)
+            packed_batch_data = pack_padded_sequence(
+                batch_data, batch_lengths.cpu().numpy(), batch_first=True
+                )  # .to(self.device)
 
             batch_size = packed_batch_data.batch_sizes[0]  # The first element contains the batch size
 
@@ -328,6 +307,72 @@ class TimeSeriesRnnAE:
         self.encoder.load_state_dict(torch.load(encoder_file_name))
         self.decoder.load_state_dict(torch.load(decoder_file_name))
 
+    def plot_traces(self, dataloader, figsize=(10, 10), n_samples=16, sharex=False):
+
+        self.eval()
+
+        x_val = []
+        y_val = []
+        latent = []
+        losses = []
+        for batch_data, batch_lengths in tqdm(dataloader):
+            batch_data = batch_data.unsqueeze(-1)
+            batch_data = batch_data.to(dtype=torch.float32)  # .to(self.device)  # Move to device and ensure it's float
+            batch_lengths = torch.tensor(batch_lengths, dtype=torch.float32)  # , device=self.device)
+
+            # Pack the batch
+            packed_batch_data = pack_padded_sequence(
+                batch_data, batch_lengths.cpu().numpy(), batch_first=True
+                )  # .to(self.device)
+            batch_size = packed_batch_data.batch_sizes[0]  # The first element contains the batch size
+
+            # encode
+            encoder = self.encoder
+            initial_hidden = encoder.init_hidden(batch_size)
+            encoded, _ = encoder(packed_batch_data, initial_hidden)
+
+            # decode
+            decoder = self.decoder
+            loss, decoded = decoder(packed_batch_data, encoded, batch_lengths, return_outputs=True)
+
+            # Convert batch_data and decoded data to numpy
+            x_np = batch_data.cpu().numpy()
+            y_np = decoded.cpu().detach().numpy()
+            encoded_np = encoded.cpu().detach().numpy()
+
+            # Remove zero padding based on batch_lengths
+            x_np = [x_np[i, :int(batch_lengths[i]), :] for i in range(len(batch_lengths))]
+            y_np = [y_np[i, :int(batch_lengths[i]), :] for i in range(len(batch_lengths))]
+
+            x_val.extend(x_np)
+            y_val.extend(y_np)
+            latent.extend(encoded_np)
+            losses.append(loss.item())
+
+        n_samples = min(len(x_val), n_samples)
+
+        fig, axx = plt.subplots(n_samples, 2, figsize=figsize, sharey=False, sharex=sharex)
+
+        for i, idx in enumerate(np.random.randint(0, len(x_val), size=(n_samples))):
+            x = np.squeeze(x_val[idx])
+            y = np.squeeze(y_val[idx])
+
+            axx[i, 0].plot(x, color="gray", linestyle="--")
+            axx[i, 0].plot(y, color="red", linestyle="-")
+            axx[i, 0].set_ylabel(f"idx: {idx}")
+
+            if i != 0:
+                axx[i, 0].sharex(axx[0, 0])
+
+            latent_vector = latent[i]
+            latent_vector = np.reshape(latent_vector, (len(latent_vector), 1)).transpose()
+            axx[i, 1].imshow(latent_vector, aspect="auto", cmap="viridis")
+            axx[i, 1].axis("off")
+
+        plt.tight_layout()
+
+        return x_val, y_val, latent, losses
+
 
 class Encoder(nn.Module):
 
@@ -337,7 +382,9 @@ class Encoder(nn.Module):
         self.params = params
         # Check if valid value for RNN type
         if self.params.rnn_type not in [RnnType.GRU, RnnType.LSTM]:
-            raise Exception("Unknown RNN type for encoder. Valid options: {}".format(', '.join([str(t) for t in RnnType])))
+            raise Exception(
+                "Unknown RNN type for encoder. Valid options: {}".format(', '.join([str(t) for t in RnnType]))
+                )
 
         # RNN layer
         # self.num_directions = 2 if self.params.bidirectional_encoder == True else 1
@@ -351,27 +398,32 @@ class Encoder(nn.Module):
         else:
             raise ValueError
 
-        self.rnn = rnn(self.params.num_features,
-                       self.params.rnn_hidden_dim,
-                       num_layers=self.params.num_layers,
-                       bidirectional=self.params.bidirectional_encoder,
-                       dropout=self.params.dropout,
-                       batch_first=True)
+        self.rnn = rnn(
+            self.params.num_features, self.params.rnn_hidden_dim, num_layers=self.params.num_layers,
+            bidirectional=self.params.bidirectional_encoder, dropout=self.params.dropout, batch_first=True
+            )
 
         # Initialize hidden state
         self.hidden = None
         # Define linear layers
         self.linear_dims = params.linear_dims
-        self.linear_dims = [self.params.rnn_hidden_dim * self.num_directions * self.params.num_layers * self.num_hidden_states] + self.linear_dims
+        self.linear_dims = [
+                               self.params.rnn_hidden_dim * self.num_directions * self.params.num_layers * self.num_hidden_states] + self.linear_dims
 
         self._init_weights()
 
     def init_hidden(self, batch_size):
         if self.params.rnn_type == RnnType.GRU:
-            return torch.zeros(self.params.num_layers * self.num_directions, batch_size, self.params.rnn_hidden_dim).to(self.device)
+            return torch.zeros(self.params.num_layers * self.num_directions, batch_size, self.params.rnn_hidden_dim).to(
+                self.device
+                )
         elif self.params.rnn_type == RnnType.LSTM:
-            return (torch.zeros(self.params.num_layers * self.num_directions, batch_size, self.params.rnn_hidden_dim).to(self.device),
-                    torch.zeros(self.params.num_layers * self.num_directions, batch_size, self.params.rnn_hidden_dim).to(self.device))
+            return (
+            torch.zeros(self.params.num_layers * self.num_directions, batch_size, self.params.rnn_hidden_dim).to(
+                self.device
+                ), torch.zeros(self.params.num_layers * self.num_directions, batch_size, self.params.rnn_hidden_dim).to(
+                self.device
+                ))
 
     def forward(self, packed_inputs, initial_hidden=None):
 
@@ -390,31 +442,20 @@ class Encoder(nn.Module):
         return last_embedding_layer, new_hidden  # Return the new hidden state
 
     def _flatten_hidden(self, h, batch_size):
-        # if h is None:
-        #     return None
-        # elif isinstance(h, tuple): # LSTM
-        #     X = torch.cat([self._flatten(h[0], batch_size), self._flatten(h[1], batch_size)], 1)
-        # else: # GRU
-        #     X = self._flatten(h, batch_size)
-        # return X
 
         if h is None:
             return None
         elif isinstance(h, tuple):  # LSTM
             h_last = h[0][-1]  # Take the last hidden state from the last layer
-            c_last = h[1][-1]  # Take the last cell state from the last layer
-            X = torch.cat([h_last, c_last], dim=1)  # Concatenate along feature dimension
         else:  # GRU
             h_last = h[-1]  # Take the last hidden state from the last layer
-            X = h_last
-        # return X
         return h_last
 
     def _flatten(self, h, batch_size):
         # (num_layers*num_directions, batch_size, hidden_dim)  ==>
         # (batch_size, num_directions*num_layers, hidden_dim)  ==>
         # (batch_size, num_directions*num_layers*hidden_dim)
-        return h.transpose(0,1).contiguous().view(batch_size, -1)
+        return h.transpose(0, 1).contiguous().view(batch_size, -1)
 
     def _init_weights(self):
         for m in self.modules():
@@ -423,14 +464,6 @@ class Encoder(nn.Module):
             elif isinstance(m, nn.Linear):
                 torch.nn.init.xavier_uniform_(m.weight)
                 m.bias.data.fill_(0.01)
-
-    def _sample(self, mean, logv):
-        std = torch.exp(0.5 * logv)
-        # torch.randn_like() creates a tensor with values samples from N(0,1) and std.shape
-        eps = torch.randn_like(std)
-        # Sampling from Z~N(μ, σ^2) = Sampling from μ + σX, X~N(0,1)
-        z = mean + std * eps
-        return z
 
 
 class Decoder(nn.Module):
@@ -443,10 +476,13 @@ class Decoder(nn.Module):
         # Check if a valid parameter for RNN type is given
         if self.params.rnn_type not in [RnnType.GRU, RnnType.LSTM]:
             raise Exception(
-                "Unknown RNN type for encoder. Valid options: {}".format(', '.join([str(t) for t in RnnType])))
+                "Unknown RNN type for encoder. Valid options: {}".format(', '.join([str(t) for t in RnnType]))
+            )
 
         if not self.params.initialize_repeat:
-            self.transformation_layer = nn.Linear(self.params.rnn_hidden_dim, self.params.rnn_hidden_dim * self.params.num_layers)
+            self.transformation_layer = nn.Linear(
+                self.params.rnn_hidden_dim, self.params.rnn_hidden_dim * self.params.num_layers
+                )
 
         # RNN layer
         self.num_directions = 2 if self.params.bidirectional_encoder == True else 1
@@ -458,11 +494,10 @@ class Decoder(nn.Module):
             self.num_hidden_states = 2
             rnn = nn.LSTM
 
-        self.rnn = rnn(self.params.num_features,
-                       self.params.rnn_hidden_dim*self.num_directions,
-                       num_layers=self.params.num_layers,
-                       dropout=self.params.dropout,
-                       batch_first=True)
+        self.rnn = rnn(
+            self.params.num_features, self.params.rnn_hidden_dim * self.num_directions,
+            num_layers=self.params.num_layers, dropout=self.params.dropout, batch_first=True
+            )
 
         # self.linear_dims = self.params.linear_dims + [self.params.rnn_hidden_dim * self.num_directions * self.params.num_layers * self.num_hidden_states]
         #
@@ -479,10 +514,7 @@ class Decoder(nn.Module):
         batch_size, num_steps = padded_sequence.shape[0], padded_sequence.shape[1]
 
         # Initialize with the embedding
-        hidden = (
-            z.repeat(self.params.num_layers, 1, 1),
-            z.repeat(self.params.num_layers, 1, 1)
-        )
+        hidden = (z.repeat(self.params.num_layers, 1, 1), z.repeat(self.params.num_layers, 1, 1))
 
         # Initialize recovered_sequence with zeros
         recovered_sequence = torch.zeros(padded_sequence.shape, dtype=torch.float32).to(self.device)
@@ -503,7 +535,6 @@ class Decoder(nn.Module):
         else:
             return loss
 
-
     def _step(self, input, hidden):
 
         # Ensure the input is 3D: [batch_size, 1, input_dim]
@@ -515,54 +546,9 @@ class Decoder(nn.Module):
 
         # print("hidden.shape: ", hidden[0].shape, hidden[1].shape)
 
-        prediction = self.out(prediction)[:, :, 0]#.squeeze(0)
+        prediction = self.out(prediction)[:, :, 0]  # .squeeze(0)
 
         return prediction, hidden
-
-    def _unflatten_hidden(self, X, batch_size):
-        if self.params.rnn_type == RnnType.LSTM:  # LSTM
-
-            if self.params.initialize_repeat:
-                # Repeat the last hidden state for each layer
-                # h = (self._unflatten(X, batch_size).repeat(self.params.num_layers, 1, 1),
-                #      self._unflatten(X, batch_size).repeat(self.params.num_layers, 1, 1))
-                h = (X.repeat(self.params.num_layers, 1, 1),
-                     X.repeat(self.params.num_layers, 1, 1))
-            else:
-                # Learn a transformation (assuming you have a transformation_layer)
-                transformed = self.transformation_layer(X)
-                h = (self._unflatten(transformed, batch_size),
-                     self._unflatten(transformed, batch_size))
-        else:  # GRU
-            if self.params.initialize_repeat:
-                h = self._unflatten(X, batch_size).repeat(self.params.num_layers, 1, 1)
-            else:
-                transformed = self.transformation_layer(X)
-                h = self._unflatten(transformed, batch_size)
-        return h
-
-    def _unflatten(self, X, batch_size):
-        return X.view(self.params.num_layers, batch_size, self.params.rnn_hidden_dim).contiguous()
-
-    def _init_hidden_state(self, encoder_hidden):
-        if encoder_hidden is None:
-            return None
-        elif isinstance(encoder_hidden, tuple): # LSTM
-            return tuple([self._concat_directions(h) for h in encoder_hidden])
-        else: # GRU
-            return self._concat_directions(encoder_hidden)
-
-    def _concat_directions(self, hidden):
-            # hidden.shape = (num_layers * num_directions, batch_size, hidden_dim)
-            #print(hidden.shape, hidden[0:hidden.size(0):2].shape)
-            if self.params.bidirectional_encoder:
-                hidden = torch.cat([hidden[0:hidden.size(0):2], hidden[1:hidden.size(0):2]], 2)
-                # Alternative approach (same output but easier to understand)
-                #h = hidden.view(self.params.num_layers, self.num_directions, hidden.size(1), self.params.rnn_hidden_dim)
-                #h_fwd = h[:, 0, :, :]
-                #h_bwd = h[:, 1, :, :]
-                #hidden = torch.cat([h_fwd, h_bwd], 2)
-            return hidden
 
     def _init_weights(self):
         for m in self.modules():
@@ -571,34 +557,6 @@ class Decoder(nn.Module):
             elif isinstance(m, nn.Linear):
                 torch.nn.init.xavier_uniform_(m.weight)
                 m.bias.data.fill_(0.01)
-
-    def generate(self, z, max_steps):
-            # decoded_sequence = []
-            # # "Expand" z vector
-            # #X = self.z_to_hidden(z)
-            # X = z
-            # # Unflatten hidden state for GRU or LSTM
-            # hidden = self._unflatten_hidden(X, 1)
-            # # Restructure shape of hidden state to accommodate bidirectional encoder (decoder is unidirectional)
-            # hidden = self._init_hidden_state(hidden)
-            # # Create SOS token tensor as first input for decoder
-            # input = torch.LongTensor([[Token.SOS]]).to(self.device)
-            # # Generate words step by step
-            # for i in range(max_steps):
-            #     output, hidden = self._step(input, hidden)
-            #     topv, topi = output.data.topk(1)
-            #     #print(topi.shape, topi[0])
-            #     if topi.item() == Token.EOS:
-            #         break
-            #     else:
-            #         decoded_sequence.append(topi.item())
-            #         input = topi.detach()
-            # # Return final decoded sequence (sequence of of indices)
-            # return decoded_sequence
-
-        # loss, outputs = self.forward(z, z, return_outputs=True)
-        output, hidden = self._step(z, z)
-        return output
 
 
 class PaddedSequenceDataset(Dataset):
@@ -618,7 +576,9 @@ class PaddedDataLoader():
     def __init__(self, data):
         self.data = data
 
-    def get_datasets(self, batch_size=(32, "auto", "auto"), val_size=0.15, test_size=0.15, shuffle=(True, False, False)):
+    def get_datasets(
+            self, batch_size=(32, "auto", "auto"), val_size=0.15, test_size=0.15, shuffle=(True, False, False)
+            ):
 
         # First, split into training and temp sets
         train_data, temp_data = train_test_split(self.data, test_size=(val_size + test_size))
@@ -657,77 +617,3 @@ class PaddedDataLoader():
         sequences = pad_sequence(sequences, batch_first=True)
 
         return sequences, lengths
-
-
-def plot_traces(timeseries_rnn_ae, dataloader, figsize=(10, 10), n_samples=16, sharex=False):
-
-    from tqdm import tqdm
-    from torch.utils.data import DataLoader, BatchSampler, SequentialSampler
-    import torch.nn as nn
-    from tqdm import tqdm
-    import matplotlib.pyplot as plt
-
-    timeseries_rnn_ae.eval()
-
-    x_val = []
-    y_val = []
-    latent = []
-    losses = []
-    for batch_data, batch_lengths in tqdm(dataloader):
-
-        batch_data = batch_data.unsqueeze(-1)
-        batch_data = batch_data.to(dtype=torch.float32)#.to(self.device)  # Move to device and ensure it's float
-        batch_lengths = torch.tensor(batch_lengths, dtype=torch.float32)#, device=self.device)
-
-        # Pack the batch
-        packed_batch_data = pack_padded_sequence(batch_data, batch_lengths.cpu().numpy(), batch_first=True)#.to(self.device)
-
-        batch_size = packed_batch_data.batch_sizes[0]  # The first element contains the batch size
-        num_steps = packed_batch_data.data.size(0)  # Total number of timesteps across all sequences
-
-        encoder = timeseries_rnn_ae.encoder
-        initial_hidden = encoder.init_hidden(batch_size)
-        encoded, _ = encoder(packed_batch_data, initial_hidden)
-
-        decoder = timeseries_rnn_ae.decoder
-        loss, decoded = decoder(packed_batch_data, encoded, batch_lengths, return_outputs=True)
-
-        # Convert batch_data and decoded data to numpy
-        x_np = batch_data.cpu().numpy()
-        y_np = decoded.cpu().detach().numpy()
-        encoded_np = encoded.cpu().detach().numpy()
-
-        # Remove zero padding based on batch_lengths
-        x_np = [x_np[i, :int(batch_lengths[i]), :] for i in range(len(batch_lengths))]
-        y_np = [y_np[i, :int(batch_lengths[i]), :] for i in range(len(batch_lengths))]
-        # encoded_np = [encoded_np[i, :int(batch_lengths[i])] for i in range(len(batch_lengths))]
-
-        x_val.extend(x_np)
-        y_val.extend(y_np)
-        latent.extend(encoded_np)
-        losses.append(loss.item())
-
-    n_samples = min(len(x_val), n_samples)
-
-    fig, axx = plt.subplots(n_samples, 2, figsize=figsize, sharey=False, sharex=sharex)
-
-    for i, idx in enumerate(np.random.randint(0, len(x_val), size=(n_samples))):
-        x = np.squeeze(x_val[idx])
-        y = np.squeeze(y_val[idx])
-
-        axx[i, 0].plot(x, color="gray", linestyle="--")
-        axx[i, 0].plot(y, color="red", linestyle="-")
-        axx[i, 0].set_ylabel(f"idx: {idx}")
-
-        if i != 0:
-            axx[i, 0].sharex(axx[0, 0])
-
-        latent_vector = latent[i]
-        latent_vector = np.reshape(latent_vector, (len(latent_vector), 1)).transpose()
-        axx[i, 1].imshow(latent_vector, aspect="auto", cmap="viridis")
-        axx[i, 1].axis("off")
-
-    plt.tight_layout()
-
-    return x_val, y_val, latent, losses
-
