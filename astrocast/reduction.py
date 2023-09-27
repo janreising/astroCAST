@@ -187,42 +187,27 @@ class RNN_Autoencoder(nn.Module):
         super(RNN_Autoencoder, self).__init__()
 
         self.l1_reg = l1_reg
-        self.encoder = nn.LSTM(input_dim, hidden_dim, num_layers, batch_first=True, dropout=dropout)
-        self.decoder = nn.LSTM(hidden_dim, input_dim, num_layers, batch_first=True, dropout=dropout)
+        # self.encoder = nn.LSTM(input_dim, hidden_dim, num_layers, batch_first=True, dropout=dropout)
+        # self.decoder = nn.LSTM(hidden_dim, input_dim, num_layers, batch_first=True, dropout=dropout)
+        self.encoder = nn.GRU(input_dim, hidden_dim, num_layers, batch_first=True, dropout=dropout)
+        self.decoder = nn.GRU(hidden_dim, input_dim, num_layers, batch_first=True, dropout=dropout)
 
     def forward(self, x, lengths):
         # Encoder
-        # print(x.shape)
         packed_x = pack_padded_sequence(x, lengths, batch_first=True, enforce_sorted=False)
-        packed_out, (h_n, c_n) = self.encoder(packed_x)
-        # print("h_n: ", h_n.shape)
-        # print("c_n: ", c_n.shape)
+        packed_out, h_n = self.encoder(packed_x)
 
         # Prepare the initial input and hidden state for decoder
-        # decoder_input = torch.zeros_like(x)  # Initialize decoder input with zeros
-        # decoder_input = h_n[-1]  # Initialize decoder input with zeros
-        # decoder_input = h_n[-1, :, :].unsqueeze(1)  # Initialize decoder input with zeros
-        # print("dec: ", decoder_input.shape)
-        # decoder_hidden = (h_n, c_n)  # Use the last hidden state from the encoder to initialize the decoder
-
-        # Unpack the sequence
         unpacked_out, _ = pad_packed_sequence(packed_out, batch_first=True)
-
-        # Use the unpacked output as the initial input for the decoder
         decoder_input = unpacked_out
-        decoder_hidden = (h_n, c_n)
+        decoder_hidden = h_n[-1].unsqueeze(0)  # Using the last layer's hidden state
 
         # Decoder
         decoded_out, _ = self.decoder(decoder_input, decoder_hidden)
-        # print(decoded_out.shape)
 
         # Calculate L1 loss on the latent representation
         latent_representation = h_n.view(h_n.size(1), -1)
-        if self.l1_reg is not None:
-            l1_loss = self.l1_reg * torch.norm(latent_representation, 1)
-        else:
-
-            l1_loss = 0
+        l1_loss = self.l1_reg * torch.norm(latent_representation, 1) if self.l1_reg else 0
 
         return decoded_out, l1_loss, latent_representation
 

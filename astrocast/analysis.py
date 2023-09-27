@@ -215,7 +215,7 @@ class Events(CachedClass):
             if typ == "object":
                 typ = type(events[column].dropna().iloc[0])
 
-            if typ in [int, float, np.int64, np.float64]:
+            if typ in [int, float, np.int64, np.float64, np.float32]:
 
                 min_, max_ = filters[column]
 
