@@ -19,6 +19,7 @@ from astrocast.preparation import IO
 import seaborn as sns
 
 from astrocast.reduction import CNN
+from astrocast.rnn import TimeSeriesRnnAE, Parameters, PaddedDataLoader
 
 with warnings.catch_warnings():
     warnings.simplefilter(action='ignore', category=NumbaDeprecationWarning)
@@ -59,6 +60,25 @@ class Analysis:
                 "in_numeric_cnn_batch_size":64,
                 "in_numeric_cnn_patience":5,
                 "in_numeric_cnn_min_delta":0.005,
+            },
+            "RNN":{
+                "in_numeric_rnn_batch_size":16,
+                "in_numeric_rnn_val_size":0.15,
+                "in_numeric_rnn_test_size":0.15,
+                "in_numeric_rnn_num_epochs":10,
+                "in_numeric_rnn_patience":5,
+                "in_numeric_rnn_min_delta":0.001,
+                "in_switch_encoding_use_rnn":False,
+                "in_switch_rnn_use_cuda":False,
+                "in_numeric_rnn_encode_lr":0.001,
+                "in_numeric_rnn_decode_lr":0.001,
+                "in_numeric_rnn_diminish_lr":0.99,
+                "in_select_rnn_type":"LSTM",
+                "in_numeric_rnn_hidden":32,
+                "in_numeric_rnn_num_layers":2,
+                "in_numeric_rnn_dropout":0,
+                "in_numeric_rnn_clip":0.5,
+                "in_switch_rnn_initialize_repeat":True,
             }
         }
 
@@ -360,12 +380,83 @@ class Analysis:
 
                                     )
                                 ),
+                                xui.accordion_panel(
+                                    "RNN",
+                                    ui.input_switch("in_switch_encoding_use_rnn", "use rnn encoding",
+                                                    value=self.settings["RNN"]["in_switch_encoding_use_rnn"]),
+                                    xui.card(
+                                        xui.card_header("Settings"),
+                                        ui.input_switch("in_switch_rnn_use_cuda", "use cuda",
+                                                    value=self.settings["RNN"]["in_switch_rnn_use_cuda"]),
+                                        ui.row(
+                                            ui.column(4, ui.input_numeric("in_numeric_rnn_batch_size", "batch size",
+                                                                          value=self.settings["RNN"]["in_numeric_rnn_batch_size"])),
+                                            ui.column(4, ui.input_numeric("in_numeric_rnn_val_size", "validation split",
+                                                                          value=self.settings["RNN"]["in_numeric_rnn_val_size"])),
+                                            ui.column(4, ui.input_numeric("in_numeric_rnn_test_size", "test split",
+                                                                          value=self.settings["RNN"]["in_numeric_rnn_test_size"])),
+                                        ),
+                                        ui.row(
+                                            ui.column(4, ui.input_numeric("in_numeric_rnn_num_epochs", "num epochs",
+                                                                          value=self.settings["RNN"]["in_numeric_rnn_num_epochs"])),
+                                            ui.column(4, ui.input_numeric("in_numeric_rnn_patience", "patience",
+                                                                          value=self.settings["RNN"]["in_numeric_rnn_patience"])),
+                                            ui.column(4, ui.input_numeric("in_numeric_rnn_min_delta", "min delta",
+                                                                          value=self.settings["RNN"]["in_numeric_rnn_min_delta"])),
+                                        ),
+                                        ui.row(
+                                            ui.column(4, ui.input_numeric("in_numeric_rnn_encode_lr", "encoder learning rate",
+                                                                          value=self.settings["RNN"]["in_numeric_rnn_encode_lr"], max=1)),
+                                            ui.column(4, ui.input_numeric("in_numeric_rnn_decode_lr", "decoder learning rate",
+                                                                          value=self.settings["RNN"]["in_numeric_rnn_decode_lr"], max=1)),
+                                            ui.column(4, ui.input_numeric("in_numeric_rnn_diminish_lr", "learning rate decay",
+                                                                          value=self.settings["RNN"]["in_numeric_rnn_diminish_lr"], max=1)),
+                                        ),
+                                        ui.row(
+                                            ui.column(4, ui.input_select("in_select_rnn_type", "RNN type",
+                                                                choices=["LSTM", "GRU"],
+                                                                selected=self.settings["RNN"]["in_select_rnn_type"])),
+                                            ui.column(4, ui.input_numeric("in_numeric_rnn_hidden", "hidden dimension",
+                                                                          value=self.settings["RNN"]["in_numeric_rnn_hidden"])),
+                                            ui.column(4, ui.input_numeric("in_numeric_rnn_num_layers", "num layers",
+                                                                          value=self.settings["RNN"]["in_numeric_rnn_num_layers"])),
+                                        ),
+                                        ui.row(
+                                            ui.column(4, ui.input_numeric("in_numeric_rnn_dropout", "dropout",
+                                                                          value=self.settings["RNN"]["in_numeric_rnn_dropout"]),
+                                                                selected=self.settings["RNN"]["in_select_rnn_type"]),
+                                            ui.column(4, ui.input_numeric("in_numeric_rnn_clip", "gradient clipping",
+                                                                          value=self.settings["RNN"]["in_numeric_rnn_clip"])),
+                                            ui.column(4, ui.input_switch("in_switch_rnn_initialize_repeat", "initialize repetition",
+                                                            value=self.settings["RNN"]["in_switch_rnn_initialize_repeat"])),
+                                        ),
+                                    ),
+                                    xui.card(
+                                        xui.card_header("Plotting"),
+                                        ui.row(
+                                            ui.column(4, ui.input_numeric("in_numeric_rnn_num_samples", "num samples",
+                                                                          value=4)),
+                                            ui.column(4, ui.input_numeric("in_numeric_rnn_plot_height", "plot height",
+                                                                          value=400)),
+                                            ui.column(4, ui.input_numeric("in_numeric_rnn_plot_width", "plot width",
+                                                                          value=200)),
+                                        ),
+                                    ),
+                                ),
                             open=False),
                         ),
                         ui.panel_main(
-                            ui.output_plot("out_plot_cnn_history"),
-                            ui.output_plot("out_plot_cnn_examples"),
-                            ui.output_plot("out_plot_cnn_latent"),
+                            ui.panel_conditional(
+                                            "input.in_switch_cnn_use_cnn",
+                                            ui.output_plot("out_plot_cnn_history"),
+                                            ui.output_plot("out_plot_cnn_examples"),
+                                            ui.output_plot("out_plot_cnn_latent"),
+                                        ),
+                            ui.panel_conditional(
+                                            "input.in_switch_encoding_use_rnn",
+                                            ui.output_plot("out_plot_rnn_history"),
+                                            ui.output_ui("out_plot_rnn_ui"),
+                            ),
                         )
                     )
         )
@@ -1285,6 +1376,93 @@ class Analysis:
                 fig, ax = plt.subplots(1, 1)
                 sns.heatmap(matrix, ax=ax)
 
+                return fig
+            return None
+
+        # RNN
+        @reactive.Calc
+        def get_RNN():
+
+            event_obj = get_events_obj_normalized()
+            if input.in_switch_encoding_use_rnn() and event_obj is not None:
+
+                events = event_obj.events
+
+                params_dict = {
+                    'num_traces': len(events),
+                    'num_features': 1,
+                    'encoder_lr': input.in_numeric_rnn_encode_lr(),
+                    'decoder_lr': input.in_numeric_rnn_decode_lr(),
+                    'rnn_type': 1 if input.in_select_rnn_type() == "GRU" else 2,
+                    'rnn_hidden_dim': input.in_numeric_rnn_hidden(),
+                    'num_layers': input.in_numeric_rnn_num_layers(),
+                    'dropout': input.in_numeric_rnn_dropout(),
+                    'initialize_repeat': input.in_switch_rnn_initialize_repeat(),
+                    'clip': input.in_numeric_rnn_clip(),
+                }
+
+                params = Parameters(params_dict)
+
+                pdl = PaddedDataLoader(events.trace.tolist())
+                X_train, X_val, X_test = pdl.get_datasets(batch_size=input.in_numeric_rnn_batch_size(),
+                                                          val_size=input.in_numeric_rnn_val_size(),
+                                                          test_size=input.in_numeric_rnn_test_size())
+
+                rnnAE = TimeSeriesRnnAE(params)
+
+                rnnAE.train_epochs(X_train, X_val,
+                                      num_epochs=input.in_numeric_rnn_num_epochs(),
+                                      diminish_learning_rate=input.in_numeric_rnn_diminish_lr(),
+                                      patience=input.in_numeric_rnn_patience(),
+                                      min_delta=input.in_numeric_rnn_min_delta(),
+                                      show_mode="progress")
+
+                return rnnAE, (X_train, X_val, X_test)
+            return None, (None, None, None)
+
+        @output
+        @render.plot
+        def out_plot_rnn_history():
+
+            rnnAE, (X_train, X_val, X_test) = get_RNN()
+            if rnnAE is not None:
+
+                fig, axx = plt.subplots(1, 2, figsize=(9, 4))
+
+                axx[0].plot(rnnAE.train_losses, color="black", label="training")
+                if X_val is not None:
+                    axx[0].plot(np.array(rnnAE.val_losses).flatten(), color="green", label="validation")
+
+                axx[0].set_title(f"losses")
+                axx[0].set_yscale("log")
+                axx[0].legend()
+
+                lrates = np.array(rnnAE.learning_rates)
+                axx[1].plot(lrates[:, 0], color="green", label="encoder", linestyle="--")
+                axx[1].plot(lrates[:, 1], color="red", label="decoder", linestyle="--")
+                axx[1].set_title(f"learning rates")
+                axx[1].legend()
+
+                fig.suptitle(f"Epoch {len(rnnAE.train_losses)}/{input.in_numeric_rnn_num_epochs()}")
+                return fig
+            return None
+
+        @output
+        @render.ui
+        def out_plot_rnn_ui():
+            return ui.output_plot("out_plot_rnn_examples",
+                                  width=f"{input.in_numeric_rnn_plot_height()}px",
+                                  height=f"{input.in_numeric_rnn_plot_width()}px")
+
+        @output
+        @render.plot
+        def out_plot_rnn_examples():
+
+            rnnAE, (X_train, X_val, X_test) = get_RNN()
+            if rnnAE is not None:
+
+                fig, _, _, _, _ = rnnAE.plot_traces(X_test,
+                                                                      n_samples=input.in_numeric_rnn_num_samples())
                 return fig
             return None
 

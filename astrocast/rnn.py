@@ -221,6 +221,10 @@ class TimeSeriesRnnAE:
 
         self.eval()
 
+        self.train_losses = train_losses
+        self.val_losses = val_losses
+        self.learning_rates = learning_rates
+
         return losses
 
     def train_batch(self, packed_inputs, lengths):
@@ -350,7 +354,6 @@ class TimeSeriesRnnAE:
             losses.append(loss.item())
 
         n_samples = min(len(x_val), n_samples)
-
         fig, axx = plt.subplots(n_samples, 2, figsize=figsize, sharey=False, sharex=sharex)
 
         for i, idx in enumerate(np.random.randint(0, len(x_val), size=(n_samples))):
@@ -371,7 +374,7 @@ class TimeSeriesRnnAE:
 
         plt.tight_layout()
 
-        return x_val, y_val, latent, losses
+        return fig, x_val, y_val, latent, losses
 
 
 class Encoder(nn.Module):
@@ -387,7 +390,6 @@ class Encoder(nn.Module):
                 )
 
         # RNN layer
-        # self.num_directions = 2 if self.params.bidirectional_encoder == True else 1
         self.num_directions = 1
         if self.params.rnn_type == RnnType.GRU:
             self.num_hidden_states = 1
@@ -400,16 +402,11 @@ class Encoder(nn.Module):
 
         self.rnn = rnn(
             self.params.num_features, self.params.rnn_hidden_dim, num_layers=self.params.num_layers,
-            bidirectional=self.params.bidirectional_encoder, dropout=self.params.dropout, batch_first=True
+            bidirectional=False, dropout=self.params.dropout, batch_first=True
             )
 
         # Initialize hidden state
         self.hidden = None
-        # Define linear layers
-        self.linear_dims = params.linear_dims
-        self.linear_dims = [
-                               self.params.rnn_hidden_dim * self.num_directions * self.params.num_layers * self.num_hidden_states] + self.linear_dims
-
         self._init_weights()
 
     def init_hidden(self, batch_size):
@@ -485,7 +482,7 @@ class Decoder(nn.Module):
                 )
 
         # RNN layer
-        self.num_directions = 2 if self.params.bidirectional_encoder == True else 1
+        self.num_directions = 1
 
         if self.params.rnn_type == RnnType.GRU:
             self.num_hidden_states = 1
@@ -499,9 +496,6 @@ class Decoder(nn.Module):
             num_layers=self.params.num_layers, dropout=self.params.dropout, batch_first=True
             )
 
-        # self.linear_dims = self.params.linear_dims + [self.params.rnn_hidden_dim * self.num_directions * self.params.num_layers * self.num_hidden_states]
-        #
-        # print("rnn_hidden_dim: ", self.params.rnn_hidden_dim * self.num_directions)
         self.out = nn.Linear(self.params.rnn_hidden_dim * self.num_directions, self.params.num_features)
 
         self._init_weights()
