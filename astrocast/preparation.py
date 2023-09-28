@@ -353,6 +353,9 @@ class IO:
             elif path.suffix in [".npy", ".NPY"]:
                 data =  self._load_npy(path, lazy=lazy, chunks=chunks)
 
+            elif path.suffix in [".csv", ".CSV"]:
+                data =  self._load_csv(path, chunks=chunks)
+
             elif path.is_dir():
 
                 # If the path is a directory, load multiple TIFF files
@@ -452,6 +455,17 @@ class IO:
                 data = data[h5_loc][:] # Read all data from HDF5 file
 
         return data
+
+    def _load_csv(self, path, chunks="auto"):
+
+        df = pd.read_csv(path)
+
+        if isinstance(pd.Series):
+            df = df.values
+            return da.from_array(df, chunks=chunks)
+
+        return df
+
 
     @staticmethod
     def _load_czi(path, lazy=False):
