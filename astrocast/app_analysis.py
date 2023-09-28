@@ -9,13 +9,16 @@ import numpy as np
 import pandas as pd
 import seaborn
 import sklearn.decomposition
+import yaml
 from matplotlib import pyplot as plt, gridspec
 from numba import NumbaDeprecationWarning
 from shiny import App, ui, render, reactive, req
 import shiny.experimental.ui as xui
 from sklearn.manifold import TSNE
+from sklearn.metrics import ConfusionMatrixDisplay
 
 from astrocast.analysis import Events, Video
+from astrocast.clustering import CoincidenceDetection, Discriminator
 from astrocast.helper import Normalization, is_ragged
 from astrocast.preparation import IO
 import seaborn as sns
@@ -52,40 +55,58 @@ class Analysis:
                 "in_select_impute_order":"", "in_switch_impute_fixed":False, "in_numeric_impute_val":0,
                 "in_select_gradient_order":""
             },
-            "FE":{
-                "in_switch_encoder_use_fe": False,
-                "in_switch_encoder_fe_add_def_columns": False
+            "Encoding":{
+                "in_select_encoding_options": "Feature Extraction",
+                "FE":{
+                    "in_switch_encoder_use_fe": False,
+                    "in_switch_encoder_fe_add_def_columns": False,
+                },
+                "CNN":{
+                    "in_switch_cnn_use_cnn":False,
+                    "in_slider_cnn_split":0.9,
+                    "in_numeric_cnn_learning_rate":0.001,
+                    "in_numeric_cnn_latent_size":128,
+                    "in_numeric_cnn_dropout":None,
+                    "in_numeric_cnn_regularize":None,
+                    "in_numeric_cnn_epochs":10,
+                    "in_numeric_cnn_batch_size":32,
+                    "in_numeric_cnn_patience":5,
+                    "in_numeric_cnn_min_delta":0.01,
+                },
+                "RNN":{
+                    "in_switch_encoding_use_rnn":False,
+                    "in_numeric_rnn_batch_size":16,
+                    "in_numeric_rnn_val_size":0.05,
+                    "in_numeric_rnn_test_size":0.05,
+                    "in_numeric_rnn_num_epochs":10,
+                    "in_numeric_rnn_patience":5,
+                    "in_numeric_rnn_min_delta":0.001,
+                    "in_switch_rnn_use_cuda":False,
+                    "in_numeric_rnn_encode_lr":0.001,
+                    "in_numeric_rnn_decode_lr":0.001,
+                    "in_numeric_rnn_diminish_lr":0.99,
+                    "in_select_rnn_type":"LSTM",
+                    "in_numeric_rnn_hidden":32,
+                    "in_numeric_rnn_num_layers":2,
+                    "in_numeric_rnn_dropout":0,
+                    "in_numeric_rnn_clip":0.5,
+                    "in_switch_rnn_initialize_repeat":True,
+                },
+                "reducer":{
+                    "in_select_dimensionality_reduction_options": "",
+                    "in_switch_encoding_pca_auto_dim": True,
+                    "in_numeric_encoding_pca_n_components":2,
+                    "in_numeric_encoding_tsne_n_components": 2,
+                    "in_numeric_encoding_tsne_early_exaggeration": 12,
+                    "in_numeric_encoding_tsne_perplexity": 30,
+                    "in_numeric_encoding_tsne_n_iter": 1000,
+                    "in_numeric_encoding_umap_neighbors":30,
+                    "in_numeric_encoding_umap_min_dist":0,
+                    "in_numeric_encoding_umap_n_components":2,
+                }
             },
-            "CNN":{
-                "in_switch_cnn_use_cnn":False,
-                "in_slider_cnn_split":0.9,
-                "in_numeric_cnn_learning_rate":0.001,
-                "in_numeric_cnn_latent_size":128,
-                "in_numeric_cnn_dropout":None,
-                "in_numeric_cnn_regularize":None,
-                "in_numeric_cnn_epochs":10,
-                "in_numeric_cnn_batch_size":32,
-                "in_numeric_cnn_patience":5,
-                "in_numeric_cnn_min_delta":0.01,
-            },
-            "RNN":{
-                "in_switch_encoding_use_rnn":False,
-                "in_numeric_rnn_batch_size":16,
-                "in_numeric_rnn_val_size":0.05,
-                "in_numeric_rnn_test_size":0.05,
-                "in_numeric_rnn_num_epochs":10,
-                "in_numeric_rnn_patience":5,
-                "in_numeric_rnn_min_delta":0.001,
-                "in_switch_rnn_use_cuda":False,
-                "in_numeric_rnn_encode_lr":0.001,
-                "in_numeric_rnn_decode_lr":0.001,
-                "in_numeric_rnn_diminish_lr":0.99,
-                "in_select_rnn_type":"LSTM",
-                "in_numeric_rnn_hidden":32,
-                "in_numeric_rnn_num_layers":2,
-                "in_numeric_rnn_dropout":0,
-                "in_numeric_rnn_clip":0.5,
-                "in_switch_rnn_initialize_repeat":True,
+            "Experiment":{
+                "in_textarea_inc_kwargs":"",
             }
         }
 
@@ -94,16 +115,30 @@ class Analysis:
             if not isinstance(default_settings, dict):
                 raise ValueError(f"Please provide default_settings as dictionary, not {type(default_settings)}")
 
-            for nav_key in default_settings.keys():
-
-                nav_settings = default_settings[nav_key]
-                for ui_key in nav_settings.keys():
-                    settings[nav_key][ui_key] = nav_settings[ui_key]
+            settings = self.update_nested_dict(settings, default_settings)
 
         self.settings = settings
 
         self.app_ui = self.create_ui()
         self.app = App(self.app_ui, self.server)
+
+    def update_nested_dict(self, base_dict, new_dict):
+        """
+        Update a nested dictionary with values from another nested dictionary.
+
+        Parameters:
+        - base_dict (dict): The dictionary to be updated.
+        - new_dict (dict): The dictionary containing new values.
+
+        Returns:
+        - None: The base_dict is updated in-place.
+        """
+        for key, value in new_dict.items():
+            if isinstance(value, dict):
+                base_dict[key] = self.update_nested_dict(base_dict.get(key, {}), value)
+            else:
+                base_dict[key] = value
+        return base_dict
 
     def create_ui(self):
 
@@ -345,15 +380,16 @@ class Analysis:
                         ui.panel_sidebar(
                             ui.input_select("in_select_encoding_options", "Encoders",
                                             choices=["", "Feature Extraction", "Convolutional Neural Network (CNN)",
-                                                     "Recurrent Neural Network (RNN)"], selected=""),
+                                                     "Recurrent Neural Network (RNN)"],
+                                            selected=self.settings["Encoding"]["in_select_encoding_options"]),
                             ui.panel_conditional(
                                 "input.in_select_encoding_options == 'Feature Extraction'",
                                 xui.card(
                                     xui.card_header("FE"),
                                     ui.input_switch("in_switch_encoder_use_fe", "use FE encoding",
-                                                    value=self.settings["FE"]["in_switch_encoder_use_fe"]),
+                                                    value=self.settings["Encoding"]["FE"]["in_switch_encoder_use_fe"]),
                                     ui.input_switch("in_switch_encoder_fe_add_def_columns", "add default columns",
-                                                    value=self.settings["FE"]["in_switch_encoder_fe_add_def_columns"]),
+                                                    value=self.settings["Encoding"]["FE"]["in_switch_encoder_fe_add_def_columns"]),
                                     ui.input_select("in_select_encoder_fe_nan_settings", "NaN behavior",
                                                     choices=["", "column", "rows", "fill"]),
                                     ui.panel_conditional(
@@ -368,7 +404,7 @@ class Analysis:
                                 xui.card(
                                     xui.card_header("CNN"),
                                     ui.input_switch("in_switch_cnn_use_cnn", "use cnn encoding",
-                                                    value=self.settings["CNN"]["in_switch_cnn_use_cnn"]),
+                                                    value=self.settings["Encoding"]["CNN"]["in_switch_cnn_use_cnn"]),
                                     ui.output_text("out_text_cnn_warning_ragged"),
                                     ui.br(),
                                     xui.card(
@@ -376,30 +412,30 @@ class Analysis:
                                         ui.input_file("in_file_cnn_encoder", "encoder path"),
                                         ui.row(
                                             ui.column(4, ui.input_slider("in_slider_cnn_split", "Train split", min=0.01, max=0.99,
-                                                                         value=self.settings["CNN"]["in_slider_cnn_split"]),),
+                                                                         value=self.settings["Encoding"]["CNN"]["in_slider_cnn_split"]),),
                                             ui.column(4, ui.input_numeric("in_numeric_cnn_latent_size", "latent_size",
-                                                                         value=self.settings["CNN"]["in_numeric_cnn_latent_size"]),),
+                                                                         value=self.settings["Encoding"]["CNN"]["in_numeric_cnn_latent_size"]),),
                                             ui.column(4, ui.input_numeric("in_numeric_cnn_learning_rate", "learning rate",
-                                                                         value=self.settings["CNN"]["in_numeric_cnn_learning_rate"]),),
+                                                                         value=self.settings["Encoding"]["CNN"]["in_numeric_cnn_learning_rate"]),),
                                         ),
                                         ui.row(
                                             ui.column(6, ui.input_numeric("in_numeric_cnn_dropout", "dropout",
-                                                                          value=self.settings["CNN"]["in_numeric_cnn_dropout"], max=0.99)),
+                                                                          value=self.settings["Encoding"]["CNN"]["in_numeric_cnn_dropout"], max=0.99)),
                                             ui.column(6, ui.input_numeric("in_numeric_cnn_regularize", "regularize latent",
-                                                                          value=self.settings["CNN"]["in_numeric_cnn_regularize"], max=0.99)),
+                                                                          value=self.settings["Encoding"]["CNN"]["in_numeric_cnn_regularize"], max=0.99)),
                                         ),
                                         ui.row(
                                             ui.column(6, ui.input_numeric("in_numeric_cnn_epochs", "epochs",
-                                                                          value=self.settings["CNN"]["in_numeric_cnn_epochs"], min=1),),
+                                                                          value=self.settings["Encoding"]["CNN"]["in_numeric_cnn_epochs"], min=1),),
                                             ui.column(6, ui.input_numeric("in_numeric_cnn_batch_size", "batch size",
-                                                                          value=self.settings["CNN"]["in_numeric_cnn_batch_size"], min=1),),
+                                                                          value=self.settings["Encoding"]["CNN"]["in_numeric_cnn_batch_size"], min=1),),
                                         ),
                                         # ui.h6("Early stopping"),
                                         ui.row(
                                             ui.column(6, ui.input_numeric("in_numeric_cnn_patience", "patience",
-                                                                          value=self.settings["CNN"]["in_numeric_cnn_patience"], min=1),),
+                                                                          value=self.settings["Encoding"]["CNN"]["in_numeric_cnn_patience"], min=1),),
                                             ui.column(6, ui.input_numeric("in_numeric_cnn_min_delta", "min_delta",
-                                                                          value=self.settings["CNN"]["in_numeric_cnn_min_delta"]),),
+                                                                          value=self.settings["Encoding"]["CNN"]["in_numeric_cnn_min_delta"]),),
                                         ),
                                     ),
                                     xui.card(
@@ -415,52 +451,52 @@ class Analysis:
                                 xui.card(
                                     xui.card_header("RNN"),
                                     ui.input_switch("in_switch_encoding_use_rnn", "use rnn encoding",
-                                                    value=self.settings["RNN"]["in_switch_encoding_use_rnn"]),
+                                                    value=self.settings["Encoding"]["RNN"]["in_switch_encoding_use_rnn"]),
                                     xui.card(
                                         xui.card_header("Settings"),
                                         ui.input_switch("in_switch_rnn_use_cuda", "use cuda",
-                                                    value=self.settings["RNN"]["in_switch_rnn_use_cuda"]),
+                                                    value=self.settings["Encoding"]["RNN"]["in_switch_rnn_use_cuda"]),
                                         ui.row(
                                             ui.column(4, ui.input_numeric("in_numeric_rnn_batch_size", "batch size",
-                                                                          value=self.settings["RNN"]["in_numeric_rnn_batch_size"])),
+                                                                          value=self.settings["Encoding"]["RNN"]["in_numeric_rnn_batch_size"])),
                                             ui.column(4, ui.input_numeric("in_numeric_rnn_val_size", "validation split",
-                                                                          value=self.settings["RNN"]["in_numeric_rnn_val_size"])),
+                                                                          value=self.settings["Encoding"]["RNN"]["in_numeric_rnn_val_size"])),
                                             ui.column(4, ui.input_numeric("in_numeric_rnn_test_size", "test split",
-                                                                          value=self.settings["RNN"]["in_numeric_rnn_test_size"])),
+                                                                          value=self.settings["Encoding"]["RNN"]["in_numeric_rnn_test_size"])),
                                         ),
                                         ui.row(
                                             ui.column(4, ui.input_numeric("in_numeric_rnn_num_epochs", "num epochs",
-                                                                          value=self.settings["RNN"]["in_numeric_rnn_num_epochs"])),
+                                                                          value=self.settings["Encoding"]["RNN"]["in_numeric_rnn_num_epochs"])),
                                             ui.column(4, ui.input_numeric("in_numeric_rnn_patience", "patience",
-                                                                          value=self.settings["RNN"]["in_numeric_rnn_patience"])),
+                                                                          value=self.settings["Encoding"]["RNN"]["in_numeric_rnn_patience"])),
                                             ui.column(4, ui.input_numeric("in_numeric_rnn_min_delta", "min delta",
-                                                                          value=self.settings["RNN"]["in_numeric_rnn_min_delta"])),
+                                                                          value=self.settings["Encoding"]["RNN"]["in_numeric_rnn_min_delta"])),
                                         ),
                                         ui.row(
                                             ui.column(4, ui.input_numeric("in_numeric_rnn_encode_lr", "encoder learning rate",
-                                                                          value=self.settings["RNN"]["in_numeric_rnn_encode_lr"], max=1)),
+                                                                          value=self.settings["Encoding"]["RNN"]["in_numeric_rnn_encode_lr"], max=1)),
                                             ui.column(4, ui.input_numeric("in_numeric_rnn_decode_lr", "decoder learning rate",
-                                                                          value=self.settings["RNN"]["in_numeric_rnn_decode_lr"], max=1)),
+                                                                          value=self.settings["Encoding"]["RNN"]["in_numeric_rnn_decode_lr"], max=1)),
                                             ui.column(4, ui.input_numeric("in_numeric_rnn_diminish_lr", "learning rate decay",
-                                                                          value=self.settings["RNN"]["in_numeric_rnn_diminish_lr"], max=1)),
+                                                                          value=self.settings["Encoding"]["RNN"]["in_numeric_rnn_diminish_lr"], max=1)),
                                         ),
                                         ui.row(
                                             ui.column(4, ui.input_select("in_select_rnn_type", "RNN type",
                                                                 choices=["LSTM", "GRU"],
-                                                                selected=self.settings["RNN"]["in_select_rnn_type"])),
+                                                                selected=self.settings["Encoding"]["RNN"]["in_select_rnn_type"])),
                                             ui.column(4, ui.input_numeric("in_numeric_rnn_hidden", "hidden dimension",
-                                                                          value=self.settings["RNN"]["in_numeric_rnn_hidden"])),
+                                                                          value=self.settings["Encoding"]["RNN"]["in_numeric_rnn_hidden"])),
                                             ui.column(4, ui.input_numeric("in_numeric_rnn_num_layers", "num layers",
-                                                                          value=self.settings["RNN"]["in_numeric_rnn_num_layers"])),
+                                                                          value=self.settings["Encoding"]["RNN"]["in_numeric_rnn_num_layers"])),
                                         ),
                                         ui.row(
                                             ui.column(4, ui.input_numeric("in_numeric_rnn_dropout", "dropout",
-                                                                          value=self.settings["RNN"]["in_numeric_rnn_dropout"]),
-                                                                selected=self.settings["RNN"]["in_select_rnn_type"]),
+                                                                          value=self.settings["Encoding"]["RNN"]["in_numeric_rnn_dropout"]),
+                                                                selected=self.settings["Encoding"]["RNN"]["in_select_rnn_type"]),
                                             ui.column(4, ui.input_numeric("in_numeric_rnn_clip", "gradient clipping",
-                                                                          value=self.settings["RNN"]["in_numeric_rnn_clip"])),
+                                                                          value=self.settings["Encoding"]["RNN"]["in_numeric_rnn_clip"])),
                                             ui.column(4, ui.input_switch("in_switch_rnn_initialize_repeat", "initialize repetition",
-                                                            value=self.settings["RNN"]["in_switch_rnn_initialize_repeat"])),
+                                                            value=self.settings["Encoding"]["RNN"]["in_switch_rnn_initialize_repeat"])),
                                         ),
                                     ),
                                     xui.card(
@@ -481,14 +517,16 @@ class Analysis:
                                 xui.card(
                                     xui.card_header("Dimensionality reduction"),
                                     ui.input_select("in_select_dimensionality_reduction_options", "Options",
-                                            choices=["", "PCA", "tSNE", "UMAP"], selected=""),
+                                                    choices=["", "PCA", "tSNE", "UMAP"],
+                                                    selected=self.settings["Encoding"]["reducer"]["in_select_dimensionality_reduction_options"]),
                                     ui.panel_conditional(
                                         "input.in_select_dimensionality_reduction_options == 'PCA'",
                                         ui.row(
                                             ui.column(3, ui.input_switch("in_switch_encoding_pca_auto_dim",
-                                                                         "automatic choice"), value=False),
+                                                                         "automatic choice"),
+                                                      value=self.settings["Encoding"]["reducer"]["in_switch_encoding_pca_auto_dim"]),
                                             ui.column(9, ui.input_numeric("in_numeric_encoding_pca_n_components", "n_components",
-                                                     value=2)),
+                                                     value=self.settings["Encoding"]["reducer"]["in_numeric_encoding_pca_n_components"])),
                                         ),
                                         ui.output_text("out_text_reduction_pca_quality"),
                                     ),
@@ -496,21 +534,24 @@ class Analysis:
                                         "input.in_select_dimensionality_reduction_options == 'tSNE'",
                                         ui.row(
                                             ui.column(3, ui.input_numeric("in_numeric_encoding_tsne_n_components", "n_components",
-                                                         value=2)),
+                                                         value=self.settings["Encoding"]["reducer"]["in_numeric_encoding_tsne_n_components"])),
                                             ui.column(3, ui.input_numeric("in_numeric_encoding_tsne_early_exaggeration", "early_exaggeration",
-                                                         value=12)),
+                                                         value=self.settings["Encoding"]["reducer"]["in_numeric_encoding_tsne_early_exaggeration"])),
                                             ui.column(3, ui.input_numeric("in_numeric_encoding_tsne_perplexity", "perplexity",
-                                                         value=30)),
+                                                         value=self.settings["Encoding"]["reducer"]["in_numeric_encoding_tsne_perplexity"])),
                                             ui.column(3, ui.input_numeric("in_numeric_encoding_tsne_n_iter", "n_iter",
-                                                         value=1000, min=250)),
+                                                         value=self.settings["Encoding"]["reducer"]["in_numeric_encoding_tsne_n_iter"], min=250)),
                                         ),
                                     ),
                                     ui.panel_conditional(
                                         "input.in_select_dimensionality_reduction_options == 'UMAP'",
                                         ui.row(
-                                            ui.column(4, ui.input_numeric("in_numeric_encoding_umap_neighbors", "n_neighbors", value=30),),
-                                            ui.column(4, ui.input_numeric("in_numeric_encoding_umap_min_dist", "min_dist", value=0),),
-                                            ui.column(4, ui.input_numeric("in_numeric_encoding_umap_n_components", "n_components", value=2),),
+                                            ui.column(4, ui.input_numeric("in_numeric_encoding_umap_neighbors", "n_neighbors",
+                                                                          value=self.settings["Encoding"]["reducer"]["in_numeric_encoding_umap_neighbors"]),),
+                                            ui.column(4, ui.input_numeric("in_numeric_encoding_umap_min_dist", "min_dist",
+                                                                          value=self.settings["Encoding"]["reducer"]["in_numeric_encoding_umap_min_dist"]),),
+                                            ui.column(4, ui.input_numeric("in_numeric_encoding_umap_n_components", "n_components",
+                                                                          value=self.settings["Encoding"]["reducer"]["in_numeric_encoding_umap_n_components"]),),
                                         ),
                                         ui.input_select("in_text_encoding_umap_metric", "metric", choices=['euclidean',
                                 'manhattan', 'chebyshev', 'minkowski', 'canberra',
@@ -578,8 +619,64 @@ class Analysis:
                 ui.nav(
                     "Coincidence Detection",
                     ui.layout_sidebar(
-                        ui.panel_sidebar(),
-                        ui.panel_main()
+                        ui.panel_sidebar(
+                            xui.card(
+                                xui.card_header("Incidences"),
+                                ui.input_switch("in_switch_inc_create_dummy", "create dummy incidences", value=False),
+                                ui.panel_conditional(
+                                    "input.in_switch_inc_create_dummy != true",
+                                    ui.input_file("in_file_inc_file", label="incidence file path"),
+                                ),
+                                ui.panel_conditional(
+                                    "input.in_switch_inc_create_dummy",
+                                    ui.row(
+                                        ui.column(6, ui.input_numeric("in_numeric_inc_dummy_distance",
+                                                                      "average distance", value=25)),
+                                        ui.column(6, ui.input_numeric("in_numeric_inc_dummy_gap",
+                                                                      "minimum gap", value=10)),
+                                        # ui.column(1, ui.input_numeric("in_numeric_inc_dummy_", "", value=0)),
+                                    )
+                                ),
+                                ui.output_text("out_text_inc_num_incidence"),
+                            ),
+                            xui.card(
+                                xui.card_header("Settings"),
+                                ui.input_switch("in_switch_inc_predict_coincidence", "predict class", value=True),
+                                ui.row(
+                                    ui.column(4, ui.input_numeric("in_numeric_inc_train_split", "train split",
+                                                                  value=0.9, min=0.01, max=0.99)),
+                                    ui.column(4, ui.input_switch("in_switch_inc_balance_training",
+                                                                 "balance training set", value=True)),
+                                    ui.column(4, ui.input_switch("in_switch_inc_balance_test",
+                                                                 "balance test set", value=False)),
+                                ),
+                                ui.panel_conditional(
+                                    "input.in_switch_inc_predict_coincidence",
+                                    ui.input_select("in_select_inc_classifier", "Classifier",
+                                                    choices=[m for m in Discriminator.get_available_models() if "Classifier" in m],
+                                                    selected="RandomForestClassifier"),
+                                    ui.row(
+                                        ui.column(6, ui.input_switch("in_switch_inc_binary_class",
+                                                                     "binary classification", value=True)),
+                                        ui.column(6, ui.input_select("in_select_inc_norm_confusion_matrix",
+                                                                     "normalize confusion matrix",
+                                                                     choices=["", "pred", "all", "true"],
+                                                                     selected="")),
+                                    )
+                                ),
+                                ui.panel_conditional(
+                                    "input.in_switch_inc_predict_coincidence == false",
+                                    ui.input_select("in_select_inc_classifier_loc", "Classifier",
+                                                    choices=[m for m in Discriminator.get_available_models() if "Regressor" in m],
+                                                    selected="RandomForestRegressor"),
+                                ),
+                                ui.input_text_area("in_textarea_inc_kwargs", "additional model parameters (yaml format)",
+                                                   value=self.settings["Experiment"]["in_textarea_inc_kwargs"], height="200px"),
+                            )
+                        ),
+                        ui.panel_main(
+                            ui.output_plot("out_plot_inc")
+                        )
                     )
                 ),
                 ui.nav(
@@ -1797,6 +1894,157 @@ class Analysis:
                                                     n_samples=input.in_numeric_rnn_num_samples())
                 return fig
             return None
+
+        ###############
+        # Experiments #
+        ###############
+
+        #####
+        # ? #
+        #####
+
+        ##########################
+        # Coincidence Prediction #
+        ##########################
+
+        @reactive.Calc
+        def get_incidences():
+
+            events = get_events_obj_filtered()
+            if events is not None:
+                if input.in_switch_inc_create_dummy():
+
+                    events = events.events
+                    z0, z1 = events.z0.min(), events.z1.max()
+
+                    avg_length = input.in_numeric_inc_dummy_distance()
+                    min_gap = input.in_numeric_inc_dummy_gap()
+
+                    incidences = []
+                    z = 0
+                    while z < z1:
+
+                        loc = np.random.randint(z, z+avg_length, size=1)[0]
+                        incidences.append(loc)
+
+                        z = loc + min_gap
+
+                    incidences = np.array(incidences)
+
+                else:
+
+                    if input.in_file_inc_file() is not None:
+
+                        path = Path(input.in_file_inc_file())
+
+                        if not path.exists():
+                            ui.notification_show(f"cannot find file: {path}", type="error")
+                            return None
+
+                        io = IO()
+                        incidences = io.load(path)
+                    else:
+                        return None
+
+                return incidences
+            return None
+
+        @reactive.Calc
+        def read_kwargs():
+
+            textbox_input = input.in_textarea_inc_kwargs()
+
+            if textbox_input == "":
+                return {}
+
+            else:
+
+                try:
+                    parsed_dict = yaml.safe_load(textbox_input)
+                    print(parsed_dict)
+                    if not isinstance(parsed_dict, dict):
+                        raise ValueError("The input does not represent a dictionary.")
+                    return parsed_dict
+                except yaml.YAMLError as e:
+                    print(f"Error parsing YAML: {e}")
+                    return None
+
+        @reactive.Calc
+        def get_coincidence_prediction():
+
+            events = get_events_obj_filtered()
+            embedding = get_reduction()
+            if embedding is not None:
+
+                incidences = get_incidences()
+
+                train_split = input.in_numeric_inc_train_split()
+                balance_training_set = input.in_switch_inc_balance_training()
+                balance_test_set = input.in_switch_inc_balance_test()
+
+                cd = CoincidenceDetection(events, incidences, embedding,
+                                          train_split=train_split, balance_training_set=balance_training_set,
+                                          balance_test_set=balance_test_set)
+
+                extra_arguments = read_kwargs()
+
+                if input.in_switch_inc_predict_coincidence():
+
+                    norm_confusion = input.in_select_inc_norm_confusion_matrix()
+
+                    clf, evaluation = cd.predict_coincidence(
+                        binary_classification=input.in_switch_inc_binary_class(),
+                        classifier=input.in_select_inc_classifier(),
+                        normalize_confusion_matrix= norm_confusion if norm_confusion != "" else None,
+                        **extra_arguments
+                    )
+
+                else:
+
+                    clf, evaluation = cd.predict_incidence_location(
+                        classifier=input.in_select_inc_classifier_loc(),
+                        **extra_arguments
+                    )
+
+                return clf, evaluation
+
+            return None
+
+        @output
+        @render.plot
+        def out_plot_inc():
+
+            inc_pred = get_coincidence_prediction()
+            if inc_pred is not None:
+
+                clf, evaluation = inc_pred
+                labels = ["train", "test"]
+
+                if isinstance(evaluation[0], float):
+                    fig, ax = plt.subplots(1, 1)
+                    for i in range(len(evaluation)):
+                        ax.scatter(i, evaluation[i], label=labels[i])
+
+                    ax.set_title(f"Score: {evaluation[1]:.4f}")
+                    ax.legend()
+
+                else:
+
+                    fig, axx = plt.subplots(1, 2, figsize=(15, 15))
+
+                    for i, cm in enumerate(evaluation):
+
+                        cmd = ConfusionMatrixDisplay(cm)
+                        cmd.plot(ax=axx[i])
+                        axx[i].set_title(labels[i])
+
+                return fig
+            return None
+
+        #####
+        # ? #
+        #####
+
 
     def plot_images(self, arr, frames, lbls=None, figsize=(10, 5), vmin=None, vmax=None):
 
