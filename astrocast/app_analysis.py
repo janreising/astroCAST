@@ -8,18 +8,20 @@ import hdbscan
 import numpy as np
 import pandas as pd
 import seaborn
+import sklearn.decomposition
 from matplotlib import pyplot as plt, gridspec
 from numba import NumbaDeprecationWarning
 from shiny import App, ui, render, reactive, req
 import shiny.experimental.ui as xui
+from sklearn.manifold import TSNE
 
 from astrocast.analysis import Events, Video
 from astrocast.helper import Normalization, is_ragged
 from astrocast.preparation import IO
 import seaborn as sns
 
-from astrocast.reduction import CNN
-from astrocast.rnn import TimeSeriesRnnAE, Parameters, PaddedDataLoader
+from astrocast.reduction import FeatureExtraction
+from astrocast.autoencoders import TimeSeriesRnnAE, Parameters, PaddedDataLoader, CNN_Autoencoder
 
 with warnings.catch_warnings():
     warnings.simplefilter(action='ignore', category=NumbaDeprecationWarning)
@@ -50,25 +52,30 @@ class Analysis:
                 "in_select_impute_order":"", "in_switch_impute_fixed":False, "in_numeric_impute_val":0,
                 "in_select_gradient_order":""
             },
+            "FE":{
+                "in_switch_encoder_use_fe": False,
+                "in_switch_encoder_fe_add_def_columns": False
+            },
             "CNN":{
                 "in_switch_cnn_use_cnn":False,
                 "in_slider_cnn_split":0.9,
-                "in_select_cnn_loss":"mse",
+                "in_numeric_cnn_learning_rate":0.001,
+                "in_numeric_cnn_latent_size":128,
                 "in_numeric_cnn_dropout":None,
                 "in_numeric_cnn_regularize":None,
-                "in_numeric_cnn_epochs":50,
-                "in_numeric_cnn_batch_size":64,
+                "in_numeric_cnn_epochs":10,
+                "in_numeric_cnn_batch_size":32,
                 "in_numeric_cnn_patience":5,
-                "in_numeric_cnn_min_delta":0.005,
+                "in_numeric_cnn_min_delta":0.01,
             },
             "RNN":{
+                "in_switch_encoding_use_rnn":False,
                 "in_numeric_rnn_batch_size":16,
-                "in_numeric_rnn_val_size":0.15,
-                "in_numeric_rnn_test_size":0.15,
+                "in_numeric_rnn_val_size":0.05,
+                "in_numeric_rnn_test_size":0.05,
                 "in_numeric_rnn_num_epochs":10,
                 "in_numeric_rnn_patience":5,
                 "in_numeric_rnn_min_delta":0.001,
-                "in_switch_encoding_use_rnn":False,
                 "in_switch_rnn_use_cuda":False,
                 "in_numeric_rnn_encode_lr":0.001,
                 "in_numeric_rnn_decode_lr":0.001,
@@ -336,12 +343,30 @@ class Analysis:
                     "Encoding",
                     ui.layout_sidebar(
                         ui.panel_sidebar(
-                            xui.accordion(
-                                xui.accordion_panel(
-                                    "Feature Extraction",
+                            ui.input_select("in_select_encoding_options", "Encoders",
+                                            choices=["", "Feature Extraction", "Convolutional Neural Network (CNN)",
+                                                     "Recurrent Neural Network (RNN)"], selected=""),
+                            ui.panel_conditional(
+                                "input.in_select_encoding_options == 'Feature Extraction'",
+                                xui.card(
+                                    xui.card_header("FE"),
+                                    ui.input_switch("in_switch_encoder_use_fe", "use FE encoding",
+                                                    value=self.settings["FE"]["in_switch_encoder_use_fe"]),
+                                    ui.input_switch("in_switch_encoder_fe_add_def_columns", "add default columns",
+                                                    value=self.settings["FE"]["in_switch_encoder_fe_add_def_columns"]),
+                                    ui.input_select("in_select_encoder_fe_nan_settings", "NaN behavior",
+                                                    choices=["", "column", "rows", "fill"]),
+                                    ui.panel_conditional(
+                                        "input.in_select_encoder_fe_nan_settings == 'fill'",
+                                        ui.input_numeric("in_numeric_encoder_fe_nan_fixed", "fixed value",
+                                                         value=-10**6),
+                                    ),
                                 ),
-                                xui.accordion_panel(
-                                    "CNN",
+                            ),
+                            ui.panel_conditional(
+                                "input.in_select_encoding_options == 'Convolutional Neural Network (CNN)'",
+                                xui.card(
+                                    xui.card_header("CNN"),
                                     ui.input_switch("in_switch_cnn_use_cnn", "use cnn encoding",
                                                     value=self.settings["CNN"]["in_switch_cnn_use_cnn"]),
                                     ui.output_text("out_text_cnn_warning_ragged"),
@@ -350,10 +375,12 @@ class Analysis:
                                         xui.card_header("Settings"),
                                         ui.input_file("in_file_cnn_encoder", "encoder path"),
                                         ui.row(
-                                            ui.column(8, ui.input_slider("in_slider_cnn_split", "Train split", min=0.01, max=0.99,
+                                            ui.column(4, ui.input_slider("in_slider_cnn_split", "Train split", min=0.01, max=0.99,
                                                                          value=self.settings["CNN"]["in_slider_cnn_split"]),),
-                                            ui.column(4, ui.input_select("in_select_cnn_loss", "loss", choices=['mse'],
-                                                                         selected=self.settings["CNN"]["in_select_cnn_loss"]),),
+                                            ui.column(4, ui.input_numeric("in_numeric_cnn_latent_size", "latent_size",
+                                                                         value=self.settings["CNN"]["in_numeric_cnn_latent_size"]),),
+                                            ui.column(4, ui.input_numeric("in_numeric_cnn_learning_rate", "learning rate",
+                                                                         value=self.settings["CNN"]["in_numeric_cnn_learning_rate"]),),
                                         ),
                                         ui.row(
                                             ui.column(6, ui.input_numeric("in_numeric_cnn_dropout", "dropout",
@@ -367,7 +394,7 @@ class Analysis:
                                             ui.column(6, ui.input_numeric("in_numeric_cnn_batch_size", "batch size",
                                                                           value=self.settings["CNN"]["in_numeric_cnn_batch_size"], min=1),),
                                         ),
-                                        ui.h6("Early stopping"),
+                                        # ui.h6("Early stopping"),
                                         ui.row(
                                             ui.column(6, ui.input_numeric("in_numeric_cnn_patience", "patience",
                                                                           value=self.settings["CNN"]["in_numeric_cnn_patience"], min=1),),
@@ -377,11 +404,16 @@ class Analysis:
                                     ),
                                     xui.card(
                                         xui.card_header("Plotting"),
-
+                                        ui.input_numeric("in_numeric_cnn_num_samples", "num_samples",
+                                                         value=9),
+                                        ui.input_switch("in_switch_cnn_show_diff", "show latent diff", value=False)
                                     )
                                 ),
-                                xui.accordion_panel(
-                                    "RNN",
+                            ),
+                            ui.panel_conditional(
+                                "input.in_select_encoding_options == 'Recurrent Neural Network (RNN)'",
+                                xui.card(
+                                    xui.card_header("RNN"),
                                     ui.input_switch("in_switch_encoding_use_rnn", "use rnn encoding",
                                                     value=self.settings["RNN"]["in_switch_encoding_use_rnn"]),
                                     xui.card(
@@ -437,36 +469,127 @@ class Analysis:
                                             ui.column(4, ui.input_numeric("in_numeric_rnn_num_samples", "num samples",
                                                                           value=4)),
                                             ui.column(4, ui.input_numeric("in_numeric_rnn_plot_height", "plot height",
-                                                                          value=400)),
+                                                                          value=1200)),
                                             ui.column(4, ui.input_numeric("in_numeric_rnn_plot_width", "plot width",
-                                                                          value=200)),
+                                                                          value=600)),
                                         ),
                                     ),
                                 ),
-                            open=False),
+                            ),
+                            ui.panel_conditional(
+                                "input.in_select_encoding_options != ''",
+                                xui.card(
+                                    xui.card_header("Dimensionality reduction"),
+                                    ui.input_select("in_select_dimensionality_reduction_options", "Options",
+                                            choices=["", "PCA", "tSNE", "UMAP"], selected=""),
+                                    ui.panel_conditional(
+                                        "input.in_select_dimensionality_reduction_options == 'PCA'",
+                                        ui.row(
+                                            ui.column(3, ui.input_switch("in_switch_encoding_pca_auto_dim",
+                                                                         "automatic choice"), value=False),
+                                            ui.column(9, ui.input_numeric("in_numeric_encoding_pca_n_components", "n_components",
+                                                     value=2)),
+                                        ),
+                                        ui.output_text("out_text_reduction_pca_quality"),
+                                    ),
+                                    ui.panel_conditional(
+                                        "input.in_select_dimensionality_reduction_options == 'tSNE'",
+                                        ui.row(
+                                            ui.column(3, ui.input_numeric("in_numeric_encoding_tsne_n_components", "n_components",
+                                                         value=2)),
+                                            ui.column(3, ui.input_numeric("in_numeric_encoding_tsne_early_exaggeration", "early_exaggeration",
+                                                         value=12)),
+                                            ui.column(3, ui.input_numeric("in_numeric_encoding_tsne_perplexity", "perplexity",
+                                                         value=30)),
+                                            ui.column(3, ui.input_numeric("in_numeric_encoding_tsne_n_iter", "n_iter",
+                                                         value=1000, min=250)),
+                                        ),
+                                    ),
+                                    ui.panel_conditional(
+                                        "input.in_select_dimensionality_reduction_options == 'UMAP'",
+                                        ui.row(
+                                            ui.column(4, ui.input_numeric("in_numeric_encoding_umap_neighbors", "n_neighbors", value=30),),
+                                            ui.column(4, ui.input_numeric("in_numeric_encoding_umap_min_dist", "min_dist", value=0),),
+                                            ui.column(4, ui.input_numeric("in_numeric_encoding_umap_n_components", "n_components", value=2),),
+                                        ),
+                                        ui.input_select("in_text_encoding_umap_metric", "metric", choices=['euclidean',
+                                'manhattan', 'chebyshev', 'minkowski', 'canberra',
+                                'braycurtis', 'haversine', 'mahalanobis', 'wminkowski',
+                                'seuclidean', 'Angular and correlation metrics', 'cosine', 'correlation',],
+                                                        selected='euclidean'
+                                            ),
+                                    ),
+                                )
+                            ),
                         ),
                         ui.panel_main(
                             ui.panel_conditional(
-                                            "input.in_switch_cnn_use_cnn",
-                                            ui.output_plot("out_plot_cnn_history"),
-                                            ui.output_plot("out_plot_cnn_examples"),
-                                            ui.output_plot("out_plot_cnn_latent"),
-                                        ),
-                            ui.panel_conditional(
-                                            "input.in_switch_encoding_use_rnn",
-                                            ui.output_plot("out_plot_rnn_history"),
-                                            ui.output_ui("out_plot_rnn_ui"),
+                                "input.in_select_encoding_options != ''",
+                                xui.card(
+                                    xui.card_header("Encoders"),
+                                    ui.panel_conditional(
+                                                "input.in_switch_cnn_use_cnn & input.in_select_encoding_options == 'Convolutional Neural Network (CNN)'",
+                                                ui.output_plot("out_plot_cnn_history"),
+                                                ui.output_plot("out_plot_cnn_examples"),
+                                            ),
+                                    ui.panel_conditional(
+                                                    "input.in_switch_encoding_use_rnn & input.in_select_encoding_options == 'Recurrent Neural Network (RNN)'",
+                                                    ui.output_plot("out_plot_rnn_history"),
+                                                    ui.output_ui("out_plot_rnn_ui"),
+                                    ),
+                                ),
+                                xui.card(
+                                    xui.card_header("Encoding"),
+                                    ui.output_data_frame("out_data_frame_encoding_"),
+                                ),
+
+                                ui.panel_conditional(
+                                    "input.in_select_dimensionality_reduction_options != ''",
+                                    xui.card(
+                                        xui.card_header("Reduction"),
+                                        ui.row(
+                                            ui.column(3, ui.output_data_frame("out_data_frame_reduction_")),
+                                            ui.column(
+                                                9, ui.row(
+                                                    ui.column(6, ui.input_select("out_select_reduction_dim1", "X", choices=["dim1"])),
+                                                    ui.column(6, ui.input_select("out_select_reduction_dim2", "Y", choices=["dim2"])),
+                                                ),
+                                                ui.output_plot("out_plot_reduction_scatter")
+                                            ),
+                                        )
+                                    ),
+                                ),
                             ),
+
                         )
                     )
         )
 
         nav_experiment = ui.nav(
-                    "Experiment",
+            "Experiment",
+            ui.navset_tab_card(
+                ui.nav(
+                    "Conditional Contrasts",
                     ui.layout_sidebar(
                         ui.panel_sidebar(),
                         ui.panel_main()
                     )
+                ),
+                ui.nav(
+                    "Coincidence Detection",
+                    ui.layout_sidebar(
+                        ui.panel_sidebar(),
+                        ui.panel_main()
+                    )
+                ),
+                ui.nav(
+                    "Stereotype Classification",
+                    ui.layout_sidebar(
+                        ui.panel_sidebar(),
+                        ui.panel_main()
+                    )
+                )
+            )
         )
 
         # NAME_nav = ui.nav(
@@ -1105,7 +1228,6 @@ class Analysis:
         def out_ext_dyn_plot():
 
             dyn_height = f"{200+input.in_numeric_panel_height_ext()*input.in_numeric_norm_num()}px"
-            print(f"dyn height: {dyn_height}")
             return xui.output_plot("out_plot_ext", width="100%", height=dyn_height)
 
         @output
@@ -1281,7 +1403,192 @@ class Analysis:
 
         ##########
         # ENCODERS
+        ##########
 
+        @reactive.Calc
+        def get_embedding():
+
+            event_obj = get_events_obj_normalized()
+            if event_obj is not None:
+
+                if input.in_switch_encoder_use_fe() \
+                        and input.in_select_encoding_options()=="Feature Extraction":
+                    fe = FeatureExtraction(event_obj)
+
+                    # extracted features
+                    features = fe.all_features()
+
+                    if input.in_switch_encoder_fe_add_def_columns():
+                        events = get_events_obj_filtered().events.copy()
+                        v_columns = [col for col in events.columns if col.startswith("v_")]
+                        def_features = events[v_columns]
+
+                        # combine
+                        features = pd.concat([def_features, features], axis=1)
+
+                    if features.isnull().values.any():
+
+                        nan_settings = input.in_select_encoder_fe_nan_settings()
+                        if nan_settings == "" or nan_settings is None:
+                            ui.notification_show("NaN values present. Please choose a NaN behavior.",
+                                                 type="error", duration=5)
+                            return None
+
+                        elif nan_settings == "fill":
+
+                            fixed_value = input.in_numeric_encoder_fe_nan_fixed()
+                            if fixed_value is None:
+                                fixed_value = -np.finfo(np.float32).max
+
+                            features = features.fillna(fixed_value)
+
+                        elif nan_settings == "column":
+                            features = features.dropna(axis=1, how='any')
+
+                        elif nan_settings == "rows":
+                            features = features.dropna(axis=0, how='any')
+
+                    return features
+
+                elif input.in_switch_cnn_use_cnn() \
+                        and input.in_select_encoding_options()=="Convolutional Neural Network (CNN)":
+                    embedding = embedd_cnn()
+                    return embedding
+
+                elif input.in_switch_encoding_use_rnn() \
+                        and input.in_select_encoding_options()=='Recurrent Neural Network (RNN)':
+                    embedding = embedd_rnn()
+                    return embedding
+
+            return None
+
+        pca_explained_variance_ration = reactive.Value([])
+
+        @output
+        @render.text
+        def out_text_reduction_pca_quality():
+
+            ratios = pca_explained_variance_ration.get()
+            if len(ratios) > 0:
+                out_str = "variance_ratios:\n"
+                for i, r in enumerate(ratios):
+                    out_str += f"dim{i}:{np.round(r, 3)}\n"
+                return out_str
+            return None
+
+        @reactive.Calc
+        def get_reduction():
+
+            # get embeddings
+            embedding = get_embedding()
+
+            if embedding is not None:
+
+                if isinstance(embedding, list):
+                    embedding_data = np.array(embedding)
+                elif isinstance(embedding, (pd.Series, pd.DataFrame)):
+                    embedding_data = embedding.values
+                else:
+                    embedding_data = embedding
+
+                if input.in_select_dimensionality_reduction_options() == "PCA":
+
+                    if input.in_switch_encoding_pca_auto_dim():
+                        n_components = "mle"
+                    else:
+                        n_components = input.in_numeric_encoding_pca_n_components()
+
+                    pca = sklearn.decomposition.PCA(n_components=n_components)
+                    X_embedded = pca.fit_transform(embedding_data)
+
+                    pca_explained_variance_ration.set(pca.explained_variance_ratio_)
+
+                    return pd.DataFrame(X_embedded)
+
+                elif input.in_select_dimensionality_reduction_options() == "tSNE":
+                    X_embedded = TSNE(n_components=input.in_numeric_encoding_tsne_n_components(),
+                                      learning_rate='auto',
+                                      init='random',
+                                      perplexity=input.in_numeric_encoding_tsne_early_exaggeration(),
+                                      n_iter=input.in_numeric_encoding_tsne_n_iter(),
+                                      early_exaggeration=input.in_numeric_encoding_tsne_early_exaggeration(),
+                                      ).fit_transform(embedding_data)
+                    return pd.DataFrame(X_embedded)
+
+                elif input.in_select_dimensionality_reduction_options() == "UMAP":
+                    umap_ = umap.UMAP(n_neighbors=input.in_numeric_encoding_umap_neighbors(),
+                                      min_dist=input.in_numeric_encoding_umap_min_dist(),
+                                      n_components=input.in_numeric_encoding_umap_n_components(),
+                                      metric=input.in_text_encoding_umap_metric())
+                    X_embedded = umap_.fit_transform(embedding_data)
+                    return pd.DataFrame(X_embedded)
+
+                else:
+                    return embedding
+
+            return None
+
+        @output
+        @render.data_frame
+        def out_data_frame_encoding_():
+
+            embedding = get_embedding()
+            if embedding is not None:
+
+                if isinstance(embedding, list):
+                    embedding = pd.DataFrame({"trace":embedding})
+                elif isinstance(embedding, np.ndarray):
+                    embedding = pd.DataFrame({"trace":embedding.tolist()})
+
+                return render.DataTable(embedding, height="500px", summary=True, row_selection_mode="none")
+            return None
+
+        @reactive.Effect
+        def update_reduction_selectors():
+
+            reduction = get_reduction()
+            if reduction is not None and isinstance(reduction, pd.DataFrame):
+
+                columns = [f"dim{i}" for i in reduction.columns]
+                if len(columns) > 1:
+
+                    ui.update_select("out_select_reduction_dim1", choices=columns, selected=columns[0])
+                    ui.update_select("out_select_reduction_dim2", choices=columns, selected=columns[1])
+
+        @output
+        @render.data_frame
+        def out_data_frame_reduction_():
+
+            reduction = get_reduction()
+            if reduction is not None:
+                reduction.columns = [f"dim{i}" for i in range(len(reduction.columns))]
+                reduction = reduction.round(3)
+
+                return render.DataTable(reduction, height="500px", summary=True, row_selection_mode="none")
+            return None
+
+        ####
+        # FE
+
+        @output
+        @render.plot
+        def out_plot_reduction_scatter():
+            reduction = get_reduction()
+            if reduction is not None:
+
+                dim1 = input.out_select_reduction_dim1()
+                dim2 = input.out_select_reduction_dim2()
+
+                fig, ax = plt.subplots(1, 1)
+                ax.scatter(reduction[dim1], reduction[dim2])
+                ax.set_xlabel(dim1)
+                ax.set_ylabel(dim2)
+
+                return fig
+            return None
+
+        #####
+        # CNN
         @output
         @render.text
         def out_text_cnn_warning_ragged():
@@ -1300,39 +1607,47 @@ class Analysis:
         def get_CNN():
 
             if input.in_switch_cnn_use_cnn():
-                cnn = CNN()
-
-                path = input.in_file_cnn_encoder()
-                if path is not None:
-                    cnn.load_model(path)
 
                 event_obj = get_events_obj_normalized()
                 if event_obj is not None:
 
-                    data = np.array(event_obj.events.trace.tolist())
-                    print(f"\n\ndata: {data.shape}, {np.unique([len(data[i]) for i in range(len(data))])}")
+                    data = event_obj.events.trace.tolist()
+                    target_length = len(data[0])
 
-                    _ = cnn.train(data,
-                              train_split=input.in_slider_cnn_split(),
-                              validation_split=1-input.in_slider_cnn_split(),
-                              loss=input.in_select_cnn_loss(),
-                              dropout=input.in_numeric_cnn_dropout(),
-                              regularize_latent=input.in_numeric_cnn_regularize(),
-                              epochs=input.in_numeric_cnn_epochs(),
-                              batch_size=input.in_numeric_cnn_batch_size(),
-                              patience=input.in_numeric_cnn_patience(),
-                              min_delta=input.in_numeric_cnn_min_delta()
-                              )
+                    cnn = CNN_Autoencoder(target_length,
+                                  dropout=input.in_numeric_cnn_dropout(),
+                                  l1_reg=input.in_numeric_cnn_regularize(),
+                                  latent_size=input.in_numeric_cnn_latent_size(),
+                                  add_noise=None)
 
-                    return cnn
+                    with reactive.isolate():
+                        train_split = input.in_slider_cnn_split()
+                        val_split = 1-input.in_slider_cnn_split()
+                        patience = input.in_numeric_cnn_patience()
+                        min_delta = input.in_numeric_cnn_min_delta()
+                        batch_size = input.in_numeric_cnn_batch_size()
+
+                    X_train, X_val, X_test = cnn.split_dataset(data,
+                                                               train_split=train_split,
+                                                               val_split=val_split)
+
+                    cnn.train_autoencoder(X_train, X_val, X_test,
+                        patience=patience,
+                        min_delta=min_delta,
+                        epochs=input.in_numeric_cnn_epochs(),
+                        learning_rate=input.in_numeric_cnn_learning_rate(),
+                        batch_size=batch_size
+                    )
+
+                    return cnn, (X_train, X_val, X_test)
             return None
 
         @reactive.Calc
         def embedd_cnn():
 
-            if input.in_switch_cnn_use_cnn():
-                cnn = get_CNN()
-                event_obj = get_events_obj_normalized()
+            event_obj = get_events_obj_normalized()
+            if input.in_switch_cnn_use_cnn() and event_obj is not None:
+                cnn, _ = get_CNN()
 
                 if event_obj is not None:
 
@@ -1346,9 +1661,19 @@ class Analysis:
         def out_plot_cnn_history():
 
             if input.in_switch_cnn_use_cnn():
-                cnn = get_CNN()
-                if cnn.history is not None:
-                    return cnn.plot_history()
+                cnn, _ = get_CNN()
+
+                if cnn is not None:
+                    fig, ax = plt.subplots(1, 1, figsize=(9, 4))
+                    losses = np.array(cnn.losses)
+
+                    ax.plot(losses[:, 0], color="black", label="training")
+                    ax.plot(losses[:, 1], color="green", label="validation")
+
+                    ax.set_title(f"losses")
+                    ax.set_yscale("log")
+                    ax.legend()
+
             return None
 
         @output
@@ -1356,26 +1681,12 @@ class Analysis:
         def out_plot_cnn_examples():
 
             if input.in_switch_cnn_use_cnn():
-                cnn = get_CNN()
-                if cnn.X_test is not None:
-                    return cnn.plot_examples(X_test=cnn.X_test)
-            return None
+                cnn, (X_train, X_test, X_val) = get_CNN()
 
-        @output
-        @render.plot
-        def out_plot_cnn_latent():
-
-            latent = embedd_cnn()
-
-            if latent is not None:
-
-                N = 6
-                indices = np.random.randint(0, len(latent), size=(N))
-                matrix = latent[indices].transpose()
-
-                fig, ax = plt.subplots(1, 1)
-                sns.heatmap(matrix, ax=ax)
-
+                fig = cnn.plot_examples_pytorch(X_test,
+                                                show_diff=input.in_switch_cnn_show_diff(),
+                                                num_samples=input.in_numeric_cnn_num_samples(),
+                                                figsize=(10, 6))
                 return fig
             return None
 
@@ -1420,6 +1731,27 @@ class Analysis:
                 return rnnAE, (X_train, X_val, X_test)
             return None, (None, None, None)
 
+        @reactive.Calc
+        def embedd_rnn():
+
+            if input.in_switch_encoding_use_rnn():
+
+                rnnAE, (X_train, X_val, X_test) = get_RNN()
+                event_obj = get_events_obj_normalized()
+
+                if rnnAE is not None and event_obj is not None:
+
+
+                    data = event_obj.events.trace.tolist()
+
+                    pdl = PaddedDataLoader(data)
+                    loader = pdl.get_dataloader(data, batch_size=32, shuffle=False)
+
+                    _, _, latent, _ = rnnAE.embedd(loader)
+
+                    return latent
+            return None
+
         @output
         @render.plot
         def out_plot_rnn_history():
@@ -1462,7 +1794,7 @@ class Analysis:
             if rnnAE is not None:
 
                 fig, _, _, _, _ = rnnAE.plot_traces(X_test,
-                                                                      n_samples=input.in_numeric_rnn_num_samples())
+                                                    n_samples=input.in_numeric_rnn_num_samples())
                 return fig
             return None
 

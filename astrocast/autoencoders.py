@@ -9,9 +9,384 @@ import numpy as np
 from matplotlib import pyplot as plt
 from sklearn.model_selection import train_test_split
 from torch.nn.utils.rnn import pad_packed_sequence, pack_padded_sequence, pad_sequence
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import Dataset, DataLoader, TensorDataset
 from tqdm import tqdm
 
+
+
+##############################################
+## Convolutional Neural Network Autoencoder ##
+class EarlyStopper:
+    def __init__(self, patience=1, min_delta=0):
+        self.patience = patience
+        self.min_delta = min_delta
+        self.counter = 0
+        self.min_validation_loss = float('inf')
+
+    def early_stop(self, validation_loss):
+
+        if validation_loss < self.min_validation_loss:
+            self.min_validation_loss = validation_loss
+            self.counter = 0
+        elif validation_loss - self.min_validation_loss <= self.min_delta:
+            self.counter += 1
+            if self.counter >= self.patience:
+                return True
+        return False
+
+
+class GaussianNoise(nn.Module):
+    def __init__(self, mean=0., std=0.1):
+        super(GaussianNoise, self).__init__()
+        self.mean = mean
+        self.std = std
+
+    def forward(self, x):
+        if self.training:
+            noise = torch.randn_like(x) * self.std + self.mean
+            return x + noise
+        return x
+
+
+class CustomUpsample(nn.Module):
+    def __init__(self, target_length):
+        super(CustomUpsample, self).__init__()
+        self.target_length = target_length
+
+    def forward(self, x):
+        current_length = x.shape[-1]
+        diff = self.target_length - current_length
+        zeros = torch.zeros((x.shape[0], x.shape[1], diff)).to(x.device)
+        return torch.cat([x, zeros], dim=-1)
+
+
+class CNN_Autoencoder(nn.Module):
+    def __init__(self, target_length, dropout=0.15, l1_reg=0.0001, latent_size=64*6, add_noise=None):
+        super(CNN_Autoencoder, self).__init__()
+
+        self.l1_reg = l1_reg
+        self.latent_size = latent_size
+
+        self.encoder, self.decoder = self.define_layers(dropout=dropout, add_noise=add_noise, target_length=target_length)
+
+        # Manually defining a linear layer to serve as the dense layer for the encoder output
+        self.latent_size = latent_size
+        self.dense_layer = None
+        self.dense_layer_out = None
+        self.add_noise = add_noise
+
+    def define_layers(self, dropout=None, add_noise=None, target_length=18):
+
+        encoder_layers = []
+        if dropout is not None:
+            encoder_layers += [nn.Dropout(dropout)]
+        if add_noise is not None:
+            encoder_layers += [GaussianNoise(std=add_noise)]
+        encoder_layers += [nn.Conv1d(1, 128, 3, padding=1),]
+        encoder_layers += [nn.ReLU(),]
+        encoder_layers += [nn.MaxPool1d(2),]
+        encoder_layers += [nn.Conv1d(128, 64, 3, padding=1),]
+        encoder_layers += [nn.ReLU(),]
+        encoder_layers += [nn.MaxPool1d(2),]
+        encoder = nn.Sequential(*encoder_layers)
+
+        decoder = nn.Sequential(
+            nn.Conv1d(64, 64, 3, padding=1),
+            nn.ReLU(),
+            nn.Upsample(scale_factor=2),
+            nn.Conv1d(64, 128, 3, padding=1),
+            nn.ReLU(),
+            nn.Upsample(scale_factor=2),
+            CustomUpsample(target_length=target_length),
+            nn.Conv1d(128, 1, 3, padding=1),
+            nn.Sigmoid()
+        )
+
+        return encoder, decoder
+
+    def forward(self, x):
+        x = self.encoder(x)
+
+        shape_before_flatten = x.shape[1:]
+        flattened_dim = torch.prod(torch.tensor(shape_before_flatten))
+
+        if self.dense_layer is None:
+            self.dense_layer = nn.Linear(flattened_dim.item(), self.latent_size).to(x.device)
+            self.dense_layer_out = nn.Linear(self.latent_size, flattened_dim.item()).to(x.device)
+
+        x = x.view(-1, flattened_dim)
+
+        # Apply the dense layer
+        x = self.dense_layer(x)
+
+        # Make the output binary
+        x = torch.sigmoid(x)
+        x = torch.round(x)
+
+        # Save the encoder output for later use
+        encoder_output = x
+
+        # go back to initial size
+        x = self.dense_layer_out(x)
+
+        # Add L1 regularization to the encoder output
+        l1_loss = self.l1_reg * torch.norm(x, 1)
+
+        x = x.view(-1, *shape_before_flatten)
+        x = self.decoder(x)
+
+        return x, l1_loss, encoder_output
+
+    def split_dataset(self, data, val_split=0.1, train_split=0.8, seed=None):
+
+        from torch.utils.data import random_split
+
+        # Assuming you have a PyTorch Dataset object `full_dataset`
+        # This could be an instance of a custom dataset class, or one of the built-in classes like `torchvision.datasets.MNIST`
+
+        if seed is not None:
+            torch.manual_seed(seed)
+
+        # ensure equal length input
+        unique_length = np.unique([len(data[i, :]) for i in range(len(data))])
+        if len(unique_length) > 1:
+            raise ValueError(f"input contains unequal length sequences: {unique_length}! aborting.")
+
+        # Define the proportions
+        total_size = len(data)
+        train_size = int(train_split * total_size)
+        val_size = int(val_split * total_size)
+        test_size = total_size - train_size - val_size
+
+        # Split the dataset
+        train_dataset, val_dataset, test_dataset = random_split(data, [train_size, val_size, test_size])
+        return train_dataset, val_dataset, test_dataset
+
+    def train_autoencoder(self, X_train, X_val=None, X_test=None, patience=5, min_delta=0.0005, epochs=100, learning_rate=0.001, batch_size=32):
+
+        # ensure equal length input
+        for X in [X_train, X_val, X_test]:
+            if X is not None:
+                unique_length = np.unique([len(X_train[i, :]) for i in range(len(X))])
+                if len(unique_length) > 1:
+                    raise ValueError(f"input contains unequal length sequences: {unique_length}! aborting.")
+
+        # Create DataLoader
+        train_data = torch.FloatTensor(X_train)
+        train_dataset = TensorDataset(train_data, train_data)  # autoencoders use same data for input and output
+        train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+
+        if X_val is not None:
+            val_data = torch.FloatTensor(X_val)
+            val_dataset = TensorDataset(val_data, val_data)
+            val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
+        else:
+            val_loader = None
+
+        if X_test is not None:
+            test_data = torch.FloatTensor(X_test)
+            test_dataset = TensorDataset(test_data, test_data)
+            test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
+        else:
+            val_loader = None
+
+        # Initialize model
+        model = self
+        criterion = nn.MSELoss()  # Mean Squared Error Loss
+        optimizer = optim.Adam(model.parameters(), lr=learning_rate)
+
+        # Training loop
+
+        losses = []
+        early_stopper = EarlyStopper(patience=patience, min_delta=min_delta)
+        pbar = tqdm(total=epochs)
+        for epoch in range(epochs):
+            model.train()
+            train_loss = 0
+
+            for batch_data, _ in train_loader:  # autoencoders don't use labels
+                batch_data = batch_data.unsqueeze(1)  # add channel dimension
+
+                # Forward pass
+                outputs, l1_loss, encoded = model(batch_data)
+
+                # Compute loss
+                reconstruction_loss = criterion(outputs, batch_data)
+                loss = reconstruction_loss + l1_loss
+
+                # Backward pass and optimization
+                optimizer.zero_grad()
+                loss.backward()
+                optimizer.step()
+
+                train_loss += loss.item()
+
+            # Validation
+            if val_loader is not None:
+                model.eval()
+                val_loss = 0
+                with torch.no_grad():
+                    for batch_data, _ in val_loader:
+                        batch_data = batch_data.unsqueeze(1)  # add channel dimension
+                        outputs, l1_loss, encoded = model(batch_data)
+
+                        reconstruction_loss = criterion(outputs, batch_data)
+                        loss = reconstruction_loss + l1_loss
+                        val_loss += loss.item()
+
+                model.train()
+            else:
+                val_loss = None
+
+            losses.append((train_loss, val_loss))
+
+            # Early stopping logic
+            if early_stopper.early_stop(val_loss):
+                print("Early stopping!")
+                break
+
+            pbar.set_description(f"train_Loss:{train_loss/len(train_loader):.4f}, val_loss:{val_loss/len(val_loader):.4f}")
+            pbar.update(1)
+        pbar.close()
+
+        # Evaluation
+        if test_loader is not None:
+            model.eval()
+            with torch.no_grad():
+                test_loss = 0
+                for batch_data, _ in test_loader:
+                    batch_data = batch_data.unsqueeze(1)  # add channel dimension
+                    outputs, l1_loss, encoded = model(batch_data)
+
+                    reconstruction_loss = criterion(outputs, batch_data)
+                    loss = reconstruction_loss + l1_loss
+                    test_loss += loss.item()
+
+                print(f"Test Loss: {test_loss/len(test_loader):.4f}")
+            model.train()
+
+        self.losses = losses
+        return losses
+
+    def embed(self, data, batch_size=64):
+
+        # Create DataLoader
+        train_data = torch.FloatTensor(data)
+        train_dataset = TensorDataset(train_data, train_data)  # autoencoders use same data for input and output
+        train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+
+        # Initialize model
+        model = self
+        encoded_traces = []
+        for batch_data, _ in train_loader:
+            batch_data = batch_data.unsqueeze(1)
+            _, _, encoded = model(batch_data)
+            encoded = encoded.detach().numpy()
+
+            encoded_traces.append(encoded)
+
+        encoded_traces = np.vstack(encoded_traces)
+
+        return encoded_traces
+
+    @staticmethod
+    def reshape_to_squareish_matrix(vector):
+        """
+        Reshapes a 1D vector to a square-ish 2D matrix.
+        """
+
+        import math
+
+        length = len(vector)
+        # Find the closest integer square root of the length
+        sqrt_length = int(math.sqrt(length))
+
+        # Find the dimensions of the reshaped matrix
+        rows = sqrt_length
+        while length % rows != 0:
+            rows -= 1
+        cols = length // rows
+
+        # Reshape the vector
+        reshaped_matrix = np.reshape(vector, (rows, cols))
+
+        return reshaped_matrix
+
+    def plot_examples_pytorch(self, X_test, Y_test=None,
+                              show_diff=False, num_samples=9, figsize=(10, 6)):
+
+        model = self
+
+        # Convert PyTorch tensor to numpy
+        X_test = np.array(list(X_test))
+
+        # Make predictions if Y_test is not provided
+        if Y_test is None:
+            model.eval()
+            with torch.no_grad():
+                input_tensor = torch.FloatTensor(X_test).unsqueeze(1)  # add channel dimension
+                output_tensor, l1_loss, encoder_output = model(input_tensor)
+            Y_test = output_tensor.numpy().squeeze()
+            encoder_output = encoder_output.numpy().squeeze()
+
+        else:
+            encoder_output = Y_test
+
+        if show_diff and Y_test is not None:
+            consensus = np.mean(encoder_output, axis=0)
+            encoder_output = encoder_output - consensus
+        else:
+            if not isinstance(Y_test, np.ndarray):
+                Y_test = Y_test.numpy().squeeze()
+            else:
+                Y_test = np.squeeze(Y_test)
+
+        num_rounds = 1
+        if type(num_samples) != int:
+            num_rounds, num_samples = num_samples
+
+        for nr in range(num_rounds):
+            fig, axx = plt.subplots(3, num_samples, figsize=figsize, sharey=False)
+
+            for i, idx in enumerate(np.random.randint(0, len(X_test) - 1, size=num_samples)):
+                inp = X_test[idx, :]
+                out = Y_test[idx, :]
+
+                inp = np.trim_zeros(inp, trim="b")
+                out = out[0:len(inp)]
+
+                axx[0, i].plot(inp, alpha=0.75, color="black")
+                axx[0, i].plot(out, alpha=0.75, linestyle="--", color="darkgreen")
+                axx[1, i].plot(inp - out)
+
+                axx[0, i].sharey(axx[1, i])
+
+                latent_output = encoder_output[idx, :]
+                latent_output = self.reshape_to_squareish_matrix(latent_output)
+
+                cmap = 'binary' if not show_diff else 'bwr'
+                vmin = 0 if not show_diff else -1
+                axx[2, i].imshow(latent_output, cmap=cmap, interpolation='nearest', aspect='auto',
+                                 vmin=vmin, vmax=1)
+                axx[2, i].get_xaxis().set_visible(False)
+                axx[2, i].get_yaxis().set_visible(False)
+
+
+                axx[0, i].get_xaxis().set_visible(False)
+                axx[1, i].get_xaxis().set_visible(False)
+
+                if i != 0:
+                    axx[0, i].get_yaxis().set_visible(False)
+                    axx[1, i].get_yaxis().set_visible(False)
+
+            axx[0, 0].set_ylabel("IN/OUT", fontweight=600)
+            axx[1, 0].set_ylabel("error", fontweight=600)
+
+        return fig
+
+
+##########################################
+## Recurrent Neural Network Autoencoder ##
 
 class RnnType:
     GRU = 1
@@ -311,7 +686,7 @@ class TimeSeriesRnnAE:
         self.encoder.load_state_dict(torch.load(encoder_file_name))
         self.decoder.load_state_dict(torch.load(decoder_file_name))
 
-    def plot_traces(self, dataloader, figsize=(10, 10), n_samples=16, sharex=False):
+    def embedd(self, dataloader):
 
         self.eval()
 
@@ -352,6 +727,14 @@ class TimeSeriesRnnAE:
             y_val.extend(y_np)
             latent.extend(encoded_np)
             losses.append(loss.item())
+
+        return x_val, y_val, latent, losses
+
+    def plot_traces(self, dataloader, figsize=(10, 10), n_samples=16, sharex=False):
+
+        self.eval()
+
+        x_val, y_val, latent, losses = self.embedd(dataloader)
 
         n_samples = min(len(x_val), n_samples)
         fig, axx = plt.subplots(n_samples, 2, figsize=figsize, sharey=False, sharex=sharex)
@@ -570,6 +953,14 @@ class PaddedDataLoader():
     def __init__(self, data):
         self.data = data
 
+    def get_dataloader(self, data, batch_size, shuffle):
+
+        ds = [torch.tensor(x, dtype=torch.float32) for x in data]
+        ds = PaddedSequenceDataset(ds)
+
+        dl = DataLoader(ds, batch_size=batch_size, shuffle=shuffle, collate_fn=self.collate_fn)
+        return dl
+
     def get_datasets(
             self, batch_size=(32, "auto", "auto"), val_size=0.15, test_size=0.15, shuffle=(True, False, False)
             ):
@@ -587,15 +978,14 @@ class PaddedDataLoader():
 
         datasets = []
         for i, ds in enumerate([train_data, val_data, test_data]):
-            ds = [torch.tensor(x, dtype=torch.float32) for x in ds]
-            ds = PaddedSequenceDataset(ds)
 
             bs = batch_size[i]
             if bs == "auto":
                 bs = len(ds)
 
-            ds = DataLoader(ds, batch_size=bs, shuffle=shuffle[i], collate_fn=self.collate_fn)
-            datasets.append(ds)
+            dl = self.get_dataloader(ds, batch_size=bs, shuffle=shuffle[i])
+
+            datasets.append(dl)
 
         return datasets
 

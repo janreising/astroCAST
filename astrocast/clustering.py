@@ -111,6 +111,7 @@ class KMeansClustering(CachedClass):
 
         return cluster_lookup_table
 
+
 class Linkage(CachedClass):
 
     """
