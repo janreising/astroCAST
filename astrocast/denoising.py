@@ -30,365 +30,6 @@ from scipy.stats import bootstrap
 # TODO write plotting for generators
 # TODO write plotting for network history
 
-class FullFrameGenerator(keras.utils.Sequence):
-
-    """ Takes a single .h5 or tiff file and generates preprocessed training batches.
-
-    """
-
-    def __init__(self, pre_post_frame, batch_size,
-                 file_path, loc=None,
-                 max_frame_summary_stats=1000, # TODO superseded
-                 start_frame=0, end_frame=-1,
-                 gap_frames=0, total_samples=-1, randomize=True):
-
-        """
-
-        :param pre_post_frame:
-        :param batch_size:
-        :param steps_per_epoch:
-        :param start_frame:
-        :param end_frame: compatlible with negative frames. -1 is the last
-        :param gap_frames:
-        :param total_samples:
-        :param randomize:
-        """
-
-        if type(pre_post_frame) == int:
-            self.pre_frame, self.post_frame = pre_post_frame, pre_post_frame
-        else:
-            self.pre_frame, self.post_frame = pre_post_frame
-
-        self.batch_size = batch_size
-        self.steps_per_epoch = 0
-        self.start_frame = start_frame
-        self.end_frame = end_frame
-        self.pre_post_omission = gap_frames
-        self.total_samples = total_samples
-        self.randomize = randomize
-
-        self.file_path = file_path
-        self.loc = loc
-
-        # We initialize the epoch counter
-        self.epoch_index = 0
-
-        # read file dimensions
-        if file_path.suffix in (".h5", ".hdf5"):
-
-            assert loc is not None, "When using a .h5 file the 'loc' parameter needs to be provided"
-
-            with h5.File(file_path, "r") as file:
-
-                data = file[loc]
-                self.total_frame_per_movie = int(data.shape[0])
-
-                self._update_end_frame(self.total_frame_per_movie)
-                self._calculate_list_samples(self.total_frame_per_movie)
-
-                average_nb_samples = np.min([int(self.total_frame_per_movie), max_frame_summary_stats])
-                local_data = data[0:average_nb_samples, :, :].flatten()
-                local_data = local_data.astype("float32")
-
-                self.local_mean = np.mean(local_data)
-                self.local_std = np.std(local_data)
-
-        if file_path.suffix in (".tiff", ".tif"):
-
-            tif = tiff.TiffFile(file_path)
-            self.total_frame_per_movie = len(tif.pages)
-            tif.close()
-
-            self._update_end_frame(self.total_frame_per_movie)
-            self._calculate_list_samples(self.total_frame_per_movie)
-
-            average_nb_samples = np.min([int(self.total_frame_per_movie), max_frame_summary_stats])
-            local_data = tiff.imread(file_path, key=range(self.start_frame, average_nb_samples)).flatten()
-            local_data = local_data.astype("float32")
-
-            self.local_mean = np.mean(local_data)
-            self.local_std = np.std(local_data)
-
-    def _get_input_size(self):
-        """
-        This function returns the input size of the
-        generator, excluding the batching dimension
-
-        Parameters:
-        None
-
-        Returns:
-        tuple: list of integer size of input array,
-        excluding the batching dimension
-        """
-        local_obj = self.__getitem__(0)[0]
-
-        return local_obj.shape[1:]
-
-    def get_output_size(self):
-        """
-        This function returns the output size of
-        the generator, excluding the batching dimension
-
-        Parameters:
-        None
-
-        Returns:
-        tuple: list of integer size of output array,
-        excluding the batching dimension
-        """
-        local_obj = self.__getitem__(0)[1]
-
-        return local_obj.shape[1:]
-
-    # TODO change 512, 512 >> dynamic
-    def __getitem__(self, index):
-        shuffle_indexes = self.generate_batch_indexes(index)
-
-        input_full = np.zeros(
-            [self.batch_size, 512, 512, self.pre_frame + self.post_frame],
-            dtype="float32",
-        )
-
-        output_full = np.zeros([self.batch_size, 512, 512, 1], dtype="float32")
-
-        for batch_index, frame_index in enumerate(shuffle_indexes):
-            X, Y = self.__data_generation__(frame_index)
-
-            input_full[batch_index, :, :, :] = X
-            output_full[batch_index, :, :, :] = Y
-
-        return input_full, output_full
-
-    # TODO change 512, 512 >> dynamic
-    def __data_generation__(self, index_frame):
-        "Generates data containing batch_size samples"
-
-        input_full = np.zeros([1, 512, 512, self.pre_frame + self.post_frame])
-        output_full = np.zeros([1, 512, 512, 1])
-
-        input_index = np.arange(
-            index_frame - self.pre_frame - self.pre_post_omission,
-            index_frame + self.post_frame + self.pre_post_omission + 1,
-        )
-        input_index = input_index[input_index != index_frame]
-
-        for index_padding in np.arange(self.pre_post_omission + 1):
-            input_index = input_index[input_index !=
-                                      index_frame - index_padding]
-            input_index = input_index[input_index !=
-                                      index_frame + index_padding]
-
-        if self.file_path.suffix in (".h5", ".hdf5"):
-
-            with h5.File(self.file_path, "r") as movie_obj:
-
-                data_img_input = movie_obj[self.loc][input_index, :, :]
-                data_img_input = np.swapaxes(data_img_input, 1, 2)
-                data_img_input = np.swapaxes(data_img_input, 0, 2)
-
-                data_img_output = movie_obj[self.loc][index_frame, :, :]
-
-        elif self.file_path.suffix in (".tiff", ".tif"):
-
-            data_img_input = tiff.imread(self.file_path, key=input_index)
-            # TODO this might not be necessary for TIFFs
-            data_img_input = np.swapaxes(data_img_input, 1, 2)
-            data_img_input = np.swapaxes(data_img_input, 0, 2)
-
-            data_img_output = tiff.imread(self.file_path, key=index_frame)
-
-        img_in_shape = data_img_input.shape
-        img_out_shape = data_img_output.shape
-
-        data_img_input = (
-            data_img_input.astype(float) - self.local_mean
-        ) / self.local_std
-        data_img_output = (
-            data_img_output.astype(float) - self.local_mean
-        ) / self.local_std
-
-        input_full[0, : img_in_shape[0], : img_in_shape[1], :] = data_img_input
-        output_full[0, : img_out_shape[0], : img_out_shape[1], 0] = data_img_output
-
-        return input_full, output_full
-
-    def __get_norm_parameters__(self, idx):
-        """
-        This function returns the normalization parameters
-        of the generator. This can potentially be different
-        for each data sample
-
-        Parameters:
-        idx index of the sample
-
-        Returns:
-        local_mean
-        local_std
-        """
-        local_mean = self.local_mean
-        local_std = self.local_std
-
-        return local_mean, local_std
-
-    def _update_end_frame(self, total_frame_per_movie):
-        """Update end_frame based on the total number of frames available.
-        This allows for truncating the end of the movie when end_frame is
-        negative."""
-
-        # This is to handle selecting the end of the movie
-        if self.end_frame < 0:
-            self.end_frame = total_frame_per_movie+self.end_frame
-        elif total_frame_per_movie <= self.end_frame:
-            self.end_frame = total_frame_per_movie-1
-
-    def _calculate_list_samples(self, total_frame_per_movie):
-
-        # We first cut if start and end frames are too close to the edges.
-        self.start_sample = np.max([self.pre_frame
-                                    + self.pre_post_omission,
-                                    self.start_frame])
-        self.end_sample = np.min([self.end_frame, total_frame_per_movie - 1 -
-                                  self.post_frame - self.pre_post_omission])
-
-        if (self.end_sample - self.start_sample+1) < self.batch_size:
-            raise Exception("Not enough frames to construct one " +
-                            str(self.batch_size) + " frame(s) batch between " +
-                            str(self.start_sample) +
-                            " and "+str(self.end_sample) +
-                            " frame number.")
-
-        # +1 to make sure end_samples is included
-        self.list_samples = np.arange(self.start_sample, self.end_sample+1)
-
-        if self.randomize:
-            np.random.shuffle(self.list_samples)
-
-        # We cut the number of samples if asked to
-        if (self.total_samples > 0
-                and self.total_samples < len(self.list_samples)):
-            self.list_samples = self.list_samples[0: self.total_samples]
-
-    def on_epoch_end(self):
-        """We only increase index if steps_per_epoch is set to positive value.
-        -1 will force the generator to not iterate at the end of each epoch."""
-        if self.steps_per_epoch > 0:
-            if self.steps_per_epoch * (self.epoch_index + 2) < self.__len__():
-                self.epoch_index = self.epoch_index + 1
-            else:
-                # if we reach the end of the data, we roll over
-                self.epoch_index = 0
-
-    def __len__(self):
-        "Denotes the total number of batches"
-        return int(len(self.list_samples) / self.batch_size)
-
-    def generate_batch_indexes(self, index):
-        # This is to ensure we are going through
-        # the entire data when steps_per_epoch<self.__len__
-        if self.steps_per_epoch > 0:
-            index = index + self.steps_per_epoch * self.epoch_index
-
-        # Generate indexes of the batch
-        indexes = np.arange(index * self.batch_size,
-                            (index + 1) * self.batch_size)
-
-        shuffle_indexes = self.list_samples[indexes]
-
-        return shuffle_indexes
-
-    def infer(self, model, output=None, batch_size=25,
-              out_loc=None, dtype=float, chunk_size=None, rescale=True):
-
-        """
-
-        :param model_path:
-        :param output:
-        :param batch_size:
-        :param out_loc:
-        :param dtype:
-        :param chunk_size:
-        :param rescale: reverse normalization
-        :return:
-        """
-
-        # load model if not provided
-        if type(model) in [str, pathlib.PosixPath]:
-
-            if os.path.isdir(model):
-
-                models = list(filter(os.path.isfile, glob.glob(model + "/*.h5")))
-                models.sort(key=lambda x: os.path.getmtime(x))
-                model_path = models[0]
-                logging.info(f"directory provided. Selected most recent model: {model_path}")
-
-            else:
-                model_path = model
-
-            model = load_model(model_path,
-                    custom_objects={"annealed_loss": Network.annealed_loss, "mean_squareroot_error":Network.mean_squareroot_error})
-
-        else:
-            logging.warning(f"providing model via parameter. Model type: {type(model)}")
-
-            # deals with keras.__version__ > 2.10.0
-            try:
-                expected_model_type = keras.engine.functional.Functional
-            except AttributeError:
-                expected_model_type = keras.src.engine.functional.Functional
-
-            assert type(model) == expected_model_type, f"Please provide keras model, " \
-                                                       f"file_path or dir_path instead of {type(model)}"
-
-        # create output array
-        num_datasets = len(self)
-        indiv_shape = self.get_output_size()
-
-        final_shape = [num_datasets * batch_size]
-        first_sample = 0
-
-        final_shape.extend(indiv_shape[:-1])
-
-        if (output is None) or (output.suffix in (".tiff", ".tif")):
-            dset_out = np.zeros(tuple(final_shape), dtype=dtype)
-
-        elif output.suffix in (".h5", ".hdf5"):
-
-            assert out_loc is not None, "when exporting results to .h5 file please provide 'out_loc' flag"
-
-            f = h5.File(output, "a")
-            dset_out = f.create_dataset(out_loc, shape=final_shape, chunks=chunk_size, dtype=dtype)
-
-        for index_dataset in np.arange(0, num_datasets, 1):
-
-            local_data = self[index_dataset]
-            predictions_data = model.predict(local_data[0])
-
-            local_mean, local_std = \
-                self.__get_norm_parameters__(index_dataset)
-            local_size = predictions_data.shape[0]
-
-            corrected_data = predictions_data * local_std + local_mean if rescale else predictions_data
-
-            start = first_sample + index_dataset * batch_size
-            end = first_sample + index_dataset * batch_size \
-                + local_size
-
-            # We squeeze to remove the feature dimension from tensorflow
-            dset_out[start:end, :] = np.squeeze(corrected_data, -1)
-
-        if output is None:
-            return dset_out
-
-        elif output.suffix in (".tiff", ".tif"):
-            tiff.imwrite(output, data=dset_out)
-
-        elif output.suffix in (".hdf5", ".h5"):
-            f.close()
-
-# TODO inference on SubFrameGenerator
-# TODO extending borders Z
-# TODO extending borders X, Y
 class SubFrameGenerator(tf.keras.utils.Sequence):
 
     """ Takes a single or multiple paths to a .h5 file containing video data in (Z, X, Y) format and generates
@@ -1018,6 +659,7 @@ class SubFrameGenerator(tf.keras.utils.Sequence):
 
         return True
 
+
 class Network:
     def __init__(self, train_generator, val_generator=None, learning_rate=0.0001,
                  n_stacks=3, kernel=64, batchNormalize=False, loss=None,
@@ -1048,6 +690,8 @@ class Network:
         self.val_gen = val_generator
 
         # Create the U-Net model
+        self.n_stacks = n_stacks
+        self.kernel = kernel
         self.model = self.create_unet(n_stacks=n_stacks, kernel=kernel, batchNormalize=batchNormalize)
 
         # Set the optimizer and compile the model
@@ -1123,7 +767,11 @@ class Network:
 
         # Save the final model
         if save_model is not None:
-            self.model.save(save_model.joinpath("model.h5").as_posix())
+            # Create a filename with parameters
+            input_shape_str = "x".join(map(str, self.train_gen.__getitem__(0)[0].shape[1:]))
+            param_str = f"lr={self.model.optimizer.learning_rate}_nstacks={self.n_stacks}_kernel={self.kernel}_inputshape={input_shape_str}"
+            save_path = save_model.joinpath(f"model-{param_str}-{{epoch:02d}}-{{val_loss:.2f}}.hdf5").as_posix()
+            print(f"saved model to: {save_path}")
 
         return history
 
@@ -1169,7 +817,54 @@ class Network:
 
         return decoder
 
-    def create_unet(self, n_stacks=3, kernel=64, batchNormalize=False, verbose=1):
+    def retrain_model(self, new_train_gen, model=None, new_val_gen=None, pretrained_model_path=None, num_epochs=25, batch_size=10, verbose=1):
+        """
+        Retrains the model on a new dataset and optionally initializes it with weights from a pretrained model.
+
+        Args:
+            new_train_gen: The generator for the new training data.
+            new_val_gen: The generator for the new validation data.
+            pretrained_model_path (str): Path to the pretrained model.
+            num_epochs (int): Number of epochs to retrain the model.
+            batch_size (int): Number of samples per gradient update.
+            verbose (int): Verbosity mode (0 - silent, 1 - progress bar, 2 - one line per epoch).
+
+        Returns:
+            tf.keras.History: Object containing the retraining history.
+        """
+        self.train_gen = new_train_gen
+        self.val_gen = new_val_gen
+
+        new_input_shape = self.train_gen.__getitem__(0)[0].shape[1:]
+        new_model = self.create_unet(input_shape=new_input_shape)
+
+        if pretrained_model_path is not None:
+            # Load pre-trained weights into the new model
+            new_model.load_weights(pretrained_model_path, by_name=True, skip_mismatch=True)
+
+            # Load the pretrained model to get its layer names
+            pretrained_model = tf.keras.models.load_model(pretrained_model_path)
+            pretrained_layer_names = [layer.name for layer in pretrained_model.layers]
+
+            # Freeze layers that are both in the new model and the pre-trained model
+            for layer in new_model.layers:
+                if layer.name in pretrained_layer_names:
+                    layer.trainable = False
+                else:
+                    layer.trainable = True  # New or mismatched layers
+
+        self.model = new_model
+
+        # You might want to set a different optimizer or keep it as is
+        self.model.compile(optimizer=self.model.optimizer,
+                           loss=self.model.loss,
+                           # Add metrics if any
+                           )
+
+        return self.run(num_epochs=num_epochs, batch_size=batch_size, verbose=verbose)
+
+
+    def create_unet(self, input_shape=None, n_stacks=3, kernel=64, batchNormalize=False, verbose=1):
         """
         Creates a U-Net model.
 
@@ -1184,8 +879,11 @@ class Network:
         """
 
         # Input
-        input_img = self.train_gen.__getitem__(0)
-        input_window = Input((input_img[0].shape[1:]))
+        if input_shape is None:
+            input_shape = self.train_gen.__getitem__(0)[0].shape[1:]
+
+        input_window = Input(input_shape)
+
 
         last_layer = input_window
 
