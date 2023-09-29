@@ -50,12 +50,12 @@ jnormcorre = "^0.0.7"
 dtaidistance = "^2.3.10"
 tsfresh = "^0.20.1"
 tslearn = "^0.6.2"
-umap-learn = "*"
+umap-learn = {version = "*", markers = "sys_platform == 'win32' or sys_platform == 'linux'"}
 tensorflow = "^2.13.0"
 keras = "*"
 datashader = "^0.15.2"
 llvmlite = "~0.39"
-napari = {version = "0.4.14", extras = ["all"]}
+napari = {version = "0.4.14", markers = "sys_platform == 'win32' or sys_platform == 'linux'", extras = ["all"]}
 
 [tool.poetry.scripts]
 astrocast = 'astrocast.cli_interfaces:cli'
