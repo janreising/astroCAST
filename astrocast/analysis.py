@@ -13,6 +13,8 @@ import psutil
 import xxhash
 from matplotlib import pyplot as plt
 import seaborn as sns
+from scipy.cluster.hierarchy import fcluster
+from sklearn import metrics
 from tqdm import tqdm
 import napari
 from napari.utils.events import Event
@@ -27,7 +29,7 @@ from astrocast.preparation import IO
 class Events(CachedClass):
 
     def __init__(self, event_dir, lazy=True, data=None, h5_loc=None, group=None, subject_id=None,
-                 z_slice=None, index_prefix=None, custom_columns=("area_norm", "cx", "cy"), frame_to_time_mapping=None,
+                 z_slice=None, index_prefix=None, custom_columns=("v_area_norm", "cx", "cy"), frame_to_time_mapping=None,
                  frame_to_time_function=None, cache_path=None, seed=1):
 
         super().__init__(cache_path=cache_path)
@@ -88,7 +90,7 @@ class Events(CachedClass):
                 # add group columns
                 self.events["group"] = group
                 self.events["subject_id"] = subject_id
-                self.events["name"] = event_dir.stem
+                self.events["file_name"] = event_dir.stem
 
             # get data
             if isinstance(data, (str, Path)):
@@ -150,6 +152,11 @@ class Events(CachedClass):
             self.events.reset_index(drop=False, inplace=True, names="idx")
             self.z_slice = z_slice
 
+        # make categorical
+        for col in ('file_name', 'subject_id', 'group'):
+            if col in self.events.columns:
+                self.events[col] = self.events[col].astype("category")
+
     def __len__(self):
         return len(self.events)
 
@@ -167,6 +174,15 @@ class Events(CachedClass):
 
     def _repr_html_(self):
         return self.events._repr_html_()
+
+    # def save(self, path):
+    #     from joblib import dump
+    #     dump(self, path)
+    #
+    # @staticmethod
+    # def load(path):
+    #     from joblib import load
+    #     return load(path)
 
     def is_multi_subject(self):
         if len(self.events.subject_id.unique()) > 1:
@@ -187,6 +203,83 @@ class Events(CachedClass):
 
         events[column_name] = events.index.map(cluster_lookup_table)
 
+    @staticmethod
+    def score_clustering(groups, pred_groups):
+
+        # ensure number as group id
+        lut_groups = {g:i for i, g in enumerate(np.unique(groups))}
+        groups = [lut_groups[g] for g in groups]
+
+        selected_metrics = [metrics.adjusted_rand_score, metrics.adjusted_mutual_info_score,
+                            metrics.normalized_mutual_info_score,  metrics.homogeneity_score,
+                            metrics.completeness_score, metrics.v_measure_score,
+                            metrics.fowlkes_mallows_score]
+
+        results = {f.__name__:np.round(f(groups, pred_groups), 2) for f in selected_metrics}
+        return results
+
+    def get_counts_per_cluster(self, cluster_col, group_col=None):
+
+        if group_col is None:
+            counts = self.events[cluster_col].value_counts()
+
+        else:
+
+            unique_clusters = self.events[cluster_col].unique()
+            lut_cluster = {c:i for i, c in enumerate(unique_clusters)}
+
+            unique_groups = self.events[group_col].unique()
+            lut_groups = {g:i for i, g in enumerate(unique_groups)}
+
+            counts = np.zeros(shape=(len(unique_clusters), len(unique_groups)), dtype=int)
+
+            for _, row in self.events.iterrows():
+
+                x = lut_cluster[row[cluster_col]]
+                y = lut_groups[row[group_col]]
+                counts[x, y] += 1
+
+            counts = pd.DataFrame(data=counts, index=unique_clusters, columns=unique_groups)
+
+        return counts
+
+    def plot_cluster_counts(self, counts, normalize_instructions=None,
+                            method="average", metric="euclidean", z_score=0, center=0,
+                            transpose=False,
+                            color_palette="viridis", group_cmap=None, cmap="vlag"):
+
+        # normalize
+        if normalize_instructions is not None:
+            norm = Normalization(counts, inplace=False)
+            counts = norm.run(instructions=normalize_instructions)
+
+        # grouping colors
+        unique_groups = np.unique(counts.columns)
+        if group_cmap == "auto":
+            color_palette_ = sns.color_palette(color_palette, len(unique_groups))
+            group_cmap = {g:c for g, c in list(zip(unique_groups, color_palette_))}
+
+        if transpose:
+            counts = counts.transpose()
+
+        # plot
+        clustermap = sns.clustermap(data=counts,
+                                    col_colors=[group_cmap[g] for g in counts.columns] if group_cmap is not None else None,
+                                    row_cluster=True,
+                                    col_cluster=True,
+                                    method=method, metric=metric, z_score=z_score, center=center,
+                                    cmap=cmap, cbar_pos=None
+                                    )
+
+        # quality of clustering
+        linkage = clustermap.dendrogram_col.linkage
+        n_true_clusters = len(unique_groups)
+
+        pred_clusters = fcluster(linkage, n_true_clusters, criterion="maxclust")
+        pred_scores = self.score_clustering(counts.columns, pred_clusters)
+
+        return clustermap, pred_scores
+
     def copy(self):
         return copy.deepcopy(self)
 
@@ -197,15 +290,27 @@ class Events(CachedClass):
 
         for column in filters:
 
-            min_, max_ = filters[column]
+            typ = events[column].dtype
+            if typ == "object":
+                typ = type(events[column].dropna().iloc[0])
 
-            if min_ in [-1, None]:
-                min_ = events[column].min() + 1
+            if typ in [int, float, np.int64, np.float64, np.float32]:
 
-            if max_ in [-1, None]:
-                max_ = events[column].max() + 1
+                min_, max_ = filters[column]
 
-            events = events[events[column].between(min_, max_, inclusive="both")]
+                if min_ in [-1, None]:
+                    min_ = events[column].min() -1
+
+                if max_ in [-1, None]:
+                    max_ = events[column].max() + 1
+
+                events = events[events[column].between(min_, max_, inclusive="both")]
+
+            elif typ in [str, "category"]:
+                events = events[events[column].isin(filters[column])]
+
+            else:
+                raise ValueError(f"unknown column dtype: {column}>{typ}")
 
         if inplace:
             self.events = events
@@ -365,7 +470,7 @@ class Events(CachedClass):
         return time_map, events_start_frame, events_end_frame
 
     @staticmethod
-    def load_events(event_dir:Path, z_slice=None, index_prefix=None, custom_columns=("area_norm", "cx", "cy")):
+    def load_events(event_dir:Path, z_slice=None, index_prefix=None, custom_columns=("v_area_norm", "cx", "cy")):
 
         """
         Load events from the specified directory and perform optional preprocessing.
@@ -397,10 +502,10 @@ class Events(CachedClass):
 
         # Dictionary of custom column functions
         custom_column_functions = {
-            "area_norm": lambda events: events.area / events.dz,
-            "area_footprint": lambda events: events.footprint.apply(sum),
-            "cx": lambda events: events.x0 + events.dx * events["fp_centroid_local-0"],
-            "cy": lambda events: events.y0 + events.dy * events["fp_centroid_local-1"]
+            "v_area_norm": lambda events: events.v_area / events.dz,
+            "v_area_footprint": lambda events: events.footprint.apply(sum),
+            "cx": lambda events: events.x0 + events.dx * events["v_fp_centroid_local-0"],
+            "cy": lambda events: events.y0 + events.dy * events["v_fp_centroid_local-1"]
         }
 
         if custom_columns is not None:
@@ -433,135 +538,6 @@ class Events(CachedClass):
 
         return events
 
-    @wrapper_local_cache
-    def get_extended_events(self, video=None, dtype=float, extend=-1,
-                            return_array=False, in_place=False,
-                            normalization_instructions=None, show_progress=True,
-                            memmap_path=None, save_path=None, save_param={}):
-
-        """ takes the footprint of each individual event and extends it over the whole z-range
-
-        example standardizing:
-
-        normalization_instructions =
-            0: ["subtract", {"mode": "mean"}],
-            1: ["divide", {"mode": "std"}]
-        }
-
-        """
-
-        events = self.events if in_place else self.events.copy()
-        n_events = len(events)
-
-        # load data
-        if video is not None:
-            video = video.get_data()
-        elif self.data is not None:
-            video = self.data.get_data()
-        else:
-            raise ValueError("to extend the event traces you either have to provide the 'video' argument "
-                             "when calling this function or the 'data' argument during Event creation.")
-
-        # get video dimensions
-        n_frames, X, Y = video.shape
-
-        # create container to save extended events in
-        arr_ext, extended = None, None
-        if return_array:
-
-            # create array
-            if memmap_path:
-                memmap_path = Path(memmap_path).with_suffix(f".dtype_{np.dtype(dtype).name}_shape_{n_events}x{n_frames}.mmap")
-                arr_ext = np.memmap(memmap_path.as_posix(), dtype=dtype, mode='w+', shape=(n_events, n_frames))
-            else:
-                arr_ext = np.zeros((n_events, n_frames), dtype=dtype)
-
-            arr_size = arr_ext.itemsize*n_events*n_frames
-            ram_size = psutil.virtual_memory().total
-            if arr_size > 0.9 * ram_size:
-                logging.warning(f"array size ({n_events}, {n_frames}) is larger than 90% RAM size ({arr_size*1e-9:.2f}GB, {arr_size/ram_size*100}%). Consider using smaller dtype or providing a 'mmemap_path'")
-
-        else:
-            extended = list()
-
-        z0_container, z1_container = list(), list()
-
-        # extract footprints
-        c = 0
-        iterator = tqdm(events.iterrows(), total=len(events), desc="gathering footprints") if show_progress else events.iterrows()
-        for i, event in iterator:
-
-            # get z extend
-            if extend == -1:
-                z0, z1 = 0, n_frames
-            elif isinstance(extend, (int)):
-                dz0 = dz1 = extend
-                z0, z1 = max(0, event.z0-dz0), min(event.z1+dz1, n_frames)
-            elif isinstance(extend, (list, tuple)):
-
-                if len(extend) != 2:
-                    raise ValueError("provide 'extend' flag as int or tuple (ext_left, ext_right")
-
-                dz0, dz1 = extend
-
-                dz0 = n_frames if dz0 == -1 else dz0
-                dz1 = n_frames if dz1 == -1 else dz1
-
-                z0, z1 = max(0, event.z0-dz0), min(event.z1+dz1, n_frames)
-            else:
-                raise ValueError("provide 'extend' flag as int or tuple (ext_left, ext_right")
-
-            # extract requested volume
-            event_trace = video[z0:z1, event.x0:event.x1, event.y0:event.y1]
-
-            # select event pixel
-            footprint = np.invert(np.reshape(event["footprint"], (event.dx, event.dy)))
-            mask = np.broadcast_to(footprint, event_trace.shape)
-
-            # project to trace
-            projection = np.ma.masked_array(data=event_trace, mask=mask)
-            p = np.nanmean(projection, axis=(1, 2))
-
-            if normalization_instructions is not None:
-                norm = helper.Normalization(data=p, inplace=True)
-                norm.run(normalization_instructions)
-
-            if return_array:
-                arr_ext[c, z0:z1] = p
-            else:
-                extended.append(p)
-
-            z0_container.append(z0)
-            z1_container.append(z1)
-
-            c += 1
-
-        if return_array:
-
-            if memmap_path is not None:
-                logging.info(f"'save_path' ignored. Extended array saved as memmap to :{memmap_path}")
-
-            elif save_path is not None:
-                io = IO()
-                io.save(path=save_path, data=arr_ext, **save_param)
-
-            return arr_ext, z0_container, z1_container
-
-        else:
-
-            events.trace = extended
-
-            # save a copy of original z frames
-            events["z0_orig"] = events.z0
-            events["z1_orig"] = events.z1
-            events["dz_orig"] = events.dz
-
-            # update current z frames
-            events.z0 = z0_container
-            events.z1 = z1_container
-            events.dz = events["z1"] - events["z0"]
-
-            return events
 
     def to_numpy(self, events=None, empty_as_nan=True, simple=False):
 
@@ -713,6 +689,8 @@ class Events(CachedClass):
 
         viewer = napari.Viewer()
 
+        io = IO()
+
         # check if video was loaded at initialization
         if video is None and self.data is not None:
             logging.info(f"loading video from path provided during initialization."
@@ -722,22 +700,37 @@ class Events(CachedClass):
             viewer.add_image(data, )
 
         else:
-            io = IO()
             data = io.load(path=video, h5_loc=h5_loc, z_slice=z_slice, lazy=lazy)
 
-            viewer.add_image(data, )
+            viewer.add_image(data, name="data")
 
+        for debug_file in ["debug_smoothed_input.tiff", "debug_active_pixels.tiff",
+                            "debug_active_pixels_morphed.tiff"]:
+
+            dpath = self.event_dir.joinpath(debug_file)
+            if dpath.is_file():
+
+                debug = io.load(path=dpath, h5_loc="", z_slice=z_slice, lazy=lazy)
+
+                if "active" in debug_file:
+                    lbl_layer = viewer.add_labels(debug, name=debug_file.replace(".tiff", "").replace("debug_", ""))
+                    lbl_layer.contour = 1
+                else:
+                    viewer.add_image(debug, name=debug_file.replace(".tiff", "").replace("debug_", ""))
+
+        # add final labels
         event_map = self.event_map
         if z_slice is not None:
             event_map = event_map[z_slice[0]:z_slice[1], :, :]
 
-        viewer.add_labels(event_map)
+        lbl_layer = viewer.add_labels(event_map, name="event_labels")
+        lbl_layer.contour = 1
 
         return viewer
 
     @wrapper_local_cache
     def get_summary_statistics(self, decimals=2, groupby=None,
-        columns_excluded=('name', 'subject_id', 'group', 'z0', 'z1', 'x0', 'x1', 'y0', 'y1', 'mask', 'contours', 'footprint', 'fp_cx', 'fp_cy', 'trace', 'error',  'cx', 'cy')):
+        columns_excluded=('file_name', 'subject_id', 'group', 'z0', 'z1', 'x0', 'x1', 'y0', 'y1', 'mask', 'contours', 'footprint', 'fp_cx', 'fp_cy', 'trace', 'error',  'cx', 'cy')):
 
         events = self.events
 
@@ -870,6 +863,232 @@ class Events(CachedClass):
             res = array
 
         return res
+    @wrapper_local_cache
+    def get_extended_events(self, events=None, video=None, dtype=float, use_footprint=False,
+                            extend=-1, ensure_min=None, ensure_max=None, pad_borders=False,
+                            return_array=False, in_place=False,
+                            normalization_instructions=None, show_progress=True,
+                            memmap_path=None, save_path=None, save_param={}):
+
+        """ takes the footprint of each individual event and extends it over the whole z-range
+
+        example standardizing:
+
+        normalization_instructions =
+            0: ["subtract", {"mode": "mean"}],
+            1: ["divide", {"mode": "std"}]
+        }
+
+        """
+
+        if events is None:
+            events = self.events
+
+        if not in_place:
+            events = events.copy()
+
+        n_events = len(events)
+
+        # load data
+        if video is not None:
+            video = video.get_data()
+        elif self.data is not None:
+            video = self.data.get_data()
+        else:
+            raise ValueError("to extend the event traces you either have to provide the 'video' argument "
+                             "when calling this function or the 'data' argument during Event creation.")
+
+        # get video dimensions
+        n_frames, X, Y = video.shape
+
+        # create container to save extended events in
+        arr_ext, extended = None, None
+        if return_array:
+
+            # create array
+            if memmap_path:
+                memmap_path = Path(memmap_path).with_suffix(f".dtype_{np.dtype(dtype).name}_shape_{n_events}x{n_frames}.mmap")
+                arr_ext = np.memmap(memmap_path.as_posix(), dtype=dtype, mode='w+', shape=(n_events, n_frames))
+            else:
+                arr_ext = np.zeros((n_events, n_frames), dtype=dtype)
+
+            arr_size = arr_ext.itemsize*n_events*n_frames
+            ram_size = psutil.virtual_memory().total
+            if arr_size > 0.9 * ram_size:
+                logging.warning(f"array size ({n_events}, {n_frames}) is larger than 90% RAM size ({arr_size*1e-9:.2f}GB, {arr_size/ram_size*100}%). Consider using smaller dtype or providing a 'mmemap_path'")
+
+        else:
+            extended = list()
+
+        z0_container, z1_container = list(), list()
+
+        # extract footprints
+        c = 0
+        iterator = tqdm(events.iterrows(), total=len(events), desc="extending events") if show_progress else events.iterrows()
+        for i, event in iterator:
+
+            # select event pixel # TODO flag to switch between footprint and last frame
+            if use_footprint:
+                footprint = np.invert(np.reshape(event["footprint"], (event.dx, event.dy)))
+                mask_begin, mask_end = footprint, footprint
+
+            else:
+                mask_volume = np.invert(np.reshape(event["mask"], (event.dz, event.dx, event.dy)))
+                mask_begin, mask_end = mask_volume[0, :, :], mask_volume[-1, :, :]
+
+            z0, z1 = event.z0, event.z1
+
+            # get new boundaries
+            if extend == -1:
+                dz0 = z0
+                dz1 = n_frames - z1
+
+                full_z0, full_z1 = 0, n_frames
+
+            elif isinstance(extend, int):
+
+                dz0 = extend
+                dz1 = extend
+
+                if dz0 > z0:
+                    dz0 = z0
+
+                if z1 + dz1 > n_frames:
+                    dz1 = n_frames - z1
+
+                full_z0, full_z1 = z0-dz0, z1+dz1
+
+            elif isinstance(extend, (list, tuple)):
+
+                if len(extend) != 2:
+                    raise ValueError("provide 'extend' flag as int or tuple (ext_left, ext_right")
+
+                dz0, dz1 = extend
+
+                if dz0 == -1:
+                    dz0 = z0
+
+                elif dz0 > z0:
+                    dz0 = z0
+
+                if dz1 == -1:
+                    dz1 = n_frames - z1
+
+                elif z1 + dz1 > n_frames:
+                    dz1 = n_frames - z1
+
+                full_z0, full_z1 = z0-dz0, z1+dz1
+
+            else:
+                raise ValueError("provide 'extend' flag as int or tuple (ext_left, ext_right")
+
+            # ensure max and min criteria
+            full_dz = full_z1 - full_z0
+            if ensure_min is not None and full_dz < ensure_min:
+                diff = ensure_min - full_dz
+                left, right = diff // 2, diff // 2 + diff % 2
+
+                dz0 += left
+                dz1 += right
+
+                if dz0 > z0:
+                    dz0 = z0
+
+                if z1 + dz1 > n_frames:
+                    dz1 = n_frames - z1
+
+                full_z0, full_z1 = z0-dz0, z1+dz1
+
+            elif ensure_max is not None and full_dz > ensure_max:
+
+                diff = full_dz - ensure_max
+                left, right = diff // 2, diff // 2 + diff % 2
+
+                dz0 -= left
+                dz1 -= right
+
+                full_z0, full_z1 = z0-dz0, z1+dz1
+
+            # extract new signal
+
+            # beginning
+            pre_volume = video[full_z0:z0, event.x0:event.x1, event.y0:event.y1]
+            mask = np.broadcast_to(mask_begin, pre_volume.shape)
+
+            projection = np.ma.masked_array(data=pre_volume, mask=mask)
+            pre_trace = np.nanmean(projection, axis=(1, 2))
+
+            # end
+            post_volume = video[z1:full_z1, event.x0:event.x1, event.y0:event.y1]
+            mask = np.broadcast_to(mask_end, post_volume.shape)
+
+            projection = np.ma.masked_array(data=post_volume, mask=mask)
+            post_trace = np.nanmean(projection, axis=(1, 2))
+
+            # combine
+            trace = np.concatenate([pre_trace, event.trace, post_trace])
+
+            if ensure_max is not None and len(trace) > ensure_max:
+
+                c0 = max(0, full_z0-z0)
+                c1 = len(trace) - max(0, z1-full_z1)
+                trace = trace[c0:c1]
+
+            # padding to enforce equal length
+            if pad_borders:
+                full_dz = len(trace)
+
+                if ensure_min is not None and full_dz < ensure_min:
+                    diff = ensure_min - full_dz
+                    left, right = diff // 2, diff // 2 + diff % 2
+
+                    full_z0 -= left
+                    full_z1 += right
+                    trace = np.pad(trace, pad_width=(left, right), mode="edge")
+
+            # normalize
+            if normalization_instructions is not None:
+                norm = helper.Normalization(data=trace, inplace=True)
+                norm.run(normalization_instructions)
+
+            if return_array:
+                arr_ext[c, full_z0:full_z1] = trace
+            else:
+                extended.append(trace)
+
+            z0_container.append(full_z0)
+            z1_container.append(full_z1)
+
+            c += 1
+
+        if return_array:
+
+            if memmap_path is not None:
+                logging.info(f"'save_path' ignored. Extended array saved as memmap to :{memmap_path}")
+
+            elif save_path is not None:
+                io = IO()
+                io.save(path=save_path, data=arr_ext, **save_param)
+
+            return arr_ext, z0_container, z1_container
+
+        else:
+
+            events.trace = extended
+
+            # save a copy of original z frames
+            events["z0_orig"] = events.z0
+            events["z1_orig"] = events.z1
+            events["dz_orig"] = events.dz
+
+            # update current z frames
+            events.z0 = z0_container
+            events.z1 = z1_container
+            events.dz = events["z1"] - events["z0"]
+
+            self.events = events
+
+            return events
 
     def enforce_length(self, min_length=None, pad_mode="edge", max_length=None, inplace=False):
 
@@ -967,7 +1186,13 @@ class Events(CachedClass):
         traces = self.events.trace
 
         norm = Normalization(traces)
-        norm_traces = norm.run(normalize_instructions)
+
+        if "default" in normalize_instructions.keys():
+            def_func = getattr(norm, normalize_instructions["default"])
+            norm_traces = def_func()
+
+        else:
+            norm_traces = norm.run(normalize_instructions)
 
         # update events
         if inplace:
@@ -987,10 +1212,22 @@ class Video:
 
     def __init__(self, data, z_slice=None, h5_loc=None, lazy=False, name=None):
 
+        if isinstance(h5_loc, (tuple, list)):
+            if len(h5_loc) == 1:
+                h5_loc = h5_loc[0]
+
         if isinstance(data, (Path, str)):
 
             io = IO()
-            self.data = io.load(data, h5_loc=h5_loc, lazy=lazy, z_slice=z_slice)
+
+            if isinstance(h5_loc, str):
+                self.data = io.load(data, h5_loc=h5_loc, lazy=lazy, z_slice=z_slice)
+                self.Z, self.X, self.Y = self.data.shape
+
+            elif isinstance(h5_loc, (tuple, list)):
+                self.data = {}
+                for loc in h5_loc:
+                    self.data[loc] = io.load(data, h5_loc=loc, lazy=lazy, z_slice=z_slice)
 
         elif isinstance(data, (np.ndarray, da.Array)):
 
@@ -1000,8 +1237,13 @@ class Video:
             else:
                 self.data = data
 
+            self.Z, self.X, self.Y = self.data.shape
+
+        else:
+            raise ValueError(f"unknown data type: {type(data)}")
+
         self.z_slice = z_slice
-        self.Z, self.X, self.Y = self.data.shape
+
         self.name = name
 
     def __hash__(self):
@@ -1052,12 +1294,20 @@ class Video:
 
         return proj
 
-    def show(self, viewer=None, colormap="red",
-             show_trace=False, window=160, indices=None, viewer1d=None, xlabel="frames", ylabel="Intensity", reset_y=False):
+    def show(self, viewer=None, colormap="gray",
+             show_trace=False, window=160, indices=None, viewer1d=None,
+             xlabel="frames", ylabel="Intensity", reset_y=False):
+
+        if show_trace and isinstance(self.data, (tuple, list)):
+            raise ValueError(f"'show_trace' is currently not implemented for multiple datasets.")
 
         if viewer is None:
-            viewer = napari.view_image(self.data, name=self.name, colormap=colormap)
+            viewer = napari.Viewer()
 
+        if isinstance(self.data, dict):
+
+            for key in self.data.keys():
+                viewer.add_image(self.data[key], name=key, colormap=colormap)
         else:
             viewer.add_image(self.data, name=self.name, colormap=colormap)
 
@@ -1082,24 +1332,6 @@ class Video:
 
             # create attachable qtviewer
             line = v1d.add_line(np.c_[X, Y], name=self.name, color=colormap)
-
-            # def update_line(event: Event):
-            #     Z, _, _ = event.value
-            #     z0, z1 = Z-window, Z
-            #
-            #     if z0 < 0:
-            #         z0 = 0
-            #
-            #     y_ = Y[z0:z1]
-            #     x_ = X[z0:z1]
-            #     # y1 = np.pad(y1, (-z0, 0), 'constant', constant_values=0)
-            #
-            #     line.data = np.c_[x_, y_]
-            #
-            #     v1d.reset_x_view()
-            #
-            #     if reset_y:
-            #         v1d.reset_y_view()
 
             current_frame_line = None
 
@@ -1143,7 +1375,6 @@ class Video:
 
                 if reset_y:
                     v1d.reset_y_view()
-
 
             viewer.dims.events.current_step.connect(update_line)
 

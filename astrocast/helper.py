@@ -270,6 +270,9 @@ def get_data_dimensions(input_, loc=None, return_dtype=False):
     elif isinstance(input_, str):
         path = Path(input_)
 
+    elif isinstance(input_, (np.ndarray, da.Array)):
+        return input_.shape, None
+
     else:
         raise TypeError(f"data type not recognized: {type(input_)}")
 
@@ -829,6 +832,14 @@ class Normalization:
         }
         return self.run(instructions)
 
+    def mean_std(self):
+
+        instructions = {
+            0: ["subtract", {"mode": "mean"}],
+            1: ["divide", {"mode": "std"}]
+        }
+        return self.run(instructions)
+
     @staticmethod
     def get_value(data, mode, population_wide=False, axis=1):
 
@@ -953,11 +964,14 @@ class Normalization:
     @staticmethod
     def diff(data):
 
+        def get_diff(x, axis=1):
+            return np.concatenate([np.array([0]), np.diff(x, axis=axis)])
+
         if isinstance(data, ak.Array):
-            return ak.Array([np.diff(data[i]) for i in range(len(data))])
+            return ak.Array([get_diff(data[i], axis=0) for i in range(len(data))])
 
         else:
-            return np.diff(data, axis=1)
+            return get_diff(data, axis=1)
 
 class CachedClass:
 
@@ -981,7 +995,6 @@ class CachedClass:
         logging.warning(f"cache_path: {self.cache_path}")
         time.sleep(0.5)
         return np.random.random(1)
-
 
 def load_yaml_defaults(yaml_file_path):
     """Load default values from a YAML file."""
