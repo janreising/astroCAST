@@ -632,6 +632,7 @@ class Analysis:
                                 ui.input_switch("in_switch_contrast_use_classifier", "use classifier", value=True),
                                 ui.panel_conditional(
                                     "input.in_switch_contrast_use_classifier == true",
+                                    ui.h5("Classifiers"),
                                     ui.row(
                                     ui.column(4, ui.input_numeric("in_numeric_contrast_train_split", "train split",
                                                                   value=0.9, min=0.01, max=0.99)),
@@ -649,6 +650,7 @@ class Analysis:
                                 ),
                                 ui.panel_conditional(
                                     "input.in_switch_contrast_use_classifier == false",
+                                    ui.h5("Hierarchical Clustering"),
                                     ui.row(
                                         ui.column(6, ui.input_switch("in_switch_contrast_use_embedding", "use_embedding", value=False),),
                                         ui.column(6, ui.column(4, ui.input_switch("in_select_contrasts_cl_transpose", "transpose",
@@ -744,6 +746,7 @@ class Analysis:
                                 ),
                                 ui.panel_conditional(
                                     "input.in_switch_inc_predict_coincidence",
+                                    ui.h5("Coincidence Classification"),
                                     ui.input_select("in_select_inc_classifier", "Classifier",
                                                     choices=[m for m in Discriminator.get_available_models() if "Classifier" in m],
                                                     selected="RandomForestClassifier"),
@@ -758,6 +761,7 @@ class Analysis:
                                 ),
                                 ui.panel_conditional(
                                     "input.in_switch_inc_predict_coincidence == false",
+                                    ui.h5("Coincidence Regression"),
                                     ui.input_select("in_select_inc_classifier_loc", "Classifier",
                                                     choices=[m for m in Discriminator.get_available_models() if "Regressor" in m],
                                                     selected="RandomForestRegressor"),
