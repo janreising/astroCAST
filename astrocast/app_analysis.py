@@ -11,14 +11,16 @@ import seaborn
 import sklearn.decomposition
 import yaml
 from matplotlib import pyplot as plt, gridspec
+from matplotlib.lines import Line2D
 from numba import NumbaDeprecationWarning
+from scipy.cluster.hierarchy import dendrogram
 from shiny import App, ui, render, reactive, req
 import shiny.experimental.ui as xui
 from sklearn.manifold import TSNE
 from sklearn.metrics import ConfusionMatrixDisplay
 
 from astrocast.analysis import Events, Video
-from astrocast.clustering import CoincidenceDetection, Discriminator
+from astrocast.clustering import CoincidenceDetection, Discriminator, Linkage
 from astrocast.helper import Normalization, is_ragged
 from astrocast.preparation import IO
 import seaborn as sns
@@ -148,7 +150,10 @@ class Analysis:
                             ui.panel_sidebar(
                                 ui.h3(""),
                                 ui.h3("Settings"),
-                                ui.input_text("path", "Event directory", value=self.path),
+                                xui.tooltip(
+                                    ui.input_text("path", "Event directory", value=self.path),
+                                    "/absolute/path, comma-separated-list or /glob/path/*.roi", id="tooltip_path", placement="top"
+                                ),
                                 ui.input_text("frames", "frames", value=self.settings["Events"]["frames"]),
                                 ui.input_switch("in_switch_dummy_groups", "dummy groups", value=self.settings["Events"]["in_switch_dummy_groups"]),
                                 ui.h3("Information"),
@@ -612,8 +617,95 @@ class Analysis:
                 ui.nav(
                     "Conditional Contrasts",
                     ui.layout_sidebar(
-                        ui.panel_sidebar(),
-                        ui.panel_main()
+                        ui.panel_sidebar(
+                            xui.card(
+                                xui.card_header("Contrast groups"),
+                                ui.input_select("in_select_contrast_groups", "category", choices=[]),
+                                ui.panel_conditional(
+                                    "input.in_select_contrast_groups == 'dummy'",
+                                    ui.input_numeric("in_numeric_contrast_num_groups", "num contrasts", value=2),
+                                    ui.input_select("in_select_contrast_bias", "bias column", choices=[]),
+                                ),
+                            ),
+                            xui.card(
+                                xui.card_header("Settings"),
+                                ui.input_switch("in_switch_contrast_use_classifier", "use classifier", value=True),
+                                ui.panel_conditional(
+                                    "input.in_switch_contrast_use_classifier == true",
+                                    ui.row(
+                                    ui.column(4, ui.input_numeric("in_numeric_contrast_train_split", "train split",
+                                                                  value=0.9, min=0.01, max=0.99)),
+                                    ui.column(4, ui.input_switch("in_switch_contrast_balance_training",
+                                                                 "balance training set", value=True)),
+                                    ui.column(4, ui.input_switch("in_switch_contrast_balance_test",
+                                                                 "balance test set", value=False)),
+                                    ),
+                                    ui.input_select("in_select_contrast_classifier", "Classifier",
+                                                choices=[m for m in Discriminator.get_available_models() if "Classifier" in m],
+                                                selected="RandomForestClassifier"),
+                                    ui.input_select("in_select_contrast_norm_confusion_matrix",
+                                                                 "normalize confusion matrix",
+                                                                 choices=["", "pred", "all", "true"]),
+                                ),
+                                ui.panel_conditional(
+                                    "input.in_switch_contrast_use_classifier == false",
+                                    ui.row(
+                                        ui.column(6, ui.input_switch("in_switch_contrast_use_embedding", "use_embedding", value=False),),
+                                        ui.column(6, ui.column(4, ui.input_switch("in_select_contrasts_cl_transpose", "transpose",
+                                                                     value=False)),),
+                                    ),
+                                    ui.row(
+                                        ui.column(6, ui.input_numeric("in_numeric_contrasts_bary_cutoff", "cutoff",
+                                                                      value=5)),
+                                        ui.column(6, ui.input_select("in_select_contrasts_bary_crit", "criterion",
+                                                                     choices=['distance', 'maxclust'],
+                                                                     selected="maxclust")),
+                                    ),
+                                    ui.row(
+                                        ui.column(6, ui.input_select("in_select_contrasts_cl_method", "method",
+                                                                     choices=['average', 'single', 'complete',
+                                                                              'weighted', 'centroid', 'median', 'ward'])),
+                                        ui.column(6, ui.input_select("in_select_contrasts_cl_metric", "metric",
+                                                                     choices=['euclidean', 'minkowski', 'cityblock',
+                                                                         'seuclidean', 'sqeuclidean', 'cosine',
+                                                                         'correlation', 'hamming', 'jaccard',
+                                                                         'jensenshannon', 'chebyshev', 'canberra',
+                                                                         'braycurtis', 'mahalanobis', 'yule',
+                                                                         'matching', 'dice', 'kulczynski1',
+                                                                         'rogerstanimoto', 'russellrao',
+                                                                         'sokalmichener', 'sokalsneath'])),
+                                    ),
+                                    ui.row(
+                                        ui.column(6, ui.input_select("in_select_contrasts_cl_z_score", "z_score",
+                                                                      choices=["", "rows", "columns"])),
+                                        ui.column(6, ui.input_select("in_select_contrasts_cl_center", "center",
+                                                                      choices=["", "rows", "columns"])),
+                                    ),
+                                    ui.row(
+                                        ui.column(4, ui.input_select("in_select_contrasts_cl_cmap", "colormap",
+                                                                    choices=["vlag"])),
+                                        ui.column(4, ui.input_select("in_select_contrasts_cl_cmap_group", "group colormap",
+                                                                    choices=["viridis"])),
+                                        ui.column(4, ui.input_text("in_text_contrasts_cl_group_color_col", "group color column",
+                                                                   value=""))
+                                    ),
+                                )
+                            )
+                        ),
+                        ui.panel_main(
+                            ui.panel_conditional(
+                                "input.in_switch_contrast_use_classifier == true",
+                                ui.output_plot("out_plot_contrast_classifier")
+                            ),
+                            ui.panel_conditional(
+                                "input.in_switch_contrast_use_classifier == false",
+                                ui.row(
+                                    ui.column(6, ui.output_plot("out_plot_contrast_hierarchical_left", height="800px")),
+                                    ui.column(6, ui.output_plot("out_plot_contrast_hierarchical_right"), height="800px"),
+                                ),
+
+                            ),
+                        )
                     )
                 ),
                 ui.nav(
@@ -679,13 +771,6 @@ class Analysis:
                         )
                     )
                 ),
-                ui.nav(
-                    "Stereotype Classification",
-                    ui.layout_sidebar(
-                        ui.panel_sidebar(),
-                        ui.panel_main()
-                    )
-                )
             )
         )
 
@@ -710,24 +795,48 @@ class Analysis:
 
         @reactive.Calc
         def get_events_obj():
-            path = Path(input.path())
 
-            if path.exists():
-                events = Events(path)
+            path = input.path()
 
-                if input.in_switch_dummy_groups():
 
-                    lut_group = {idx:np.random.randint(1, 3) for idx in events.events.index.tolist()}
-                    events.add_clustering(lut_group, column_name="group")
+            split_path = path.split(",")
+            if len(split_path) > 1:
+                path = path.replace(" ", "").split(",")
 
-                    lut_subject_id = {idx:np.random.randint(1, 4) for idx in events.events.index.tolist()}
-                    events.add_clustering(lut_subject_id, column_name="subject_id")
+                for p in path:
+                    if not Path(p).exists():
+                        ui.notification_show(f"file missing: {p}", type="error")
+                        return None
 
-                    events.events.group = events.events.group.astype("category")
-                    events.events.subject_id = events.events.subject_id.astype("category")
+            elif "*" in path:
 
-                return events
-            return None
+                path = Path(path)
+                parent = path.parent
+                name = path.name
+                path = list(parent.glob(name))
+
+            else:
+                path = Path(path)
+                if not path.exists():
+                    ui.notification_show(f"file missing: {path}", type="error")
+                    return None
+
+            print(path)
+
+            events = Events(path)
+
+            if input.in_switch_dummy_groups():
+
+                lut_group = {idx:np.random.randint(1, 3) for idx in events.events.index.tolist()}
+                events.add_clustering(lut_group, column_name="group")
+
+                lut_subject_id = {idx:np.random.randint(1, 4) for idx in events.events.index.tolist()}
+                events.add_clustering(lut_subject_id, column_name="subject_id")
+
+                events.events.group = events.events.group.astype("category")
+                events.events.subject_id = events.events.subject_id.astype("category")
+
+            return events
 
         @reactive.Calc
         def get_events_obj_filtered():
@@ -1899,9 +2008,305 @@ class Analysis:
         # Experiments #
         ###############
 
-        #####
-        # ? #
-        #####
+        @reactive.Calc
+        def read_kwargs():
+
+            textbox_input = input.in_textarea_inc_kwargs()
+
+            if textbox_input == "":
+                return {}
+
+            else:
+
+                try:
+                    parsed_dict = yaml.safe_load(textbox_input)
+                    print(parsed_dict)
+                    if not isinstance(parsed_dict, dict):
+                        raise ValueError("The input does not represent a dictionary.")
+                    return parsed_dict
+                except yaml.YAMLError as e:
+                    print(f"Error parsing YAML: {e}")
+                    return None
+
+        #########################
+        # Conditional Contrasts #
+        #########################
+
+        @reactive.Effect
+        def update_contrast_groups():
+
+            events = get_events_obj_filtered().events
+
+            if events is not None:
+                cols = [col for col in events.columns if events[col].dtype =="category" and len(np.unique(events[col].dropna())) > 1]
+
+                ui.update_select("in_select_contrast_groups", choices=["", "dummy"] + cols)
+
+        @reactive.Effect
+        def update_contrast_bias():
+
+            events = get_events_obj_filtered().events
+
+            if events is not None:
+                cols = [col for col in events.columns if events[col].dtype != "category" and col.startswith("v_")]
+
+                ui.update_select("in_select_contrast_bias", choices=[""] + cols)
+
+        @reactive.Calc
+        def get_contrast_classes():
+
+            events = get_events_obj_filtered()
+            if events is not None and input.in_select_contrast_groups() != "":
+
+                num_contrasts = input.in_numeric_contrast_num_groups()
+                group_column = input.in_select_contrast_groups()
+                if group_column == "dummy":
+
+                    bias = input.in_select_contrast_bias()
+                    if bias != "":
+
+                        bias_column = events.events[bias].astype(float)
+
+                        contrasts = pd.qcut(bias_column, num_contrasts, labels=(0, num_contrasts))
+                        contrasts = np.array(contrasts.tolist())
+                    else:
+                        contrasts = np.random.randint(0, num_contrasts, size=len(events))
+
+                    mapping_dict = {v:v for v in np.unique(contrasts)}
+                    rev_mapping_dict = {v:k for k, v in mapping_dict.items()}
+
+                else:
+                    values = events.events[group_column]
+                    unique_values = values.unique()
+
+                    mapping_dict = {v:i for i, v in enumerate(unique_values)}
+                    rev_mapping_dict = {v:k for k, v in mapping_dict.items()}
+                    contrasts = np.array(values.map(mapping_dict).tolist())
+
+                return contrasts, rev_mapping_dict
+            return None, None
+
+        @reactive.Calc
+        def get_contrast_classifier():
+
+            events = get_events_obj_filtered()
+            contrasts, contrast_map = get_contrast_classes()
+            embedding = get_reduction()
+            if events is not None and embedding is not None and contrasts is not None:
+
+                if isinstance(embedding, pd.DataFrame):
+                    embedding = embedding.values
+
+                train_split = input.in_numeric_contrast_train_split()
+                balance_training_set = input.in_switch_contrast_balance_training()
+                balance_test_set = input.in_switch_contrast_balance_test()
+
+                discr = Discriminator(events=events)
+                discr.split_dataset(embedding, contrasts,
+                    split=train_split, balance_training_set=balance_training_set, balance_test_set=balance_test_set
+                )
+
+                extra_arguments = read_kwargs()
+                clf = discr.train_classifier(classifier=input.in_select_contrast_classifier(), **extra_arguments)
+
+                norm_conf_matrix = input.in_select_contrast_norm_confusion_matrix()
+                evaluation = discr.evaluate(regression=False, cutoff=None,
+                                             normalize=norm_conf_matrix if norm_conf_matrix != "" else None)
+
+                predictions = clf.predict(embedding)
+
+                return clf, evaluation, predictions
+            return None, None, None
+
+        @output
+        @render.plot
+        def out_plot_contrast_classifier():
+
+            embedding = get_reduction()
+            contrasts, contrast_map = get_contrast_classes()
+            clf, evaluation, predictions = get_contrast_classifier()
+            if clf is not None:
+
+                # Create the figure
+                fig = plt.figure(figsize=(20, 20))
+
+                # Create a GridSpec layout with 2 rows and 2 columns
+                gs = gridspec.GridSpec(2, 2, width_ratios=[1, 2], height_ratios=[1, 1])
+
+                # Create subplots
+                ax1 = plt.subplot(gs[0, 0])  # A
+                ax2 = plt.subplot(gs[1, 0])  # B
+                ax3 = plt.subplot(gs[:, 1])  # C
+
+                # plot quality control
+                cmd_1 = ConfusionMatrixDisplay(evaluation[0])
+                cmd_1.plot(ax=ax1)
+                ax1.set_title("training confusion matrix")
+
+                cmd_2 = ConfusionMatrixDisplay(evaluation[1])
+                cmd_2.plot(ax=ax2)
+                ax2.set_title("test confusion matrix")
+
+                if isinstance(embedding, pd.DataFrame):
+                    embedding = embedding.values
+
+                # plot UMAP
+                if embedding.shape[1] > 2:
+                    umap_ = umap.UMAP(n_components=2)
+                    two_dim_embedding = umap_.fit_transform(embedding)
+                else:
+                    two_dim_embedding = embedding
+
+                available_markers = list(Line2D.markers.keys())
+                filtered_markers = [m for m in available_markers if m not in ['None', ' ', '', 'None|', None]]
+
+                labeled = {c:False for c in np.unique(contrasts)}
+                for i in range(len(contrasts)):
+                    true_, pred = contrasts[i], predictions[i]
+
+                    ax3.scatter(two_dim_embedding[i, 0], two_dim_embedding[i, 1],
+                                c="green" if true_ == pred else "red",
+                                marker=filtered_markers[true_+2],
+                                label=contrast_map[true_] if not labeled[true_] else None)
+
+                    labeled[true_] = True
+
+                ax3.legend()
+
+                return fig
+            return None
+
+        @reactive.Calc
+        def get_barycenters():
+
+            events = get_events_obj_normalized()
+            if events is not None:
+
+                events = events.copy()
+                linkage = Linkage()
+
+                if input.in_switch_contrast_use_embedding():
+
+                    embedding = get_embedding()
+                    if embedding is None:
+                        ui.notification_show(f"cannot find embedding; please calculate with 'Encoding' tab.")
+                        return None
+
+                    if isinstance(embedding, pd.DataFrame):
+                        embedding = np.array(embedding.values).tolist()
+                    elif isinstance(embedding, np.ndarray):
+                        embedding = embedding.tolist()
+
+                    events.events.trace = embedding
+
+                cutoff=input.in_numeric_contrasts_bary_cutoff()
+                criterion=input.in_select_contrasts_bary_crit()
+                distance_type="pearson" if input.in_switch_contrast_use_embedding() else "dtw"
+                barycenters, lut, Z = linkage.get_barycenters(events,
+                                                               cutoff=cutoff,
+                                                               criterion=criterion,
+                                                               distance_type=distance_type,
+                                                               return_linkage_matrix=True)
+
+                return barycenters, lut, Z
+            return None, None
+
+        @output
+        @render.plot
+        def out_plot_contrast_hierarchical_left():
+
+            barycenters, lut, Z = get_barycenters()
+            contrasts, mapping_dict = get_contrast_classes()
+            events = get_events_obj_filtered()
+            if events is not None and barycenters is not None and contrasts is not None:
+
+                # Create the figure
+                fig = plt.figure(figsize=(10, 10))
+
+                # Create a GridSpec layout with 2 rows and 2 columns
+                gs = gridspec.GridSpec(2, 1)
+
+                # Create subplots
+                ax1 = plt.subplot(gs[0, 0])  # A
+                ax2 = plt.subplot(gs[1, 0])  # B
+
+                # Dendogram
+                p = input.in_numeric_contrasts_bary_cutoff()
+                if input.in_select_contrasts_bary_crit() == "maxclust":
+                    truncate_mode = "lastp"
+                else:
+                    truncate_mode = "level"
+
+                dendo_plot = dendrogram(Z, p=p, truncate_mode=truncate_mode, color_threshold=7,
+                        orientation="left",
+                        leaf_font_size=12, above_threshold_color="black",
+                        ax=ax1, no_plot=False, get_leaves=True, show_leaf_counts=True)
+
+                # Barplot
+                events = events.copy()
+                cluster_column = "bary_cluster"
+                events.add_clustering(cluster_lookup_table=lut, column_name=cluster_column)
+                events.add_clustering(
+                    cluster_lookup_table={idx:v for idx, v in list(zip(events.events.index.tolist(), contrasts))},
+                    column_name="contrast"
+                )
+
+                sel = pd.DataFrame({
+                    "dz":events.events.dz,
+                    cluster_column:events.events.bary_cluster,
+                    "contrasts": contrasts,
+                    "contrast_name": [mapping_dict[c] for c in contrasts]
+                })
+                sel = sel.groupby([cluster_column, "contrasts"]).count().reset_index()
+                sel[cluster_column] = sel[cluster_column].astype(str)
+                sns.barplot(data=sel, x="contrasts", y="dz", hue=cluster_column, ax=ax2)
+
+                return fig
+            return None
+
+        @output
+        @render.plot
+        def out_plot_contrast_hierarchical_right():
+
+            barycenters, lut, Z = get_barycenters()
+            contrasts, mapping_dict = get_contrast_classes()
+            events = get_events_obj_filtered()
+            if events is not None and barycenters is not None and contrasts is not None:
+
+                events = events.copy()
+                cluster_column = "bary_cluster"
+                events.add_clustering(cluster_lookup_table=lut, column_name=cluster_column)
+                events.add_clustering(
+                    cluster_lookup_table={idx:v for idx, v in list(zip(events.events.index.tolist(), contrasts))},
+                    column_name="contrast"
+                )
+
+                # Clustermap
+                counts = events.get_counts_per_cluster(cluster_column, group_col="contrast")
+
+                # group_color_col = input.in_text_contrasts_cl_group_color_col()
+                # if group_color_col != "":
+                #     color_palette_ = sns.color_palette(input.in_select_contrasts_cl_cmap(), len(group_color_col))
+                #
+
+                in_dict = {"":None, "rows":0, "columns":1}
+                clustermap, pred_scores = events.plot_cluster_counts(counts,
+                    normalize_instructions=None,
+                    method=input.in_select_contrasts_cl_method(),
+                    metric=input.in_select_contrasts_cl_metric(),
+                    z_score=in_dict[input.in_select_contrasts_cl_z_score()],
+                    center=in_dict[input.in_select_contrasts_cl_center()],
+                    color_palette=input.in_select_contrasts_cl_cmap_group(),
+                    group_cmap=None,
+                    cmap=input.in_select_contrasts_cl_cmap(),
+                    transpose=input.in_select_contrasts_cl_transpose()
+                )
+
+                print("clustermap scores: ", pred_scores)
+
+                fig = clustermap.ax_heatmap.get_figure()
+                return fig
+            return None
 
         ##########################
         # Coincidence Prediction #
@@ -1948,26 +2353,6 @@ class Analysis:
 
                 return incidences
             return None
-
-        @reactive.Calc
-        def read_kwargs():
-
-            textbox_input = input.in_textarea_inc_kwargs()
-
-            if textbox_input == "":
-                return {}
-
-            else:
-
-                try:
-                    parsed_dict = yaml.safe_load(textbox_input)
-                    print(parsed_dict)
-                    if not isinstance(parsed_dict, dict):
-                        raise ValueError("The input does not represent a dictionary.")
-                    return parsed_dict
-                except yaml.YAMLError as e:
-                    print(f"Error parsing YAML: {e}")
-                    return None
 
         @reactive.Calc
         def get_coincidence_prediction():

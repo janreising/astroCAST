@@ -245,6 +245,7 @@ class Events(CachedClass):
 
     def plot_cluster_counts(self, counts, normalize_instructions=None,
                             method="average", metric="euclidean", z_score=0, center=0,
+                            transpose=False,
                             color_palette="viridis", group_cmap=None, cmap="vlag"):
 
         # normalize
@@ -254,13 +255,16 @@ class Events(CachedClass):
 
         # grouping colors
         unique_groups = np.unique(counts.columns)
-        if group_cmap is None:
+        if group_cmap == "auto":
             color_palette_ = sns.color_palette(color_palette, len(unique_groups))
             group_cmap = {g:c for g, c in list(zip(unique_groups, color_palette_))}
 
+        if transpose:
+            counts = counts.transpose()
+
         # plot
         clustermap = sns.clustermap(data=counts,
-                                    col_colors=[group_cmap[g] for g in counts.columns],
+                                    col_colors=[group_cmap[g] for g in counts.columns] if group_cmap is not None else None,
                                     row_cluster=True,
                                     col_cluster=True,
                                     method=method, metric=metric, z_score=z_score, center=center,

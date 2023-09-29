@@ -128,13 +128,13 @@ class Linkage(CachedClass):
 """
 
     def __init__(self, cache_path=None, logging_level=logging.INFO):
-        super().__init__(logging_level=logging_level, cache_path=None, )
+        super().__init__(logging_level=logging_level, cache_path=cache_path)
 
         self.Z = None
 
     def get_barycenters(self, events, cutoff, criterion="distance", default_cluster = -1,
                         distance_matrix=None,
-                        distance_type="pearson", param_distance={},
+                        distance_type="pearson", param_distance={}, return_linkage_matrix=False,
                         param_linkage={}, param_clustering={}, param_barycenter={}):
 
         """
@@ -168,7 +168,10 @@ class Linkage(CachedClass):
         for _, row in barycenters.iterrows():
             cluster_lookup_table.update({idx_: row.cluster for idx_ in row.idx})
 
-        return barycenters, cluster_lookup_table
+        if return_linkage_matrix:
+            return barycenters, cluster_lookup_table, linkage_matrix
+        else:
+            return barycenters, cluster_lookup_table
 
     @wrapper_local_cache
     def get_two_step_barycenters(self, events, step_one_column="subject_id",
@@ -883,7 +886,7 @@ class Discriminator(CachedClass):
 
         return available_models
 
-    def train_classifier(self, embedding, category_vector=None, split=0.8,
+    def train_classifier(self, embedding=None, category_vector=None, split=0.8,
                          classifier="RandomForestClassifier", **kwargs):
 
         # split into training and validation dataset
@@ -933,7 +936,7 @@ class Discriminator(CachedClass):
 
             pred = np.squeeze(self.clf.predict(X))
 
-            if pred.dtype != int and not regression:
+            if pred.dtype != int and not regression and cutoff is not None:
                 logging.warning(f"assuming probability prediction. thresholding at {cutoff}")
                 Y = Y >= cutoff
 
@@ -947,7 +950,6 @@ class Discriminator(CachedClass):
                 evaluations.append(cm)
 
         return evaluations
-
 
     def split_dataset(self, embedding, category_vector, split=0.8,
                       balance_training_set=False, balance_test_set=False, encode_category=None,
