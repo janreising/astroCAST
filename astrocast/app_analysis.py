@@ -2430,10 +2430,6 @@ class Analysis:
                 return fig
             return None
 
-        #####
-        # ? #
-        #####
-
 
     def plot_images(self, arr, frames, lbls=None, figsize=(10, 5), vmin=None, vmax=None):
 
