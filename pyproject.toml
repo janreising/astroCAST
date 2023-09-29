@@ -12,7 +12,7 @@ matplotlib = "^3.8.0"
 multiprocess = "^0.70.15"
 networkx = "^3.1"
 pandas = "^2.1.0"
-napari-plot = "^0.1.5"
+napari-plot = {version = "^0.1.5", markers = "sys_platform == 'win32' or sys_platform == 'linux'"}
 powerlaw = "^1.5"
 pynwb = "^2.5.0"
 deprecated = "^1.2.14"
