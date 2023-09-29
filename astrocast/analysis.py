@@ -13,6 +13,8 @@ import psutil
 import xxhash
 from matplotlib import pyplot as plt
 import seaborn as sns
+from scipy.cluster.hierarchy import fcluster
+from sklearn import metrics
 from tqdm import tqdm
 import napari
 from napari.utils.events import Event
@@ -200,6 +202,79 @@ class Events(CachedClass):
                             f"Please provide a different column_name if this is not the expected behavior.")
 
         events[column_name] = events.index.map(cluster_lookup_table)
+
+    @staticmethod
+    def score_clustering(groups, pred_groups):
+
+        # ensure number as group id
+        lut_groups = {g:i for i, g in enumerate(np.unique(groups))}
+        groups = [lut_groups[g] for g in groups]
+
+        selected_metrics = [metrics.adjusted_rand_score, metrics.adjusted_mutual_info_score,
+                            metrics.normalized_mutual_info_score,  metrics.homogeneity_score,
+                            metrics.completeness_score, metrics.v_measure_score,
+                            metrics.fowlkes_mallows_score]
+
+        results = {f.__name__:np.round(f(groups, pred_groups), 2) for f in selected_metrics}
+        return results
+
+    def get_counts_per_cluster(self, cluster_col, group_col=None):
+
+        if group_col is None:
+            counts = self.events[cluster_col].value_counts()
+
+        else:
+
+            unique_clusters = self.events[cluster_col].unique()
+            lut_cluster = {c:i for i, c in enumerate(unique_clusters)}
+
+            unique_groups = self.events[group_col].unique()
+            lut_groups = {g:i for i, g in enumerate(unique_groups)}
+
+            counts = np.zeros(shape=(len(unique_clusters), len(unique_groups)), dtype=int)
+
+            for _, row in self.events.iterrows():
+
+                x = lut_cluster[row[cluster_col]]
+                y = lut_groups[row[group_col]]
+                counts[x, y] += 1
+
+            counts = pd.DataFrame(data=counts, index=unique_clusters, columns=unique_groups)
+
+        return counts
+
+    def plot_cluster_counts(self, counts, normalize_instructions=None,
+                            method="average", metric="euclidean", z_score=0, center=0,
+                            color_palette="viridis", group_cmap=None, cmap="vlag"):
+
+        # normalize
+        if normalize_instructions is not None:
+            norm = Normalization(counts, inplace=False)
+            counts = norm.run(instructions=normalize_instructions)
+
+        # grouping colors
+        unique_groups = np.unique(counts.columns)
+        if group_cmap is None:
+            color_palette_ = sns.color_palette(color_palette, len(unique_groups))
+            group_cmap = {g:c for g, c in list(zip(unique_groups, color_palette_))}
+
+        # plot
+        clustermap = sns.clustermap(data=counts,
+                                    col_colors=[group_cmap[g] for g in counts.columns],
+                                    row_cluster=True,
+                                    col_cluster=True,
+                                    method=method, metric=metric, z_score=z_score, center=center,
+                                    cmap=cmap, cbar_pos=None
+                                    )
+
+        # quality of clustering
+        linkage = clustermap.dendrogram_col.linkage
+        n_true_clusters = len(unique_groups)
+
+        pred_clusters = fcluster(linkage, n_true_clusters, criterion="maxclust")
+        pred_scores = self.score_clustering(counts.columns, pred_clusters)
+
+        return clustermap, pred_scores
 
     def copy(self):
         return copy.deepcopy(self)
