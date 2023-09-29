@@ -1033,7 +1033,7 @@ class MotionCorrection:
             elif input_.suffix in [".tiff", ".TIFF", ".tif", ".TIF"]:
                 # If input is a TIFF file
 
-                with tifffile.TiffFile('temp.tif') as tif:
+                with tifffile.TiffFile(input_.as_posix()) as tif:
 
                  self.frames = len(tif.pages)  # number of pages in the file
                  page = tif.pages[0]  # get shape and dtype of image in first page
@@ -1163,7 +1163,7 @@ class MotionCorrection:
         """
 
         # enforce path
-        output = Path(output)
+        output = Path(output) if output is not None else output
 
         # Check if the tiff output is available
         tiff_path = self.tiff_path

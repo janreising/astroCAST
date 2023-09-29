@@ -611,7 +611,7 @@ class Test_MotionCorrection:
             mc = MotionCorrection(working_directory=wd)
             mc.run(data, h5_loc=h5_loc, max_shifts=(6, 6))
 
-            data = mc.save(output=None, remove_mmap=True)
+            data = mc.save(output=None)
             assert type(data) == np.ndarray
 
 
@@ -660,7 +660,7 @@ class Test_MotionCorrection:
             mc = MotionCorrection()
             mc.run(data, h5_loc=h5_loc, max_shifts=(6, 6))
 
-            data = mc.save(output=None, remove_mmap=True)
+            data = mc.save(output=None)
             assert type(data) == np.ndarray
 
     @pytest.mark.parametrize("extension", [".h5", ".tiff"])
@@ -672,7 +672,7 @@ class Test_MotionCorrection:
         mc = MotionCorrection()
         mc.run(input_=input_, h5_loc=h5_loc, max_shifts=(6, 6))
 
-        data = mc.save(output=None, remove_mmap=True)
+        data = mc.save(output=None)
         assert type(data) == np.ndarray
 
     @pytest.mark.parametrize("video_param",
@@ -696,7 +696,7 @@ class Test_MotionCorrection:
         mc = MotionCorrection()
         mc.run(data, max_shifts=(int(X/2)-1, int(Y/2)-1))
 
-        data = mc.save(output=None, remove_mmap=True)
+        data = mc.save(output=None)
         assert type(data) == np.ndarray
 
         # get average shift per frame
