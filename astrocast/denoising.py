@@ -720,7 +720,7 @@ class SubFrameGenerator(tf.keras.utils.Sequence):
 
 
 class Network:
-    def __init__(self, train_generator, val_generator=None, learning_rate=0.001, decay_rate=0.99, decay_steps=100,
+    def __init__(self, train_generator, val_generator=None, learning_rate=0.001, decay_rate=0.99, decay_steps=250,
                  n_stacks=3, kernel=64, batchNormalize=False, loss=None, pretrained_weights=None,
                  use_cpu=False):
         """
@@ -814,7 +814,7 @@ class Network:
 
             callbacks.append(
                 ModelCheckpoint(
-                    filepath=save_model.joinpath(model_prefix+"-{epoch:02d}-{val_loss:.2f}.h5").as_posix(),
+                    # filepath=save_model.joinpath(model_prefix+"-{epoch:02d}-{val_loss:.2f}.h5").as_posix(),
                     save_weights_only=False,
                     monitor=monitor, mode='min',
                     save_best_only=True,
