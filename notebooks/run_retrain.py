@@ -40,7 +40,7 @@ else:
 loc = "mc/ch0" # data/
 param = dict(loc=loc, input_size=(256, 256), pre_post_frame=5, gap_frames=0, normalize="global", in_memory=True)
 
-train_gen = SubFrameGenerator(paths=train_paths, padding=None, batch_size=32 ,max_per_file=100,
+train_gen = SubFrameGenerator(paths=train_paths, padding=None, batch_size=16 ,max_per_file=100,
                                allowed_rotation=[1, 2, 3], allowed_flip=[0, 1], shuffle=True, **param)
 
 # Network
