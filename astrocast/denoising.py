@@ -762,19 +762,31 @@ class Network:
         else:
             lr_schedule=learning_rate
 
+        if pretrained_weights is not None:
+
+                    if isinstance(pretrained_weights, str):
+                        pretrained_weights = Path(pretrained_weights)
+
+                    if pretrained_weights.is_file():
+                        self.model = load_model(pretrained_weights,
+                            custom_objects={"annealed_loss": Network.annealed_loss, "mean_squareroot_error":Network.mean_squareroot_error})
+
+                    elif pretrained_weights.is_dir():
+
+                        latest_weights = tf.train.latest_checkpoint(pretrained_weights)
+
+                        if latest_weights is not None:
+                            logging.info(f"Loading previous weights from: {pretrained_weights}")
+                            self.model.load_weights(latest_weights)
+                        else:
+                            logging.warning(f"Couldn't find pretrained weights in {pretrained_weights}")
+
+                    else:
+                        logging.warning(f"pretrained_weights is neither file nor dir: {pretrained_weights}")
+
         # Set the optimizer and compile the model
         self.model.compile(optimizer=Adam(learning_rate=lr_schedule),
                            loss=self.annealed_loss if loss is None else loss)
-
-        if pretrained_weights is not None:
-
-            latest_weights = tf.train.latest_checkpoint(pretrained_weights)
-
-            if latest_weights is not None:
-                logging.info(f"Loading previous weights from: {pretrained_weights}")
-                self.model.load_weights(latest_weights)
-            else:
-                logging.warning(f"Couldn't find pretrained weights in {pretrained_weights}")
 
     def run(self, batch_size=10, num_epochs=25, save_model=None,
             patience=3, min_delta=0.005, monitor="val_loss", model_prefix="model",
