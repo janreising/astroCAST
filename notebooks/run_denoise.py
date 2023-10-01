@@ -35,7 +35,7 @@ if infer_output.is_file():
 
 inf_param = param.copy()
 inf_param["paths"] = infer_input
-inf_gen = SubFrameGenerator(padding="edge", batch_size=32, allowed_rotation=[0], allowed_flip=[-1], #z_select=(0, 1),
+inf_gen = SubFrameGenerator(padding="edge", batch_size=32, allowed_rotation=[0], allowed_flip=[-1], z_select=(0, 25),
                             overlap=10,
                                 shuffle=False, max_per_file=None, **inf_param)
 
