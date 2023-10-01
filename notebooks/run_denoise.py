@@ -25,7 +25,7 @@ if not model_path.is_dir() or len(list(model_path.glob("*.h5")))<1:
     net = Network(train_generator=train_gen, val_generator=val_gen, 
                   pretrained_weights = model_path,
                   n_stacks=2, kernel=32, 
-                  batchNormalize=False, use_cpu=True)
+                  batchNormalize=False, use_cpu=False)
     net.run(batch_size=1, 
             num_epochs=5,
             patience=2, min_delta=0.01, 
