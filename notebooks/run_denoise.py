@@ -40,5 +40,5 @@ inf_gen = SubFrameGenerator(padding="edge", batch_size=32, allowed_rotation=[0],
                             overlap=10,
                                 shuffle=False, max_per_file=None, **inf_param)
 
-inf_gen.infer(model=model_path, output=infer_output.as_posix(), out_loc=out_loc, rescale=True, dtype=float)
+inf_gen.infer(model=model_path, output=infer_output.as_posix(), out_loc="", rescale=True, dtype=float)
 
