@@ -10,7 +10,7 @@ root = Path("/tf/data/")
 
 model_path = root.joinpath("model")
 save_path = root.joinpath("model_retrain")
-train_paths = root.joinpath("pub_data/ExVivoSuppRaw.h5")
+train_paths = root.joinpath("pub_data/GlusnfrSuppRaw.h5")
 infer_input = train_paths
 
 infer_output = infer_input.parent.with_suffix(".retrain.tiff")
