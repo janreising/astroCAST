@@ -814,7 +814,7 @@ class Network:
 
             callbacks.append(
                 ModelCheckpoint(
-                    # filepath=save_model.joinpath(model_prefix+"-{epoch:02d}-{val_loss:.2f}.h5").as_posix(),
+                    filepath=save_model.as_posix(),
                     save_weights_only=False,
                     monitor=monitor, mode='min',
                     save_best_only=True,
