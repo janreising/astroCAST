@@ -9,6 +9,7 @@ from pathlib import Path
 root = Path("/tf/data/")
 
 model_path = root.joinpath("model")
+save_path = root.joinpath("model_retrain")
 train_paths = root.joinpath("ast/test_7g0hbnu0.h5")
 val_paths = train_paths
 infer_input = train_paths
