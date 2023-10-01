@@ -720,7 +720,7 @@ class SubFrameGenerator(tf.keras.utils.Sequence):
 
 
 class Network:
-    def __init__(self, train_generator, val_generator=None, learning_rate=0.1, decay_rate=0.9, decay_steps=100000,
+    def __init__(self, train_generator, val_generator=None, learning_rate=0.01, decay_rate=0.99, decay_steps=1000,
                  n_stacks=3, kernel=64, batchNormalize=False, loss=None, pretrained_weights=None,
                  use_cpu=False):
         """
