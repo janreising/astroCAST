@@ -8,7 +8,7 @@ from pathlib import Path
 import click
 import h5py
 import humanize
-import napari
+
 import numpy as np
 import yaml
 from functools import partial
@@ -681,6 +681,8 @@ def view_data(input_path, h5_loc, z_select, lazy, show_trace, window, colormap):
     view_data('path/to/your/file.h5', h5_loc='dataset_name', z_select=(10, 20), lazy=True)
     """
 
+    import napari
+
     vid = Video(data=input_path, z_slice=z_select, h5_loc=h5_loc, lazy=lazy)
     vid.show(show_trace=show_trace, window=window, colormap=colormap)
     napari.run()
@@ -715,6 +717,8 @@ def view_detection_results(event_dir, video_path, h5_loc, z_select, lazy):
     $ astrocast -view-detection-results --lazy False /path/to/event_dir
 
     """
+
+    import napari
 
     event = Events(event_dir=event_dir, data=video_path, h5_loc=h5_loc, z_slice=z_select, lazy=lazy)
     viewer = event.show_event_map(video=None, h5_loc=None, z_slice=z_select)
