@@ -10,7 +10,7 @@ root = Path("/tf/data/")
 
 model_path = root.joinpath("model")
 save_path = root.joinpath("model_retrain")
-train_paths = root.joinpath("pub_data/GlusnfrSuppRaw.h5")
+train_paths = root.joinpath("pub_data/InVivoSuppRaw.h5")
 infer_input = train_paths
 
 infer_output = infer_input.parent.with_suffix(".retrain.tiff")
@@ -55,14 +55,14 @@ net.retrain_model(batch_size=1,
         patience=20, min_delta=0.0001, monitor="loss",
         save_model=save_path)
 
-if infer_output.is_file():
-    infer_output.unlink()
-
-inf_param = param.copy()
-inf_param["paths"] = infer_input
-inf_gen = SubFrameGenerator(padding="edge", batch_size=32, allowed_rotation=[0], allowed_flip=[-1], z_select=(0, 25),
-                            overlap=10,
-                                shuffle=False, max_per_file=None, **inf_param)
-
-inf_gen.infer(model=model_path, output=infer_output.as_posix(), out_loc="", rescale=True, dtype=float)
+# if infer_output.is_file():
+#     infer_output.unlink()
+#
+# inf_param = param.copy()
+# inf_param["paths"] = infer_input
+# inf_gen = SubFrameGenerator(padding="edge", batch_size=32, allowed_rotation=[0], allowed_flip=[-1], z_select=(0, 25),
+#                             overlap=10,
+#                                 shuffle=False, max_per_file=None, **inf_param)
+#
+# inf_gen.infer(model=model_path, output=infer_output.as_posix(), out_loc="", rescale=True, dtype=float)
 
