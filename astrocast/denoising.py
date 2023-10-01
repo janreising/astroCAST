@@ -223,9 +223,6 @@ class SubFrameGenerator(tf.keras.utils.Sequence):
                                 Y - y_start + pad_y1 - dh,
                                 dh - overlap_y))
 
-            print(f"_xrange: {xRange}")
-            print(f"_yrange: {yRange}")
-
             logging.debug(f"\nz_range: {zRange}")
             logging.debug(f"\nx_range: {xRange}")
             logging.debug(f"\nx_range param > x_start:{x_start}, X:{X} pad_x1:{pad_x1}, dw:{dw}")
