@@ -22,7 +22,7 @@ val_gen = SubFrameGenerator(padding=None, batch_size=16, max_per_file=1, cache_r
 
 net = Network(train_generator=train_gen, val_generator=val_gen,
               pretrained_weights = model_path,
-              n_stacks=3, kernel=64,
+              n_stacks=3, kernel=32,
               batchNormalize=False, use_cpu=False)
 net.run(batch_size=1,
         num_epochs=25,
