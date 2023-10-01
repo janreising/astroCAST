@@ -7,10 +7,10 @@ root = Path("/tf/data/")
 
 model_path = root.joinpath("model")
 train_paths = list(root.joinpath("ast").glob("train*.h5"))
-val_paths = list(root.joinpath("ast").glob("val*.h5"))
+val_paths = list(root.joinpath("ast").glob("test*.h5"))
 print(len(train_paths), len(val_paths))
 
-infer_input = root.joinpath("ast/test_7g0hbnu0.h5")
+infer_input = root.joinpath("ast/true_test_70v89olb.h5")
 infer_output = infer_input.parent.with_suffix(".tiff")
 
 param = dict(loc="data", input_size=(256, 256), pre_post_frame=5, gap_frames=0, normalize="global", in_memory=True)
