@@ -14,7 +14,7 @@ infer_output = infer_input.parent.with_suffix(".tiff")
 
 param = dict(paths=train_paths, loc="data", input_size=(256, 256), pre_post_frame=5, gap_frames=0, normalize="global", in_memory=True)
 
-train_gen = SubFrameGenerator(padding=None, batch_size=64 ,max_per_file=16,
+train_gen = SubFrameGenerator(padding=None, batch_size=12 ,max_per_file=16,
                                allowed_rotation=[1, 2, 3], allowed_flip=[0, 1], shuffle=True, **param)
 
 val_gen = SubFrameGenerator(padding=None, batch_size=16, max_per_file=1, cache_results=True,
@@ -22,7 +22,7 @@ val_gen = SubFrameGenerator(padding=None, batch_size=16, max_per_file=1, cache_r
 
 net = Network(train_generator=train_gen, val_generator=val_gen,
               pretrained_weights = model_path,
-              n_stacks=3, kernel=32,
+              n_stacks=3, kernel=64,
               batchNormalize=False, use_cpu=False)
 net.run(batch_size=1,
         num_epochs=25,

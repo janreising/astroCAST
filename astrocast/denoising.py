@@ -805,7 +805,7 @@ class Network:
 
             callbacks.append(
                 ModelCheckpoint(
-                    filepath=save_model.joinpath(model_prefix+"-{epoch:02d}-{val_loss:.2f}.keras").as_posix(),
+                    filepath=save_model.joinpath(model_prefix+"-{epoch:02d}-{val_loss:.2f}.h5").as_posix(),
                     save_weights_only=False,
                     monitor=monitor, mode='min',
                     save_best_only=True,
@@ -825,7 +825,7 @@ class Network:
         # Save the final model
         if save_model is not None:
             # Create a filename with parameters
-            save_path = save_model.joinpath(model_prefix+"-{epoch:02d}-{val_loss:.2f}.keras").as_posix()
+            save_path = save_model.joinpath(model_prefix+"-{epoch:02d}-{val_loss:.2f}.h5").as_posix()
             logging.info(f"saved model to: {save_path}")
             self.model.save(save_path)
 
