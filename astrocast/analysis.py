@@ -5,8 +5,6 @@ from functools import lru_cache
 from pathlib import Path
 
 import dask.array as da
-import napari_plot
-from napari_plot._qt.qt_viewer import QtViewer
 import numpy as np
 import pandas as pd
 import psutil
@@ -1297,6 +1295,9 @@ class Video:
     def show(self, viewer=None, colormap="gray",
              show_trace=False, window=160, indices=None, viewer1d=None,
              xlabel="frames", ylabel="Intensity", reset_y=False):
+
+        import napari_plot
+        from napari_plot._qt.qt_viewer import QtViewer
 
         if show_trace and isinstance(self.data, (tuple, list)):
             raise ValueError(f"'show_trace' is currently not implemented for multiple datasets.")

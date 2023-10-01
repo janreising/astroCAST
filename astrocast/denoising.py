@@ -100,7 +100,6 @@ class SubFrameGenerator(tf.keras.utils.Sequence):
         self.add_noise = add_noise
         self.drop_frame_probability = drop_frame_probability
 
-        # assert normalize in [None, "normalize", "center", "standardize"], "normalize argument needs be one of: [None, 'normalize', 'center', 'standardize']"
         assert normalize in [None, "local", "global"], "normalize argument needs be one of: [None, local, global]"
         self.normalize = normalize
         if self.normalize == "global":
