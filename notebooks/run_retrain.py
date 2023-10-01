@@ -10,7 +10,7 @@ root = Path("/tf/data/")
 
 model_path = root.joinpath("model")
 save_path = root.joinpath("model_retrain")
-train_paths = root.joinpath("ast/test_7g0hbnu0.h5")
+train_paths = root.joinpath("public/ExVivoSuppRaw.h5")
 val_paths = train_paths
 infer_input = train_paths
 
@@ -38,16 +38,17 @@ else:
     raise FileNotFoundError(f"cannot find model: {model_path}")
 
 # Generators
-param = dict(loc="data", input_size=(256, 256), pre_post_frame=5, gap_frames=0, normalize="global", in_memory=True)
+loc = "mc/ch0" # data/
+param = dict(loc=loc, input_size=(256, 256), pre_post_frame=5, gap_frames=0, normalize="global", in_memory=True)
 
-train_gen = SubFrameGenerator(paths=train_paths, padding=None, batch_size=12 ,max_per_file=100,
+train_gen = SubFrameGenerator(paths=train_paths, padding=None, batch_size=32 ,max_per_file=100,
                                allowed_rotation=[1, 2, 3], allowed_flip=[0, 1], shuffle=True, **param)
 
 val_gen = SubFrameGenerator(paths=val_paths, padding=None, batch_size=16, max_per_file=1, cache_results=True,
                                    allowed_rotation=[0], allowed_flip=[-1], shuffle=False, **param)
 
 # Network
-net = Network(train_generator=train_gen, val_generator=val_gen, learning_rate=0.0001, decay_rate=None,
+net = Network(train_generator=train_gen, val_generator=val_gen, learning_rate=0.001, decay_rate=None,
               pretrained_weights = model_path.as_posix(),
               n_stacks=3, kernel=64,
               batchNormalize=False, use_cpu=False)
@@ -55,7 +56,7 @@ net = Network(train_generator=train_gen, val_generator=val_gen, learning_rate=0.
 # Train
 net.retrain_model(batch_size=1,
         frozen_epochs=50, unfrozen_epochs=50,
-        patience=3, min_delta=0.0001,
+        patience=20, min_delta=0.0001,
         save_model=save_path)
 
 if infer_output.is_file():
