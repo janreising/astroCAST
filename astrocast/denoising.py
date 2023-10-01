@@ -853,6 +853,7 @@ class Network:
         return history
 
     def retrain_model(self, frozen_epochs=25, unfrozen_epochs=5, batch_size=10,
+                      patience=3, min_delta=0.005, monitor="val_loss",
                       save_model=None, model_prefix="retrain",
                       verbose=1):
         """
@@ -879,6 +880,7 @@ class Network:
         logging.info(model.summary(line_length=100))
 
         history_frozen = self.run(num_epochs=frozen_epochs, batch_size=batch_size,
+                                  patience=patience, min_delta=min_delta, monitor=monitor,
                                   save_model=save_model, model_prefix=model_prefix,  verbose=verbose)
 
         if unfrozen_epochs is not None:
@@ -888,7 +890,8 @@ class Network:
             logging.info(model.summary(line_length=100))
 
             history_frozen = self.run(num_epochs=unfrozen_epochs, batch_size=batch_size,
-                                  save_model=save_model, model_prefix=model_prefix,  verbose=verbose)
+                                      patience=patience, min_delta=min_delta, monitor=monitor,
+                                      save_model=save_model, model_prefix=model_prefix,  verbose=verbose)
 
     def create_unet(self, n_stacks=3, kernel=64, batchNormalize=False, verbose=1):
         """
