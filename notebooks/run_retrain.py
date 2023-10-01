@@ -56,7 +56,7 @@ net = Network(train_generator=train_gen, val_generator=val_gen,
 net.run(batch_size=1,
         num_epochs=50,
         patience=3, min_delta=0.0001,
-        save_model=model_path)
+        save_model=save_path)
 
 if infer_output.is_file():
     infer_output.unlink()
