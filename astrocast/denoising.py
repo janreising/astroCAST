@@ -8,6 +8,8 @@ from typing import Union
 
 from tqdm import tqdm
 
+from astrocast.preparation import IO
+
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 import tensorflow as tf
 
@@ -82,6 +84,9 @@ class SubFrameGenerator(tf.keras.utils.Sequence):
 
         self.allowed_flip = allowed_flip
 
+        if random_offset and overlap is not None:
+            raise ValueError(f"random_offset and overlap are incompatible. Please choose only one.")
+
         self.overlap = overlap  # float
 
         assert padding in [None, "symmetric", "edge"]
@@ -119,14 +124,7 @@ class SubFrameGenerator(tf.keras.utils.Sequence):
     def generate_items(self):
 
         # define size of each predictive field of view (X, Y)
-        iw, ih = self.input_size
-
-        if self.overlap is not None:
-            dw = int(iw * self.overlap)
-            dh = int(ih * self.overlap)
-        else:
-            dw = iw
-            dh = ih
+        dw, dh = self.input_size
 
         # enforce tuples for signal and gap frames
         if isinstance(self.signal_frames, int):
@@ -145,13 +143,26 @@ class SubFrameGenerator(tf.keras.utils.Sequence):
 
         self.fov_size = (stack_len, dw, dh)
 
+        x_start, y_start, z_start = 0, 0, 0
         # randomize input
         if self.random_offset:
             x_start = np.random.randint(0, dw)
             y_start = np.random.randint(0, dh)
             z_start = np.random.randint(0, stack_len)
+
+        # adjust for overlap
+        overlap = self.overlap
+        if overlap is not None:
+            if overlap < 1:
+                overlap_x, overlap_y = int(dw*overlap), int(dh*overlap)
+            else:
+                overlap_x, overlap_y = overlap, overlap
+
         else:
-            x_start, y_start, z_start = 0, 0, 0
+            overlap_x, overlap_y = 0, 0
+
+            # x_start = -overlap_x
+            # y_start = -overlap_y
 
         allowed_rotation = self.allowed_rotation if self.allowed_rotation is not None else [None]
         allowed_flip = self.allowed_flip if self.allowed_flip is not None else [None]
@@ -194,18 +205,28 @@ class SubFrameGenerator(tf.keras.utils.Sequence):
             if self.padding is not None:
                 pad_z0 = signal_frames[0] + gap_frames[0]
                 pad_z1 = signal_frames[1] + gap_frames[1] + 1
-                pad_x1 = iw % X
-                pad_y1 = ih % Y
+                pad_x1 = dw % X
+                pad_y1 = dh % Y
             else:
                 pad_z0 = pad_z1 = pad_x1 = pad_y1 = 0
 
-            zRange =list(range(Z0 + z_start - pad_z0, Z1 - stack_len - z_start + pad_z1, z_steps))
-            xRange = list(range(x_start, X - x_start + pad_x1, dw))
-            yRange = list(range(y_start, Y - y_start + pad_y1, dh))
+            zRange =list(range(
+                Z0 + z_start - pad_z0,
+                Z1 - stack_len - z_start + pad_z1,
+                z_steps))
+            xRange = list(range(x_start,
+                                X - x_start  + pad_x1 - dw,
+                                dw - overlap_x))
+            yRange = list(range(y_start,
+                                Y - y_start + pad_y1 - dh,
+                                dh - overlap_y))
+
+            print(f"_xrange: {xRange}")
+            print(f"_yrange: {yRange}")
 
             logging.debug(f"\nz_range: {zRange}")
             logging.debug(f"\nx_range: {xRange}")
-            logging.debug(f"\nx_range param > x_start:{x_start}, X:{X} iw:{iw} pad_x1:{pad_x1}, dw:{dw}")
+            logging.debug(f"\nx_range param > x_start:{x_start}, X:{X} pad_x1:{pad_x1}, dw:{dw}")
             logging.debug(f"\ny_range: {yRange}")
 
             if self.shuffle:
@@ -217,10 +238,10 @@ class SubFrameGenerator(tf.keras.utils.Sequence):
                 z1 = z0 + stack_len
 
                 for x0 in xRange:
-                    x1 = x0 + iw
+                    x1 = x0 + dw
 
                     for y0 in yRange:
-                        y1 = y0 + ih
+                        y1 = y0 + dh
 
                         # choose modification
                         rot = random.choice(allowed_rotation)
@@ -233,19 +254,20 @@ class SubFrameGenerator(tf.keras.utils.Sequence):
                             drop_frame = -1
 
                         # calculate necessary padding
-                        padding = np.zeros(4, dtype=int)
+                        padding = np.zeros(6, dtype=int)
 
-                        if not z0 > 0:
-                            padding[0] = 0 - z0
+                        padding[0] = min(0, z0)
+                        padding[1] = max(0, z1 - Z1)
 
-                        if not z1 < Z1:
-                            padding[1] = z1 - Z1
+                        # padding[2] = min(0, -x0)
+                        padding[3] = max(0, x1 - X)
 
-                        if not x1 < X:
-                            padding[2] = x1 - X
+                        # padding[4] = min(0, -y0)
+                        padding[5] = max(0, y1 - Y)
 
-                        if not y1 < Y:
-                            padding[3] = y1 - Y
+                        padding = np.abs(padding)
+
+                        # print(f"_padding: {padding}, 2: {min(0, -x0)}, 3: {max(0, x1-X)}, 4: {min(0, -y0)}, 5: {max(0, y1 - Y)},")
 
                         # cannot pad on empty axis
                         if (padding[0] >= stack_len) or (padding[1] >= stack_len) or (padding[2] >= dw) or (padding[3] >= dh):
@@ -254,7 +276,7 @@ class SubFrameGenerator(tf.keras.utils.Sequence):
                         # create item
                         item = {
                             "idx": idx, "path": file, "z0": z0, "z1": z1, "x0": x0, "x1": x1, "y0": y0,
-                            "y1": y1, "rot": rot, "flip": flip,
+                            "y1": y1, "rot": rot, "flip": flip, "Z":Z, "X":X, "Y":Y,
                             "noise": self.add_noise, "drop_frame": drop_frame,
                             "padding": padding}
 
@@ -284,7 +306,6 @@ class SubFrameGenerator(tf.keras.utils.Sequence):
                             self.set_local_descriptive(file, h5_loc=self.loc, mean=mean, std=std)
 
                     else:
-                        logging.info("loading descriptive statistics from file")
                         self.descr[file] = local_save
 
                 else:
@@ -350,7 +371,7 @@ class SubFrameGenerator(tf.keras.utils.Sequence):
                 logging.debug(f"sel items: {sel_items}")
             for _, row in sel_items.iterrows():
 
-                raw = self._load_row(row.path, row.z0, row.z1, row.x0, row.x1, row.y0, row.y1).flatten()
+                raw = self._load_row(row).flatten()
                 raws.append(raw)
 
                 means += [np.nanmedian(raw)]
@@ -376,15 +397,51 @@ class SubFrameGenerator(tf.keras.utils.Sequence):
 
         return mean_, std_
 
-    def _load_row(self, path, z0, z1, x0, x1, y0, y1, padding=None):
+    def _load_row(self, row):
 
-        if padding is not None:
-            pad_z0, pad_z1, pad_x1, pad_y1 = padding
+        path, z0, z1, x0, x1, y0, y1, Z, X, Y = row.path, row.z0, row.z1, row.x0, row.x1, row.y0, row.y1, row.Z, row.X, row.Y
+        pad_z0, pad_z1, pad_x0, pad_x1, pad_y0, pad_y1 = row.padding
 
-            z0 = z0 + pad_z0
-            z1 = z1 - pad_z1
-            x1 = x1 - pad_x1
-            y1 = y1 - pad_y1
+        if sum([pad_z0, pad_z1, pad_x0, pad_x1, pad_y0, pad_y1]) > 0:
+
+            # adjust Z boundaries
+            if z0 < 0:
+                pad_z0 = abs(z0)
+                z0 = 0
+            else:
+                pad_z0 = 0
+                
+            if z1 > Z:
+                pad_z1 = abs(Z-z1)
+                z1 = Z
+            else:
+                pad_z1 = 0
+            
+            # adjust X boundaries
+            if x0 < 0:
+                pad_x0 = abs(x0)
+                x0 = 0
+            else:
+                pad_x0 = 0
+                
+            if x1 > X:
+                pad_x1 = abs(X-x1)
+                x1 = X
+            else:
+                pad_x1 = 0
+            
+            # adjust Y boundaries
+            if y0 < 0:
+                pad_y0 = abs(y0)
+                y0 = 0
+            else:
+                pad_y0 = 0
+                
+            if y1 > Y:
+                pad_y1 = abs(Y-y1)
+                y1 = Y
+            else:
+                pad_y1 = 0
 
         if type(self.mem_data) == dict:
 
@@ -408,9 +465,9 @@ class SubFrameGenerator(tf.keras.utils.Sequence):
             data = tiff.imread(path.as_posix(), key=range(z0, z1))
             data = data[:, x0:x1, y0:y1]
 
-        if (padding is not None) and np.sum((pad_z0, pad_z1, pad_x1, pad_y1)) > 0:
-            data = np.pad(data, ((pad_z0, pad_z1), (0, pad_x1), (0, pad_y1)),
-                          mode=self.padding)
+        if np.sum((pad_z0, pad_z1, pad_x0, pad_x1, pad_y0, pad_y1)) > 0:
+                data = np.pad(data, ((pad_z0, pad_z1), (pad_x0, pad_x1), (pad_y0, pad_y1)),
+                              mode=self.padding)
 
         return data
 
@@ -423,8 +480,7 @@ class SubFrameGenerator(tf.keras.utils.Sequence):
         y = []
         for _, row in self.items[self.items.batch == index].iterrows():
 
-            data = self._load_row(row.path, row.z0, row.z1, row.x0, row.x1, row.y0, row.y1,
-                                  padding=None if self.padding is None else row.padding)
+            data = self._load_row(row)
 
             assert data.shape == self.fov_size, f"loaded data does not match expected FOV size " \
                                                 f"(fov: {self.fov_size}) vs. (load: {data.shape}"
@@ -503,7 +559,7 @@ class SubFrameGenerator(tf.keras.utils.Sequence):
 
             if os.path.isdir(model):
 
-                models = list(model.glob("*.h5"))
+                models = list(model.glob("*.h*5"))
 
                 if len(models) < 1:
                     raise FileNotFoundError(f"cannot find model in provided directory: {model}")
@@ -543,8 +599,8 @@ class SubFrameGenerator(tf.keras.utils.Sequence):
 
         if "padding" in items.columns:
             pad_z_max = items.padding.apply(lambda x: x[1]).max()
-            pad_x_max = items.padding.apply(lambda x: x[2]).max()
-            pad_y_max = items.padding.apply(lambda x: x[3]).max()
+            pad_x_max = items.padding.apply(lambda x: x[3]).max()
+            pad_y_max = items.padding.apply(lambda x: x[5]).max()
         else:
             pad_z_max, pad_x_max, pad_y_max = 0, 0, 0
 
@@ -568,7 +624,7 @@ class SubFrameGenerator(tf.keras.utils.Sequence):
         for batch in tqdm(self.items.batch.unique()):
 
             x, _ = self[batch] # raw data
-            y = model.predict(x) # denoised data
+            y = model.predict(x, verbose=0) # denoised data
 
             if dtype != y.dtype:
                 y = y.astype(dtype)
@@ -582,19 +638,23 @@ class SubFrameGenerator(tf.keras.utils.Sequence):
 
                 im = y[c, :, :, 0]
 
-                pad_z0, pad_z1, pad_x1, pad_y1 = row.padding
+                pad_z0, pad_z1, pad_x0, pad_x1, pad_y0, pad_y1 = row.padding
+                overlap_x_half, overlap_y_half = int(self.overlap/2), int(self.overlap/2)
 
-                if pad_x1 > 0:
-                    im = im[:-pad_x1, :]
+                x0, x0_ = (0, pad_x0) if row.x0 == 0 else (row.x0 + overlap_x_half, overlap_x_half+pad_x0)
+                y0, y0_ = (0, pad_y0) if row.y0 == 0 else (row.y0 + overlap_y_half, overlap_y_half+pad_y0)
 
-                if pad_y1 > 0:
-                    im = im[:, :-pad_y1]
+                x1, x1_ = (row.x1, -pad_x1) if row.x1 >= row.X else (row.x1 - overlap_x_half-pad_x1, -overlap_x_half-pad_x1)
+                y1, y1_ = (row.y1, -pad_y1) if row.y1 >= row.Y else (row.y1 - overlap_y_half-pad_y1, -overlap_y_half-pad_y1)
+
+                im = im[x0_:x1_, y0_:y1_]
 
                 if rescale:
                     mean, std = self.descr[self.items.iloc[0].path]
                     im = (im * std) + mean
 
-                rec[row.z0+5, row.x0:row.x1, row.y0:row.y1] = im
+                # TODO this shouldn't be hardcoded
+                rec[row.z0+5, x0:x1, y0:y1] = im
 
                 c+=1
 
@@ -662,7 +722,7 @@ class SubFrameGenerator(tf.keras.utils.Sequence):
 
 class Network:
     def __init__(self, train_generator, val_generator=None, learning_rate=0.0001,
-                 n_stacks=3, kernel=64, batchNormalize=False, loss=None,
+                 n_stacks=3, kernel=64, batchNormalize=False, loss=None, pretrained_weights=None,
                  use_cpu=False):
         """
         Initializes the Network class.
@@ -695,16 +755,21 @@ class Network:
         self.model = self.create_unet(n_stacks=n_stacks, kernel=kernel, batchNormalize=batchNormalize)
 
         # Set the optimizer and compile the model
-        opt = Adam(learning_rate=learning_rate)
-        self.model.compile(optimizer=opt,
-                           loss=self.annealed_loss if loss is None else loss,
-                           # metrics=["val_loss", "loss", self.mean_squareroot_error]
-                           )
+        self.model.compile(optimizer=Adam(learning_rate=learning_rate),
+                           loss=self.annealed_loss if loss is None else loss)
 
-    def run(self,
-            batch_size=10, num_epochs=25,
-            patience=3, min_delta=0.005, monitor="val_loss",
-            save_model=None, load_weights=False,
+        if pretrained_weights is not None:
+
+            latest_weights = tf.train.latest_checkpoint(pretrained_weights)
+
+            if latest_weights is not None:
+                logging.info(f"Loading previous weights from: {pretrained_weights}")
+                self.model.load_weights(latest_weights)
+            else:
+                logging.warning(f"Couldn't find pretrained weights in {pretrained_weights}")
+
+    def run(self, batch_size=10, num_epochs=25, save_model=None,
+            patience=3, min_delta=0.005, monitor="val_loss", model_prefix="model",
             verbose=1):
         """
         Trains the model.
@@ -727,32 +792,25 @@ class Network:
             logging.info("Created save dir at: %s", save_model)
             save_model.mkdir()
 
-        callbacks = [
-            # Early stopping callback to stop training if no improvement
-            EarlyStopping(monitor=monitor, patience=patience, min_delta=min_delta, verbose=verbose),
-        ]
+        callbacks = []
+        if patience is not None:
+            callbacks.append(EarlyStopping(monitor=monitor, patience=patience, min_delta=min_delta, verbose=verbose))
 
         if save_model is not None:
-            if type(save_model) == str:
+
+            if isinstance(save_model, str):
                 save_model = Path(save_model)
 
-            # Model checkpoint callback to save the best model during training
+            if not save_model.is_dir():
+                save_model.mkdir()
+
             callbacks.append(
                 ModelCheckpoint(
-                    filepath=save_model.joinpath("model-{epoch:02d}-{val_loss:.2f}.hdf5").as_posix(),
+                    filepath=save_model.joinpath(model_prefix+"-{epoch:02d}-{val_loss:.2f}.hdf5").as_posix(),
                     save_weights_only=False,
-                    monitor=monitor,
-                    mode='min',
+                    monitor=monitor, mode='min',
                     save_best_only=True,
-                )
-            )
-
-            if load_weights:
-                logging.info("Loading previous weights!")
-                latest_weights = tf.train.latest_checkpoint(save_model)
-
-                if latest_weights is not None:
-                    self.model.load_weights(latest_weights)
+                ))
 
         # Start model training
         history = self.model.fit(
@@ -769,55 +827,16 @@ class Network:
         if save_model is not None:
             # Create a filename with parameters
             input_shape_str = "x".join(map(str, self.train_gen.__getitem__(0)[0].shape[1:]))
-            param_str = f"lr={self.model.optimizer.learning_rate}_nstacks={self.n_stacks}_kernel={self.kernel}_inputshape={input_shape_str}"
-            save_path = save_model.joinpath(f"model-{param_str}-{{epoch:02d}}-{{val_loss:.2f}}.hdf5").as_posix()
-            print(f"saved model to: {save_path}")
+            param_str = f"_nstacks-{self.n_stacks}_kernel-{self.kernel}_inputshape-{input_shape_str}"
+            save_path = save_model.joinpath(f"{model_prefix}_{param_str}-{{epoch:02d}}-{{val_loss:.2f}}.hdf5").as_posix()
+            logging.info(f"saved model to: {save_path}")
+            self.model.save(save_path)
 
         return history
 
-
-    def get_vanilla_architecture(self, verbose=1):
-
-        input_img = self.train_gen.__getitem__(0)
-        input_window = Input((input_img[0].shape[1:]))
-
-        # encoder
-        # input = 512 x 512 x number_img_in (wide and thin)
-        conv1 = Conv2D(64, (3, 3), activation="relu", padding="same")(input_window)  # 512 x 512 x 32
-        pool1 = MaxPooling2D(pool_size=(2, 2))(conv1)  # 14 x 14 x 32
-        conv2 = Conv2D(128, (3, 3), activation="relu", padding="same")(
-            pool1
-        )  # 256 x 256 x 64
-        pool2 = MaxPooling2D(pool_size=(2, 2))(conv2)  # 7 x 7 x 64#
-        conv3 = Conv2D(256, (3, 3), activation="relu", padding="same")(
-            pool2
-        )  # 128 x 128 x 128 (small and thick)
-
-        # decoder
-        conv4 = Conv2D(256, (3, 3), activation="relu", padding="same")(
-            conv3
-        )  # 128 x 128 x 128
-        up1 = UpSampling2D((2, 2))(conv4)  # 14 x 14 x 128
-
-        conc_up_1 = Concatenate()([up1, conv2])
-        conv5 = Conv2D(128, (3, 3), activation="relu", padding="same")(
-            conc_up_1
-        )  # 256 x 256 x 64
-        up2 = UpSampling2D((2, 2))(conv5)  # 28 x 28 x 64
-
-        conc_up_2 = Concatenate()([up2, conv1])
-        decoded = Conv2D(1, (3, 3), activation=None, padding="same")(
-            conc_up_2
-        )  # 512 x 512 x 1
-
-        decoder = Model(input_window, decoded)
-
-        if verbose > 0:
-            decoder.summary(line_length=100)
-
-        return decoder
-
-    def retrain_model(self, new_train_gen, model=None, new_val_gen=None, pretrained_model_path=None, num_epochs=25, batch_size=10, verbose=1):
+    def retrain_model(self, frozen_epochs=25, unfrozen_epochs=5, batch_size=10,
+                      save_model=None, model_prefix="retrain",
+                      verbose=1):
         """
         Retrains the model on a new dataset and optionally initializes it with weights from a pretrained model.
 
@@ -832,39 +851,28 @@ class Network:
         Returns:
             tf.keras.History: Object containing the retraining history.
         """
-        self.train_gen = new_train_gen
-        self.val_gen = new_val_gen
 
-        new_input_shape = self.train_gen.__getitem__(0)[0].shape[1:]
-        new_model = self.create_unet(input_shape=new_input_shape)
+        model = self.model
 
-        if pretrained_model_path is not None:
-            # Load pre-trained weights into the new model
-            new_model.load_weights(pretrained_model_path, by_name=True, skip_mismatch=True)
+        # set layers other than input and output not trainable
+        for layer in model.layers[1:-1]:
+            layer.trainable = False
 
-            # Load the pretrained model to get its layer names
-            pretrained_model = tf.keras.models.load_model(pretrained_model_path)
-            pretrained_layer_names = [layer.name for layer in pretrained_model.layers]
+        logging.info(model.summary(line_length=100))
 
-            # Freeze layers that are both in the new model and the pre-trained model
-            for layer in new_model.layers:
-                if layer.name in pretrained_layer_names:
-                    layer.trainable = False
-                else:
-                    layer.trainable = True  # New or mismatched layers
+        history_frozen = self.run(num_epochs=frozen_epochs, batch_size=batch_size,
+                                  save_model=save_model, model_prefix=model_prefix,  verbose=verbose)
 
-        self.model = new_model
+        if unfrozen_epochs is not None:
+            for layer in model.layers:
+                layer.trainable = True
 
-        # You might want to set a different optimizer or keep it as is
-        self.model.compile(optimizer=self.model.optimizer,
-                           loss=self.model.loss,
-                           # Add metrics if any
-                           )
+            logging.info(model.summary(line_length=100))
 
-        return self.run(num_epochs=num_epochs, batch_size=batch_size, verbose=verbose)
+            history_frozen = self.run(num_epochs=unfrozen_epochs, batch_size=batch_size,
+                                  save_model=save_model, model_prefix=model_prefix,  verbose=verbose)
 
-
-    def create_unet(self, input_shape=None, n_stacks=3, kernel=64, batchNormalize=False, verbose=1):
+    def create_unet(self, n_stacks=3, kernel=64, batchNormalize=False, verbose=1):
         """
         Creates a U-Net model.
 
@@ -879,11 +887,8 @@ class Network:
         """
 
         # Input
-        if input_shape is None:
-            input_shape = self.train_gen.__getitem__(0)[0].shape[1:]
-
+        input_shape = self.train_gen.__getitem__(0)[0].shape[1:]
         input_window = Input(input_shape)
-
 
         last_layer = input_window
 
