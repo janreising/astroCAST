@@ -10,7 +10,7 @@ root = Path("/tf/data/")
 
 model_path = root.joinpath("model")
 save_path = root.joinpath("model_retrain")
-train_paths = root.joinpath("public/ExVivoSuppRaw.h5")
+train_paths = root.joinpath("pub_data/ExVivoSuppRaw.h5")
 val_paths = train_paths
 infer_input = train_paths
 
