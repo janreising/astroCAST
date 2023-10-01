@@ -636,6 +636,7 @@ class SubFrameGenerator(tf.keras.utils.Sequence):
             for _, row in x_items.iterrows():
 
                 im = y[c, :, :, 0]
+                im_shape_orig = im.shape
 
                 pad_z0, pad_z1, pad_x0, pad_x1, pad_y0, pad_y1 = row.padding
                 overlap_x_half, overlap_y_half = int(self.overlap/2), int(self.overlap/2)
@@ -646,14 +647,30 @@ class SubFrameGenerator(tf.keras.utils.Sequence):
                 x1, x1_ = (row.x1, -pad_x1) if row.x1 >= row.X else (row.x1 - overlap_x_half-pad_x1, -overlap_x_half-pad_x1)
                 y1, y1_ = (row.y1, -pad_y1) if row.y1 >= row.Y else (row.y1 - overlap_y_half-pad_y1, -overlap_y_half-pad_y1)
 
+                if x1_ == 0:
+                    x1_ = None
+
+                if y1_ == 0:
+                    y1_ = None
+
                 im = im[x0_:x1_, y0_:y1_]
 
                 if rescale:
                     mean, std = self.descr[self.items.iloc[0].path]
                     im = (im * std) + mean
 
+                # print(f"row: {row.to_dict()}")
+
+
                 # TODO this shouldn't be hardcoded
-                rec[row.z0+5, x0:x1, y0:y1] = im
+                try:
+                    rec[row.z0+5, x0:x1, y0:y1] = im
+                except:
+                    print(f"padding: {row.padding}")
+                    print(f"x_: {(x0_, x1_)}, y_:{(y0_, y1_)}")
+                    print(f"im.shape: {im_shape_orig} > {im.shape}")
+                    print(f"x: {(x0, x1)}, y:{(y0, y1)}")
+                    print("")
 
                 c+=1
 
