@@ -805,7 +805,7 @@ class Network:
 
             callbacks.append(
                 ModelCheckpoint(
-                    filepath=save_model.joinpath(model_prefix+"-{epoch:02d}-{val_loss:.2f}.hdf5").as_posix(),
+                    filepath=save_model.joinpath(model_prefix+"-{epoch:02d}-{val_loss:.2f}.keras").as_posix(),
                     save_weights_only=False,
                     monitor=monitor, mode='min',
                     save_best_only=True,
@@ -825,9 +825,7 @@ class Network:
         # Save the final model
         if save_model is not None:
             # Create a filename with parameters
-            input_shape_str = "x".join(map(str, self.train_gen.__getitem__(0)[0].shape[1:]))
-            param_str = f"_nstacks-{self.n_stacks}_kernel-{self.kernel}_inputshape-{input_shape_str}"
-            save_path = save_model.joinpath(f"{model_prefix}_{param_str}-{{epoch:02d}}-{{val_loss:.2f}}.hdf5").as_posix()
+            save_path = save_model.joinpath(model_prefix+"-{epoch:02d}-{val_loss:.2f}.keras").as_posix()
             logging.info(f"saved model to: {save_path}")
             self.model.save(save_path)
 
