@@ -53,9 +53,9 @@ net = Network(train_generator=train_gen, val_generator=val_gen,
               batchNormalize=False, use_cpu=False)
 
 # Train
-net.run(batch_size=1,
-        num_epochs=50,
-        patience=3, min_delta=0.0001,
+net.retrain_model(batch_size=1,
+        frozen_epochs=10, unfrozen_epochs=10,
+        # patience=3, min_delta=0.0001,
         save_model=save_path)
 
 if infer_output.is_file():
