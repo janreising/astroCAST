@@ -720,7 +720,7 @@ class SubFrameGenerator(tf.keras.utils.Sequence):
 
 
 class Network:
-    def __init__(self, train_generator, val_generator=None, learning_rate=0.0001,
+    def __init__(self, train_generator, val_generator=None, learning_rate=0.1, decay_rate=0.9, decay_steps=100000,
                  n_stacks=3, kernel=64, batchNormalize=False, loss=None, pretrained_weights=None,
                  use_cpu=False):
         """
@@ -753,8 +753,17 @@ class Network:
         self.kernel = kernel
         self.model = self.create_unet(n_stacks=n_stacks, kernel=kernel, batchNormalize=batchNormalize)
 
+        if decay_rate is not None:
+            lr_schedule = tf.keras.optimizers.schedules.ExponentialDecay(
+                learning_rate,
+                decay_steps=decay_steps,
+                decay_rate=decay_rate,
+                staircase=True)
+        else:
+            lr_schedule=learning_rate
+
         # Set the optimizer and compile the model
-        self.model.compile(optimizer=Adam(learning_rate=learning_rate),
+        self.model.compile(optimizer=Adam(learning_rate=lr_schedule),
                            loss=self.annealed_loss if loss is None else loss)
 
         if pretrained_weights is not None:

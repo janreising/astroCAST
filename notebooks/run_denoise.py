@@ -7,17 +7,18 @@ root = Path("/tf/data/")
 
 model_path = root.joinpath("model")
 train_paths = list(root.joinpath("ast").glob("train*.h5"))
-print(len(train_paths))
+val_paths = list(root.joinpath("ast").glob("val*.h5"))
+print(len(train_paths), len(val_paths))
 
 infer_input = root.joinpath("ast/test_7g0hbnu0.h5")
 infer_output = infer_input.parent.with_suffix(".tiff")
 
-param = dict(paths=train_paths, loc="data", input_size=(256, 256), pre_post_frame=5, gap_frames=0, normalize="global", in_memory=True)
+param = dict(loc="data", input_size=(256, 256), pre_post_frame=5, gap_frames=0, normalize="global", in_memory=True)
 
-train_gen = SubFrameGenerator(padding=None, batch_size=12 ,max_per_file=16,
+train_gen = SubFrameGenerator(paths=train_paths, padding=None, batch_size=12 ,max_per_file=16,
                                allowed_rotation=[1, 2, 3], allowed_flip=[0, 1], shuffle=True, **param)
 
-val_gen = SubFrameGenerator(padding=None, batch_size=16, max_per_file=1, cache_results=True,
+val_gen = SubFrameGenerator(paths=val_paths, padding=None, batch_size=16, max_per_file=1, cache_results=True,
                                    allowed_rotation=[0], allowed_flip=[-1], shuffle=False, **param)
 
 net = Network(train_generator=train_gen, val_generator=val_gen,
@@ -25,8 +26,8 @@ net = Network(train_generator=train_gen, val_generator=val_gen,
               n_stacks=3, kernel=64,
               batchNormalize=False, use_cpu=False)
 net.run(batch_size=1,
-        num_epochs=25,
-        patience=3, min_delta=0.001,
+        num_epochs=50,
+        patience=3, min_delta=0.0001,
         save_model=model_path)
 
 if infer_output.is_file():
