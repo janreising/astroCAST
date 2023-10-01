@@ -87,6 +87,9 @@ class SubFrameGenerator(tf.keras.utils.Sequence):
         if random_offset and overlap is not None:
             raise ValueError(f"random_offset and overlap are incompatible. Please choose only one.")
 
+        if isinstance(overlap, int):
+            overlap = overlap + overlap % 2
+
         self.overlap = overlap  # float
 
         assert padding in [None, "symmetric", "edge"]
