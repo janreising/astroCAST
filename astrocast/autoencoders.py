@@ -61,7 +61,21 @@ class CustomUpsample(nn.Module):
 
 
 class CNN_Autoencoder(nn.Module):
-    def __init__(self, target_length, dropout=0.15, l1_reg=0.0001, latent_size=64*6, add_noise=None):
+    """
+    Convolutional Neural Network Autoencoder.
+
+    This class defines a convolutional autoencoder model using PyTorch. An autoencoder is a neural network architecture
+    designed for tasks such as dimensionality reduction, feature learning, and data denoising.
+
+    Parameters:
+        target_length (int): trace leght.
+    
+    Example:
+        autoencoder = CNN_Autoencoder(target_length=18, dropout=0.2, latent_size=128, add_noise=0.1)
+    """
+
+    
+    def __init__(self, target_length:int, dropout:float=0.15, l1_reg:float=0.0001, latent_size=64*6, add_noise=None):
         super(CNN_Autoencoder, self).__init__()
 
         self.l1_reg = l1_reg
@@ -167,7 +181,7 @@ class CNN_Autoencoder(nn.Module):
         # ensure equal length input
         for X in [X_train, X_val, X_test]:
             if X is not None:
-                unique_length = np.unique([len(X_train[i, :]) for i in range(len(X))])
+                unique_length = np.unique([len(X_train[i]) for i in range(len(X))])
                 if len(unique_length) > 1:
                     raise ValueError(f"input contains unequal length sequences: {unique_length}! aborting.")
 

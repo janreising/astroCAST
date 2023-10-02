@@ -110,7 +110,7 @@ class Events(CachedClass):
                     self.data = Video(data, z_slice=z_slice, h5_loc=h5_loc, lazy=False)
 
             elif isinstance(data, (np.ndarray, da.Array)):
-
+                print("data instance is an np array")
                 if z_slice is not None:
                     logging.warning("'data'::array > Please ensure array was not sliced before providing data flag")
 
@@ -149,10 +149,11 @@ class Events(CachedClass):
             self.events.reset_index(drop=False, inplace=True, names="idx")
             self.z_slice = z_slice
 
-        # make categorical
-        for col in ('file_name', 'subject_id', 'group'):
-            if col in self.events.columns:
-                self.events[col] = self.events[col].astype("category")
+        if self.events is not None:
+            # make categorical
+            for col in ('file_name', 'subject_id', 'group'):
+                if col in self.events.columns:
+                    self.events[col] = self.events[col].astype("category")
 
     def __len__(self):
         return len(self.events)
