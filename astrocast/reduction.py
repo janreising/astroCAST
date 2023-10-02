@@ -4,7 +4,7 @@ import logging
 import pickle
 from pathlib import Path
 
-import napari
+
 import numpy as np
 import pandas as pd
 import pyinform.shannon
@@ -366,6 +366,8 @@ class UMAP:
     def plot(self, data=None, ax=None, labels=None, size=0.1, use_napari=True):
 
         if use_napari:
+
+            import napari
 
             if data is None:
                 raise ValueError("please provide the data attribute or set 'use_napari' to False")

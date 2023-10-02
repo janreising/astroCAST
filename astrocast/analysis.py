@@ -5,8 +5,6 @@ from functools import lru_cache
 from pathlib import Path
 
 import dask.array as da
-import napari_plot
-from napari_plot._qt.qt_viewer import QtViewer
 import numpy as np
 import pandas as pd
 import psutil
@@ -16,8 +14,7 @@ import seaborn as sns
 from scipy.cluster.hierarchy import fcluster
 from sklearn import metrics
 from tqdm import tqdm
-import napari
-from napari.utils.events import Event
+
 import awkward as ak
 
 import astrocast.detection
@@ -688,6 +685,9 @@ class Events(CachedClass):
 
     def show_event_map(self, video=None, h5_loc=None, z_slice=None, lazy=True):
 
+        import napari
+        from napari.utils.events import Event
+
         viewer = napari.Viewer()
 
         io = IO()
@@ -1230,6 +1230,11 @@ class Video:
                 for loc in h5_loc:
                     self.data[loc] = io.load(data, h5_loc=loc, lazy=lazy, z_slice=z_slice)
 
+            else:
+                print("loaded")
+                self.data = io.load(data, h5_loc="", lazy=lazy, z_slice=z_slice)
+                self.Z, self.X, self.Y = self.data.shape
+
         elif isinstance(data, (np.ndarray, da.Array)):
 
             if z_slice is not None:
@@ -1298,6 +1303,10 @@ class Video:
     def show(self, viewer=None, colormap="gray",
              show_trace=False, window=160, indices=None, viewer1d=None,
              xlabel="frames", ylabel="Intensity", reset_y=False):
+
+        import napari
+        import napari_plot
+        from napari_plot._qt.qt_viewer import QtViewer
 
         if show_trace and isinstance(self.data, (tuple, list)):
             raise ValueError(f"'show_trace' is currently not implemented for multiple datasets.")

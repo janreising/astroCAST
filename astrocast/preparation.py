@@ -8,7 +8,6 @@ from pathlib import Path
 import czifile
 import dask
 import h5py
-import napari_plot
 import numpy as np
 import pandas as pd
 import psutil
@@ -17,8 +16,6 @@ import tiledb
 import dask.array as da
 import dask_image.imread
 from dask.distributed import Client, LocalCluster
-from napari_plot._qt.qt_viewer import QtViewer
-from napari.utils.events import Event
 from scipy import signal
 from skimage.transform import resize
 from skimage.util import img_as_uint
@@ -1703,6 +1700,10 @@ class XII:
              colormap=None, window=160, ylabel="XII", xlabel="step"):
 
         # todo: test with Video
+
+        import napari_plot
+        from napari_plot._qt.qt_viewer import QtViewer
+        from napari.utils.events import Event
 
         xii = self.container[dataset_name][::down_sample]
 

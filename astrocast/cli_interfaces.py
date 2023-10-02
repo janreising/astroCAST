@@ -4,24 +4,14 @@ import os
 import shutil
 import time
 from pathlib import Path
-
 import click
-import h5py
 import humanize
-import napari
-import numpy as np
 import yaml
 from functools import partial
-
-from astrocast.analysis import Video, Events
-from astrocast.app_analysis import Analysis
-from astrocast.app_preparation import Explorer
-from astrocast.denoising import SubFrameGenerator
-from astrocast.detection import Detector
-from astrocast.preparation import MotionCorrection, Delta, Input, IO
+import numpy as np
 
 from colorama import init as init_colorama
-from colorama import Fore, Back, Style
+from colorama import Fore
 import inspect
 from prettytable import PrettyTable
 
@@ -45,6 +35,9 @@ def check_output(output_path, input_path, h5_loc_save, overwrite):
     if output_path.exists():
 
         if output_path.suffix in (".hdf5", ".h5"):
+
+            import h5py
+
             with h5py.File(output_path.as_posix(), "a") as f:
                 if h5_loc_save in f and not overwrite:
                     logging.error(f"{h5_loc_save} already exists in {output_path}. "
@@ -212,6 +205,8 @@ def convert_input(
     Convert user files to astroCAST compatible format using the Input class.
     """
 
+    from astrocast.preparation import Input
+
     with UserFeedback(params=locals(), logging_level=logging_level):
         # check output
         output_path = check_output(output_path, input_path, h5_loc, overwrite)
@@ -302,6 +297,8 @@ def motion_correction(
     Correct motion artifacts of input data using the MotionCorrection class.
     """
 
+    from astrocast.preparation import MotionCorrection
+
     with UserFeedback(params=locals(), logging_level=logging_level):
         # check output
         output_path = check_output(output_path, input_path, h5_loc_save, overwrite)
@@ -364,6 +361,8 @@ def subtract_delta(
     Subtract baseline of input using the Delta class.
     """
 
+    from astrocast.preparation import Delta
+
     with UserFeedback(params=locals(), logging_level=logging_level):
         # check output
         output_path = check_output(output_path, input_path, h5_loc_out, overwrite)
@@ -393,6 +392,114 @@ def subtract_delta(
 
 
 @cli.command()
+@click_custom_option('--training-files', type=click.STRING, required=True, default=None,
+                     help="Path to training file or a glob search string (eg. './train_*.h5')")
+@click_custom_option('--validation-files', type=click.STRING, default=None,
+                     help="Path to validation file or a glob search string (eg. './train_*.h5')")
+@click_custom_option('--loc', type=click.STRING, default=None,
+                     help="Dataset location if .h5 files are provided.")
+@click_custom_option('--batch-size', type=click.INT, default=16,
+                     help="Batch size that is trained at once.")
+@click_custom_option('--batch-size-val', type=click.INT, default=4,
+                     help="Batch size that is validated at once.")
+@click_custom_option('--epochs', type=click.INT, default=10,
+                     help="Maximum number of epochs trained.")
+@click_custom_option('--patience', type=click.INT, default=3,
+                     help="Maximum number of epochs without improvement before early stopping.")
+@click_custom_option('--min-delta', type=click.INT, default=0.001,
+                     help="Minimum difference considered to be improvement.")
+@click_custom_option('--input-size', type=(click.INT, click.INT), default=(256, 256),
+                     help="Field of view (FoV) that is denoised at each iteration.")
+@click_custom_option('--train-rotation', type=(click.INT, click.INT, click.INT), default=(1, 2, 3),
+                     help="Allowed rotations of training data.")
+@click_custom_option('--train-flip', type=(click.INT, click.INT), default=(0, 1),
+                     help="Allowed mirroring axis of training data")
+@click_custom_option('--pre-post-frames', type=click.INT, default=5,
+                     help="Number of frames before and after reconstruction image that are provided for interpolation.")
+@click_custom_option('--gap-frames', type=click.INT, default=0,
+                     help="Number of frames skipped between reconstruction image and pre-post-frames.")
+@click_custom_option('--normalize', type=click.STRING, default="global",
+                     help="Type of normalization applied to input data.")
+@click_custom_option('--padding', type=click.INT, default=None,
+                     help="Padding added to the FoV.")
+@click_custom_option('--max-per-file', type=click.INT, default=8,
+                     help="Maximum number of sections extracted from training file per epoch.")
+@click_custom_option('--max-per-val-file', type=click.INT, default=3,
+                     help="Maximum number of sections extracted from validation file per epoch.")
+@click_custom_option('--learning-rate', type=click.FLOAT, default=0.001,
+                     help="Learning rate applied to the model")
+@click_custom_option('--decay-rate', type=click.FLOAT, default=0.99,
+                     help="Exponential decay of learning rate. Set to None to learn at steady rate.")
+@click_custom_option('--decay-steps', type=click.INT, default=250,
+                     help="Used with decay_rate to set step interval at which decay occurs.")
+@click_custom_option('--n-stacks', type=click.INT, default=2,
+                     help="Number of stacked layers for encoder and decoder architecture.")
+@click_custom_option('--kernel', type=click.INT, default=32,
+                     help="Number of kernels in the initial convolutional layer.")
+@click_custom_option('--batch-normalize', type=click.BOOL, default=False,
+                     help="Enables batch normalization.")
+@click_custom_option('--loss', type=click.STRING, default="annealed_loss",
+                     help="Loss function used to assess reconstruction quality.")
+@click_custom_option('--pretrained-weights', type=click.STRING, default=None,
+                     help="Loads pretrained weights from saved model (file path) or keras checkpoints (directory).")
+@click_custom_option('--save-path', type=click.STRING, default=None,
+                     help="Path to save model and checkpoints to.")
+@click_custom_option('--use-cpu', type=click.BOOL, default=True,
+                     help="Toggles between training on CPU and GPU. "
+                          "GPU is significantly faster, but might not be available on all systems.")
+@click_custom_option('--in-memory', type=click.BOOL, default=False,
+                     help="Toggle if training data is loaded into memory."
+                          "GPU is significantly faster, but might not be available on all systems.")
+@click_custom_option('--logging-level', type=click.INT, default=logging.INFO, help='Logging level for messages.')
+def train_denoiser(training_files, validation_files, input_size, learning_rate, decay_rate, decay_steps,
+                   n_stacks, kernel, batch_normalize, loss, pretrained_weights, use_cpu, train_rotation,
+                   pre_post_frames, gap_frames, loc, max_per_file, max_per_val_file, batch_size, padding,
+                   in_memory,normalize, train_flip, batch_size_val, epochs, patience, min_delta, save_path,
+                   logging_level):
+
+    import astrocast.denoising as denoising
+
+    with UserFeedback(params=locals(), logging_level=logging_level):
+        # Trainer
+        if "*" in training_files:
+            train_str = Path(training_files)
+            train_paths = list(train_str.stem.glob(train_str.name))
+        else:
+            train_paths = Path(training_files)
+
+        train_gen = denoising.SubFrameGenerator(
+            paths=train_paths, max_per_file=max_per_file, loc=loc, input_size=input_size,
+            pre_post_frame=pre_post_frames, gap_frames=gap_frames, allowed_rotation=train_rotation,
+            padding=padding, batch_size=batch_size, normalize=normalize, in_memory=in_memory,
+            allowed_flip=train_flip, shuffle=True)
+
+        # Validator
+        if validation_files is not None:
+            if "*" in validation_files:
+                val_str = Path(validation_files)
+                val_paths = list(val_str.stem.glob(val_str.name))
+            else:
+                val_paths = Path(validation_files)
+
+            val_gen = denoising.SubFrameGenerator(
+                paths=val_paths, max_per_file=max_per_val_file, batch_size=batch_size_val, loc=loc, input_size=input_size,
+                pre_post_frame=pre_post_frames, gap_frames=gap_frames, allowed_rotation=[0],
+                padding=padding, normalize=normalize, in_memory=in_memory, cache_results=False,
+                allowed_flip=[-1], shuffle=False)
+        else:
+            val_gen = None
+
+        # Network
+        net = denoising.Network(train_generator=train_gen, val_generator=val_gen,
+                                learning_rate=learning_rate, decay_rate=decay_rate, decay_steps=decay_steps,
+                                pretrained_weights=pretrained_weights, loss=loss,
+                                n_stacks=n_stacks, kernel=kernel,
+                                batchNormalize=batch_normalize, use_cpu=use_cpu)
+
+        net.run(batch_size=1, num_epochs=epochs, patience=patience, min_delta=min_delta,
+        save_model= save_path)
+
+@cli.command()
 @click.argument('input-path', type=click.Path())
 @click_custom_option('--model', type=click.Path(), required=True,
                      help='Path to the trained model file or the model object itself.'
@@ -400,8 +507,8 @@ def subtract_delta(
 @click_custom_option('--output-file', type=click.Path(), required=True,
                      help='Path to the output file where the results will be saved. If not provided, the result will be returned instead of being saved to a file.'
                      )
-@click_custom_option('--batch-size', type=click.INT, default=16, help='batch size processed in each step.')
-@click_custom_option('--input-size', type=(int, int), default=(100, 100), help='size of the denoising window')
+@click_custom_option('--batch-size', type=click.INT, default=8, help='batch size processed in each step.')
+@click_custom_option('--input-size', type=(int, int), default=(256, 256), help='size of the denoising window')
 @click_custom_option('--pre-post-frame', type=click.INT, default=5,
                      help='Number of frames before and after the central frame in each data chunk.'
                      )
@@ -411,9 +518,10 @@ def subtract_delta(
 @click_custom_option('--z-select', type=(click.INT, click.INT), default=None,
                      help='Range of frames to select in the Z dimension, given as a tuple (start, end).'
                      )
-@click_custom_option('--overlap', type=click.FLOAT, default=None, help='Overlap between data chunks.')
-@click_custom_option('--padding', type=click.STRING, default=None, help='Padding mode for the data chunks.')
-@click_custom_option('--normalize', type=click.STRING, default=None, help='Normalization mode for the data.')
+@click_custom_option('--overlap', type=click.INT, default=10,
+                     help='Overlap of reconstructed sections to prevent sharp borders.')
+@click_custom_option('--padding', type=click.STRING, default="edge", help='Padding mode for the data chunks.')
+@click_custom_option('--normalize', type=click.STRING, default="global", help='Normalization mode for the data.')
 @click_custom_option('--loc', type=click.STRING, default="data/",
                      help='Location in the input file(s) where the data is stored.'
                      )
@@ -429,25 +537,24 @@ def subtract_delta(
                      help='Chunk size for saving the results in the output file. If not provided, a default chunk size will be used.'
                      )
 @click_custom_option('--rescale', type=click.BOOL, default=True, help='Whether to rescale the output values.')
-def denoise(
-        input_file, batch_size, input_size, pre_post_frame, gap_frames, z_select,
-        logging_level, model, output, out_loc, dtype, chunk_size, rescale,
-        overlap, padding,
-        normalize, loc, in_memory
-        ):
+def denoise(input_path, batch_size, input_size, pre_post_frame, gap_frames, z_select,
+            logging_level, model, out_loc, dtype, chunk_size, rescale,
+            overlap, padding, normalize, loc, in_memory, output_file):
     """
     Denoise the input data using the SubFrameGenerator class and infer method.
     """
 
+    from astrocast.denoising import SubFrameGenerator
+
     with UserFeedback(params=locals(), logging_level=logging_level):
         # Initializing the SubFrameGenerator instance
         sub_frame_generator = SubFrameGenerator(
-            paths=input_file,
+            paths=input_path,
             batch_size=batch_size,
             input_size=input_size,
             pre_post_frame=pre_post_frame,
             gap_frames=gap_frames,
-            z_steps=None,
+            # z_steps=None,
             z_select=z_select,
             allowed_rotation=[0],
             allowed_flip=[-1],
@@ -470,12 +577,14 @@ def denoise(
         # Running the infer method
         result = sub_frame_generator.infer(
             model=model,
-            output=output,
+            output=output_file,
             out_loc=out_loc,
             dtype=dtype,
             chunk_size=chunk_size,
             rescale=rescale
         )
+
+        logging.info(f"saved inference to: {output_file}")
 
 
 @cli.command()
@@ -557,6 +666,8 @@ def detect_events(
     Detect events using the Detector class.
     """
 
+    from astrocast.detection import Detector
+
     with UserFeedback(params=locals(), logging_level=logging_level):
 
         if output_path == "infer":
@@ -601,6 +712,9 @@ def detect_events(
 
 def visualize_h5_recursive(loc, indent='', prefix=''):
     """Recursive part of the function to visualize the structure."""
+
+    import h5py
+
     items = list(loc.items())
     for i, (name, item) in enumerate(items):
         is_last = i == len(items) - 1
@@ -646,6 +760,8 @@ def visualize_h5(input_path):
     file_size = humanize.naturalsize(os.path.getsize(input_path))
     print(f"\n> {os.path.basename(input_path)} ({file_size})")
 
+    import h5py
+
     with h5py.File(input_path, 'r') as f:
         visualize_h5_recursive(f['/'])
 
@@ -681,6 +797,9 @@ def view_data(input_path, h5_loc, z_select, lazy, show_trace, window, colormap):
     view_data('path/to/your/file.h5', h5_loc='dataset_name', z_select=(10, 20), lazy=True)
     """
 
+    import napari
+    from astrocast.analysis import Video
+
     vid = Video(data=input_path, z_slice=z_select, h5_loc=h5_loc, lazy=lazy)
     vid.show(show_trace=show_trace, window=window, colormap=colormap)
     napari.run()
@@ -715,6 +834,9 @@ def view_detection_results(event_dir, video_path, h5_loc, z_select, lazy):
     $ astrocast -view-detection-results --lazy False /path/to/event_dir
 
     """
+
+    import napari
+    from astrocast.analysis import Events
 
     event = Events(event_dir=event_dir, data=video_path, h5_loc=h5_loc, z_slice=z_select, lazy=lazy)
     viewer = event.show_event_map(video=None, h5_loc=None, z_slice=z_select)
@@ -777,6 +899,8 @@ def export_video(input_path, output_path, h5_loc_in, h5_loc_out, z_select, lazy,
 
         return 0
 
+    from astrocast.preparation import IO
+
     io = IO()
     data = io.load(input_path, h5_loc=h5_loc_in, z_slice=z_select, lazy=lazy)
 
@@ -789,6 +913,9 @@ def export_video(input_path, output_path, h5_loc_in, h5_loc_out, z_select, lazy,
                      help='Name or identifier of the dataset in the h5 file.'
                      )
 def explorer(input_path, h5_loc):
+
+    from astrocast.app_preparation import Explorer
+
     app_instance = Explorer(input_path=input_path, h5_loc=h5_loc)
     app_instance.run()
 
@@ -801,10 +928,27 @@ def analysis(input_path, video_path, h5_loc, default_settings):
 
     """Run interactive analysis of events."""
 
+    from astrocast.app_analysis import Analysis
+
     app_instance = Analysis(input_path=input_path, video_path=video_path,
                             h5_loc=h5_loc, default_settings=default_settings)
     app_instance.run()
 
+@cli.command
+@click.argument('--save-path', type=click.Path())
+@click_custom_option('--get-public', type=click.BOOL, default=True, help='Flag to download public datasets.')
+@click_custom_option('--get-custom', type=click.BOOL, default=True, help='Flag to download custom datasets.')
+def download_datasets(save_path, get_public, get_custom):
+
+    import helper
+    helper.download_sample_data(save_path, public_datasets=get_public, custom_datasets=get_custom)
+
+@cli.command
+@click.argument('--save-path', type=click.Path())
+def download_models(save_path):
+
+    import helper
+    helper.download_pretrained_models(save_path)
 
 if __name__ == '__main__':
     cli()

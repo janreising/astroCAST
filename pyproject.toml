@@ -12,7 +12,6 @@ matplotlib = "^3.8.0"
 multiprocess = "^0.70.15"
 networkx = "^3.1"
 pandas = "^2.1.0"
-napari-plot = {version = "^0.1.5", markers = "sys_platform == 'win32' or sys_platform == 'linux'"}
 powerlaw = "^1.5"
 pynwb = "^2.5.0"
 deprecated = "^1.2.14"
@@ -29,7 +28,6 @@ prettytable = "^3.9.0"
 colorama = "^0.4.6"
 shiny = "^0.5.1"
 pyinform = "^0.2.0"
-
 opencv-python = "^4.8.0.76"
 scikit-image = "^0.21.0"
 scikit-learn = "^1.3.0"
@@ -55,7 +53,7 @@ tensorflow = "^2.13.0"
 keras = "*"
 datashader = "^0.15.2"
 llvmlite = "~0.39"
-napari = {version = "0.4.14", markers = "sys_platform == 'win32' or sys_platform == 'linux'", extras = ["all"]}
+gdown = "^4.7.1"
 
 [tool.poetry.scripts]
 astrocast = 'astrocast.cli_interfaces:cli'
@@ -63,6 +61,13 @@ astrocast = 'astrocast.cli_interfaces:cli'
 [tool.poetry.group.dev.dependencies]
 pytest-cov = {version = "^4.1.0", optional = true}
 pytest-xdist = {version = "^3.3.1", optional = true}
+
+[tool.poetry.group.vis]
+optional = true
+
+[tool.poetry.group.vis.dependencies]
+napari = {version = "0.4.14", extras = ["all"]}
+napari-plot = "^0.1.5"
 
 [build-system]
 requires = ["poetry-core"]

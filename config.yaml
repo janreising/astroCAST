@@ -1,0 +1,158 @@
+convert-input:
+  sep: "_"
+  channels: 1
+  z_slice: null
+  lazy: false
+  subtract_background: null
+  subtract_func: "mean"
+  rescale: null
+  in_memory: false
+  h5_loc: "data"
+  chunks: "infer"
+  compression: null
+  overwrite: false
+
+motion-correction:
+  working_directory: null
+  h5_loc: ""
+  max_shifts: [50, 50]
+  niter_rig: 3
+  splits_rig: 14
+  num_splits_to_process_rig: null
+  strides: [48, 48]
+  overlaps: [24, 24]
+  pw_rigid: false
+  splits_els: 14
+  num_splits_to_process_els: null
+  upsample_factor_grid: 4
+  max_deviation_rigid: 3
+  nonneg_movie: true
+  gsig_filt: [20, 20]
+  h5_loc_save: "mc"
+  chunks: null
+  compression: null
+  overwrite: false
+
+train-denoiser:
+  validation_files: null
+  loc: null
+  batch_size: 16
+  batch_size_val: 4
+  epochs: 10
+  patience: 3
+  min_delta: 0.001
+  input_size: [256, 256]
+  train_rotation: [1, 2, 3]
+  train_flip: [0, 1]
+  pre_post_frames: 5
+  gap_frames: 0
+  normalize: global
+  padding: null
+  max_per_file: 8
+  max_per_val_file: 3
+  learning_rate: 0.001
+  decay_rate: 0.99
+  decay_steps: 250
+  n_stacks: 2
+  kernel: 32
+  batch_normalize: false
+  loss: annealed_loss
+  pretrained_weights: null
+  save_path: null
+  use_cpu: true
+  in_memory: false
+
+denoise:
+  batch_size: 8
+  input_size: [256, 256]
+  pre_post_frame: 5
+  gap_frames: 0
+  z_select: null
+  overlap: 10
+  padding: edge 
+  normalize: global
+  loc: "data/ch0"
+  in_memory: false
+  logging_level: 20  # INFO level
+  out_loc: null 
+  dtype: "same"
+  chunk_size: null
+  rescale: true
+
+subtract-delta:
+  output_path: null
+  h5_loc_in: ""
+  method: "background"
+  processing_chunks: "infer"
+  save_chunks: "infer"
+  overwrite_first_frame: true
+  lazy: true
+  h5_loc_out: "dff"
+  compression: null
+  overwrite: false
+
+detect-events:
+  area_threshold: 10
+  comb_type: '&'
+  debug: false
+  exclude_border: 3
+  fill_holes: true
+  fill_holes_first: true
+  h5_loc: dff/ch0
+  holes_connectivity: 1
+  holes_depth: 1
+  logging_level: 20
+  min_size: 10
+  object_connectivity: 1
+  objects_depth: 1
+  output_path: infer
+  overwrite: false
+  remove_objects: true
+  smooth_radius: 2
+  smooth_sigma: 3
+  spatial_min_ratio: 1
+  spatial_z_depth: 1
+  split_events: false
+  temporal_prominence: 10
+  temporal_rel_height: 0.9
+  temporal_width: 3
+  temporal_wlen: 60
+  use_smoothing: false
+  use_spatial: true
+  use_temporal: true
+
+detect-events:
+  h5_loc: null
+  threshold: null
+  exclude_border: 0
+  use_smoothing: true
+  smooth_radius: 2
+  smooth_sigma: 2
+  use_spatial: true
+  spatial_min_ratio: 1
+  spatial_z_depth: 1
+  use_temporal: true
+  temporal_prominence: 10
+  temporal_width: 3
+  temporal_rel_height: 0.9
+  temporal_wlen: 60
+  temporal_plateau_size: null
+  comb_type: "&"
+  fill_holes: true
+  area_threshold: 10
+  holes_connectivity: 1
+  holes_depth: 1
+  remove_objects: true
+  min_size: 20
+  object_connectivity: 1
+  objects_depth: 1
+  fill_holes_first: true
+  lazy: true
+  adjust_for_noise: false
+  subset: null
+  split_events: false
+  debug: false
+  parallel: true
+  output_path: null
+  overwrite: false
+
