@@ -2,6 +2,9 @@
 import itertools
 import os
 import pathlib
+import sys
+import traceback
+
 import yaml
 
 from astrocast.denoising import SubFrameGenerator, Network
@@ -93,5 +96,11 @@ for param_set in combinations:
             net.run(batch_size=1, num_epochs=epochs, patience=patience, min_delta=min_delta,
             save_model= model_path.joinpath(f"{k}_{name}"))
 
-        except:
-            print(f"Error in {k}:{name}")
+        except KeyboardInterrupt:
+            sys.exit(2)
+
+        except Exception as err:
+            print(f"Error in {k}:{name}: {err}")
+            traceback.print_exc()
+
+        sys.exit(2)
