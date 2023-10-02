@@ -47,7 +47,7 @@ for param_set in combinations:
         print(f"{k}:{name}")
 
         save_model_path = model_path.joinpath(f"{k}_{name}")
-        if save_model_path.is_file():
+        if save_model_path.joinpath("model.h5").is_file():
             print(f"Skipping > model exists: {save_model_path}")
 
         try:
