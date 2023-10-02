@@ -46,6 +46,10 @@ for param_set in combinations:
 
         print(f"{k}:{name}")
 
+        save_model_path = model_path.joinpath(f"{k}_{name}")
+        if save_model_path.is_file():
+            print(f"Skipping > model exists: {save_model_path}")
+
         try:
             input_size = param_set["input_size"]
             pre_post_frame = param_set["pre_post_frame"]
@@ -94,7 +98,7 @@ for param_set in combinations:
                           batchNormalize=False, use_cpu=False)
 
             net.run(batch_size=1, num_epochs=epochs, patience=patience, min_delta=min_delta,
-            save_model= model_path.joinpath(f"{k}_{name}"))
+            save_model= save_model_path)
 
         except KeyboardInterrupt:
             sys.exit(2)
