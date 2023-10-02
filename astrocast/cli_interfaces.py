@@ -4,24 +4,14 @@ import os
 import shutil
 import time
 from pathlib import Path
-
 import click
-import h5py
 import humanize
-
-import numpy as np
 import yaml
 from functools import partial
-
-from astrocast.analysis import Video, Events
-from astrocast.app_analysis import Analysis
-from astrocast.app_preparation import Explorer
-from astrocast.denoising import SubFrameGenerator
-from astrocast.detection import Detector
-from astrocast.preparation import MotionCorrection, Delta, Input, IO
+import numpy as np
 
 from colorama import init as init_colorama
-from colorama import Fore, Back, Style
+from colorama import Fore
 import inspect
 from prettytable import PrettyTable
 
@@ -45,6 +35,9 @@ def check_output(output_path, input_path, h5_loc_save, overwrite):
     if output_path.exists():
 
         if output_path.suffix in (".hdf5", ".h5"):
+
+            import h5py
+
             with h5py.File(output_path.as_posix(), "a") as f:
                 if h5_loc_save in f and not overwrite:
                     logging.error(f"{h5_loc_save} already exists in {output_path}. "
@@ -212,6 +205,8 @@ def convert_input(
     Convert user files to astroCAST compatible format using the Input class.
     """
 
+    from astrocast.preparation import Input
+
     with UserFeedback(params=locals(), logging_level=logging_level):
         # check output
         output_path = check_output(output_path, input_path, h5_loc, overwrite)
@@ -302,6 +297,8 @@ def motion_correction(
     Correct motion artifacts of input data using the MotionCorrection class.
     """
 
+    from astrocast.preparation import MotionCorrection
+
     with UserFeedback(params=locals(), logging_level=logging_level):
         # check output
         output_path = check_output(output_path, input_path, h5_loc_save, overwrite)
@@ -363,6 +360,8 @@ def subtract_delta(
     """
     Subtract baseline of input using the Delta class.
     """
+
+    from astrocast.preparation import Delta
 
     with UserFeedback(params=locals(), logging_level=logging_level):
         # check output
@@ -438,6 +437,8 @@ def denoise(
     """
     Denoise the input data using the SubFrameGenerator class and infer method.
     """
+
+    from astrocast.denoising import SubFrameGenerator
 
     with UserFeedback(params=locals(), logging_level=logging_level):
         # Initializing the SubFrameGenerator instance
@@ -557,6 +558,8 @@ def detect_events(
     Detect events using the Detector class.
     """
 
+    from astrocast.detection import Detector
+
     with UserFeedback(params=locals(), logging_level=logging_level):
 
         if output_path == "infer":
@@ -601,6 +604,9 @@ def detect_events(
 
 def visualize_h5_recursive(loc, indent='', prefix=''):
     """Recursive part of the function to visualize the structure."""
+
+    import h5py
+
     items = list(loc.items())
     for i, (name, item) in enumerate(items):
         is_last = i == len(items) - 1
@@ -646,6 +652,8 @@ def visualize_h5(input_path):
     file_size = humanize.naturalsize(os.path.getsize(input_path))
     print(f"\n> {os.path.basename(input_path)} ({file_size})")
 
+    import h5py
+
     with h5py.File(input_path, 'r') as f:
         visualize_h5_recursive(f['/'])
 
@@ -682,6 +690,7 @@ def view_data(input_path, h5_loc, z_select, lazy, show_trace, window, colormap):
     """
 
     import napari
+    from astrocast.analysis import Video
 
     vid = Video(data=input_path, z_slice=z_select, h5_loc=h5_loc, lazy=lazy)
     vid.show(show_trace=show_trace, window=window, colormap=colormap)
@@ -719,6 +728,7 @@ def view_detection_results(event_dir, video_path, h5_loc, z_select, lazy):
     """
 
     import napari
+    from astrocast.analysis import Events
 
     event = Events(event_dir=event_dir, data=video_path, h5_loc=h5_loc, z_slice=z_select, lazy=lazy)
     viewer = event.show_event_map(video=None, h5_loc=None, z_slice=z_select)
@@ -781,6 +791,8 @@ def export_video(input_path, output_path, h5_loc_in, h5_loc_out, z_select, lazy,
 
         return 0
 
+    from astrocast.preparation import IO
+
     io = IO()
     data = io.load(input_path, h5_loc=h5_loc_in, z_slice=z_select, lazy=lazy)
 
@@ -793,6 +805,9 @@ def export_video(input_path, output_path, h5_loc_in, h5_loc_out, z_select, lazy,
                      help='Name or identifier of the dataset in the h5 file.'
                      )
 def explorer(input_path, h5_loc):
+
+    from astrocast.app_preparation import Explorer
+
     app_instance = Explorer(input_path=input_path, h5_loc=h5_loc)
     app_instance.run()
 
@@ -804,6 +819,8 @@ def explorer(input_path, h5_loc):
 def analysis(input_path, video_path, h5_loc, default_settings):
 
     """Run interactive analysis of events."""
+
+    from astrocast.app_analysis import Analysis
 
     app_instance = Analysis(input_path=input_path, video_path=video_path,
                             h5_loc=h5_loc, default_settings=default_settings)
