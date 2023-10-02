@@ -1,0 +1,33 @@
+root_path: "/tf/data/"
+model_path: "/tf/data/model/"
+data:
+  1p_exvivo:
+    train: "ast/train*.h5"
+    val: "ast/test*.h5"
+    loc: "data/"
+    max_per_file: 8
+  2p_invivo:
+    train: "pub_data/ExVivoSuppRaw.h5"
+    loc: "data/ch0"
+    max_per_file: 32
+  2p_exvivo:
+    train: "pub_data/InVivoSuppRaw.h5"
+    loc: "data/ch0"
+    max_per_file: 32
+  2p_Glusnfr:
+    train: "pub_data/GlusnfrSuppRaw.h5"
+    loc: "data/ch0"
+    max_per_file: 32
+  cell_scan:
+    train: "pub_data/cellscan_scim.h5"
+    loc: "data/ch0"
+    max_per_file: 32
+param:
+  input_size: [[256, 256], [64, 64]]
+  pre_post_frame: [5]
+  gap_frames: [0, 2]
+  train_rotation: [[1, 2, 3], [0]]
+  architecture: [[3, 64], [2, 32]]
+  epochs: [50]
+  patience: [10]
+  min_delta: [0.0001]
