@@ -102,5 +102,3 @@ for param_set in combinations:
         except Exception as err:
             print(f"Error in {k}:{name}: {err}")
             traceback.print_exc()
-
-        sys.exit(2)
