@@ -863,7 +863,7 @@ class Network:
         # Save the final model
         if save_model is not None:
             # Create a filename with parameters
-            save_path = save_model.joinpath(model_prefix+"-{epoch:02d}-{val_loss:.2f}.h5").as_posix()
+            save_path = save_model.joinpath(f"{model_prefix}.h5").as_posix()
             logging.info(f"saved model to: {save_path}")
             self.model.save(save_path)
 

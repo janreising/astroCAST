@@ -62,7 +62,7 @@ for param_set in combinations:
             train_gen = SubFrameGenerator(
                 paths=train_paths, max_per_file=v["max_per_file"], loc=v["loc"], input_size=input_size,
                 pre_post_frame=pre_post_frame, gap_frames=gap_frames, allowed_rotation=train_rotation,
-                padding=None, batch_size=16, normalize="global", in_memory=True,
+                padding=None, batch_size=8, normalize="global", in_memory=False,
                 allowed_flip=[0, 1], shuffle=True)
 
             # Validator
@@ -76,7 +76,7 @@ for param_set in combinations:
                 val_gen = SubFrameGenerator(
                     paths=val_paths, max_per_file=3, loc=v["loc"], input_size=input_size,
                     pre_post_frame=pre_post_frame, gap_frames=gap_frames, allowed_rotation=[0],
-                    padding=None, batch_size=16, normalize="global", in_memory=True,
+                    padding=None, batch_size=16, normalize="global", in_memory=False,
                     cache_results=True,
                     allowed_flip=[-1], shuffle=True)
 
