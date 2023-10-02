@@ -53,6 +53,7 @@ tensorflow = "^2.13.0"
 keras = "*"
 datashader = "^0.15.2"
 llvmlite = "~0.39"
+gdown = "^4.7.1"
 
 [tool.poetry.scripts]
 astrocast = 'astrocast.cli_interfaces:cli'

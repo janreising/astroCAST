@@ -1009,3 +1009,23 @@ def load_yaml_defaults(yaml_file_path):
             logging.info(f"yaml parameter >> {key}:{value}")
 
         return params
+
+def download_sample_data(save_path, public_datasets=True, custom_datasets=True):
+
+    import gdown
+
+    save_path = Path(save_path)
+
+    if public_datasets:
+
+        folder_url = "https://drive.google.com/drive/u/0/folders/10hhWg4XdVGlPmqmSXy4devqfjs2xE6A6"
+        gdown.download_folder(folder_url, output=save_path.joinpath("public_data").as_posix(),
+                              quiet=False, use_cookies=False)
+
+    if custom_datasets:
+        folder_url = "https://drive.google.com/drive/u/0/folders/13I_1q3osfIGlLhjEiAnLBoJSfPux688g"
+        gdown.download_folder(folder_url, output=save_path.joinpath("custom_data").as_posix(),
+                              quiet=False, use_cookies=False)
+
+    logging.info(f"Downloaded sample datasets to: {save_path}")
+

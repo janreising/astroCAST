@@ -738,7 +738,7 @@ class SubFrameGenerator(tf.keras.utils.Sequence):
 
 class Network:
     def __init__(self, train_generator, val_generator=None, learning_rate=0.001, decay_rate=0.99, decay_steps=250,
-                 n_stacks=3, kernel=64, batchNormalize=False, loss=None, pretrained_weights=None,
+                 n_stacks=3, kernel=64, batchNormalize=False, loss="annealed_loss", pretrained_weights=None,
                  use_cpu=False):
         """
         Initializes the Network class.
@@ -803,7 +803,7 @@ class Network:
 
         # Set the optimizer and compile the model
         self.model.compile(optimizer=Adam(learning_rate=lr_schedule),
-                           loss=self.annealed_loss if loss is None else loss)
+                           loss=self.annealed_loss if loss == 'annealed_loss' else loss)
 
     def run(self, batch_size=10, num_epochs=25, save_model=None,
             patience=3, min_delta=0.005, monitor="val_loss", model_prefix="model",
@@ -825,6 +825,7 @@ class Network:
             tf.keras.History: Object containing the training history.
         """
 
+        save_model = Path(save_model)
         if save_model is not None and not save_model.is_dir():
             logging.info("Created save dir at: %s", save_model)
             save_model.mkdir()
