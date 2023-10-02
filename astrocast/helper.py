@@ -1029,3 +1029,15 @@ def download_sample_data(save_path, public_datasets=True, custom_datasets=True):
 
     logging.info(f"Downloaded sample datasets to: {save_path}")
 
+def download_pretrained_models(save_path):
+
+    import gdown
+
+    save_path = Path(save_path)
+
+    folder_url = "https://drive.google.com/drive/u/0/folders/1RJU-JjQIpoRJOqxivOVo44Q3irs88YX8"
+    gdown.download_folder(folder_url, output=save_path.joinpath("public_data").as_posix(),
+                          quiet=False, use_cookies=False)
+
+    logging.info(f"Downloaded sample datasets to: {save_path}")
+
