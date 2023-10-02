@@ -659,9 +659,6 @@ class SubFrameGenerator(tf.keras.utils.Sequence):
                     mean, std = self.descr[self.items.iloc[0].path]
                     im = (im * std) + mean
 
-                # print(f"row: {row.to_dict()}")
-
-
                 # TODO this shouldn't be hardcoded
                 try:
                     rec[row.z0+5, x0:x1, y0:y1] = im

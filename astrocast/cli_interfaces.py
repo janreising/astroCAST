@@ -520,7 +520,7 @@ def train_denoiser(training_files, validation_files, input_size, learning_rate, 
                      )
 @click_custom_option('--overlap', type=click.INT, default=10,
                      help='Overlap of reconstructed sections to prevent sharp borders.')
-@click_custom_option('--padding', type=click.STRING, default=None, help='Padding mode for the data chunks.')
+@click_custom_option('--padding', type=click.STRING, default="edge", help='Padding mode for the data chunks.')
 @click_custom_option('--normalize', type=click.STRING, default="global", help='Normalization mode for the data.')
 @click_custom_option('--loc', type=click.STRING, default="data/",
                      help='Location in the input file(s) where the data is stored.'
@@ -537,9 +537,9 @@ def train_denoiser(training_files, validation_files, input_size, learning_rate, 
                      help='Chunk size for saving the results in the output file. If not provided, a default chunk size will be used.'
                      )
 @click_custom_option('--rescale', type=click.BOOL, default=True, help='Whether to rescale the output values.')
-def denoise(input_file, batch_size, input_size, pre_post_frame, gap_frames, z_select,
-            logging_level, model, output, out_loc, dtype, chunk_size, rescale,
-            overlap, padding, normalize, loc, in_memory):
+def denoise(input_path, batch_size, input_size, pre_post_frame, gap_frames, z_select,
+            logging_level, model, out_loc, dtype, chunk_size, rescale,
+            overlap, padding, normalize, loc, in_memory, output_file):
     """
     Denoise the input data using the SubFrameGenerator class and infer method.
     """
@@ -549,12 +549,12 @@ def denoise(input_file, batch_size, input_size, pre_post_frame, gap_frames, z_se
     with UserFeedback(params=locals(), logging_level=logging_level):
         # Initializing the SubFrameGenerator instance
         sub_frame_generator = SubFrameGenerator(
-            paths=input_file,
+            paths=input_path,
             batch_size=batch_size,
             input_size=input_size,
             pre_post_frame=pre_post_frame,
             gap_frames=gap_frames,
-            z_steps=None,
+            # z_steps=None,
             z_select=z_select,
             allowed_rotation=[0],
             allowed_flip=[-1],
@@ -577,12 +577,14 @@ def denoise(input_file, batch_size, input_size, pre_post_frame, gap_frames, z_se
         # Running the infer method
         result = sub_frame_generator.infer(
             model=model,
-            output=output,
+            output=output_file,
             out_loc=out_loc,
             dtype=dtype,
             chunk_size=chunk_size,
             rescale=rescale
         )
+
+        logging.info(f"saved inference to: {output_file}")
 
 
 @cli.command()
@@ -932,6 +934,21 @@ def analysis(input_path, video_path, h5_loc, default_settings):
                             h5_loc=h5_loc, default_settings=default_settings)
     app_instance.run()
 
+@cli.command
+@click.argument('--save-path', type=click.Path(), help='Directory to download data to.')
+@click_custom_option('--get-public', type=click.BOOL, default=True, help='Flag to download public datasets.')
+@click_custom_option('--get-custom', type=click.BOOL, default=True, help='Flag to download custom datasets.')
+def download_datasets(save_path, get_public, get_custom):
+
+    import helper
+    helper.download_sample_data(save_path, public_datasets=get_public, custom_datasets=get_custom)
+
+@cli.command
+@click.argument('--save-path', type=click.Path(), help='Directory to download data to.')
+def download_models(save_path):
+
+    import helper
+    helper.download_pretrained_models(save_path)
 
 if __name__ == '__main__':
     cli()

@@ -1229,6 +1229,11 @@ class Video:
                 for loc in h5_loc:
                     self.data[loc] = io.load(data, h5_loc=loc, lazy=lazy, z_slice=z_slice)
 
+            else:
+                print("loaded")
+                self.data = io.load(data, h5_loc="", lazy=lazy, z_slice=z_slice)
+                self.Z, self.X, self.Y = self.data.shape
+
         elif isinstance(data, (np.ndarray, da.Array)):
 
             if z_slice is not None:
