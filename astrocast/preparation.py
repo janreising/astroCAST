@@ -1568,11 +1568,6 @@ class Delta:
                 # background = np.nanmax(background, axis=0)
                 background = MIN[shift:-shift]
 
-                print(z)
-                print(background)
-                print(delta_func(z, background))
-                print("")
-
                 if inplace:
                     arr[:, x, y] = delta_func(z, background)
                 else:
