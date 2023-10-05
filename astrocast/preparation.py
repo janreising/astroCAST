@@ -1406,16 +1406,20 @@ class Delta:
             if not isinstance(data, da.Array):
                 data = da.from_array(data, chunks=(self.dim))
             data = da.rechunk(data, chunks=(-1, "auto", "auto"))
+            data = data.astype(int)
             return data
 
         # convert to .tdb
         elif isinstance(input_, Path) and input_.suffix == ".tdb":
-            return io.load(input_, lazy=lazy)
+            data = io.load(input_, lazy=lazy)
+            data = data.astype(int)
+            return data
 
         elif isinstance(input_, Path):
             # if the input is a file path, load it into memory and convert to TileDB array
 
             data = io.load(input_, h5_loc=self.loc)
+            data = data.astype(int)
 
             new_path = input_.with_suffix(".tdb") if output_path is None else Path(output_path)
             if not new_path.suffix in (".tdb"):
@@ -1435,6 +1439,7 @@ class Delta:
                 chunks = (-1, "auto", "auto")
 
             input_ = da.from_array(input_, chunks=chunks)
+            input_ = input_.astype(int)
             return input_
 
         elif isinstance(input_, da.Array):
@@ -1443,6 +1448,7 @@ class Delta:
                 chunks = (-1, "auto", "auto")
 
             input_ = input_.rechunk(chunks)
+            input_ = input_.astype(int)
             return input_
 
         else:
@@ -1561,6 +1567,11 @@ class Delta:
                 # background[1, :] = MIN[window:]
                 # background = np.nanmax(background, axis=0)
                 background = MIN[shift:-shift]
+
+                print(z)
+                print(background)
+                print(delta_func(z, background))
+                print("")
 
                 if inplace:
                     arr[:, x, y] = delta_func(z, background)

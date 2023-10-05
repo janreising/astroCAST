@@ -279,6 +279,22 @@ class Explorer:
             return pixels, colors
 
         @reactive.Calc
+        def get_pixel_traces():
+
+            pixels, _ = get_pixel()
+            data = load_data()
+
+            Z, X, Y = data.shape
+            small_data = np.zeros((Z, len(pixels), 1), dtype=data.dtype)
+            for i, (px, py) in enumerate(pixels):
+                small_data[:, i, 0] = data[:, px, py]
+
+            if isinstance(small_data, da.Array):
+                small_data = small_data.compute()
+
+            return small_data
+
+        @reactive.Calc
         def get_delta():
 
             data = load_data()
@@ -289,6 +305,20 @@ class Explorer:
                                   overwrite_first_frame=input.delta_overwrite_first_frame())
 
             return result#.compute()
+
+        @reactive.Calc
+        def get_delta_trace():
+            small_data = get_pixel_traces()
+
+            deltaObj = Delta(input_=small_data, loc="")
+            result = deltaObj.run(method=input.delta_method(), window=input.delta_window(),
+                                  processing_chunks=(-1, 1, 1),
+                                  overwrite_first_frame=input.delta_overwrite_first_frame())
+
+            if isinstance(result, da.Array):
+                result = result.compute()
+
+            return result
 
         @reactive.Calc
         def get_smooth():
@@ -489,7 +519,7 @@ class Explorer:
         @render.plot
         def delta():
 
-            delta = get_delta()
+            delta_trace = get_delta_trace()
             pixels, colors = get_pixel()
 
             if input.delta_plot_original():
@@ -509,8 +539,8 @@ class Explorer:
                 twinx = ax.twinx()
                 twin_axx = [twinx for _ in range(len(pixels))]
 
-            for (x, y), color, ax, twinx in list(zip(pixels, colors, axx, twin_axx)):
-                ax.plot(delta[:, x, y], color=color)
+            for i, ((x, y), color, ax, twinx) in enumerate(list(zip(pixels, colors, axx, twin_axx))):
+                ax.plot(delta_trace[:, i, 0], color=color)
 
                 if input.delta_plot_original() and input.delta_twinx():
                     twinx.plot(original[:, x, y], color=color, linestyle="--", alpha=input.delta_alpha())
