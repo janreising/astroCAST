@@ -479,7 +479,11 @@ class Explorer:
             data = load_data()
             frames = get_frames()
 
-            return self.plot_images([data], frames, lbls=["INPUT"])
+            pixel, _ = get_pixel()
+            if pixel == 1:
+                pixel = None
+
+            return self.plot_images([data], frames, lbls=["INPUT"], pixels=pixel)
 
         @output
         @render.plot
@@ -693,7 +697,7 @@ class Explorer:
             return f"astrocast view-detection-results " \
                    f"--lazy False --h5-loc {input.h5_loc()} {input.path().replace('.h5', '.roi')}"
 
-    def plot_images(self, arr, frames, lbls=None, figsize=(10, 5), vmin=None, vmax=None):
+    def plot_images(self, arr, frames, pixels=None, lbls=None, figsize=(10, 5), vmin=None, vmax=None):
 
         if not isinstance(arr, list):
             arr = [arr]
@@ -726,6 +730,10 @@ class Explorer:
 
                 if lbls is not None:
                     ax.set_ylabel(f"{lbls[x]}")
+
+                if pixels is not None:
+                    for px, py in pixels:
+                        ax.scatter(px, py, color="red", alpha=0.5)
 
         return fig
 
