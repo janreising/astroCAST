@@ -332,26 +332,29 @@ class IO:
 
         """
 
+        if not isinstance(z_slice, (tuple, list)) or len(z_slice) != 2:
+                raise ValueError("please provide z_slice as tuple or list of (z_start, z_end)")
+
         if isinstance(path, (str, Path)):
             path = Path(path)
 
             if path.suffix in [".tdb"]:
-                data =  self._load_tdb(path, lazy=lazy, chunks=chunks)  # Call private method to load TDB file
+                data =  self._load_tdb(path, lazy=lazy, chunks=chunks, z_slice=z_slice)  # Call private method to load TDB file
 
             elif path.suffix in [".tif", ".tiff", ".TIF", ".TIFF"]:
-                data =  self._load_tiff(path, sep, lazy=lazy)  # Call private method to load TIFF file
+                data =  self._load_tiff(path, sep, lazy=lazy, z_slice=z_slice)  # Call private method to load TIFF file
 
             elif path.suffix in [".czi", ".CZI"]:
-                data =  self._load_czi(path, lazy=lazy)  # Call private method to load CZI file
+                data =  self._load_czi(path, lazy=lazy, z_slice=z_slice)  # Call private method to load CZI file
 
             elif path.suffix in [".h5", ".hdf5", ".H5", ".HDF5"]:
-                data =  self._load_h5(path, h5_loc=h5_loc, lazy=lazy, chunks=chunks)  # Call private method to load HDF5 file
+                data =  self._load_h5(path, h5_loc=h5_loc, lazy=lazy, chunks=chunks, z_slice=z_slice)  # Call private method to load HDF5 file
 
             elif path.suffix in [".npy", ".NPY"]:
-                data =  self._load_npy(path, lazy=lazy, chunks=chunks)
+                data =  self._load_npy(path, lazy=lazy, chunks=chunks, z_slice=z_slice)
 
             elif path.suffix in [".csv", ".CSV"]:
-                data =  self._load_csv(path, chunks=chunks)
+                data =  self._load_csv(path, chunks=chunks, z_slice=z_slice)
 
             elif path.is_dir():
 
@@ -361,42 +364,51 @@ class IO:
                     raise FileNotFoundError("couldn't find files in folder. Recognized ext: [.tif, .tiff, .TIF, .TIFF]")
 
                 else:
-                    data =  self._load_tiff(path, sep, lazy=lazy)  # Call private method to load TIFF files from directory
+                    data =  self._load_tiff(path, sep, lazy=lazy, z_slice=z_slice)  # Call private method to load TIFF files from directory
 
             else:
                 raise ValueError("unrecognized file format! Choose one of [.tiff, .h5, .tdb, .czi]")
 
         elif isinstance(path, np.ndarray):
-            data = da.from_array(path, chunks=chunks)
+            z0, z1 = z_slice
+            data = da.from_array(path[z0:z1], chunks=chunks)
 
         elif isinstance(path, da.Array):
-            data = da.rechunk(path, chunks=chunks)
-
-        if z_slice is not None:
-
-            if not isinstance(z_slice, (tuple, list)) or len(z_slice) != 2:
-                raise ValueError("please provide z_slice as tuple or list of (z_start, z_end)")
-
-            # todo would be better not to load all the data first
             z0, z1 = z_slice
-            data = data[z0:z1, :, :]
+            data = da.rechunk(path[z0:z1], chunks=chunks)
 
         return data
 
-    def _load_npy(self, path, lazy=False, chunks="auto"):
+    def _load_npy(self, path, lazy=False, chunks="auto", z_slice=None):
+
+        if z_slice is not None:
+            z0, z1 = z_slice
 
         if lazy:
             try:
-                return da.from_npy_stack(path)
+
+                data = da.from_npy_stack(path)
+                if z_slice is not None:
+                    data = data[z0:z1]
+
+                return data
 
             except NotADirectoryError:
                 mmap = np.load(path, mmap_mode="r")
+
+                if z_slice is not None:
+                    mmap = mmap[z0:z1]
+
                 return da.from_array(mmap, chunks=chunks)
 
         else:
-            return np.load(path.as_posix(), allow_pickle=True)
+            data = np.load(path.as_posix(), allow_pickle=True)
+            if z_slice is not None:
+                    data = data[z0:z1]
 
-    def _load_tdb(self, path, lazy=False, chunks="auto"):
+            return data
+
+    def _load_tdb(self, path, lazy=False, chunks="auto", z_slice=None):
 
         """
         Loads data from a TileDB file.
@@ -409,18 +421,28 @@ class IO:
 
         """
 
+        if z_slice is not None:
+            z0, z1 = z_slice
+
         if lazy:
             tdb = tiledb.open(path.as_posix(), "r")
+
+            if z_slice is not None:
+                tdb = tdb[z0:z1]
+
             data = da.from_array(tdb, chunks=chunks)
 
         else:
 
             with tiledb.open(path.as_posix(), "r") as tdb:
-                data = tdb[:]  # Read all data from TileDB array
+                if z_slice is not None:
+                    data = tdb[z0:z1]
+                else:
+                    data = tdb[:]  # Read all data from TileDB array
 
         return data
 
-    def _load_h5(self, path, h5_loc, lazy=False, chunks="auto"):
+    def _load_h5(self, path, h5_loc, lazy=False, chunks="auto", z_slice=None):
 
         """
         Loads data from an HDF5 file.
@@ -434,6 +456,9 @@ class IO:
 
         """
 
+        if z_slice is not None:
+            z0, z1 = z_slice
+
         if lazy:
             data = h5py.File(path, "r")
 
@@ -441,6 +466,10 @@ class IO:
                 raise ValueError(f"cannot find dataset in file ({path}): {list(data.keys())}")
 
             data = data[h5_loc]
+
+            if z_slice is not None:
+                data = data[z0:z1]
+
             data = da.from_array(data, chunks=chunks)
 
         else:
@@ -449,7 +478,10 @@ class IO:
                 if h5_loc not in data:
                     raise ValueError(f"cannot find dataset in file ({path}): {list(data.keys())}")
 
-                data = data[h5_loc][:] # Read all data from HDF5 file
+                if z_slice is not None:
+                    data = data[h5_loc][z0:z1]
+                else:
+                    data = data[h5_loc][:] # Read all data from HDF5 file
 
         return data
 
@@ -465,7 +497,7 @@ class IO:
 
 
     @staticmethod
-    def _load_czi(path, lazy=False):
+    def _load_czi(path, lazy=False, z_slice=None):
 
         """
         Loads a CZI file from the specified path and returns the data.
@@ -490,6 +522,10 @@ class IO:
 
         # Read the CZI file using czifile
         data = czifile.imread(path.as_posix())
+
+        if z_slice is not None:
+            z0, z1 = z_slice
+            data = data[z0:z1]
 
         # Remove single-dimensional entries from the shape of the data
         data = np.squeeze(data)
@@ -540,7 +576,7 @@ class IO:
         return file_names
 
     @staticmethod
-    def _load_tiff(path, sep="_", lazy=False):
+    def _load_tiff(path, sep="_", lazy=False, z_slice=None):
 
         """
         Loads TIFF image data from the specified path and returns a Dask array.
@@ -559,6 +595,9 @@ class IO:
 
         """
 
+        if z_slice is not None:
+            z0, z1 = z_slice
+
         # Convert path to a pathlib.Path object if it's provided as a string
         path = Path(path) if isinstance(path, str) else path
 
@@ -575,6 +614,9 @@ class IO:
             # Sort the file names in alphanumeric order
             files = IO.sort_alpha_numerical_names(file_names=files, sep=sep)
 
+            if z_slice is not None:
+                files = files[z0:z1]
+
             # Read the TIFF files using dask.array and stack them
             stack = da.stack([dask_image.imread.imread(f.as_posix()) for f in files])
             stack = np.squeeze(stack)
@@ -589,6 +631,9 @@ class IO:
                 stack = dask_image.imread.imread(path)
             else:
                 stack = tifffile.imread(path.as_posix())
+
+            if z_slice is not None:
+                stack = stack[z0:z1]
 
         else:
             raise FileNotFoundError(f"cannot find directory or file: {path}")
@@ -1406,16 +1451,20 @@ class Delta:
             if not isinstance(data, da.Array):
                 data = da.from_array(data, chunks=(self.dim))
             data = da.rechunk(data, chunks=(-1, "auto", "auto"))
+            data = data.astype(int)
             return data
 
         # convert to .tdb
         elif isinstance(input_, Path) and input_.suffix == ".tdb":
-            return io.load(input_, lazy=lazy)
+            data = io.load(input_, lazy=lazy)
+            data = data.astype(int)
+            return data
 
         elif isinstance(input_, Path):
             # if the input is a file path, load it into memory and convert to TileDB array
 
             data = io.load(input_, h5_loc=self.loc)
+            data = data.astype(int)
 
             new_path = input_.with_suffix(".tdb") if output_path is None else Path(output_path)
             if not new_path.suffix in (".tdb"):
@@ -1435,6 +1484,7 @@ class Delta:
                 chunks = (-1, "auto", "auto")
 
             input_ = da.from_array(input_, chunks=chunks)
+            input_ = input_.astype(int)
             return input_
 
         elif isinstance(input_, da.Array):
@@ -1443,6 +1493,7 @@ class Delta:
                 chunks = (-1, "auto", "auto")
 
             input_ = input_.rechunk(chunks)
+            input_ = input_.astype(int)
             return input_
 
         else:

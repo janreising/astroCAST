@@ -1275,7 +1275,7 @@ class Analysis:
             frames = get_frames()
 
             if len(frames) > 0:
-                return self.plot_images([data], frames, lbls=["event map"])
+                return self.plot_images([data], frames, lbls=["event map"], pixels=[])
             else:
                 return None
 
