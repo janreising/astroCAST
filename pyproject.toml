@@ -68,7 +68,7 @@ optional = true
 [tool.poetry.group.vis.dependencies]
 napari = {version = "0.4.14", extras = ["all"]}
 napari-plot = "^0.1.5"
-napari-time-series-plott = "*"
+napari-time-series-plotter = "*"
 
 [build-system]
 requires = ["poetry-core"]
