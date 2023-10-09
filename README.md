@@ -14,58 +14,22 @@ astroCAST is a Python package designed for analyzing calcium fluorescence events
 Astrocytic calcium event analysis is challenging due to its complex nature, spatiotemporally overlapping events, and variable lengths. Our Astrocytic Calcium Signaling Toolkit (astroCAST) addresses these challenges by efficiently implementing event detection and variable length clustering. Leveraging dynamic thresholding, astroCAST captures diverse calcium fluctuations effectively. Designed for modularity, parallelization, and memory-efficiency, it enables fast and scalable event detection on large datasets.
 
 ## Installation
-[//]: # (You can install astroCAST using pip: ```shell pip install astroCAST ```)
-
-You can install astroCAST by cloning the github repository and installing it locally. We will making it available through pip soon.
-```shell
-pip install -e .
+You can install astroCAST using pip: 
+```shell 
+pip install astrocast[all]
 ```
 
-Please note that astroCAST has several dependencies. You can refer to the `requirements.txt` file for a complete list of dependencies.
+Alternatively, clone this repository and install it locally:
+```shell
+pip install poetry
+poetry install --with vis
+```
 
-## Usage
-
-Here's a minimal example of how to use astroCAST:
-
-```python
-from astrocast import preparation, detection, analysis, helper, clustering
-
-# Prepare the data
-converter = preparation.Input()
-converter.run(input_path='path/to/data', output_path='path/to/output.h5')
-
-# Detrend the data
-delta = preparation.Delta('path/to/output.h5')
-dF = delta.run()
-delta.save('path/to/output.h5')
-
-# Detect events
-detector = detection.Detection('path/to/output.h5')
-data = detector.run()
-events = analysis.Events('path/to/output.roi')
-
-# Data exploration (examplary)
-events.get_summary_statistic()
-
-# Event preparation
-filter_instructions = {"event_column": (1, 20)}
-events.filter(filter_instructions, inplace=True)
-
-normalization_instructions = {
-    0: ["subtract": {"mode": "mean"}], 1: ["divide": {"mode": "std"}]
-}
-events.normalize(normalization_instructions, inplace=True)
-
-# Unify length
-events.enforce_length(min_length=10, max_length=5, inplace=True)
-
-# Clustering
-distance = clustering.Distance()
-corr = distance.get_correlation(events, correlation_type="dtw")
-
-linkage = clustering.Linkage()
-barycenters, cluster_lookup = linkage.get_barycenters(events, z_threshold=2, distance_matrix=corr)
-events.add_clustering(cluster_lookup, column_name="bary_cluster")
+MacOS users experience a dependency issue which can be fixed by installing dependencies manually:
+```shell
+pip install poetry
+poetry install
+pip install umap-learn napari-plot==0.1.5 pyqt5-tools 
 ```
 
 For more detailed examples and usage instructions, please refer to to the companion paper [here](https://papers.ssrn.com/sol3/papers.cfm?abstract_id=4491483) (currently in preprint).

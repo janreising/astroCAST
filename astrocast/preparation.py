@@ -8,7 +8,6 @@ from pathlib import Path
 import czifile
 import dask
 import h5py
-import napari_plot
 import numpy as np
 import pandas as pd
 import psutil
@@ -17,13 +16,12 @@ import tiledb
 import dask.array as da
 import dask_image.imread
 from dask.distributed import Client, LocalCluster
-from napari_plot._qt.qt_viewer import QtViewer
-from napari.utils.events import Event
 from scipy import signal
 from skimage.transform import resize
 from skimage.util import img_as_uint
 from deprecated import deprecated
 from scipy.ndimage import minimum_filter1d
+from tqdm import tqdm
 
 from astrocast.helper import get_data_dimensions
 from dask.diagnostics import ProgressBar
@@ -79,7 +77,7 @@ class Input:
         # rechunk
         if chunks is not None:
             for k in data:
-                if data[k].chunksize != chunks:
+                if not isinstance(data[k], np.ndarray) and data[k].chunksize != chunks:
                     data[k] = da.rechunk(data[k], chunks=chunks)
 
         # return result
@@ -352,6 +350,9 @@ class IO:
             elif path.suffix in [".npy", ".NPY"]:
                 data =  self._load_npy(path, lazy=lazy, chunks=chunks)
 
+            elif path.suffix in [".csv", ".CSV"]:
+                data =  self._load_csv(path, chunks=chunks)
+
             elif path.is_dir():
 
                 # If the path is a directory, load multiple TIFF files
@@ -451,6 +452,17 @@ class IO:
                 data = data[h5_loc][:] # Read all data from HDF5 file
 
         return data
+
+    def _load_csv(self, path, chunks="auto"):
+
+        df = pd.read_csv(path)
+
+        if isinstance(pd.Series):
+            df = df.values
+            return da.from_array(df, chunks=chunks)
+
+        return df
+
 
     @staticmethod
     def _load_czi(path, lazy=False):
@@ -609,7 +621,7 @@ class IO:
         if isinstance(path, (str, Path)):
             path = Path(path)
         else:
-            raise TypeError("please provide 'path' as str or pathlib.Path data type")
+            raise TypeError(f"please provide 'path' as str or pathlib.Path data type not: {type(path)}")
 
         # Check if the data is a dictionary or data array, otherwise raise an error
         if isinstance(data, (np.ndarray, da.Array)):
@@ -726,8 +738,44 @@ class IO:
                 saved_paths.append(fpath)
                 logging.info(f"saved data to {fpath}")
 
+            elif path.suffix in [".avi", ".AVI"]:
+
+                import cv2
+
+                fpath = path.with_suffix(f".{k}.avi") if len(data.keys()) > 1 else path
+                self.exists_and_clean(fpath, overwrite=overwrite)
+
+                # Get the dimensions of the numpy array
+                frames, X, Y = channel.shape
+
+                # Define the codec and create a VideoWriter object
+
+                if isinstance(fpath, Path):
+                    fpath = fpath.as_posix()
+
+                # fourcc = cv2.VideoWriter_fourcc(*'XVID')
+                out = cv2.VideoWriter(fpath, fourcc=cv2.VideoWriter_fourcc('M','J','P','G'),
+                                      fps=16, frameSize=(X, Y), isColor=True)
+
+                for i in tqdm(range(frames)):
+                    # Get the current frame
+                    frame = channel[i]
+
+                    # Since the array has only one channel, convert it to a 3-channel array (BGR)
+                    frame = cv2.normalize(frame, None, 0, 255, cv2.NORM_MINMAX, dtype=cv2.CV_8U)
+                    frame = cv2.cvtColor(frame, cv2.COLOR_GRAY2BGR)
+
+                    # Write the frame to the AVI file
+                    out.write(frame)
+
+                # Release the VideoWriter
+                out.release()
+
+                saved_paths.append(fpath)
+                logging.info(f"saved data to {fpath}")
+
             else:
-                raise TypeError("please provide output format as .h5, .tdb, .npy or .tiff file")
+                raise TypeError("please provide output format as .h5, .tdb, .npy, .avi or .tiff file")
 
         return saved_paths if len(saved_paths) > 1 else saved_paths[0]  # Return the list of saved file paths
 
@@ -825,6 +873,7 @@ class MotionCorrection:
         # output location
         self.mmap_path = None
         self.tiff_path = None
+        self.frames = self.X = self.Y = None
 
     def run(self, input_, h5_loc="",
             max_shifts=(50, 50), niter_rig=3, splits_rig=14, num_splits_to_process_rig=None,
@@ -895,6 +944,19 @@ class MotionCorrection:
         input_ = self._validate_input(input_, h5_loc=h5_loc)
         self.input_ = input_
 
+        # validate parameters
+        if max_shifts[0] >= int(self.X/2):
+            max_shifts_adj = int(self.X/2) - 1
+            logging.warning(f"dimension 1 of max_shifts parameter > 1/2 img.X ({max_shifts[0]}>{int(self.X/2)}."
+                            f"Automatically adjusting to: {max_shifts_adj}")
+            max_shifts = tuple((max_shifts_adj, max_shifts[1]))
+
+        if max_shifts[1] >= int(self.Y/2):
+            max_shifts_adj = int(self.Y/2) - 1
+            logging.warning(f"dimension 1 of max_shifts parameter > 1/2 img.X ({max_shifts[1]}>{int(self.Y/2)}."
+                            f"Automatically adjusting to: {max_shifts_adj}")
+            max_shifts = tuple((max_shifts[0], max_shifts_adj))
+
         # Create MotionCorrect instance
         mc = motion_correction.MotionCorrect(input_, var_name_hdf5=h5_loc,
                 max_shifts=max_shifts, niter_rig=niter_rig, splits_rig=splits_rig,
@@ -956,6 +1018,9 @@ class MotionCorrection:
                     if h5_loc not in f:
                         raise ValueError(f"cannot find dataset {h5_loc} in provided in {input_}.")
 
+                    self.frames, self.X, self.Y = f[h5_loc].shape
+
+                    # TODO after pull request is accepted, this should no longer be true
                     # Motion Correction fails with custom h5_loc names in cases where there is only one folder (default behavior incorrect)
                     if len(f.keys()) < 2:
                         f.create_group(self.dummy_folder_name)
@@ -964,6 +1029,13 @@ class MotionCorrection:
 
             elif input_.suffix in [".tiff", ".TIFF", ".tif", ".TIF"]:
                 # If input is a TIFF file
+
+                with tifffile.TiffFile(input_.as_posix()) as tif:
+
+                 self.frames = len(tif.pages)  # number of pages in the file
+                 page = tif.pages[0]  # get shape and dtype of image in first page
+                 self.X, self.Y = page.shape
+
                 return input_
 
             else:
@@ -971,6 +1043,8 @@ class MotionCorrection:
 
         elif isinstance(input_, np.ndarray):
             # If input is a ndarray create a temporary TIFF file to run the motion correction on
+
+            self.frames, self.X, self.Y = input_.shape
 
             logging.warning("caiman.motion_correction requires a .tiff or .h5 file to perform the correction. A temporary .tiff file is created which needs to be deleted later by calling the 'clean_up()' method of this module.")
 
@@ -1086,7 +1160,7 @@ class MotionCorrection:
         """
 
         # enforce path
-        output = Path(output)
+        output = Path(output) if output is not None else output
 
         # Check if the tiff output is available
         tiff_path = self.tiff_path
@@ -1206,7 +1280,7 @@ class Delta:
         # The location of the data in the HDF5 file (optional, only applicable for .h5 files)
         self.loc = loc
 
-    def run(self, window, method="background", chunks="infer", output_path=None,
+    def run(self, window, method="background", processing_chunks="infer", output_path=None,
             overwrite_first_frame=True, lazy=True):
         """
         Runs the delta calculation on the input data.
@@ -1229,7 +1303,7 @@ class Delta:
 
         """
         # Prepare the data for processing
-        data = self.prepare_data(self.input_, h5_loc=self.loc, chunks=chunks, output_path=output_path, lazy=lazy)
+        data = self.prepare_data(self.input_, h5_loc=self.loc, chunks=processing_chunks, output_path=output_path, lazy=lazy)
 
         # Sequential execution
         if isinstance(data, np.ndarray):
@@ -1280,25 +1354,25 @@ class Delta:
             io = IO()
             res = io.load(Path(path))
 
-        elif isinstance(data, da.core.Array):
+        elif isinstance(data, da.Array):
             # Calculate delta using Dask array for lazy loading and computation
-            res = data.map_blocks(self.calculate_delta_min_filter,
-                                  window=window,
-                                  method=method,
-                                  inplace=False,
-                                  dtype=float).compute()
+
+            def xy_delta(x):
+                return self.calculate_delta_min_filter(x, window=window, method=method, inplace=False)
+
+            res = data.map_blocks(xy_delta, dtype=float)
 
         else:
             raise ValueError(f"Input data type not recognized: {type(data)}")
 
         # Overwrite the first frame with the second frame if required
         if overwrite_first_frame:
-            res[0] = res[1]
+            res[0, :, :] = res[1, :, :]
 
         self.res = res
         return res
 
-    def save(self, output_path, h5_loc="df", chunks=(-1, "auto", "auto"), compression=None, overwrite=False):
+    def save(self, output_path, h5_loc="df", chunks=("auto", "auto", "auto"), compression=None, overwrite=False):
 
         io = IO()
         io.save(output_path, data=self.res, h5_loc=h5_loc, chunks=chunks, compression=compression, overwrite=overwrite)
@@ -1355,20 +1429,21 @@ class Delta:
 
             return io.load(new_path, lazy=lazy)
 
-        elif isinstance(input_, (np.ndarray, da.Array)):
-            # if the input is a numpy ndarray, convert to TileDB array
+        elif isinstance(input_, np.ndarray):
 
-            if output_path is None:
-                raise ValueError("when providing an array as input, an output_path needs to be provided as well.")
-            else:
-                new_path = Path(output_path)
+            if chunks == "infer":
+                chunks = (-1, "auto", "auto")
 
-            if not new_path.suffix in (".tdb"):
-                raise ValueError(f"Please provide an output_path with '.tdb' ending instead of {new_path.suffix}")
+            input_ = da.from_array(input_, chunks=chunks)
+            return input_
 
-            io.save(new_path, data=input_, chunks=chunks)
+        elif isinstance(input_, da.Array):
 
-            return io.load(new_path, lazy=lazy)
+            if chunks == "infer":
+                chunks = (-1, "auto", "auto")
+
+            input_ = input_.rechunk(chunks)
+            return input_
 
         else:
             raise TypeError(f"do not recognize data type: {type(input_)}")
@@ -1455,14 +1530,37 @@ class Delta:
                 z = arr[:, x, y]
 
                 # Pad the signal with the edge values and apply the minimum filter
-                MIN = minimum_filter1d(np.pad(z, pad_width=(0, window), mode='edge'), size=window + 1, mode="nearest",
-                                       origin=int(window / 2))
+                shift = int(window/2)
+                z_padded = np.pad(z, pad_width=(shift, shift), mode='edge')
+                z_even = z_padded[::2]
+                z_odd = z_padded[1::2]
+
+                # MIN = minimum_filter1d(z_padded, size=window+1, mode="nearest", origin=0)
+                MIN_even = minimum_filter1d(z_even, size=window+1, mode="nearest", origin=0)
+                MIN_odd = minimum_filter1d(z_odd, size=window+1, mode="nearest", origin=0)
+
+                # Duplicate each value in the even and odd series to make them the same length as the original series
+                MIN_even_expanded = np.repeat(MIN_even, 2)[:len(z_padded)]
+                MIN_odd_expanded = np.repeat(MIN_odd, 2)[:len(z_padded)]
+
+                # padding
+                if len(MIN_even_expanded) < len(z_padded):
+                    MIN_even_expanded = np.pad(MIN_even_expanded,
+                                               pad_width=(0, len(z_padded)-len(MIN_even_expanded)), mode="edge")
+
+                if len(MIN_odd_expanded) < len(z_padded):
+                    MIN_odd_expanded = np.pad(MIN_odd_expanded,
+                                               pad_width=(0, len(z_padded)-len(MIN_odd_expanded)), mode="edge")
+
+                # Get the maximum value at each point from the two expanded series to get the new baseline
+                MIN = np.maximum(MIN_even_expanded, MIN_odd_expanded)
 
                 # Shift the minimum signal by window/2 and take the max of the two signals
-                background = np.zeros((2, len(z)))
-                background[0, :] = MIN[:-window]
-                background[1, :] = MIN[window:]
-                background = np.nanmax(background, axis=0)
+                # background = np.zeros((2, len(z)))
+                # background[0, :] = MIN[:-window]
+                # background[1, :] = MIN[window:]
+                # background = np.nanmax(background, axis=0)
+                background = MIN[shift:-shift]
 
                 if inplace:
                     arr[:, x, y] = delta_func(z, background)
@@ -1602,6 +1700,10 @@ class XII:
              colormap=None, window=160, ylabel="XII", xlabel="step"):
 
         # todo: test with Video
+
+        import napari_plot
+        from napari_plot._qt.qt_viewer import QtViewer
+        from napari.utils.events import Event
 
         xii = self.container[dataset_name][::down_sample]
 

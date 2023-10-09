@@ -270,6 +270,9 @@ def get_data_dimensions(input_, loc=None, return_dtype=False):
     elif isinstance(input_, str):
         path = Path(input_)
 
+    elif isinstance(input_, (np.ndarray, da.Array)):
+        return input_.shape, None
+
     else:
         raise TypeError(f"data type not recognized: {type(input_)}")
 
@@ -829,6 +832,14 @@ class Normalization:
         }
         return self.run(instructions)
 
+    def mean_std(self):
+
+        instructions = {
+            0: ["subtract", {"mode": "mean"}],
+            1: ["divide", {"mode": "std"}]
+        }
+        return self.run(instructions)
+
     @staticmethod
     def get_value(data, mode, population_wide=False, axis=1):
 
@@ -953,11 +964,14 @@ class Normalization:
     @staticmethod
     def diff(data):
 
+        def get_diff(x, axis=1):
+            return np.concatenate([np.array([0]), np.diff(x, axis=axis)])
+
         if isinstance(data, ak.Array):
-            return ak.Array([np.diff(data[i]) for i in range(len(data))])
+            return ak.Array([get_diff(data[i], axis=0) for i in range(len(data))])
 
         else:
-            return np.diff(data, axis=1)
+            return get_diff(data, axis=1)
 
 class CachedClass:
 
@@ -982,7 +996,6 @@ class CachedClass:
         time.sleep(0.5)
         return np.random.random(1)
 
-
 def load_yaml_defaults(yaml_file_path):
     """Load default values from a YAML file."""
 
@@ -996,3 +1009,35 @@ def load_yaml_defaults(yaml_file_path):
             logging.info(f"yaml parameter >> {key}:{value}")
 
         return params
+
+def download_sample_data(save_path, public_datasets=True, custom_datasets=True):
+
+    import gdown
+
+    save_path = Path(save_path)
+
+    if public_datasets:
+
+        folder_url = "https://drive.google.com/drive/u/0/folders/10hhWg4XdVGlPmqmSXy4devqfjs2xE6A6"
+        gdown.download_folder(folder_url, output=save_path.joinpath("public_data").as_posix(),
+                              quiet=False, use_cookies=False)
+
+    if custom_datasets:
+        folder_url = "https://drive.google.com/drive/u/0/folders/13I_1q3osfIGlLhjEiAnLBoJSfPux688g"
+        gdown.download_folder(folder_url, output=save_path.joinpath("custom_data").as_posix(),
+                              quiet=False, use_cookies=False)
+
+    logging.info(f"Downloaded sample datasets to: {save_path}")
+
+def download_pretrained_models(save_path):
+
+    import gdown
+
+    save_path = Path(save_path)
+
+    folder_url = "https://drive.google.com/drive/u/0/folders/1RJU-JjQIpoRJOqxivOVo44Q3irs88YX8"
+    gdown.download_folder(folder_url, output=save_path.joinpath("public_data").as_posix(),
+                          quiet=False, use_cookies=False)
+
+    logging.info(f"Downloaded sample datasets to: {save_path}")
+

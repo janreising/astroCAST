@@ -1,6 +1,8 @@
+import inspect
 import logging
 import pickle
 import tempfile
+import traceback
 from collections import defaultdict
 from pathlib import Path
 
@@ -10,6 +12,7 @@ import hdbscan
 import networkx as nx
 import numpy as np
 import pandas as pd
+import sklearn
 from dask import array as da
 from dtaidistance import dtw_barycenter, dtw
 from matplotlib import pyplot as plt
@@ -21,7 +24,7 @@ from sklearn.cluster import KMeans
 from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
 from sklearn.model_selection import cross_val_score
 from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
-from sklearn import metrics
+from sklearn import metrics, cluster, ensemble, gaussian_process, linear_model, neighbors, neural_network, tree
 from tqdm import tqdm
 
 from astrocast.analysis import Events
@@ -111,6 +114,7 @@ class KMeansClustering(CachedClass):
 
         return cluster_lookup_table
 
+
 class Linkage(CachedClass):
 
     """
@@ -124,13 +128,13 @@ class Linkage(CachedClass):
 """
 
     def __init__(self, cache_path=None, logging_level=logging.INFO):
-        super().__init__(logging_level=logging_level, cache_path=None, )
+        super().__init__(logging_level=logging_level, cache_path=cache_path)
 
         self.Z = None
 
     def get_barycenters(self, events, cutoff, criterion="distance", default_cluster = -1,
                         distance_matrix=None,
-                        distance_type="pearson", param_distance={},
+                        distance_type="pearson", param_distance={}, return_linkage_matrix=False,
                         param_linkage={}, param_clustering={}, param_barycenter={}):
 
         """
@@ -164,7 +168,10 @@ class Linkage(CachedClass):
         for _, row in barycenters.iterrows():
             cluster_lookup_table.update({idx_: row.cluster for idx_ in row.idx})
 
-        return barycenters, cluster_lookup_table
+        if return_linkage_matrix:
+            return barycenters, cluster_lookup_table, linkage_matrix
+        else:
+            return barycenters, cluster_lookup_table
 
     @wrapper_local_cache
     def get_two_step_barycenters(self, events, step_one_column="subject_id",
@@ -868,22 +875,50 @@ class Discriminator(CachedClass):
         self.indices_test = None
         self.clf = None
 
-    def train_classifier(self, embedding, category_column, split=0.8,
-                         classifier="RandomForestClassifier", param_classifier=dict(n_estimators=100, n_jobs=-1)):
+    @staticmethod
+    def get_available_models():
+
+        available_models = []
+        for module in [cluster, ensemble, gaussian_process, linear_model, neighbors, neural_network, tree]:
+            for name, obj in inspect.getmembers(module):
+                if inspect.isclass(obj):
+                    available_models.append(name)
+
+        return available_models
+
+    def train_classifier(self, embedding=None, category_vector=None, split=0.8,
+                         classifier="RandomForestClassifier", **kwargs):
 
         # split into training and validation dataset
-        self.split_dataset(embedding, category_column, split=split)
+        if self.X_train is None or self.Y_train is None:
+            self.split_dataset(embedding, category_vector, split=split)
+
+        # available models
+        available_models = self.get_available_models()
+        if classifier not in available_models:
+            raise ValueError(f"unknown classifier {classifier}. Choose one of {available_models}")
 
         # fit model
-        if classifier == "RandomForestClassifier":
-            clf = RandomForestClassifier(**param_classifier)
-        else:
-            # todo maybe each individual function?
-            raise ValueError("Please provide on of the following classifiers: ['RandomForestClassifier']")
+        clf = None
+        for module in [cluster, ensemble, gaussian_process, linear_model, neighbors, neural_network, tree]:
+
+            try:
+                class_ = getattr(module, classifier, None)
+                clf = class_(**kwargs)
+            except TypeError:
+                pass
+            except Exception as err:
+                print(f"cannot load from {module} with error: {err}\n\n")
+                traceback.print_exc()
+                pass
+
+        if clf is None:
+            raise ValueError(f"could not load classifier. Please try another one")
 
         clf.fit(self.X_train, self.Y_train)
 
         self.clf = clf
+        return clf
 
     def predict(self, X, normalization_instructions=None):
 
@@ -893,44 +928,54 @@ class Discriminator(CachedClass):
 
         return self.clf.predict(X)
 
-    def evaluate(self, cutoff=0.5, normalize=None):
+    def evaluate(self, regression=False, cutoff=0.5, normalize=None):
 
-        X = self.X_test
-        Y = self.Y_test
-        pred_test = np.squeeze(self.clf.predict(X))
+        evaluations = []
+        for X, Y, lbl in [(self.X_train, self.Y_train, "train"),
+                     (self.X_test, self.Y_test, "test")]:
 
-        if pred_test.dtype != int:
-            logging.warning(f"assuming probability prediction. thresholding at {cutoff}")
+            pred = np.squeeze(self.clf.predict(X))
 
-            Y = Y >= cutoff
+            if pred.dtype != int and not regression and cutoff is not None:
+                logging.warning(f"assuming probability prediction. thresholding at {cutoff}")
+                Y = Y >= cutoff
 
-        cm =  confusion_matrix(pred_test, Y, normalize=normalize)
+            if regression:
+                score = self.clf.score(X, Y)
+                evaluations.append(score)
 
-        cm = pd.DataFrame(cm)
-        cm.index = [f"true_{i}" for i in cm.index]
-        cm.columns = [f"pred_{c}" for c in cm.columns]
+            else:
 
-        return cm
+                cm = confusion_matrix(pred, Y, normalize=normalize)
+                evaluations.append(cm)
 
+        return evaluations
 
-    def split_dataset(self, embedding, category_column, split=0.8,
+    def split_dataset(self, embedding, category_vector, split=0.8,
                       balance_training_set=False, balance_test_set=False, encode_category=None,
                       normalization_instructions=None):
 
         # get data
         X = embedding
 
-        # get category to predict
-        if isinstance(category_column, list):
-            Y = np.array(category_column)
-        elif isinstance(category_column, np.ndarray):
-            Y = category_column
-        elif isinstance(category_column, str):
+        if isinstance(X, pd.DataFrame):
+            X = X.values
 
+        # get category to predict
+        if isinstance(category_vector, list):
+            Y = np.array(category_vector)
+        elif isinstance(category_vector, np.ndarray):
+            Y = category_vector
+        elif isinstance(category_vector, pd.Series):
+            Y = category_vector.values
+        elif isinstance(category_vector, str):
             if encode_category is None:
-                Y = np.array(self.events.events[category_column].tolist())
+                Y = np.array(self.events.events[category_vector].tolist())
             else:
-                Y = np.array(self.events.events[category_column].map(encode_category).tolist())
+                Y = np.array(self.events.events[category_vector].map(encode_category).tolist())
+        else:
+            raise ValueError(f"unknown category vector format: {type(category_vector)}. "
+                             f"Use one of list, np.ndarray, str")
 
         # check inputs
         if len(X) != len(Y):
@@ -979,12 +1024,136 @@ class Discriminator(CachedClass):
         for category in count_category_members.index.unique():
             rand_indices.append(np.random.choice(np.where(Y == category)[0], size=min_category_count, replace=False))
 
+        rand_indices = np.array(rand_indices).astype(int)
         rand_indices = rand_indices.flatten()
 
         # select randomly chosen rows
         X = X[rand_indices]
         Y = Y[rand_indices]
-        indices = indices[rand_indices]
+
+        indices = np.array(indices)[rand_indices]
 
         return X, Y, indices
 
+class CoincidenceDetection():
+
+    def __init__(self, events, incidences, embedding,
+                 train_split=0.8, balance_training_set=False, balance_test_set=False,
+                            encode_category=None, normalization_instructions=None):
+
+        if len(events) != len(embedding):
+            raise ValueError(f"Number of events and embedding does not match: "
+                             f"n(events):{len(events)} vs. n(embedding): {len(embedding)}")
+
+        self.events = events
+        self.incidences = incidences
+        self.embedding = embedding
+
+        self.train_split = train_split
+        self.balance_training_set = balance_training_set
+        self.balance_test_set = balance_test_set
+        self.encode_category = encode_category
+        self.normalization_instructions = normalization_instructions
+
+        # align incidences
+        self.aligned = self.align_events_and_incidences()
+
+    def align_events_and_incidences(self):
+
+        id_event_ = []
+        num_events_ = []
+        incidence_location_ = []
+        incidence_location_relative_ = []
+        for i, (idx, row) in enumerate(self.events.events.iterrows()):
+
+            num_events = 0
+            incidence_location = []
+            incidence_location_relative = []
+            for incidence in self.incidences:
+
+                if incidence > row.z0 and incidence < row.z1:
+                    num_events += 1
+                    incidence_location.append(incidence - row.z0)
+                    incidence_location_relative.append((incidence - row.z0) / row.dz)
+
+            id_event_.append(i)
+            num_events_.append(num_events)
+            incidence_location_.append(incidence_location)
+            incidence_location_relative_.append(incidence_location_relative)
+
+        aligned = pd.DataFrame({
+            "id_event": id_event_,
+            "num_incidences": num_events_,
+            "incidence_location": incidence_location_,
+            "incidence_location_relative":incidence_location_relative_
+        })
+
+        return aligned
+
+    def _train(self, embedding, category_vector, classifier, regression=False, normalize_confusion_matrix=False, **kwargs):
+
+        discr = Discriminator(self.events)
+
+        discr.split_dataset(embedding, category_vector,
+                            split=self.train_split,
+                            balance_training_set=self.balance_training_set,
+                            balance_test_set=self.balance_test_set,
+                            encode_category=self.encode_category,
+                            normalization_instructions=self.normalization_instructions)
+
+        clf = discr.train_classifier(self, embedding, split=None,
+                     classifier=classifier, **kwargs)
+
+        evaluation = discr.evaluate(cutoff=0.5, normalize=normalize_confusion_matrix, regression=regression)
+
+        return clf, evaluation
+
+    def predict_coincidence(self, binary_classification=True, classifier="RandomForestClassifier",
+                            normalize_confusion_matrix=False, **kwargs):
+
+        aligned = self.aligned.copy()
+        aligned = aligned.reset_index()
+
+        embedding = self.embedding.copy()
+
+        if binary_classification:
+
+            category_vector = aligned.num_incidences.apply(lambda x: x >= 1)
+            category_vector = category_vector.astype(bool).values
+
+        else:
+            category_vector = aligned.num_incidences
+            category_vector = category_vector.astype(int).values
+
+        clf, confusion_matrix = self._train(embedding, category_vector, classifier,
+                                            regression=False, normalize_confusion_matrix=normalize_confusion_matrix,
+                                            **kwargs)
+
+        return clf, confusion_matrix
+
+    def predict_incidence_location(self, classifier="RandomForestRegressor", single_event_prediction=True, **kwargs):
+
+        aligned = self.aligned.copy()
+        aligned = aligned.reset_index()
+
+        embedding = self.embedding.copy()
+
+        # select event with coincidence
+        selected = aligned[aligned.num_incidences > 0]
+
+        if isinstance(embedding, pd.DataFrame):
+            embedding = embedding.iloc[selected.id_event.tolist()].values
+        elif isinstance(embedding, np.ndarray):
+            embedding = embedding[selected.id_event.tolist()]
+        else:
+            raise ValueError(f"unknown embedding type: {type(embedding)}")
+
+        if single_event_prediction:
+            category_vector = selected.incidence_location_relative.apply(lambda x: x[0]).values
+        else:
+            raise ValueError(f"currently multi event prediction is not implemented.")
+
+        clf, score = self._train(embedding, category_vector,
+                                 classifier=classifier, regression=True, **kwargs)
+
+        return clf, score
