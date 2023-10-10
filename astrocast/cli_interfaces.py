@@ -501,10 +501,10 @@ def train_denoiser(training_files, validation_files, input_size, learning_rate, 
 
 @cli.command()
 @click.argument('input-path', type=click.Path())
-@click_custom_option('--model', type=click.Path(), required=True,
+@click_custom_option('--model', type=click.Path(), default=None,
                      help='Path to the trained model file or the model object itself.'
                      )
-@click_custom_option('--output-file', type=click.Path(), required=True,
+@click_custom_option('--output-file', type=click.Path(), default=None,
                      help='Path to the output file where the results will be saved. If not provided, the result will be returned instead of being saved to a file.'
                      )
 @click_custom_option('--batch-size', type=click.INT, default=8, help='batch size processed in each step.')
@@ -543,6 +543,12 @@ def denoise(input_path, batch_size, input_size, pre_post_frame, gap_frames, z_se
     """
     Denoise the input data using the SubFrameGenerator class and infer method.
     """
+
+    if model is None:
+        raise ValueError(f"Please provide a model with '--model'")
+
+    if output_file is None:
+        raise ValueError(f"Please provide an output_file '--output-file")
 
     from astrocast.denoising import SubFrameGenerator
 
