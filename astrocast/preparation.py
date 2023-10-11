@@ -332,8 +332,9 @@ class IO:
 
         """
 
-        if not isinstance(z_slice, (tuple, list)) or len(z_slice) != 2:
-                raise ValueError("please provide z_slice as tuple or list of (z_start, z_end)")
+        if z_slice is not None:
+            if not isinstance(z_slice, (tuple, list)) or len(z_slice) != 2:
+                    raise ValueError("please provide z_slice as tuple or list of (z_start, z_end)")
 
         if isinstance(path, (str, Path)):
             path = Path(path)
