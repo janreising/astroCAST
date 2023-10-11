@@ -329,7 +329,7 @@ def motion_correction(
 
 @cli.command()
 @click.argument('input-path', type=click.Path())
-@click_custom_option('--window', type=click.INT, required=True, help='Size of the window for the minimum filter.')
+@click_custom_option('--window', type=click.INT, default=None, help='Size of the window for the minimum filter.')
 @click_custom_option('--output-path', type=None, help='Path to save the output data.')
 @click_custom_option('--h5-loc-in', type=click.STRING, default="",
                      help='Location of the data in the HDF5 file (if applicable).'
@@ -360,6 +360,9 @@ def subtract_delta(
     """
     Subtract baseline of input using the Delta class.
     """
+
+    if window is None:
+        raise ValueError(f"please provide window argument")
 
     from astrocast.preparation import Delta
 
