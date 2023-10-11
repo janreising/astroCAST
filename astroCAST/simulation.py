@@ -510,3 +510,112 @@ class Astrocyte:
             fig, ax = plt.subplots(figsize=figsize)
 
         ax.fill(polygon[:, 0], polygon[:, 1], edgecolor='k', facecolor='none')
+
+
+from scipy.integrate import odeint
+import numpy as np
+from scipy.stats import poisson
+
+def astrocyte_dynamics(y, t,
+                       A, psyn, D_Ca, delta_x, # check parameters
+                       r=0.5,
+                       gamma=1.0, IP3_0=1.0e-6, tau_IP3=1.0, # check values
+                       c0=2.0e-6, c1=0.185, v1=6.0, v2=0.11, v3=2.2e-6,
+                       v5=0.025e-6, v6=0.2e-6, k1=0.5, k2=1.0e-6, k3=0.1e-6,
+                       a2=0.14e-6, d1=0.13e-6, d2=1.049e-6, d3=943.4e-9, d5=82.0e-9,
+                       alpha=0.8, v4=0.25e-6, v_g=0.062e-6, k4=1.1e-6, k_g=0.78e-6, n=2):
+    """
+    Astrocyte dynamics function that models calcium dynamics in astrocytes.
+
+    Parameters:
+    - y: List of state variables [Ca_c, Ca_ER, IP3, Glu, h]
+    - t: Time variable
+    - r: Parameter representing local AVF
+    - IP3_0: Steady-state concentration of IP3 (μM); resting level
+    - tau_IP3: Time constant for IP3 equilibration (s)
+    - c0: Total [Ca2+] in terms of cytosolic vol (μM)
+    - c1: (ER vol)/(cytosolic vol)
+    - v1: Max Ca2+ channel flux (s^-1)
+    - v2: Ca2+ leak flux constant (s^-1)
+    - v3: Max Ca2+ uptake (μM s^-1)
+    - v5: Rate of calcium leak across the plasma membrane (μM s^-1)
+    - v6: Maximal rate of activation dependent calcium influx (μM s^-1)
+    - k1: Rate constant of calcium extrusion (s^-1)
+    - k2: Half-saturation constant for agonist-dependent calcium entry (μM)
+    - k3: Activation constant for ATP-Ca2+ pump (μM)
+    - a2: Ca2+ inhibition constant (μM^-1 s^-1)
+    - d1: Dissociation constant for IP3 (μM)
+    - d2: Dissociation constant for Ca2+ inhibition (μM)
+    - d3: Receptor dissociation constant for IP3 (μM)
+    - d5: Ca2+ activation constant (μM)
+    - alpha: Alpha constant for J_delta
+    - v4: Max rate of IP3 production (μM s^-1)
+    - v_g: Rate of IP3 production through glutamate (μM s^-1)
+    - k4: Dissociation constant for Ca2+ stimulation of IP3 production (μM)
+    - k_g: Dissociation constant for glutamate stimulation of IP3 production (μM)
+    - n: Exponent for Hill equation in J_glutamate
+
+    Returns:
+    - dydt: List of derivatives [dCa_c_dt, dCa_ER_dt, dIP3_dt, dGlu_dt, dh_dt]
+    """
+
+    Ca_c, Ca_ER, IP3, Glu, h = y
+
+    # Compute linked parameter s based on r
+    s = 1 / (1 - np.exp(0.1 * (r - 0.5)))
+
+    # Definitions for J_IP3
+    m_inf = IP3 / (IP3 + d1)
+    n_inf = Ca_c / (Ca_c + d5)
+    Q2 = d2 * ((IP3 + d1) / (IP3 + d3))
+    h_inf = Q2 / (Q2 + Ca_c)
+    tau_h = 1 / (a2 * (Q2 + Ca_c))
+    dh_dt = (h_inf - h) / tau_h  # We'll need to return this as part of dydt
+
+    # definitions based on Ullah et al. (2006)
+
+    # Stochastic glutamate source based on a Poisson process
+    xi_p_t = A * poisson.rvs(psyn)  # This is a simplification
+
+    # IP3 turnover
+    J_ip3_delta = v4 * ((Ca_c + (1 - alpha) * k4) / (Ca_c + k4))
+    J_ip3_glutamate = (v_g * Glu**n) / (k_g**n + Glu**n)
+    I_diff = 0  # Placeholder for IP3 diffusion term (I_diff)
+    # ?
+    I_ip3_Ca = J_ip3_delta # Ca2+-stimulated IP3 production
+    I_ip3_Glu = J_ip3_glutamate # Glutamate-driven IP3 production
+    I_ip3_eq = (IP3 - IP3_0) / tau_IP3
+
+    # Total flows across ER
+    J_leak = c1 * v1 * (Ca_ER - Ca_c) # leak from ER
+    J_pump = (v3 * Ca_c**2) / (Ca_c**2 + k3**2) # retrieval of Ca2+ into ER
+    J_IP3 = c1 * v1 * m_inf**3 * n_inf**3 * h**3 * (Ca_ER - Ca_c)
+    J_ER = J_IP3 + J_leak - J_pump # total flow of Ca2+ (cytosol > ER; ER membrane)
+
+    # Total flow across PM
+    J_in = v5 + v6 * (IP3**2 / (k2**2 + IP3**2)) # Constant Ca2+ influx + IP3 stimulated influx
+    J_out = k1 * Ca_c # Extrusion current
+    J_Glu = gamma * Glu # direct effect of Glutamate on Ca2+
+    J_pm = J_in + J_Glu - J_out # total flow of C2+ (cytosol > extracellular space; plasma membrane)
+
+    # Diffusion??
+    D_star_Ca = r ** 2 * D_Ca / delta_x ** 2
+    sum_neighbors_Ca = 0 # Placeholder for sum over nearest neighbors; assume single astrocyte for now
+    J_diff = D_star_Ca * (sum_neighbors_Ca - Ca_c)
+
+    # Define the differential equations
+    dCa_c_dt = (1 - s) * J_ER + s * J_pm + J_diff
+    dCa_ER_dt = -1 - s * J_ER
+    dIP3_dt = s * (I_ip3_Glu + I_ip3_Ca) - I_ip3_eq + I_diff
+    dGlu_dt = Glu_amb - Glu / tau_Glu + xi_p_t + G_diff  # G_diff still to be defined
+
+    dydt = [dCa_c_dt, dCa_ER_dt, dIP3_dt, dGlu_dt]
+    return dydt
+
+# Example of how to use odeint to solve these equations
+initial_conditions = [0, 0, 0, 0]  # Placeholder initial conditions
+t = np.linspace(0, 10, 100)  # Time array
+r_value = 0.5  # Example value for r
+
+# Solve the differential equations
+solution = odeint(astrocyte_dynamics, initial_conditions, t, args=(r_value,))
