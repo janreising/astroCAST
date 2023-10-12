@@ -551,7 +551,8 @@ def denoise(input_path, batch_size, input_size, pre_post_frame, gap_frames, z_se
         raise ValueError(f"Please provide a model with '--model'")
 
     if output_file is None:
-        raise ValueError(f"Please provide an output_file '--output-file")
+        output_file = input_path
+        logging.warning(f"ni output_file provided. Choosing input_file: {input_path}")
 
     from astrocast.denoising import SubFrameGenerator
 
