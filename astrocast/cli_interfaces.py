@@ -748,7 +748,7 @@ def visualize_h5_recursive(loc, indent='', prefix=''):
 
 
 @cli.command()
-@click.argument('input-path', type=click.Path())
+@click.argument('--input-path', type=click.Path())
 def visualize_h5(input_path):
     """
     Visualizes the structure of a .h5 file in a tree format.
@@ -775,11 +775,11 @@ def visualize_h5(input_path):
         visualize_h5_recursive(f['/'])
 
 @cli.command()
-@click.argument('input-path', type=click.Path())
-@click.argument('output-path', type=click.Path())
-@click.argument('loc-in', type=click.STRING)
-@click.argument('loc-out', type=click.STRING)
-@click.option('overwrite', type=click.BOOL, default=False)
+@click.argument('--input-path', type=click.Path())
+@click.argument('--output-path', type=click.Path())
+@click.argument('--loc-in', type=click.STRING)
+@click.argument('--loc-out', type=click.STRING)
+@click_custom_option('--overwrite', type=click.BOOL, default=False, help='Overwrite output dataset.')
 def move_h5_dataset(input_path, output_path, loc_in, loc_out, overwrite):
     import h5py as h5
 
