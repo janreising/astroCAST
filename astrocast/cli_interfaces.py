@@ -236,6 +236,9 @@ def convert_input(
 @click_custom_option('--h5-loc', type=click.STRING, default="",
                      help='Dataset name in case of input being an HDF5 file.'
                      )
+@click_custom_option('--h5-loc-save', type=click.STRING, default="mc/ch0",
+                     help='Location within the HDF5 file to save the data.'
+                     )
 @click_custom_option('--max-shifts', type=click.Tuple([int, int]), default=(50, 50),
                      help='Maximum allowed rigid shift.'
                      )
@@ -274,9 +277,6 @@ def convert_input(
                      )
 @click_custom_option('--gsig-filt', type=click.Tuple([int, int]), default=(20, 20),
                      help='Tuple indicating the size of the filter.'
-                     )
-@click_custom_option('--h5-loc-save', type=click.STRING, default="mc",
-                     help='Location within the HDF5 file to save the data.'
                      )
 @click_custom_option('--chunks', type=click.STRING, default=None,
                      help='Chunk shape for creating a dask array when saving to an HDF5 file.'
@@ -774,6 +774,32 @@ def visualize_h5(input_path):
     with h5py.File(input_path, 'r') as f:
         visualize_h5_recursive(f['/'])
 
+@cli.command()
+@click.argument('input-path', type=click.Path())
+@click.argument('output-path', type=click.Path())
+@click.argument('loc-in', type=click.STRING)
+@click.argument('loc-out', type=click.STRING)
+@click.option('overwrite', type=click.BOOL, default=False)
+def move_h5_dataset(input_path, output_path, loc_in, loc_out):
+    import h5py as h5
+
+    with h5.File(input_path, "r") as in_:
+        with h5.File(output_path, "a") as out_:
+
+            if loc_in not in in_:
+                raise ValueError(f"cannot find {loc_in} in {input_path}. Choose: {list(in_.keys())}")
+
+            if loc_out in out_:
+
+                if not overwrite:
+                    raise ValueError(f"{loc_out} exists in {output_path}. "
+                                     f"Choose different dataset name or overwrite==True")
+                else:
+                    del out_[loc_out]
+
+            data = in_[loc_in]
+            out_.create_dataset(loc_out, data=data)
+            print("done copying")
 
 @cli.command()
 @click.argument('input-path', type=click.Path())

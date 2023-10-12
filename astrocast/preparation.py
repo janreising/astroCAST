@@ -1177,7 +1177,7 @@ class MotionCorrection:
 
         return frames_per_file
 
-    def save(self, output=None, h5_loc="mc", chunks=None, compression=None, remove_intermediate=True):
+    def save(self, output=None, h5_loc="mc/ch0", chunks=None, compression=None, remove_intermediate=True):
 
         """
         Retrieve the motion-corrected data and optionally save it to a file.
@@ -1226,30 +1226,8 @@ class MotionCorrection:
         elif isinstance(output, (str, Path)):
             output = Path(output) if isinstance(output, Path) else output
 
-            # Create a dask array from the memory-mapped data with specified chunking and compression
-            if chunks is None:
-                chunks = tuple([max(1, int(dim/10)) for dim in data.shape])
-                logging.warning(f"No 'chunk' parameter provided. Choosing: {chunks}")
-            data = da.from_array(data, chunks=chunks)
-
-            # Check if the output file is an HDF5 file and loc is provided
-            if output.suffix in [".h5", ".hdf5"] and h5_loc is None:
-                raise ValueError("when saving to .h5 please provide a location to save to instead of 'h5_loc=None'")
-
-            # split location into channel and folder information
-            split_h5 = h5_loc.split("/")
-            if len(split_h5) < 2:
-                loc, channel = "mc", h5_loc
-            elif len(split_h5) == 2:
-                loc, channel = split_h5
-            elif len(split_h5) > 2:
-                loc = "/".join(split_h5[:-1])
-                channel = split_h5[-1]
-            else:
-                raise ValueError(f"please provide h5_loc as 'channel_name' or 'folder/channel_name' instead of {h5_loc}")
-
             # Save the motion-corrected data to the output file using the I/O module
-            self.io.save(output, data={channel:data}, h5_loc=loc, chunks=chunks, compression=compression)
+            self.io.save(output, data=data, h5_loc=h5_loc, chunks=chunks, compression=compression)
 
         else:
             raise ValueError(f"please provide output as None, str or pathlib.Path instead of {output}")
