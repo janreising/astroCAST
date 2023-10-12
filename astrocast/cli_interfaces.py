@@ -780,7 +780,7 @@ def visualize_h5(input_path):
 @click.argument('loc-in', type=click.STRING)
 @click.argument('loc-out', type=click.STRING)
 @click.option('overwrite', type=click.BOOL, default=False)
-def move_h5_dataset(input_path, output_path, loc_in, loc_out):
+def move_h5_dataset(input_path, output_path, loc_in, loc_out, overwrite):
     import h5py as h5
 
     with h5.File(input_path, "r") as in_:
