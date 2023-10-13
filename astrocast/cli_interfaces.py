@@ -660,7 +660,7 @@ def denoise(input_path, batch_size, input_size, pre_post_frame, gap_frames, z_se
                      )
 @click_custom_option('--debug', type=click.BOOL, default=False, help='Enable debug mode.')
 @click_custom_option('--parallel', type=click.BOOL, default=True, help='Enable parallel execution.')
-@click_custom_option('--output-path', type=click.Path(), default=None, help='Path to the output file.')
+@click_custom_option('--output-path', type=click.STRING, default="infer", help='Path to the output file.')
 @click_custom_option('--logging-level', type=click.INT, default=logging.INFO, help='Logging level for messages.')
 @click_custom_option('--overwrite', type=click.BOOL, default=False,
                      help='Flag for overwriting previous result in output location'
