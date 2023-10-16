@@ -497,7 +497,6 @@ class TimeSeriesRnnAE:
         self.train()
 
         patience_counter = 0
-        best_loss = float('inf')
 
         if show_mode == "progress":
             iterator = tqdm(range(num_epochs), total=num_epochs)
@@ -532,15 +531,42 @@ class TimeSeriesRnnAE:
             train_losses.append(epoch_loss)
 
             if diminish_learning_rate is not None:
-                self.update_learning_rates(0.99, 0.99)
+                self.update_learning_rates(diminish_learning_rate, diminish_learning_rate)
             learning_rates.append([self.encoder_lr, self.decoder_lr])
 
+            # model saving
+            if safe_after_epoch is not None:
+
+                if not isinstance(safe_after_epoch, (str, Path)):
+                    raise ValueError(f"please provide 'safe_after_epoch' as string or pathlib.Path")
+
+                if isinstance(safe_after_epoch, str):
+                    safe_after_epoch = Path(safe_after_epoch)
+
+                encoder_file_name = safe_after_epoch.joinpath("_encoder.model")
+                decoder_file_name = safe_after_epoch.joinpath("_decoder.model")
+
+                self.save_models(encoder_file_name, decoder_file_name)
+
+            if dataloader_val is not None:
+                val_loss = self.evaluate_batch(dataloader_val)
+                val_losses.append(val_loss)
+
+            # progress
             if show_mode == "progress":
-                iterator.set_description(
-                    f"loss: {epoch_loss:.2E} "
-                    f"lr: ({self.encoder_lr:.5f}, {self.decoder_lr:.5f}) "
-                    f"P:{patience_counter}"
-                    )
+
+                descr = f"tloss>{epoch_loss:.2E} "
+
+                if dataloader_val is not None:
+                    descr += f"vloss>{val_losses[-1]:.2E} "
+
+                if self.encoder_lr == self.decoder_lr:
+                    descr += f"lr>{self.encoder_lr:.2E} "
+                else:
+                    descr += f"lr>({self.encoder_lr:.2E}, {self.decoder_lr:.2E}) "
+
+                descr += f"P{patience_counter}"
+
                 iterator.update(1)
 
             elif show_mode == "notebook":
@@ -570,35 +596,14 @@ class TimeSeriesRnnAE:
 
                 display(fig)
 
-            # model saving
-            if safe_after_epoch is not None:
-
-                if not isinstance(safe_after_epoch, (str, Path)):
-                    raise ValueError(f"please provide 'safe_after_epoch' as string or pathlib.Path")
-
-                if isinstance(safe_after_epoch, str):
-                    safe_after_epoch = Path(safe_after_epoch)
-
-                encoder_file_name = safe_after_epoch.joinpath("_encoder.model")
-                decoder_file_name = safe_after_epoch.joinpath("_decoder.model")
-
-                self.save_models(encoder_file_name, decoder_file_name)
-
-            if dataloader_val is not None:
-                val_loss = self.evaluate_batch(dataloader_val)
-                val_losses.append(val_loss)
-
             # Early stopping
             if dataloader_val is not None:
                 losses = val_losses
             else:
                 losses = train_losses
 
-            smoothed_loss = np.sum(np.array(losses[-smooth_loss_len:])) / min(
-                len(losses), smooth_loss_len
-                )  # last 5 epochs
-            if best_loss - smoothed_loss > min_delta:
-                best_loss = smoothed_loss
+            smoothed_loss = np.median(np.array(losses[-smooth_loss_len-1:-1]))
+            if smoothed_loss - losses[-1]  > min_delta:
                 patience_counter = 0
             else:
                 patience_counter += 1
