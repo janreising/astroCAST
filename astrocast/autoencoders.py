@@ -537,7 +537,7 @@ class TimeSeriesRnnAE:
 
             if show_mode == "progress":
                 iterator.set_description(
-                    f"loss: {epoch_loss:.4f} "
+                    f"loss: {epoch_loss:.2E} "
                     f"lr: ({self.encoder_lr:.5f}, {self.decoder_lr:.5f}) "
                     f"P:{patience_counter}"
                     )
