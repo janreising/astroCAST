@@ -3,6 +3,7 @@ import logging
 import os
 import shutil
 import time
+import warnings
 from pathlib import Path
 import click
 import humanize
@@ -181,7 +182,8 @@ def cli(ctx, config):
                      help='Path to save the processed data. If None, the processed data is returned.'
                      )
 @click_custom_option('--sep', default="_", help='Separator used for sorting file names.')
-@click_custom_option('--channels', default=1, help='Number of channels or dictionary specifying channel names.')
+@click_custom_option('--num-channels', default=1, help='Number of channels.')
+@click_custom_option('--channel-names', default="ch0", help='Channel names as comma separated list.')
 @click_custom_option('--z-slice', default=None, help='Z slice index.')
 @click_custom_option('--lazy', is_flag=True, help='Lazy loading flag.')
 @click_custom_option('--subtract-background', default=None, help='Background subtraction parameter.')
@@ -198,7 +200,7 @@ def cli(ctx, config):
                      help='Flag for overwriting previous result in output location'
                      )
 def convert_input(
-        input_path, logging_level, output_path, sep, channels, z_slice, lazy, subtract_background,
+        input_path, logging_level, output_path, sep, num_channels, channel_names, z_slice, lazy, subtract_background,
         subtract_func, rescale, dtype, in_memory, h5_loc, chunks, compression, overwrite
         ):
     """
@@ -216,6 +218,13 @@ def convert_input(
 
         # check chunks
         chunks = parse_chunks(chunks)
+
+        channel_names = channel_names.split(",")
+        if len(channel_names) != num_channels:
+            warnings.warn(f"Number of channels {num_channels} does not match channel names {channel_names}. Choosing default.")
+            channel_names = [f"ch{i}" for i in range(num_channels)]
+
+        channels = {i:n for i, n in enumerate(channel_names)}
 
         # convert input
         input_instance = Input(logging_level=logging_level)

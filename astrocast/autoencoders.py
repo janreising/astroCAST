@@ -567,6 +567,7 @@ class TimeSeriesRnnAE:
 
                 descr += f"P{patience_counter}"
 
+                iterator.set_description(descr)
                 iterator.update(1)
 
             elif show_mode == "notebook":
