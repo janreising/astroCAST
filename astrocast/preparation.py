@@ -250,7 +250,7 @@ class Input:
             if not isinstance(channels, (int, dict)):
                 raise ValueError(f"please provide channels as int or dictionary.")
 
-            num_channels = channels if isinstance(channels, int) else len(len(channels.keys()))
+            num_channels = channels if isinstance(channels, int) else len(channels.keys())
 
             if stack.shape[0] % num_channels != 0:
                 logging.warning(f"cannot divide frames into channel number: {stack.shape[0]} % {num_channels} != 0. May lead to unexpacted behavior")
