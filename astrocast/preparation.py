@@ -76,6 +76,10 @@ class Input:
 
         # rechunk
         if chunks is not None:
+
+            if chunks == "infer":
+                chunks = (10, -1, -1)
+
             for k in data:
                 if not isinstance(data[k], np.ndarray) and data[k].chunksize != chunks:
                     data[k] = da.rechunk(data[k], chunks=chunks)
