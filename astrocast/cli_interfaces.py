@@ -188,7 +188,7 @@ def cli(ctx, config):
 @click_custom_option('--lazy', is_flag=True, help='Lazy loading flag.')
 @click_custom_option('--subtract-background', default=None, help='Background subtraction parameter.')
 @click_custom_option('--subtract-func', default="mean", help='Function to use for background subtraction.')
-@click_custom_option('--rescale', default=None, help='Rescale parameter.')
+@click_custom_option('--rescale', type=click.FLOAT, default=1.0, help='Rescale parameter.')
 @click_custom_option('--dtype', default=np.uint, help='Data type to convert the processed data.')
 @click_custom_option('--in-memory', is_flag=True, help='If True, the processed data is loaded into memory.')
 @click_custom_option('--h5-loc', default="data", help='Prefix to use when saving the processed data.')
