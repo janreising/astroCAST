@@ -75,10 +75,14 @@ class Input:
         logging.debug(f"data type: {type(data[list(data.keys())[0]])}")
 
         # rechunk
-        if chunks is not None or chunks != "infer":
+        if chunks is not None:
 
             for k in data:
                 if not isinstance(data[k], np.ndarray) and data[k].chunksize != chunks:
+
+                    if chunks == "infer":
+                        chunks = (10, data[k].shape[1], data[k].shape[2])
+
                     data[k] = da.rechunk(data[k], chunks=chunks)
 
         # return result
