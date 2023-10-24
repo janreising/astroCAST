@@ -995,5 +995,27 @@ def download_models(save_path):
     import helper
     helper.download_pretrained_models(save_path)
 
+@cli.command
+@click.argument('input-path', type=click.Path())
+@click_custom_option('--loc', type=click.STRING, default="data/ch0")
+@click_custom_option('--z', type=click.INT, default=0)
+@click_custom_option('--size', type=(click.INT, click.INT), default=(50, 50))
+def climage(input_path, loc, z, size):
+
+    import skimage.color as skicol
+    from skimage.transform import resize
+    import climage
+    from astrocast.preparation import IO
+
+    io = IO()
+    data = io.load(input_path, h5_loc=loc, lazy=True)
+    img = data[z, :, :].astype(float)
+
+    img = resize(img, size, anti_aliasing=True)
+    img = skicol.gray2rgb(img)
+    img = np.array(img)
+
+    print(climage.convert_array(img, is_unicode=True))
+
 if __name__ == '__main__':
     cli()
