@@ -72,6 +72,26 @@ def visualize(glob_path: str):
 
     # Convert the defaultdict to a pandas DataFrame
     df = pd.DataFrame.from_dict(output_dict, orient='index').fillna(0).astype(int)
+
+    def sort_func(x):
+
+        order = []
+        for xx in x:
+
+            number = ""
+            for v in xx:
+                try:
+                    int(v)
+                    number += v
+                except ValueError:
+                    pass
+
+            order.append(int(number))
+
+        return order
+
+    df.sort_index(key=lambda x: sort_func(x), inplace=True)
+
     print(df)
 
 if __name__ == "__main__":
