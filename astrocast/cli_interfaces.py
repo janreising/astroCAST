@@ -1018,6 +1018,8 @@ def climage(input_path, loc, z, size, equalize, clip_limit):
     for zi in z:
         img = data[zi, :, :].astype(float).compute()
 
+        print(f"z:{z1} [{np.min(img):.1f}-{np.max(img):.1f}, {np.mean(img):.1f}+-{np.std(img):.1f}]")
+
         img = img - np.min(img)
         img = img / np.max(img)
 
