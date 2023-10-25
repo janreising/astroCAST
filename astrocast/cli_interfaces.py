@@ -993,8 +993,8 @@ def download_models(save_path):
 
 @cli.command
 @click.argument('input-path', type=click.Path())
+@click.argument('z', type=click.INT, nargs=-1)
 @click_custom_option('--loc', type=click.STRING, default="data/ch0")
-@click_custom_option('--z', type=click.INT, default=0)
 @click_custom_option('--equalize', type=click.BOOL, default=True)
 @click_custom_option('--clip-limit', type=click.FLOAT, default=0.01)
 @click_custom_option('--size', type=(click.INT, click.INT), default=(50, 50))
@@ -1006,23 +1006,28 @@ def climage(input_path, loc, z, size, equalize, clip_limit):
     import climage
     from astrocast.preparation import IO
 
+    if isinstance(z, int):
+        z = [z]
+
     io = IO()
     data = io.load(input_path, h5_loc=loc, lazy=True)
-    img = data[z, :, :].astype(float).compute()
 
-    img = img - np.min(img)
-    img = img / np.max(img)
+    for zi in z:
+        img = data[zi, :, :].astype(float).compute()
 
-    img = resize(img, size, anti_aliasing=True)
+        img = img - np.min(img)
+        img = img / np.max(img)
 
-    if equalize:
-        img = exposure.equalize_adapthist(img, clip_limit=clip_limit)
+        img = resize(img, size, anti_aliasing=True)
+
+        if equalize:
+            img = exposure.equalize_adapthist(img, clip_limit=clip_limit)
 
 
-    img = skicol.gray2rgb(img)
-    img = np.array(img) * 255
+        img = skicol.gray2rgb(img)
+        img = np.array(img) * 255
 
-    print(climage.convert_array(img, is_unicode=True))
+        print(climage.convert_array(img, is_unicode=True))
 
 if __name__ == '__main__':
     cli()
