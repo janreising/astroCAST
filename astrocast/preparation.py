@@ -2,6 +2,7 @@ import logging
 import os
 import shutil
 import tempfile
+import warnings
 from collections import OrderedDict
 from pathlib import Path
 
@@ -157,6 +158,7 @@ class Input:
             # Subtract the reduced background from each channel
             for k in data.keys():
                 data[k] = data[k] - background
+                data[k] = data[k].astype(int)
 
         else:
             raise ValueError("Please provide 'subtract_background' flag with one of: np.ndarray, callable function or str")
@@ -209,9 +211,17 @@ class Input:
         # Apply resizing to each channel
         for k in data.keys():
             # Rescale the data array using the specified scaling factors and anti-aliasing
-            data[k] = data[k].map_blocks(
-                lambda chunk: resize(chunk, (chunk.shape[0], rX, rY), anti_aliasing=True),
-                chunks=(1, rX, rY))
+
+            data[k] = data[k].astype(float)
+
+            with warnings.catch_warnings():
+                warnings.filterwarnings("ignore", category=UserWarning)
+
+                data[k] = data[k].map_blocks(
+                    lambda chunk: resize(chunk, (chunk.shape[0], rX, rY), anti_aliasing=True),
+                    chunks=(1, rX, rY))
+
+            data[k] = data[k].astype(int)
 
         return data
 
@@ -295,8 +305,8 @@ class Input:
             def func(chunk):
                 return chunk.astype(dtype)
 
-        for k in data.keys():
-            data[k] = data[k].map_blocks(lambda chunk: func(chunk), dtype=dtype)
+            for k in data.keys():
+                data[k] = data[k].map_blocks(lambda chunk: func(chunk), dtype=dtype)
 
         return data
 
