@@ -1014,6 +1014,7 @@ def climage(input_path, loc, z, size, equalize, clip_limit):
 
     io = IO()
     data = io.load(input_path, h5_loc=loc, lazy=True, z_slice=(z0, z1))
+    print(f"input path: {input_path}")
 
     for zi in z:
         img = data[zi, :, :].astype(float).compute()
