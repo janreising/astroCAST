@@ -40,7 +40,7 @@ class Test_Events:
             sim = EventSim()
             event_dir = sim.create_dataset(Path(tmpdir).joinpath("sim.h5"))
 
-            custom_columns = ["area_norm", "cx", "cy", "area_footprint",
+            custom_columns = ["v_area_norm", "cx", "cy", "v_area_footprint",
                               # "pix_num_norm",
                               {"add_one": lambda events: events.z0 + 1}]
 
