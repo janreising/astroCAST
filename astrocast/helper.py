@@ -635,7 +635,7 @@ class EventSim:
 
         return event_map, num_events
 
-    def create_dataset(self, h5_path, h5_loc="dff/ch0", save_active_pixels=False, shape=(50, 100, 100),
+    def create_dataset(self, h5_path, h5_loc="dff/ch0", debug=False, shape=(50, 100, 100),
                        z_fraction=0.2, xy_fraction=0.1, gap_space=1, gap_time=1,
                        blob_size_fraction=0.05, event_probability=0.2):
 
@@ -648,10 +648,11 @@ class EventSim:
                                          gap_space=gap_space, gap_time=gap_time,
                                          blob_size_fraction=blob_size_fraction, event_probability=event_probability)
 
-        IO.save(path=h5_path, data=data, h5_loc=h5_loc)
+        io = IO()
+        io.save(path=h5_path, data=data, h5_loc=h5_loc)
 
         det = Detector(h5_path.as_posix(),  output=None)
-        det.run(dataset=h5_loc, lazy=True, save_activepixels=save_active_pixels)
+        det.run(h5_loc=h5_loc, lazy=True, debug=debug)
 
         return det.output_directory
 
