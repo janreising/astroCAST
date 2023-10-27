@@ -1027,7 +1027,7 @@ class Events(CachedClass):
             post_trace = np.nanmean(projection, axis=(1, 2))
 
             # combine
-            trace = np.concatenate([pre_trace, event.trace, post_trace])
+            trace = np.concatenate([pre_trace, np.squeeze(event.trace), post_trace])
 
             if ensure_max is not None and len(trace) > ensure_max:
 
@@ -1345,7 +1345,7 @@ class Video:
 
             current_frame_line = None
 
-            def update_line(event: Event):
+            def update_line(event: Events):
                 nonlocal current_frame_line
 
                 Z, _, _ = event.value

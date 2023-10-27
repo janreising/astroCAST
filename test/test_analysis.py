@@ -159,35 +159,89 @@ class Test_Events:
         dict(normalization_instructions={0: ["subtract", {"mode": "mean"}], 1: ["divide", {"mode": "std"}]},
              memmap_path=True)
     ])
-    def test_extension_full(self, param, shape=(50, 100, 100)):
+    def test_extension_full(self, param, shape=(50, 100, 100), num_events=3, event_length=3):
 
         with tempfile.TemporaryDirectory() as tmpdir:
 
-            if param["memmap_path"]:
-                param["memmap_path"] = Path(tmpdir).joinpath("arr.mmap")
-            else:
-                param["memmap_path"] = None
+            # I THINK THE PROBLEM IS:
+            # the extension takes the footprint and calculates the mean
+            # so technically this should create some kind of float value
+            # not sure why there are more values created though!?
 
-            # Create dummy data
-            sim = EventSim()
-            event_dir = sim.create_dataset(Path(tmpdir).joinpath("sim.h5"), shape=shape)
+            Z, X, Y = shape
 
-            events = Events(event_dir)
-            df = events.load_events(event_dir)
-            arr, shape, dtype = events.get_event_map(event_dir, lazy=False)
+            arr = np.random.random(shape) * 1000
+            arr = np.abs(arr.astype(int))
 
-            traces, _, _ = events.get_extended_events(video=Video(arr), return_array=True, **param)
+            events = {k:[] for k in ["z0", "z1", "x0", "x1", "y0", "y1", "dz", "dx", "dy", "trace", "full_trace", "mask", "fp_mask"]}
+            for i in range(num_events):
 
-            assert traces.shape == (len(df), shape[0])
+                z0 = np.random.randint(event_length+1, Z-event_length-1)
+                x0 = np.random.randint(event_length+1, X-event_length-1)
+                y0 = np.random.randint(event_length+1, Y-event_length-1)
 
-            logging.warning(f"trace: {traces}")
-            logging.warning(f"arr: {arr}")
+                events["z0"].append(z0)
+                events["x0"].append(x0)
+                events["y0"].append(y0)
 
-            data_unique_values = np.unique(arr.flatten().astype(int))
-            trace_unique_values = np.unique(traces.flatten().astype(int))
+                z1, x1, y1 = z0+event_length, x0+event_length, y0+event_length
 
-            assert abs(len(data_unique_values) - len(trace_unique_values)) <= 2, f"data_unique: {data_unique_values}\n" \
-                                                                                 f"trace_unique: {trace_unique_values}"
+                events["z1"].append(z1)
+                events["x1"].append(x1)
+                events["y1"].append(y1)
+
+                events["dz"].append(event_length)
+                events["dx"].append(event_length)
+                events["dy"].append(event_length)
+
+                trace = np.squeeze(np.mean(arr[z0:z1, x0:x1, y0:y1], axis=0))
+                full_trace = np.squeeze(np.mean(arr[:, x0:x1, y0:y1], axis=0))
+
+                events["trace"].append(trace)
+                events["full_trace"].append(full_trace)
+
+                events["mask"].append(np.ones(shape=(event_length, event_length, event_length), dtype=bool).flatten())
+                events["fp_mask"].append(np.ones(shape=(event_length, event_length), dtype=bool).flatten())
+
+            # create Events instance
+            ev = Events(None)
+            ev.events = pd.DataFrame(events)
+            ev.num_frames, ev.X, ev.Y = shape
+
+            full_traces = ev.events.full_trace.values
+
+            # extend events
+            traces, _, _ = ev.get_extended_events(video=Video(arr), return_array=True,
+                            memmap_path=Path(tmpdir).joinpath("arr.mmap") if param["memmap_path"] else None)
+
+            # check result
+            assert traces.shape == full_traces.shape
+            assert np.allclose(traces, full_traces)
+
+            ##########
+            # Old code
+
+            # # Create dummy data
+            # sim = EventSim()
+            # event_dir = sim.create_dataset(Path(tmpdir).joinpath("sim.h5"), shape=shape)
+            #
+            # events = Events(event_dir)
+            # df = events.load_events(event_dir)
+            # arr, shape, dtype = events.get_event_map(event_dir, lazy=False)
+            #
+            # traces, _, _ = events.get_extended_events(video=Video(arr), return_array=True,
+            #                             memmap_path=Path(tmpdir).joinpath("arr.mmap") if param["memmap_path"] else None)
+            #
+            # assert traces.shape == (len(df), shape[0])
+            #
+            # logging.warning(f"trace: {traces}")
+            # logging.warning(f"arr: {arr}")
+            #
+            # data_unique_values = np.unique(arr.flatten().astype(int))
+            # trace_unique_values = np.unique(traces.flatten().astype(int))
+            #
+            # assert abs(len(data_unique_values) - len(trace_unique_values)) <= 2, f"data_unique: {data_unique_values}\n" \
+            #                                                                      f"trace_unique: {trace_unique_values}"
 
     @pytest.mark.parametrize("extend", [4, (3, 2), (-1, 2), (2, -1)])
     def test_extension_partial(self, extend, shape=(50, 100, 100)):
