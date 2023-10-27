@@ -1,9 +1,9 @@
 import tempfile
 import time
 
-import numpy as np
 import pytest
 
+from astrocast.autoencoders import CNN_Autoencoder
 from astrocast.reduction import *
 from astrocast.helper import DummyGenerator
 
@@ -50,52 +50,43 @@ class Test_CNN:
 
     def test_training(self):
 
-        DG = DummyGenerator(num_rows=11, trace_length=16, ragged=False)
+        trace_length = 16
+        DG = DummyGenerator(num_rows=32, trace_length=trace_length, ragged=False)
         data = DG.get_array()
 
-        cnn = CNN()
-        cnn.train(data, epochs=2)
-
-    def test_training_modified(self):
-
-        DG = DummyGenerator(num_rows=11, trace_length=16, ragged=False)
-        data = DG.get_array()
-
-        cnn = CNN()
-        cnn.train(data, epochs=2, dropout=0.1, regularize_latent=0.01)
+        cnn = CNN_Autoencoder(target_length=trace_length)
+        train_dataset, val_dataset, test_dataset = cnn.split_dataset(data)
+        losses = cnn.train_autoencoder(X_train=train_dataset, X_val=val_dataset, X_test=test_dataset,
+                              epochs=2, batch_size=4)
 
     def test_embeding(self):
-        DG = DummyGenerator(num_rows=11, trace_length=16, ragged=False)
+
+        trace_length = 16
+        DG = DummyGenerator(num_rows=32, trace_length=trace_length, ragged=False)
         data = DG.get_array()
 
-        cnn = CNN()
-        _, X_test, _, _ = cnn.train(data, epochs=2)
+        cnn = CNN_Autoencoder(target_length=trace_length)
+        train_dataset, val_dataset, test_dataset = cnn.split_dataset(data)
+        losses = cnn.train_autoencoder(X_train=train_dataset, X_val=val_dataset, X_test=test_dataset,
+                              epochs=2, batch_size=4)
 
-        Y_test = cnn.embed(X_test)
+        Y_test = cnn.embed(data)
 
     def test_plotting(self):
 
-        DG = DummyGenerator(num_rows=11, trace_length=16, ragged=False)
+        trace_length = 16
+        DG = DummyGenerator(num_rows=32, trace_length=trace_length, ragged=False)
         data = DG.get_array()
 
-        cnn = CNN()
-        hist, X_test, Y_test, MSE = cnn.train(data, epochs=1)
+        cnn = CNN_Autoencoder(target_length=trace_length)
+        train_dataset, val_dataset, test_dataset = cnn.split_dataset(data)
+        losses = cnn.train_autoencoder(X_train=train_dataset, X_val=val_dataset, X_test=test_dataset,
+                              epochs=2, batch_size=4)
 
-        cnn.plot_history()
-        cnn.plot_examples(X_test, Y_test)
+        cnn.plot_examples_pytorch(test_dataset)
 
     def test_save_load(self, tmp_path):
-
-        DG = DummyGenerator(num_rows=11, trace_length=16, ragged=False)
-        data = DG.get_array()
-
-        cnn = CNN()
-        hist, X_test, Y_test, MSE = cnn.train(data, epochs=1)
-        cnn.save_model(tmp_path)
-
-        cnn_naive = CNN()
-        cnn_naive.load_model(tmp_path)
-        cnn_naive.embed(X_test)
+        raise NotImplementedError(f"implement CNN loading")
 
 @pytest.mark.serial
 class Test_UMAP:

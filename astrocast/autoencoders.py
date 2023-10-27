@@ -176,7 +176,8 @@ class CNN_Autoencoder(nn.Module):
         train_dataset, val_dataset, test_dataset = random_split(data, [train_size, val_size, test_size])
         return train_dataset, val_dataset, test_dataset
 
-    def train_autoencoder(self, X_train, X_val=None, X_test=None, patience=5, min_delta=0.0005, epochs=100, learning_rate=0.001, batch_size=32):
+    def train_autoencoder(self, X_train, X_val=None, X_test=None, patience=5, min_delta=0.0005, epochs=100,
+                          learning_rate=0.001, batch_size=32):
 
         # ensure equal length input
         for X in [X_train, X_val, X_test]:
