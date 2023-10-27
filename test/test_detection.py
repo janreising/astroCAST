@@ -10,8 +10,8 @@ from astrocast.preparation import IO
 class Test_Detector:
 
     @pytest.mark.parametrize("extension", [".h5", ".tiff"])
-    @pytest.mark.parametrize("save_active_pixels", [True, False])
-    def test_real_data(self, extension, save_active_pixels):
+    @pytest.mark.parametrize("debug", [True, False])
+    def test_real_data(self, extension, debug):
 
         si = SampleInput()
         input_ = si.get_test_data(extension=extension)
@@ -20,8 +20,8 @@ class Test_Detector:
             tmpdir = Path(dir)
             assert tmpdir.is_dir()
 
-            det = Detector(input_,  output=tmpdir)
-            det.run(dataset = "dff/ch0", lazy=False, save_activepixels = save_active_pixels)
+            det = Detector(input_,  output=tmpdir.joinpath("tempData"))
+            det.run(h5_loc="dff/ch0", lazy=False, debug=debug)
 
             dir_ = det.output_directory
 
@@ -35,7 +35,7 @@ class Test_Detector:
                 is_file = dir_.joinpath(file_name)
                 assert is_file, f"{file_name} file does not exist in output directory"
 
-            if save_active_pixels:
+            if debug:
                 assert dir_.joinpath("active_pixels.tiff").is_file()
 
     def test_sim_data(self):
