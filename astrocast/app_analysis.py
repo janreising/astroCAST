@@ -51,7 +51,7 @@ class Analysis:
                 "in_switch_use_padding":False, "in_switch_use_footprint":True,
             },
             "Normalization":{
-                "in_switch_norm_default":True, "in_select_norm_mode":"min_max",
+                "in_switch_norm_default":False, "in_select_norm_mode":"min_max",
                 "in_select_subtract_order":"", "in_select_subtract_mode":"min", "in_switch_subtract_pop":False, "in_select_subtract_rows":True,
                 "in_select_divide_order":"", "in_select_divide_mode":"max_abs", "in_switch_divide_pop":False, "in_select_divide_rows":True,
                 "in_select_impute_order":"", "in_switch_impute_fixed":False, "in_numeric_impute_val":0,
@@ -208,6 +208,7 @@ class Analysis:
                     "Outliers",
                     ui.layout_sidebar(
                         ui.panel_sidebar(
+                            ui.input_switch("in_switch_calc_outliers", "calculate outliers", value=False),
                             ui.h5("NaN settings"),
                             ui.input_select("in_select_nan_settings", "", choices=["column", "rows", "fill"]),
                             ui.h5(""),
@@ -946,7 +947,7 @@ class Analysis:
 
             events = get_events_obj_extended().copy()
 
-            if events is not None and len(events)>0 and True: # TODO fix
+            if events is not None and len(events)>0:
 
                 instructions = {}
 
@@ -1275,7 +1276,7 @@ class Analysis:
             frames = get_frames()
 
             if len(frames) > 0:
-                return self.plot_images([data], frames, lbls=["event map"])
+                return self.plot_images([data], frames, lbls=["event map"], pixels=[])
             else:
                 return None
 
@@ -1317,7 +1318,7 @@ class Analysis:
 
             events = get_table_no_nan()
 
-            if events is not None:
+            if events is not None and input.in_switch_calc_outliers():
 
                 events = events.events
 

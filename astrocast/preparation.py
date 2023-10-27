@@ -2,6 +2,7 @@ import logging
 import os
 import shutil
 import tempfile
+import warnings
 from collections import OrderedDict
 from pathlib import Path
 
@@ -76,8 +77,13 @@ class Input:
 
         # rechunk
         if chunks is not None:
+
             for k in data:
                 if not isinstance(data[k], np.ndarray) and data[k].chunksize != chunks:
+
+                    if chunks == "infer":
+                        chunks = (10, data[k].shape[1], data[k].shape[2])
+
                     data[k] = da.rechunk(data[k], chunks=chunks)
 
         # return result
@@ -152,6 +158,7 @@ class Input:
             # Subtract the reduced background from each channel
             for k in data.keys():
                 data[k] = data[k] - background
+                data[k] = data[k].astype(int)
 
         else:
             raise ValueError("Please provide 'subtract_background' flag with one of: np.ndarray, callable function or str")
@@ -204,9 +211,17 @@ class Input:
         # Apply resizing to each channel
         for k in data.keys():
             # Rescale the data array using the specified scaling factors and anti-aliasing
-            data[k] = data[k].map_blocks(
-                lambda chunk: resize(chunk, (chunk.shape[0], rX, rY), anti_aliasing=True),
-                chunks=(1, rX, rY))
+
+            data[k] = data[k].astype(float)
+
+            with warnings.catch_warnings():
+                warnings.filterwarnings("ignore", category=UserWarning)
+
+                data[k] = data[k].map_blocks(
+                    lambda chunk: resize(chunk, (chunk.shape[0], rX, rY), anti_aliasing=True),
+                    chunks=(1, rX, rY))
+
+            data[k] = data[k].astype(int)
 
         return data
 
@@ -250,7 +265,7 @@ class Input:
             if not isinstance(channels, (int, dict)):
                 raise ValueError(f"please provide channels as int or dictionary.")
 
-            num_channels = channels if isinstance(channels, int) else len(len(channels.keys()))
+            num_channels = channels if isinstance(channels, int) else len(channels.keys())
 
             if stack.shape[0] % num_channels != 0:
                 logging.warning(f"cannot divide frames into channel number: {stack.shape[0]} % {num_channels} != 0. May lead to unexpacted behavior")
@@ -290,8 +305,8 @@ class Input:
             def func(chunk):
                 return chunk.astype(dtype)
 
-        for k in data.keys():
-            data[k] = data[k].map_blocks(lambda chunk: func(chunk), dtype=dtype)
+            for k in data.keys():
+                data[k] = data[k].map_blocks(lambda chunk: func(chunk), dtype=dtype)
 
         return data
 
@@ -332,26 +347,30 @@ class IO:
 
         """
 
+        if z_slice is not None:
+            if not isinstance(z_slice, (tuple, list)) or len(z_slice) != 2:
+                    raise ValueError("please provide z_slice as tuple or list of (z_start, z_end)")
+
         if isinstance(path, (str, Path)):
             path = Path(path)
 
             if path.suffix in [".tdb"]:
-                data =  self._load_tdb(path, lazy=lazy, chunks=chunks)  # Call private method to load TDB file
+                data =  self._load_tdb(path, lazy=lazy, chunks=chunks, z_slice=z_slice)  # Call private method to load TDB file
 
             elif path.suffix in [".tif", ".tiff", ".TIF", ".TIFF"]:
-                data =  self._load_tiff(path, sep, lazy=lazy)  # Call private method to load TIFF file
+                data =  self._load_tiff(path, sep, lazy=lazy, z_slice=z_slice)  # Call private method to load TIFF file
 
             elif path.suffix in [".czi", ".CZI"]:
-                data =  self._load_czi(path, lazy=lazy)  # Call private method to load CZI file
+                data =  self._load_czi(path, lazy=lazy, z_slice=z_slice)  # Call private method to load CZI file
 
             elif path.suffix in [".h5", ".hdf5", ".H5", ".HDF5"]:
-                data =  self._load_h5(path, h5_loc=h5_loc, lazy=lazy, chunks=chunks)  # Call private method to load HDF5 file
+                data =  self._load_h5(path, h5_loc=h5_loc, lazy=lazy, chunks=chunks, z_slice=z_slice)  # Call private method to load HDF5 file
 
             elif path.suffix in [".npy", ".NPY"]:
-                data =  self._load_npy(path, lazy=lazy, chunks=chunks)
+                data =  self._load_npy(path, lazy=lazy, chunks=chunks, z_slice=z_slice)
 
             elif path.suffix in [".csv", ".CSV"]:
-                data =  self._load_csv(path, chunks=chunks)
+                data =  self._load_csv(path, chunks=chunks, z_slice=z_slice)
 
             elif path.is_dir():
 
@@ -361,42 +380,51 @@ class IO:
                     raise FileNotFoundError("couldn't find files in folder. Recognized ext: [.tif, .tiff, .TIF, .TIFF]")
 
                 else:
-                    data =  self._load_tiff(path, sep, lazy=lazy)  # Call private method to load TIFF files from directory
+                    data =  self._load_tiff(path, sep, lazy=lazy, z_slice=z_slice)  # Call private method to load TIFF files from directory
 
             else:
                 raise ValueError("unrecognized file format! Choose one of [.tiff, .h5, .tdb, .czi]")
 
         elif isinstance(path, np.ndarray):
-            data = da.from_array(path, chunks=chunks)
+            z0, z1 = z_slice
+            data = da.from_array(path[z0:z1], chunks=chunks)
 
         elif isinstance(path, da.Array):
-            data = da.rechunk(path, chunks=chunks)
-
-        if z_slice is not None:
-
-            if not isinstance(z_slice, (tuple, list)) or len(z_slice) != 2:
-                raise ValueError("please provide z_slice as tuple or list of (z_start, z_end)")
-
-            # todo would be better not to load all the data first
             z0, z1 = z_slice
-            data = data[z0:z1, :, :]
+            data = da.rechunk(path[z0:z1], chunks=chunks)
 
         return data
 
-    def _load_npy(self, path, lazy=False, chunks="auto"):
+    def _load_npy(self, path, lazy=False, chunks="auto", z_slice=None):
+
+        if z_slice is not None:
+            z0, z1 = z_slice
 
         if lazy:
             try:
-                return da.from_npy_stack(path)
+
+                data = da.from_npy_stack(path)
+                if z_slice is not None:
+                    data = data[z0:z1]
+
+                return data
 
             except NotADirectoryError:
                 mmap = np.load(path, mmap_mode="r")
+
+                if z_slice is not None:
+                    mmap = mmap[z0:z1]
+
                 return da.from_array(mmap, chunks=chunks)
 
         else:
-            return np.load(path.as_posix(), allow_pickle=True)
+            data = np.load(path.as_posix(), allow_pickle=True)
+            if z_slice is not None:
+                    data = data[z0:z1]
 
-    def _load_tdb(self, path, lazy=False, chunks="auto"):
+            return data
+
+    def _load_tdb(self, path, lazy=False, chunks="auto", z_slice=None):
 
         """
         Loads data from a TileDB file.
@@ -409,18 +437,28 @@ class IO:
 
         """
 
+        if z_slice is not None:
+            z0, z1 = z_slice
+
         if lazy:
             tdb = tiledb.open(path.as_posix(), "r")
+
+            if z_slice is not None:
+                tdb = tdb[z0:z1]
+
             data = da.from_array(tdb, chunks=chunks)
 
         else:
 
             with tiledb.open(path.as_posix(), "r") as tdb:
-                data = tdb[:]  # Read all data from TileDB array
+                if z_slice is not None:
+                    data = tdb[z0:z1]
+                else:
+                    data = tdb[:]  # Read all data from TileDB array
 
         return data
 
-    def _load_h5(self, path, h5_loc, lazy=False, chunks="auto"):
+    def _load_h5(self, path, h5_loc, lazy=False, chunks="auto", z_slice=None):
 
         """
         Loads data from an HDF5 file.
@@ -434,6 +472,9 @@ class IO:
 
         """
 
+        if z_slice is not None:
+            z0, z1 = z_slice
+
         if lazy:
             data = h5py.File(path, "r")
 
@@ -441,6 +482,10 @@ class IO:
                 raise ValueError(f"cannot find dataset in file ({path}): {list(data.keys())}")
 
             data = data[h5_loc]
+
+            if z_slice is not None:
+                data = data[z0:z1]
+
             data = da.from_array(data, chunks=chunks)
 
         else:
@@ -449,7 +494,10 @@ class IO:
                 if h5_loc not in data:
                     raise ValueError(f"cannot find dataset in file ({path}): {list(data.keys())}")
 
-                data = data[h5_loc][:] # Read all data from HDF5 file
+                if z_slice is not None:
+                    data = data[h5_loc][z0:z1]
+                else:
+                    data = data[h5_loc][:] # Read all data from HDF5 file
 
         return data
 
@@ -465,7 +513,7 @@ class IO:
 
 
     @staticmethod
-    def _load_czi(path, lazy=False):
+    def _load_czi(path, lazy=False, z_slice=None):
 
         """
         Loads a CZI file from the specified path and returns the data.
@@ -490,6 +538,10 @@ class IO:
 
         # Read the CZI file using czifile
         data = czifile.imread(path.as_posix())
+
+        if z_slice is not None:
+            z0, z1 = z_slice
+            data = data[z0:z1]
 
         # Remove single-dimensional entries from the shape of the data
         data = np.squeeze(data)
@@ -540,7 +592,7 @@ class IO:
         return file_names
 
     @staticmethod
-    def _load_tiff(path, sep="_", lazy=False):
+    def _load_tiff(path, sep="_", lazy=False, z_slice=None):
 
         """
         Loads TIFF image data from the specified path and returns a Dask array.
@@ -559,6 +611,9 @@ class IO:
 
         """
 
+        if z_slice is not None:
+            z0, z1 = z_slice
+
         # Convert path to a pathlib.Path object if it's provided as a string
         path = Path(path) if isinstance(path, str) else path
 
@@ -575,6 +630,9 @@ class IO:
             # Sort the file names in alphanumeric order
             files = IO.sort_alpha_numerical_names(file_names=files, sep=sep)
 
+            if z_slice is not None:
+                files = files[z0:z1]
+
             # Read the TIFF files using dask.array and stack them
             stack = da.stack([dask_image.imread.imread(f.as_posix()) for f in files])
             stack = np.squeeze(stack)
@@ -589,6 +647,9 @@ class IO:
                 stack = dask_image.imread.imread(path)
             else:
                 stack = tifffile.imread(path.as_posix())
+
+            if z_slice is not None:
+                stack = stack[z0:z1]
 
         else:
             raise FileNotFoundError(f"cannot find directory or file: {path}")
@@ -1131,7 +1192,7 @@ class MotionCorrection:
 
         return frames_per_file
 
-    def save(self, output=None, h5_loc="mc", chunks=None, compression=None, remove_intermediate=True):
+    def save(self, output=None, h5_loc="mc/ch0", chunks=None, compression=None, remove_intermediate=True):
 
         """
         Retrieve the motion-corrected data and optionally save it to a file.
@@ -1180,30 +1241,8 @@ class MotionCorrection:
         elif isinstance(output, (str, Path)):
             output = Path(output) if isinstance(output, Path) else output
 
-            # Create a dask array from the memory-mapped data with specified chunking and compression
-            if chunks is None:
-                chunks = tuple([max(1, int(dim/10)) for dim in data.shape])
-                logging.warning(f"No 'chunk' parameter provided. Choosing: {chunks}")
-            data = da.from_array(data, chunks=chunks)
-
-            # Check if the output file is an HDF5 file and loc is provided
-            if output.suffix in [".h5", ".hdf5"] and h5_loc is None:
-                raise ValueError("when saving to .h5 please provide a location to save to instead of 'h5_loc=None'")
-
-            # split location into channel and folder information
-            split_h5 = h5_loc.split("/")
-            if len(split_h5) < 2:
-                loc, channel = "mc", h5_loc
-            elif len(split_h5) == 2:
-                loc, channel = split_h5
-            elif len(split_h5) > 2:
-                loc = "/".join(split_h5[:-1])
-                channel = split_h5[-1]
-            else:
-                raise ValueError(f"please provide h5_loc as 'channel_name' or 'folder/channel_name' instead of {h5_loc}")
-
             # Save the motion-corrected data to the output file using the I/O module
-            self.io.save(output, data={channel:data}, h5_loc=loc, chunks=chunks, compression=compression)
+            self.io.save(output, data=data, h5_loc=h5_loc, chunks=chunks, compression=compression)
 
         else:
             raise ValueError(f"please provide output as None, str or pathlib.Path instead of {output}")
@@ -1406,16 +1445,20 @@ class Delta:
             if not isinstance(data, da.Array):
                 data = da.from_array(data, chunks=(self.dim))
             data = da.rechunk(data, chunks=(-1, "auto", "auto"))
+            data = data.astype(int)
             return data
 
         # convert to .tdb
         elif isinstance(input_, Path) and input_.suffix == ".tdb":
-            return io.load(input_, lazy=lazy)
+            data = io.load(input_, lazy=lazy)
+            data = data.astype(int)
+            return data
 
         elif isinstance(input_, Path):
             # if the input is a file path, load it into memory and convert to TileDB array
 
             data = io.load(input_, h5_loc=self.loc)
+            data = data.astype(int)
 
             new_path = input_.with_suffix(".tdb") if output_path is None else Path(output_path)
             if not new_path.suffix in (".tdb"):
@@ -1435,6 +1478,7 @@ class Delta:
                 chunks = (-1, "auto", "auto")
 
             input_ = da.from_array(input_, chunks=chunks)
+            input_ = input_.astype(int)
             return input_
 
         elif isinstance(input_, da.Array):
@@ -1443,6 +1487,7 @@ class Delta:
                 chunks = (-1, "auto", "auto")
 
             input_ = input_.rechunk(chunks)
+            input_ = input_.astype(int)
             return input_
 
         else:
