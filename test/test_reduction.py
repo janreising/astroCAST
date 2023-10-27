@@ -19,17 +19,7 @@ class Test_FeatureExtraction:
         events = DG.get_events()
 
         FE = FeatureExtraction(events)
-        features = FE.get_features()
-
-        assert len(events) == len(features)
-
-    def test_add_columns(self):
-
-        DG = DummyGenerator(ragged=False)
-        events = DG.get_events()
-
-        FE = FeatureExtraction(events)
-        features = FE.get_features(additional_columns=["dz"])
+        features = FE.all_features()
 
         assert len(events) == len(features)
 
@@ -44,12 +34,12 @@ class Test_FeatureExtraction:
 
             FE = FeatureExtraction(events, cache_path=tmp_path)
             t0 = time.time()
-            features_1 = FE.get_features()
+            features_1 = FE.all_features()
             d1 = time.time() - t0
 
             FE = FeatureExtraction(events, cache_path=tmp_path)
             t0 = time.time()
-            features_2 = FE.get_features()
+            features_2 = FE.all_features()
             d2 = time.time() - t0
 
             assert d2 < d1, f"caching is taking too long: {d2} > {d1}"
