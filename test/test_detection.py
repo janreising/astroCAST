@@ -50,7 +50,8 @@ class Test_Detector:
 
             sim = EventSim()
             video, num_events = sim.simulate(shape=(50, 100, 100))
-            IO.save(path=path, data={h5_loc:video})
+            io = IO()
+            io.save(path=path, data={h5_loc:video})
 
             det = Detector(path.as_posix(),  output=None)
             events = det.run(dataset=h5_loc, lazy=True, save_activepixels=save_active_pixels)
