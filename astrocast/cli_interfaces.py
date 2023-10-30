@@ -1035,5 +1035,25 @@ def climage(input_path, loc, z, size, equalize, clip_limit):
 
         print(climage.convert_array(img, is_unicode=True))
 
+@cli.command
+@cli.argument('input-path', type=click.Path())
+def delete_h5_dataset(input_path):
+    import h5py as h5
+    from pathlib import Path
+    
+    input_path = Path(input_path)
+    assert input_path.is_file()
+
+    with h5.File(input_path.as_posix(), "a") as f:
+
+        while True:
+            visualize_h5_recursive(f['/'])
+
+            in_ = input("Choose dataset or 'exit'")
+            if in_ in f:
+                del f[in_]
+            elif in_ == "exit":
+                break
+
 if __name__ == '__main__':
     cli()
