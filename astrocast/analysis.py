@@ -557,8 +557,7 @@ class Events(CachedClass):
         if simple:
             return np.array(events.trace.tolist())
 
-        num_frames = events.z1.max() + 1
-        arr = np.zeros((len(events), num_frames))
+        arr = np.zeros((len(events), self.num_frames))
 
         for i, (z0, z1, trace) in enumerate(zip(events.z0, events.z1, events.trace)):
             arr[i, z0:z1] = trace
