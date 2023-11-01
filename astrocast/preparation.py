@@ -421,15 +421,9 @@ class IO:
             data = np.load(path.as_posix(), allow_pickle=True)
             if z_slice is not None:
                     data = data[z0:z1]
-<<<<<<< HEAD
 
             return data
 
-=======
-
-            return data
-
->>>>>>> 81122343129c7db0876b0a1a30115fa091a544b5
     def _load_tdb(self, path, lazy=False, chunks="auto", z_slice=None):
 
         """

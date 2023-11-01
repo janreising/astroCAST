@@ -1036,7 +1036,7 @@ def climage(input_path, loc, z, size, equalize, clip_limit):
         print(climage.convert_array(img, is_unicode=True))
 
 @cli.command
-@cli.argument('input-path', type=click.Path())
+@click.argument('input-path', type=click.Path())
 def delete_h5_dataset(input_path):
     import h5py as h5
     from pathlib import Path
