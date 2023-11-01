@@ -139,3 +139,5 @@ temp_*
 # lock files
 dask-worker-space/*.lock
 /poetry.lock
+/install.sh
+/tsp_remove_success.sh

@@ -2,6 +2,7 @@ import logging
 import os
 import shutil
 import tempfile
+import warnings
 from collections import OrderedDict
 from pathlib import Path
 
@@ -76,8 +77,13 @@ class Input:
 
         # rechunk
         if chunks is not None:
+
             for k in data:
                 if not isinstance(data[k], np.ndarray) and data[k].chunksize != chunks:
+
+                    if chunks == "infer":
+                        chunks = (10, data[k].shape[1], data[k].shape[2])
+
                     data[k] = da.rechunk(data[k], chunks=chunks)
 
         # return result
@@ -152,6 +158,7 @@ class Input:
             # Subtract the reduced background from each channel
             for k in data.keys():
                 data[k] = data[k] - background
+                data[k] = data[k].astype(int)
 
         else:
             raise ValueError("Please provide 'subtract_background' flag with one of: np.ndarray, callable function or str")
@@ -204,9 +211,17 @@ class Input:
         # Apply resizing to each channel
         for k in data.keys():
             # Rescale the data array using the specified scaling factors and anti-aliasing
-            data[k] = data[k].map_blocks(
-                lambda chunk: resize(chunk, (chunk.shape[0], rX, rY), anti_aliasing=True),
-                chunks=(1, rX, rY))
+
+            data[k] = data[k].astype(float)
+
+            with warnings.catch_warnings():
+                warnings.filterwarnings("ignore", category=UserWarning)
+
+                data[k] = data[k].map_blocks(
+                    lambda chunk: resize(chunk, (chunk.shape[0], rX, rY), anti_aliasing=True),
+                    chunks=(1, rX, rY))
+
+            data[k] = data[k].astype(int)
 
         return data
 
@@ -250,7 +265,7 @@ class Input:
             if not isinstance(channels, (int, dict)):
                 raise ValueError(f"please provide channels as int or dictionary.")
 
-            num_channels = channels if isinstance(channels, int) else len(len(channels.keys()))
+            num_channels = channels if isinstance(channels, int) else len(channels.keys())
 
             if stack.shape[0] % num_channels != 0:
                 logging.warning(f"cannot divide frames into channel number: {stack.shape[0]} % {num_channels} != 0. May lead to unexpacted behavior")
@@ -290,8 +305,8 @@ class Input:
             def func(chunk):
                 return chunk.astype(dtype)
 
-        for k in data.keys():
-            data[k] = data[k].map_blocks(lambda chunk: func(chunk), dtype=dtype)
+            for k in data.keys():
+                data[k] = data[k].map_blocks(lambda chunk: func(chunk), dtype=dtype)
 
         return data
 
@@ -332,8 +347,9 @@ class IO:
 
         """
 
-        if not isinstance(z_slice, (tuple, list)) or len(z_slice) != 2:
-                raise ValueError("please provide z_slice as tuple or list of (z_start, z_end)")
+        if z_slice is not None:
+            if not isinstance(z_slice, (tuple, list)) or len(z_slice) != 2:
+                    raise ValueError("please provide z_slice as tuple or list of (z_start, z_end)")
 
         if isinstance(path, (str, Path)):
             path = Path(path)
@@ -405,9 +421,15 @@ class IO:
             data = np.load(path.as_posix(), allow_pickle=True)
             if z_slice is not None:
                     data = data[z0:z1]
+<<<<<<< HEAD
 
             return data
 
+=======
+
+            return data
+
+>>>>>>> 81122343129c7db0876b0a1a30115fa091a544b5
     def _load_tdb(self, path, lazy=False, chunks="auto", z_slice=None):
 
         """
@@ -1176,7 +1198,7 @@ class MotionCorrection:
 
         return frames_per_file
 
-    def save(self, output=None, h5_loc="mc", chunks=None, compression=None, remove_intermediate=True):
+    def save(self, output=None, h5_loc="mc/ch0", chunks=None, compression=None, remove_intermediate=True):
 
         """
         Retrieve the motion-corrected data and optionally save it to a file.
@@ -1225,30 +1247,8 @@ class MotionCorrection:
         elif isinstance(output, (str, Path)):
             output = Path(output) if isinstance(output, Path) else output
 
-            # Create a dask array from the memory-mapped data with specified chunking and compression
-            if chunks is None:
-                chunks = tuple([max(1, int(dim/10)) for dim in data.shape])
-                logging.warning(f"No 'chunk' parameter provided. Choosing: {chunks}")
-            data = da.from_array(data, chunks=chunks)
-
-            # Check if the output file is an HDF5 file and loc is provided
-            if output.suffix in [".h5", ".hdf5"] and h5_loc is None:
-                raise ValueError("when saving to .h5 please provide a location to save to instead of 'h5_loc=None'")
-
-            # split location into channel and folder information
-            split_h5 = h5_loc.split("/")
-            if len(split_h5) < 2:
-                loc, channel = "mc", h5_loc
-            elif len(split_h5) == 2:
-                loc, channel = split_h5
-            elif len(split_h5) > 2:
-                loc = "/".join(split_h5[:-1])
-                channel = split_h5[-1]
-            else:
-                raise ValueError(f"please provide h5_loc as 'channel_name' or 'folder/channel_name' instead of {h5_loc}")
-
             # Save the motion-corrected data to the output file using the I/O module
-            self.io.save(output, data={channel:data}, h5_loc=loc, chunks=chunks, compression=compression)
+            self.io.save(output, data=data, h5_loc=h5_loc, chunks=chunks, compression=compression)
 
         else:
             raise ValueError(f"please provide output as None, str or pathlib.Path instead of {output}")

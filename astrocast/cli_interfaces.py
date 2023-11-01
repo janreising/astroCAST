@@ -3,6 +3,7 @@ import logging
 import os
 import shutil
 import time
+import warnings
 from pathlib import Path
 import click
 import humanize
@@ -181,13 +182,13 @@ def cli(ctx, config):
                      help='Path to save the processed data. If None, the processed data is returned.'
                      )
 @click_custom_option('--sep', default="_", help='Separator used for sorting file names.')
-@click_custom_option('--channels', default=1, help='Number of channels or dictionary specifying channel names.')
+@click_custom_option('--num-channels', default=1, help='Number of channels.')
+@click_custom_option('--channel-names', default="ch0", help='Channel names as comma separated list.')
 @click_custom_option('--z-slice', default=None, help='Z slice index.')
 @click_custom_option('--lazy', is_flag=True, help='Lazy loading flag.')
 @click_custom_option('--subtract-background', default=None, help='Background subtraction parameter.')
 @click_custom_option('--subtract-func', default="mean", help='Function to use for background subtraction.')
-@click_custom_option('--rescale', default=None, help='Rescale parameter.')
-@click_custom_option('--dtype', default=np.uint, help='Data type to convert the processed data.')
+@click_custom_option('--rescale', type=click.FLOAT, default=1.0, help='Rescale parameter.')
 @click_custom_option('--in-memory', is_flag=True, help='If True, the processed data is loaded into memory.')
 @click_custom_option('--h5-loc', default="data", help='Prefix to use when saving the processed data.')
 @click_custom_option('--chunks', type=click.STRING, default="infer",
@@ -198,8 +199,8 @@ def cli(ctx, config):
                      help='Flag for overwriting previous result in output location'
                      )
 def convert_input(
-        input_path, logging_level, output_path, sep, channels, z_slice, lazy, subtract_background,
-        subtract_func, rescale, dtype, in_memory, h5_loc, chunks, compression, overwrite
+        input_path, logging_level, output_path, sep, num_channels, channel_names, z_slice, lazy, subtract_background,
+        subtract_func, rescale, in_memory, h5_loc, chunks, compression, overwrite
         ):
     """
     Convert user files to astroCAST compatible format using the Input class.
@@ -217,14 +218,18 @@ def convert_input(
         # check chunks
         chunks = parse_chunks(chunks)
 
+        channel_names = channel_names.split(",")
+        if len(channel_names) != num_channels:
+            warnings.warn(f"Number of channels {num_channels} does not match channel names {channel_names}. Choosing default.")
+            channel_names = [f"ch{i}" for i in range(num_channels)]
+
+        channels = {i:n for i, n in enumerate(channel_names)}
+
         # convert input
         input_instance = Input(logging_level=logging_level)
         input_instance.run(input_path=input_path, output_path=output_path, sep=sep, channels=channels, z_slice=z_slice,
                            lazy=lazy, subtract_background=subtract_background, subtract_func=subtract_func,
-                           rescale=rescale,
-                           dtype=dtype, in_memory=in_memory, h5_loc=h5_loc, chunks=chunks, compression=compression
-                           )
-
+                           rescale=rescale, in_memory=in_memory, h5_loc=h5_loc, chunks=chunks, compression=compression)
 
 @cli.command()
 @click.argument('input-path', type=click.Path())
@@ -235,6 +240,9 @@ def convert_input(
 @click_custom_option('--logging-level', type=click.INT, default=logging.INFO, help='Logging level for messages.')
 @click_custom_option('--h5-loc', type=click.STRING, default="",
                      help='Dataset name in case of input being an HDF5 file.'
+                     )
+@click_custom_option('--h5-loc-save', type=click.STRING, default="mc/ch0",
+                     help='Location within the HDF5 file to save the data.'
                      )
 @click_custom_option('--max-shifts', type=click.Tuple([int, int]), default=(50, 50),
                      help='Maximum allowed rigid shift.'
@@ -274,9 +282,6 @@ def convert_input(
                      )
 @click_custom_option('--gsig-filt', type=click.Tuple([int, int]), default=(20, 20),
                      help='Tuple indicating the size of the filter.'
-                     )
-@click_custom_option('--h5-loc-save', type=click.STRING, default="mc",
-                     help='Location within the HDF5 file to save the data.'
                      )
 @click_custom_option('--chunks', type=click.STRING, default=None,
                      help='Chunk shape for creating a dask array when saving to an HDF5 file.'
@@ -329,7 +334,7 @@ def motion_correction(
 
 @cli.command()
 @click.argument('input-path', type=click.Path())
-@click_custom_option('--window', type=click.INT, required=True, help='Size of the window for the minimum filter.')
+@click_custom_option('--window', type=click.INT, default=None, help='Size of the window for the minimum filter.')
 @click_custom_option('--output-path', type=None, help='Path to save the output data.')
 @click_custom_option('--h5-loc-in', type=click.STRING, default="",
                      help='Location of the data in the HDF5 file (if applicable).'
@@ -360,6 +365,9 @@ def subtract_delta(
     """
     Subtract baseline of input using the Delta class.
     """
+
+    if window is None:
+        raise ValueError(f"please provide window argument")
 
     from astrocast.preparation import Delta
 
@@ -501,10 +509,10 @@ def train_denoiser(training_files, validation_files, input_size, learning_rate, 
 
 @cli.command()
 @click.argument('input-path', type=click.Path())
-@click_custom_option('--model', type=click.Path(), required=True,
+@click_custom_option('--model', type=click.Path(), default=None,
                      help='Path to the trained model file or the model object itself.'
                      )
-@click_custom_option('--output-file', type=click.Path(), required=True,
+@click_custom_option('--output-file', type=click.Path(), default=None,
                      help='Path to the output file where the results will be saved. If not provided, the result will be returned instead of being saved to a file.'
                      )
 @click_custom_option('--batch-size', type=click.INT, default=8, help='batch size processed in each step.')
@@ -543,6 +551,13 @@ def denoise(input_path, batch_size, input_size, pre_post_frame, gap_frames, z_se
     """
     Denoise the input data using the SubFrameGenerator class and infer method.
     """
+
+    if model is None:
+        raise ValueError(f"Please provide a model with '--model'")
+
+    if output_file is None:
+        output_file = input_path
+        logging.warning(f"ni output_file provided. Choosing input_file: {input_path}")
 
     from astrocast.denoising import SubFrameGenerator
 
@@ -650,7 +665,7 @@ def denoise(input_path, batch_size, input_size, pre_post_frame, gap_frames, z_se
                      )
 @click_custom_option('--debug', type=click.BOOL, default=False, help='Enable debug mode.')
 @click_custom_option('--parallel', type=click.BOOL, default=True, help='Enable parallel execution.')
-@click_custom_option('--output-path', type=click.Path(), default=None, help='Path to the output file.')
+@click_custom_option('--output-path', type=click.STRING, default="infer", help='Path to the output file.')
 @click_custom_option('--logging-level', type=click.INT, default=logging.INFO, help='Logging level for messages.')
 @click_custom_option('--overwrite', type=click.BOOL, default=False,
                      help='Flag for overwriting previous result in output location'
@@ -765,6 +780,32 @@ def visualize_h5(input_path):
     with h5py.File(input_path, 'r') as f:
         visualize_h5_recursive(f['/'])
 
+@cli.command()
+@click.argument('input-path', type=click.Path())
+@click.argument('output-path', type=click.Path())
+@click.argument('loc-in', type=click.STRING)
+@click.argument('loc-out', type=click.STRING)
+@click_custom_option('--overwrite', type=click.BOOL, default=False, help='Overwrite output dataset.')
+def move_h5_dataset(input_path, output_path, loc_in, loc_out, overwrite):
+    import h5py as h5
+
+    with h5.File(input_path, "r") as in_:
+        with h5.File(output_path, "a") as out_:
+
+            if loc_in not in in_:
+                raise ValueError(f"cannot find {loc_in} in {input_path}. Choose: {list(in_.keys())}")
+
+            if loc_out in out_:
+
+                if not overwrite:
+                    raise ValueError(f"{loc_out} exists in {output_path}. "
+                                     f"Choose different dataset name or overwrite==True")
+                else:
+                    del out_[loc_out]
+
+            data = in_[loc_in]
+            out_.create_dataset(loc_out, data=data)
+            print("done copying")
 
 @cli.command()
 @click.argument('input-path', type=click.Path())
@@ -949,6 +990,70 @@ def download_models(save_path):
 
     import helper
     helper.download_pretrained_models(save_path)
+
+@cli.command
+@click.argument('input-path', type=click.Path())
+@click.argument('z', type=click.INT, nargs=-1)
+@click_custom_option('--loc', type=click.STRING, default="data/ch0")
+@click_custom_option('--equalize', type=click.BOOL, default=True)
+@click_custom_option('--clip-limit', type=click.FLOAT, default=0.01)
+@click_custom_option('--size', type=(click.INT, click.INT), default=(50, 50))
+def climage(input_path, loc, z, size, equalize, clip_limit):
+
+    import skimage.color as skicol
+    from skimage.transform import resize
+    from skimage import exposure
+    import climage
+    from astrocast.preparation import IO
+
+    if isinstance(z, int):
+        z = [z]
+
+    z0 = max(0, min(z)-1)
+    z1 = max(z) + 2
+
+    io = IO()
+    data = io.load(input_path, h5_loc=loc, lazy=True, z_slice=(z0, z1))
+    print(f"input path: {input_path}")
+
+    for zi in z:
+        img = data[zi-z0, :, :].astype(float).compute()
+
+        print(f"z:{z1} [{np.min(img):.1f}-{np.max(img):.1f}, {np.mean(img):.1f}+-{np.std(img):.1f}]")
+
+        img = img - np.min(img)
+        img = img / np.max(img)
+
+        img = resize(img, size, anti_aliasing=True)
+
+        if equalize:
+            img = exposure.equalize_adapthist(img, clip_limit=clip_limit)
+
+
+        img = skicol.gray2rgb(img)
+        img = np.array(img) * 255
+
+        print(climage.convert_array(img, is_unicode=True))
+
+@cli.command
+@cli.argument('input-path', type=click.Path())
+def delete_h5_dataset(input_path):
+    import h5py as h5
+    from pathlib import Path
+    
+    input_path = Path(input_path)
+    assert input_path.is_file()
+
+    with h5.File(input_path.as_posix(), "a") as f:
+
+        while True:
+            visualize_h5_recursive(f['/'])
+
+            in_ = input("Choose dataset or 'exit'")
+            if in_ in f:
+                del f[in_]
+            elif in_ == "exit":
+                break
 
 if __name__ == '__main__':
     cli()
