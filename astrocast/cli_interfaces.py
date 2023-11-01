@@ -1049,7 +1049,7 @@ def delete_h5_dataset(input_path):
         while True:
             visualize_h5_recursive(f['/'])
 
-            in_ = input("Choose dataset or 'exit'")
+            in_ = input("Choose dataset or 'exit': ")
             if in_ in f:
                 del f[in_]
             elif in_ == "exit":
