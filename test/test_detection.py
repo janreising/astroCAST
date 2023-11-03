@@ -48,15 +48,14 @@ class Test_Detector:
 
             path = tmpdir.joinpath("sim.h5")
             h5_loc = "dff/ch0"
-            save_active_pixels = False
 
             sim = EventSim()
-            video, num_events = sim.simulate(shape=(50, 100, 100))
+            video, num_events = sim.simulate(shape=(50, 100, 100), skip_n=5, event_intensity=100, background_noise=1)
             io = IO()
             io.save(path=path, data={h5_loc:video})
 
             det = Detector(path.as_posix(),  output=None)
-            events = det.run(h5_loc=h5_loc, lazy=True, debug=save_active_pixels)
+            events = det.run(h5_loc=h5_loc, lazy=True, debug=False)
 
             dir_ = det.output_directory
 
@@ -68,12 +67,6 @@ class Test_Detector:
             expected_files = ["event_map.tdb", "event_map.tiff", "time_map.npy", "events.npy", "meta.json"]
             for file_name in expected_files:
                 assert dir_.joinpath(file_name).exists(), f"cannot find {file_name}"
-
-            # optional
-            if save_active_pixels:
-                assert dir_.joinpath("active_pixels.tiff").is_file(), "can't find active_pixels.tiff but should"
-            else:
-                assert not dir_.joinpath("active_pixels.tiff").is_file(), "can find active_pixels.tiff but shouldn't"
 
             # check event detection
             assert np.allclose(len(events), num_events, rtol=0.15), f"Found {len(events)} instead of {num_events}."

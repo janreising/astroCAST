@@ -276,7 +276,8 @@ class Test_Events:
 
             # Create dummy data
             sim = EventSim()
-            event_dir = sim.create_dataset(Path(tmpdir).joinpath("sim.h5"), shape=shape)
+            event_dir = sim.create_dataset(Path(tmpdir).joinpath("sim.h5"), shape=shape,
+                                           event_intensity=100, background_noise=1)
 
             events = Events(event_dir)
             df = events.load_events(event_dir)
