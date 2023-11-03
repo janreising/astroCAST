@@ -927,7 +927,6 @@ class Events(CachedClass):
         iterator = tqdm(events.iterrows(), total=len(events), desc="extending events") if show_progress else events.iterrows()
         for i, event in iterator:
 
-            # select event pixel # TODO flag to switch between footprint and last frame
             if use_footprint:
                 footprint = np.invert(np.reshape(event["footprint"], (event.dx, event.dy)))
                 mask_begin, mask_end = footprint, footprint
@@ -1013,7 +1012,6 @@ class Events(CachedClass):
 
             # beginning
             pre_volume = video[full_z0:z0, event.x0:event.x1, event.y0:event.y1]
-            logging.warning(f"{full_z0}:{z0}; {pre_volume.shape}")
             mask = np.broadcast_to(mask_begin, pre_volume.shape)
 
             projection = np.ma.masked_array(data=pre_volume, mask=mask)
@@ -1056,6 +1054,7 @@ class Events(CachedClass):
                 norm.run(normalization_instructions)
 
             if return_array:
+                logging.warning(f"full_z0:z1 > {full_z0}:{full_z1}; trace.shape: {trace.shape}")
                 arr_ext[c, full_z0:full_z1] = trace
             else:
                 extended.append(trace)

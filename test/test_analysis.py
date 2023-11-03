@@ -138,6 +138,8 @@ class Test_Events:
             # Create dummy data
             sim = EventSim()
             event_dir = sim.create_dataset(Path(tmpdir).joinpath("sim.h5"), shape=shape,
+                                           event_intensity=100, background_noise=1,
+                                           gap_time=3, gap_space=5,
                                            blob_size_fraction=0.05, event_probability=0.2)
 
             # Call the function and assert the expected result
@@ -152,9 +154,23 @@ class Test_Events:
             event_map_recreated = events.create_event_map(df, video_dim=shape)
 
             assert event_map.shape == event_map_recreated.shape
-            assert np.allclose(event_map > 0, event_map_recreated > 0), f"{np.sum(event_map)}, {np.sum(event_map_recreated)}" \
-                                                                        f"\n{[(i, np.sum(event_map[i, :, :]), np.sum(event_map_recreated[i, :, :])) for i in range(event_map.shape[0]) if np.sum(event_map[i, :, :]) != np.sum(event_map_recreated[i, :, :])]}"
 
+            orig_masked = event_map > 0
+            recr_masked = event_map_recreated > 0
+
+            if not np.allclose(orig_masked, recr_masked):
+
+                log_string = "orig vs. recr"
+                for i in range(len(orig_masked)):
+
+                    so, sr = np.sum(orig_masked[i, :, :]), np.sum(recr_masked[i, :, :])
+
+                    if so != sr:
+                        log_string += f"\n{i}: {so} vs. {sr}"
+
+                logging.warning(log_string)
+
+                raise ValueError(f"original and recreated event_map is not equivalend: {np.sum(orig_masked)} vs. {np.sum(recr_masked)}")
     @pytest.mark.parametrize("param", [
         dict(memmap_path=False),
         dict(normalization_instructions={0: ["subtract", {"mode": "mean"}], 1: ["divide", {"mode": "std"}]},
@@ -277,16 +293,13 @@ class Test_Events:
             # Create dummy data
             sim = EventSim()
             event_dir = sim.create_dataset(Path(tmpdir).joinpath("sim.h5"), shape=shape,
-                                           event_intensity=100, background_noise=1)
+                                           event_intensity=100, background_noise=1, gap_space=5, gap_time=2)
 
             events = Events(event_dir)
             df = events.load_events(event_dir)
             arr, shape, dtype = events.get_event_map(event_dir, lazy=True)
 
             arr = arr.astype(np.int32)
-            logging.warning(f"arr.shape: {arr.shape}, dtype: {arr.dtype}, "
-                            f"np.min: {np.min(arr.compute())}, np.max: {np.max(arr.compute())}")
-
             save_path=Path(tmpdir).joinpath("footprints.npy")
             trace, _, _ = events.get_extended_events(video=Video(arr), save_path=save_path, return_array=True)
 

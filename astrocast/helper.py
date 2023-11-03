@@ -647,7 +647,7 @@ class EventSim:
         return event_map, num_events
 
     def create_dataset(self, h5_path, h5_loc="dff/ch0", debug=False, shape=(50, 100, 100),
-                       z_fraction=0.2, xy_fraction=0.1, gap_space=1, gap_time=1,
+                       z_fraction=0.2, xy_fraction=0.1, gap_space=5, gap_time=3,
                        event_intensity=100, background_noise=1,
                        blob_size_fraction=0.05, event_probability=0.2):
 
