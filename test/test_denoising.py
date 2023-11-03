@@ -46,7 +46,7 @@ class Test_Generators:
                                        allowed_rotation=[1, 2, 3], allowed_flip=[0, 1], shuffle=True, **param)
 
         net = Network(train_generator=train_gen, val_generator=train_gen, n_stacks=1, kernel=4, batchNormalize=False, use_cpu=True)
-        net.run(batch_size=train_gen.batch_size, num_epochs=2, patience=1, min_delta=0.01, save_model=None, load_weights=False)
+        net.run(batch_size=train_gen.batch_size, num_epochs=2, patience=1, min_delta=0.01, save_model=None)
 
     @pytest.mark.xdist_group(name="tensorflow")
     @pytest.mark.parametrize("extension", [".h5", ".tiff"])
@@ -76,7 +76,7 @@ class Test_Generators:
                                            allowed_rotation=[0], allowed_flip=[-1], shuffle=True, **param)
 
             net = Network(train_generator=train_gen, val_generator=val_gen, n_stacks=1, kernel=8, batchNormalize=False, use_cpu=True)
-            net.run(batch_size=train_gen.batch_size, num_epochs=2, patience=1, min_delta=0.01, save_model=None, load_weights=False)
+            net.run(batch_size=train_gen.batch_size, num_epochs=2, patience=1, min_delta=0.01, save_model=None)
             model = net.model
 
             inf_gen = SubFrameGenerator(padding="edge", batch_size=25,
