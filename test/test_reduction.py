@@ -2,6 +2,7 @@ import tempfile
 import time
 
 import pytest
+from scipy.cluster.hierarchy import linkage
 
 from astrocast.autoencoders import CNN_Autoencoder
 from astrocast.reduction import *
@@ -107,30 +108,36 @@ class Test_UMAP:
         um = UMAP()
         embedded = um.train(data)
 
-    def test_plotting(self):
+    @pytest.mark.parametrize("use_napari", [True, False])
+    @pytest.mark.parametrize("use_data", [True, False])
+    @pytest.mark.parametrize("custom_axis", [True, False])
+    @pytest.mark.parametrize("custom_labels", [True, False])
+    def test_plotting(self, use_napari, custom_axis, custom_labels, use_data):
 
         data = np.random.random(size=(12, 8))
 
         um = UMAP()
         embedded = um.train(data)
 
-        # vanilla
-        um.plot(use_napari=False)
+        ax=None
+        data_emb = None
+        labels = None
 
-        # custom axis
-        fig, ax = plt.subplots(1, 1)
-        um.plot(ax=ax, use_napari=False)
+        if custom_axis:
+            _, ax = plt.subplots(1, 1)
 
-        # napari
-        um = UMAP()
-        embedded = um.train(data)
-        um.plot(data=embedded)
+        if use_data:
+            data_emb = embedded
 
-        # napari
-        um = UMAP()
-        embedded = um.train(data)
-        labels = np.random.randint(0, 5, size=len(data))
-        um.plot(data=embedded, labels=labels)
+        if custom_labels:
+            labels = np.random.randint(0, 5, size=len(data))
+
+        if use_napari and not use_data:
+            with pytest.raises(ValueError):
+                um.plot(use_napari=use_napari, ax=ax, data=data_emb, labels=labels)
+
+        else:
+            um.plot(use_napari=use_napari, ax=ax, data=data_emb, labels=labels)
 
     def test_save_load(self, tmp_path):
 
@@ -148,3 +155,23 @@ class Test_UMAP:
         assert np.allclose(embedded_1, embedded_2)
 
 
+class Test_ClusterTree():
+
+    def test_creation(self):
+        X = [[i] for i in [2, 8, 0, 4, 1, 9, 9, 0]]
+        Z = linkage(X, 'ward')
+
+        ct = ClusterTree(Z)
+
+    def test_functions(self):
+
+        X = [[i] for i in [2, 8, 0, 4, 1, 9, 9, 0]]
+        Z = linkage(X, 'ward')
+
+        ct = ClusterTree(Z)
+        root = ct.tree
+
+        n0 = ct.get_node(0)
+        leaves = ct.get_leaves(root)
+        count = ct.get_count(root)
+        found = ct.search(root, 0)
