@@ -18,13 +18,6 @@ import tifffile
 import tiledb
 import xxhash
 
-def notimplemented(f, msg=""):
-
-    def raise_not_implemented(msg):
-        raise NotImplementedError(msg)
-
-    return raise_not_implemented
-
 def wrapper_local_cache(f):
     """ Wrapper that creates a local save of the function call based on a hash of the arguments
     expects a function from a class with 'lc_path'::pathlib.Path and 'local_cache':bool attribute
@@ -260,7 +253,7 @@ def get_data_dimensions(input_, loc=None, return_dtype=False):
     """
 
     # Check if the input is a numpy ndarray
-    if isinstance(input_, np.ndarray):
+    if isinstance(input_, (np.ndarray, da.Array)):
         # Return the shape of the ndarray and None for chunksize
         return input_.shape, None
 
@@ -269,9 +262,6 @@ def get_data_dimensions(input_, loc=None, return_dtype=False):
 
     elif isinstance(input_, str):
         path = Path(input_)
-
-    elif isinstance(input_, (np.ndarray, da.Array)):
-        return input_.shape, None
 
     else:
         raise TypeError(f"data type not recognized: {type(input_)}")
@@ -1062,7 +1052,7 @@ def download_pretrained_models(save_path):
     save_path = Path(save_path)
 
     folder_url = "https://drive.google.com/drive/u/0/folders/1RJU-JjQIpoRJOqxivOVo44Q3irs88YX8"
-    gdown.download_folder(folder_url, output=save_path.joinpath("public_data").as_posix(),
+    gdown.download_folder(folder_url, output=save_path.joinpath("models").as_posix(),
                           quiet=False, use_cookies=False)
 
     logging.info(f"Downloaded sample datasets to: {save_path}")
