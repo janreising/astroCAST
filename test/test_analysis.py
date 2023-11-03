@@ -2,6 +2,7 @@ import tempfile
 import time
 
 import dask.array
+import numpy as np
 import pytest
 
 from astrocast.analysis import *
@@ -144,13 +145,15 @@ class Test_Events:
 
             # get event map
             event_map, shape, dtype = events.get_event_map(event_dir)
+            if isinstance(event_map, da.Array):
+                event_map = event_map.compute()
 
             df = events.load_events(event_dir)
             event_map_recreated = events.create_event_map(df, video_dim=shape)
 
             assert event_map.shape == event_map_recreated.shape
-            assert np.allclose(event_map > 0, event_map_recreated > 0)
-            # assert np.allclose(event_map, event_map_recreated) # fails because
+            assert np.allclose(event_map > 0, event_map_recreated > 0), f"{np.sum(event_map)}, {np.sum(event_map_recreated)}" \
+                                                                        f"\n{[(i, np.sum(event_map[i, :, :]), np.sum(event_map_recreated[i, :, :])) for i in range(event_map.shape[0]) if np.sum(event_map[i, :, :]) != np.sum(event_map_recreated[i, :, :])]}"
 
     @pytest.mark.parametrize("param", [
         dict(memmap_path=False),
@@ -159,14 +162,17 @@ class Test_Events:
         dict(normalization_instructions={0: ["subtract", {"mode": "mean"}], 1: ["divide", {"mode": "std"}]},
              memmap_path=True)
     ])
-    def test_extension_full(self, param, shape=(50, 100, 100), num_events=3, event_length=3):
+    @pytest.mark.parametrize("extend", [-1, 4, (3, 2), (-1, 2), (2, -1)])
+    def test_extension(self, param, extend, shape=(50, 100, 100), num_events=3, event_length=3):
+
+        if extend == -1:
+            e0, e1 = 0, 0
+        elif isinstance(extend, int):
+            e0, e1 = extend, extend
+        else:
+            e0, e1 = extend
 
         with tempfile.TemporaryDirectory() as tmpdir:
-
-            # I THINK THE PROBLEM IS:
-            # the extension takes the footprint and calculates the mean
-            # so technically this should create some kind of float value
-            # not sure why there are more values created though!?
 
             Z, X, Y = shape
 
@@ -176,9 +182,9 @@ class Test_Events:
             events = {k:[] for k in ["z0", "z1", "x0", "x1", "y0", "y1", "dz", "dx", "dy", "trace", "full_trace", "mask", "fp_mask"]}
             for i in range(num_events):
 
-                z0 = np.random.randint(event_length+1, Z-event_length-1)
-                x0 = np.random.randint(event_length+1, X-event_length-1)
-                y0 = np.random.randint(event_length+1, Y-event_length-1)
+                z0 = np.random.randint(event_length+1+abs(e0), Z-event_length-1-abs(e1))
+                x0 = np.random.randint(event_length+1+abs(e0), X-event_length-1-abs(e1))
+                y0 = np.random.randint(event_length+1+abs(e0), Y-event_length-1-abs(e1))
 
                 events["z0"].append(z0)
                 events["x0"].append(x0)
@@ -194,8 +200,20 @@ class Test_Events:
                 events["dx"].append(event_length)
                 events["dy"].append(event_length)
 
-                trace = np.squeeze(np.mean(arr[z0:z1, x0:x1, y0:y1], axis=0))
-                full_trace = np.squeeze(np.mean(arr[:, x0:x1, y0:y1], axis=0))
+                trace = np.squeeze(np.mean(arr[z0:z1, x0:x1, y0:y1], axis=(1, 2)))
+                logging.warning(f"trace.shape: {trace.shape}")
+
+                if (extend == -1) or ((e0 == -1) and (e1 == -1)):
+                    full_trace = np.squeeze(np.mean(arr[:, x0:x1, y0:y1], axis=(1, 2)))
+
+                elif (e0 == -1) and (e1 != -1):
+                    full_trace = np.squeeze(np.mean(arr[0:z1+e1, x0:x1, y0:y1], axis=(1, 2)))
+
+                elif (e0 != -1) and (e1 == -1):
+                    full_trace = np.squeeze(np.mean(arr[z0-e0:, x0:x1, y0:y1], axis=(1, 2)))
+
+                else:
+                    full_trace = np.squeeze(np.mean(arr[z0-e0:z1+e1, x0:x1, y0:y1], axis=(1, 2)))
 
                 events["trace"].append(trace)
                 events["full_trace"].append(full_trace)
@@ -208,63 +226,18 @@ class Test_Events:
             ev.events = pd.DataFrame(events)
             ev.num_frames, ev.X, ev.Y = shape
 
-            full_traces = ev.events.full_trace.values
-
             # extend events
-            traces, _, _ = ev.get_extended_events(video=Video(arr), return_array=True,
+            ext_events = ev.get_extended_events(video=Video(arr), return_array=False, extend=extend,
                             memmap_path=Path(tmpdir).joinpath("arr.mmap") if param["memmap_path"] else None)
 
             # check result
-            assert traces.shape == full_traces.shape
-            assert np.allclose(traces, full_traces)
+            for i in range(len(ext_events)):
 
-            ##########
-            # Old code
+                t = np.squeeze(np.array(ext_events.iloc[i].trace))
+                f = np.squeeze(np.array(ev.events.iloc[i].full_trace))
 
-            # # Create dummy data
-            # sim = EventSim()
-            # event_dir = sim.create_dataset(Path(tmpdir).joinpath("sim.h5"), shape=shape)
-            #
-            # events = Events(event_dir)
-            # df = events.load_events(event_dir)
-            # arr, shape, dtype = events.get_event_map(event_dir, lazy=False)
-            #
-            # traces, _, _ = events.get_extended_events(video=Video(arr), return_array=True,
-            #                             memmap_path=Path(tmpdir).joinpath("arr.mmap") if param["memmap_path"] else None)
-            #
-            # assert traces.shape == (len(df), shape[0])
-            #
-            # logging.warning(f"trace: {traces}")
-            # logging.warning(f"arr: {arr}")
-            #
-            # data_unique_values = np.unique(arr.flatten().astype(int))
-            # trace_unique_values = np.unique(traces.flatten().astype(int))
-            #
-            # assert abs(len(data_unique_values) - len(trace_unique_values)) <= 2, f"data_unique: {data_unique_values}\n" \
-            #                                                                      f"trace_unique: {trace_unique_values}"
-
-    @pytest.mark.parametrize("extend", [4, (3, 2), (-1, 2), (2, -1)])
-    def test_extension_partial(self, extend, shape=(50, 100, 100)):
-
-        with tempfile.TemporaryDirectory() as tmpdir:
-
-            # Create dummy data
-            sim = EventSim()
-            event_dir = sim.create_dataset(Path(tmpdir).joinpath("sim.h5"), shape=shape)
-            events = Events(event_dir)
-            df = events.load_events(event_dir)
-            arr, shape, dtype = events.get_event_map(event_dir, lazy=False)
-
-            traces, _, _ = events.get_extended_events(video=Video(arr), extend=extend, return_array=True)
-
-            assert traces.shape == (len(df), shape[0])
-
-            # this works because we are feeding the event_map as dummy data
-            # hence all the trace values will be a constant number
-            data_unique_values = np.unique(arr.flatten().astype(int))
-            trace_unique_values = np.unique(traces.flatten().astype(int))
-            assert abs(len(data_unique_values) - len(trace_unique_values)) <= 1, f"data_unique: {data_unique_values}\n" \
-                                                                                 f"trace_unique: {trace_unique_values}"
+                assert t.shape == f.shape
+                assert np.allclose(t, f)
 
     def test_extension_cache(self, lazy=False, shape=(50, 100, 100)):
 
@@ -308,6 +281,10 @@ class Test_Events:
             events = Events(event_dir)
             df = events.load_events(event_dir)
             arr, shape, dtype = events.get_event_map(event_dir, lazy=True)
+
+            arr = arr.astype(np.int32)
+            logging.warning(f"arr.shape: {arr.shape}, dtype: {arr.dtype}, "
+                            f"np.min: {np.min(arr.compute())}, np.max: {np.max(arr.compute())}")
 
             save_path=Path(tmpdir).joinpath("footprints.npy")
             trace, _, _ = events.get_extended_events(video=Video(arr), save_path=save_path, return_array=True)
@@ -435,6 +412,7 @@ class Test_Events:
     def test_to_numpy(self):
 
         events = Events(event_dir=None)
+        events.num_frames = 10
 
         df = pd.DataFrame({
             "z0": [0, 2, 5],

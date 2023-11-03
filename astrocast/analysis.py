@@ -401,7 +401,7 @@ class Events(CachedClass):
             indices_y += event.y0
 
             # Set the corresponding event_id at the calculated indices in event_map
-            event_map[indices_z, indices_x, indices_y] = event_id
+            event_map[indices_z, indices_x, indices_y] += event_id
             event_id += 1
 
         if save_path is not None:
@@ -1013,6 +1013,7 @@ class Events(CachedClass):
 
             # beginning
             pre_volume = video[full_z0:z0, event.x0:event.x1, event.y0:event.y1]
+            logging.warning(f"{full_z0}:{z0}; {pre_volume.shape}")
             mask = np.broadcast_to(mask_begin, pre_volume.shape)
 
             projection = np.ma.masked_array(data=pre_volume, mask=mask)
@@ -1026,7 +1027,10 @@ class Events(CachedClass):
             post_trace = np.nanmean(projection, axis=(1, 2))
 
             # combine
-            trace = np.concatenate([pre_trace, np.squeeze(event.trace), post_trace])
+            full_trace = [np.squeeze(tr) for tr in [pre_trace, event.trace, post_trace]]
+            full_trace = [tr for tr in full_trace if len(tr.shape) > 0]
+            #logging.warning(f"{[(tr.shape, len(tr.shape)) for tr in full_trace]}, {z0}:{z1}, {full_z0}:{full_z1}")
+            trace = np.concatenate(full_trace)
 
             if ensure_max is not None and len(trace) > ensure_max:
 
