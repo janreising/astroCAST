@@ -389,8 +389,12 @@ class IO:
                 raise ValueError("unrecognized file format! Choose one of [.tiff, .h5, .tdb, .czi]")
 
         elif isinstance(path, np.ndarray):
-            z0, z1 = z_slice
-            data = da.from_array(path[z0:z1], chunks=chunks)
+
+            if z_slice is not None:
+                z0, z1 = z_slice
+                path = path[z0:z1]
+
+            data = da.from_array(path, chunks=chunks)
 
         elif isinstance(path, da.Array):
             z0, z1 = z_slice
