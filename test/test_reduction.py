@@ -85,8 +85,17 @@ class Test_CNN:
 
         cnn.plot_examples_pytorch(test_dataset)
 
-    def test_save_load(self, tmp_path):
-        raise NotImplementedError(f"implement CNN loading")
+    def test_save_load(self, tmp_path, target_length=18):
+
+        with tempfile.TemporaryDirectory() as temp:
+
+            tempdir = Path(temp)
+            save_path = tempdir.joinpath("model_paramters.pth")
+
+            autoencoder = CNN_Autoencoder(target_length=target_length)
+            autoencoder.save(save_path)
+
+            loaded_model = CNN_Autoencoder.load(save_path, target_length=target_length)
 
 @pytest.mark.serial
 class Test_UMAP:

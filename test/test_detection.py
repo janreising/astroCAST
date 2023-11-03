@@ -36,7 +36,9 @@ class Test_Detector:
                 assert is_file, f"{file_name} file does not exist in output directory"
 
             if debug:
-                assert dir_.joinpath("active_pixels.tiff").is_file()
+                assert dir_.joinpath("debug_smoothed_input.tiff").is_file()
+                assert dir_.joinpath("debug_active_pixels.tiff").is_file()
+                assert dir_.joinpath("debug_active_pixels_morphed.tiff").is_file()
 
     def test_sim_data(self):
 
@@ -54,7 +56,7 @@ class Test_Detector:
             io.save(path=path, data={h5_loc:video})
 
             det = Detector(path.as_posix(),  output=None)
-            events = det.run(dataset=h5_loc, lazy=True, save_activepixels=save_active_pixels)
+            events = det.run(h5_loc=h5_loc, lazy=True, debug=save_active_pixels)
 
             dir_ = det.output_directory
 

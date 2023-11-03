@@ -399,6 +399,37 @@ class CNN_Autoencoder(nn.Module):
 
         return fig
 
+    def save(self, filepath:str):
+        """
+        Save the model parameters to a file.
+
+        Parameters:
+        - filepath (str): The location where the model parameters should be saved.
+
+        Example usage:
+            model = CNN_Autoencoder(target_length=18)
+            model.save("path/to/save/model.pth")
+        """
+        torch.save(self.state_dict(), filepath)
+
+    @classmethod
+    def load(cls, filepath:str, *args, **kwargs):
+        """
+        Load the model parameters from a file and return an instance of the model.
+
+        Parameters:
+        - filepath (str): The location from where the model parameters should be loaded.
+
+        Returns:
+        - CNN_Autoencoder: An instance of the CNN_Autoencoder model with loaded parameters.
+
+        Example usage:
+            loaded_model = CNN_Autoencoder.load("path/to/save/model.pth", target_length=18)
+        """
+        model = cls(*args, **kwargs) # Create a new instance of the model
+        model.load_state_dict(torch.load(filepath))
+        model.eval() # Set the model to evaluation mode
+        return model
 
 ##########################################
 ## Recurrent Neural Network Autoencoder ##
