@@ -45,7 +45,7 @@ class SubFrameGenerator(tf.keras.utils.Sequence):
                  allowed_rotation=[0], allowed_flip=[-1],
                  random_offset=False, add_noise=False, drop_frame_probability=None,
                  max_per_file=None,
-                 overlap=None, padding=None,
+                 overlap=0, padding=None,
                  shuffle=True, normalize=None,
                  loc="data/",
                  output_size=None, cache_results=False, in_memory=False, save_global_descriptive=True,
@@ -822,7 +822,7 @@ class Network:
             tf.keras.History: Object containing the training history.
         """
 
-        save_model = Path(save_model)
+        save_model = Path(save_model) if save_model is not None else None
         if save_model is not None and not save_model.is_dir():
             logging.info("Created save dir at: %s", save_model)
             save_model.mkdir()

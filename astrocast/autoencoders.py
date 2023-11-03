@@ -176,7 +176,8 @@ class CNN_Autoencoder(nn.Module):
         train_dataset, val_dataset, test_dataset = random_split(data, [train_size, val_size, test_size])
         return train_dataset, val_dataset, test_dataset
 
-    def train_autoencoder(self, X_train, X_val=None, X_test=None, patience=5, min_delta=0.0005, epochs=100, learning_rate=0.001, batch_size=32):
+    def train_autoencoder(self, X_train, X_val=None, X_test=None, patience=5, min_delta=0.0005, epochs=100,
+                          learning_rate=0.001, batch_size=32):
 
         # ensure equal length input
         for X in [X_train, X_val, X_test]:
@@ -398,6 +399,37 @@ class CNN_Autoencoder(nn.Module):
 
         return fig
 
+    def save(self, filepath:str):
+        """
+        Save the model parameters to a file.
+
+        Parameters:
+        - filepath (str): The location where the model parameters should be saved.
+
+        Example usage:
+            model = CNN_Autoencoder(target_length=18)
+            model.save("path/to/save/model.pth")
+        """
+        torch.save(self.state_dict(), filepath)
+
+    @classmethod
+    def load(cls, filepath:str, *args, **kwargs):
+        """
+        Load the model parameters from a file and return an instance of the model.
+
+        Parameters:
+        - filepath (str): The location from where the model parameters should be loaded.
+
+        Returns:
+        - CNN_Autoencoder: An instance of the CNN_Autoencoder model with loaded parameters.
+
+        Example usage:
+            loaded_model = CNN_Autoencoder.load("path/to/save/model.pth", target_length=18)
+        """
+        model = cls(*args, **kwargs) # Create a new instance of the model
+        model.load_state_dict(torch.load(filepath))
+        model.eval() # Set the model to evaluation mode
+        return model
 
 ##########################################
 ## Recurrent Neural Network Autoencoder ##

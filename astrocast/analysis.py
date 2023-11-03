@@ -401,7 +401,7 @@ class Events(CachedClass):
             indices_y += event.y0
 
             # Set the corresponding event_id at the calculated indices in event_map
-            event_map[indices_z, indices_x, indices_y] = event_id
+            event_map[indices_z, indices_x, indices_y] += event_id
             event_id += 1
 
         if save_path is not None:
@@ -557,8 +557,7 @@ class Events(CachedClass):
         if simple:
             return np.array(events.trace.tolist())
 
-        num_frames = events.z1.max() + 1
-        arr = np.zeros((len(events), num_frames))
+        arr = np.zeros((len(events), self.num_frames))
 
         for i, (z0, z1, trace) in enumerate(zip(events.z0, events.z1, events.trace)):
             arr[i, z0:z1] = trace
@@ -928,7 +927,6 @@ class Events(CachedClass):
         iterator = tqdm(events.iterrows(), total=len(events), desc="extending events") if show_progress else events.iterrows()
         for i, event in iterator:
 
-            # select event pixel # TODO flag to switch between footprint and last frame
             if use_footprint:
                 footprint = np.invert(np.reshape(event["footprint"], (event.dx, event.dy)))
                 mask_begin, mask_end = footprint, footprint
@@ -1027,7 +1025,10 @@ class Events(CachedClass):
             post_trace = np.nanmean(projection, axis=(1, 2))
 
             # combine
-            trace = np.concatenate([pre_trace, event.trace, post_trace])
+            full_trace = [np.squeeze(tr) for tr in [pre_trace, event.trace, post_trace]]
+            full_trace = [tr for tr in full_trace if len(tr.shape) > 0]
+            #logging.warning(f"{[(tr.shape, len(tr.shape)) for tr in full_trace]}, {z0}:{z1}, {full_z0}:{full_z1}")
+            trace = np.concatenate(full_trace)
 
             if ensure_max is not None and len(trace) > ensure_max:
 
@@ -1053,6 +1054,7 @@ class Events(CachedClass):
                 norm.run(normalization_instructions)
 
             if return_array:
+                logging.warning(f"full_z0:z1 > {full_z0}:{full_z1}; trace.shape: {trace.shape}")
                 arr_ext[c, full_z0:full_z1] = trace
             else:
                 extended.append(trace)
@@ -1345,7 +1347,7 @@ class Video:
 
             current_frame_line = None
 
-            def update_line(event: Event):
+            def update_line(event: Events):
                 nonlocal current_frame_line
 
                 Z, _, _ = event.value

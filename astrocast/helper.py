@@ -453,15 +453,16 @@ class EventSim:
         pass
 
     @staticmethod
-    def split_3d_array_indices(arr, cz, cx, cy):
+    def split_3d_array_indices(arr, cz, cx, cy, skip_n):
         """
-        Split a 3D array into sections based on the given segment lengths.
+        Split a 3D array into sections based on the given segment lengths while skipping initial and trailing frames in z-dimension.
 
         Args:
             arr (numpy.ndarray): The 3D array to split.
             cz (int): The length of each section along the depth dimension.
             cx (int): The length of each section along the rows dimension.
             cy (int): The length of each section along the columns dimension.
+            skip_n (int): Number of initial and trailing frames to skip in z-dimension.
 
         Returns:
             list: A list of tuples representing the start and end indices for each section.
@@ -484,11 +485,11 @@ class EventSim:
         section_size_y = cy
 
         # Make sure the segment lengths evenly divide the array dimensions
-        if depth % cz != 0 or rows % cx != 0 or cols % cy != 0:
-            logging.warning("Segment lengths do not evenly divide the array dimensions.")
+        if (depth - 2 * skip_n) % cz != 0 or rows % cx != 0 or cols % cy != 0:
+            logging.warning("Segment lengths do not evenly divide the adjusted array dimensions.")
 
         # Calculate the number of sections in each dimension
-        num_sections_z = depth // cz
+        num_sections_z = (depth - 2 * skip_n) // cz
         num_sections_x = rows // cx
         num_sections_y = cols // cy
 
@@ -497,8 +498,8 @@ class EventSim:
         for i in range(num_sections_z):
             for j in range(num_sections_x):
                 for k in range(num_sections_y):
-                    start_z = i * section_size_z
-                    end_z = (i + 1) * section_size_z
+                    start_z = i * section_size_z + skip_n
+                    end_z = (i + 1) * section_size_z + skip_n
                     start_x = j * section_size_x
                     end_x = (j + 1) * section_size_x
                     start_y = k * section_size_y
@@ -508,7 +509,7 @@ class EventSim:
         return indices
 
     @staticmethod
-    def create_random_blob(shape, min_gap=1, blob_size_fraction=0.2, event_num=1):
+    def create_random_blob(section, min_gap=1, blob_size_fraction=0.2, event_num=1):
         """
         Generate a random blob of connected shape in a given array.
 
@@ -526,10 +527,8 @@ class EventSim:
             None
         """
 
-        array = np.zeros(shape, dtype=int)
-
         # Get the dimensions of the array
-        depth, rows, cols = shape
+        depth, rows, cols = section.shape
 
         # Calculate the maximum size of the blob based on the fraction of the total array size
         max_blob_size = int(blob_size_fraction * (depth * rows * cols))
@@ -554,7 +553,7 @@ class EventSim:
                 continue
 
             # Set the current coordinate to event_num in the array
-            array[z, x, y] = event_num
+            section[z, x, y] = event_num
 
             # Add the current coordinate to the visited set
             visited.add((z, x, y))
@@ -572,10 +571,11 @@ class EventSim:
             # Add the neighbors to the queue
             queue.extend(neighbors)
 
-        return array
+        return section
 
     def simulate(self, shape, z_fraction=0.2, xy_fraction=0.1, gap_space=1, gap_time=1,
-                 blob_size_fraction=0.05, event_probability=0.2):
+                 event_intensity="incr", background_noise=None,
+                 blob_size_fraction=0.05, event_probability=0.2, skip_n=5):
 
         """
         Simulate the generation of random blobs in a 3D array.
@@ -600,11 +600,16 @@ class EventSim:
         """
 
         # Create empty array
-        event_map = np.zeros(shape, dtype=int)
+        if background_noise is None:
+            event_map = np.zeros(shape, dtype=int)
+        else:
+            event_map = np.abs(np.random.random(shape) * background_noise)
+
         Z, X, Y = shape
 
         # Get indices for splitting the array into sections
-        indices = self.split_3d_array_indices(event_map, int(Z*z_fraction), int(X*xy_fraction), int(Y*xy_fraction))
+        indices = self.split_3d_array_indices(event_map, int(Z*z_fraction), int(X*xy_fraction), int(Y*xy_fraction),
+                                              skip_n=skip_n)
 
         # Fill with blobs
         num_events = 0
@@ -623,20 +628,27 @@ class EventSim:
             y0 += int(gap_space / 2)
             y1 -= int(gap_space / 2)
 
-            shape = (z1 - z0, x1 - x0, y1 - y0)
+            if event_intensity == "incr":
+                event_num = num_events + 1
+            elif isinstance(event_intensity, (int, float)):
+                event_num = event_intensity
+            else:
+                raise ValueError(f"event_intensity must be 'infer' or int/float; not {event_intensity}:{event_intensity.dtype}")
 
-            blob = self.create_random_blob(shape, event_num=num + 1, blob_size_fraction=blob_size_fraction)
-            event_map[z0:z1, x0:x1, y0:y1] = blob
+            section = event_map[z0:z1, x0:x1, y0:y1]
+            event_map[z0:z1, x0:x1, y0:y1] = self.create_random_blob(section, event_num=event_num, blob_size_fraction=blob_size_fraction)
 
             num_events += 1
 
         # Convert to TIFF compatible format
-        event_map = img_as_uint(event_map)
+        if event_map.dtype == int:
+            event_map = img_as_uint(event_map)
 
         return event_map, num_events
 
-    def create_dataset(self, h5_path, h5_loc="dff/ch0", save_active_pixels=False, shape=(50, 100, 100),
-                       z_fraction=0.2, xy_fraction=0.1, gap_space=1, gap_time=1,
+    def create_dataset(self, h5_path, h5_loc="dff/ch0", debug=False, shape=(50, 100, 100),
+                       z_fraction=0.2, xy_fraction=0.1, gap_space=5, gap_time=3,
+                       event_intensity=100, background_noise=1,
                        blob_size_fraction=0.05, event_probability=0.2):
 
         from astrocast.analysis import IO
@@ -645,13 +657,15 @@ class EventSim:
         h5_path = Path(h5_path)
 
         data, num_events = self.simulate(shape=shape, z_fraction=z_fraction, xy_fraction=xy_fraction,
+                                         event_intensity=event_intensity, background_noise=background_noise,
                                          gap_space=gap_space, gap_time=gap_time,
                                          blob_size_fraction=blob_size_fraction, event_probability=event_probability)
 
-        IO.save(path=h5_path, data=data, h5_loc=h5_loc)
+        io = IO()
+        io.save(path=h5_path, data=data, h5_loc=h5_loc)
 
-        det = Detector(h5_path.as_posix(),  output=None)
-        det.run(dataset=h5_loc, lazy=True, save_activepixels=save_active_pixels)
+        det = Detector(h5_path.as_posix(), output=None)
+        det.run(h5_loc=h5_loc, lazy=True, debug=debug)
 
         return det.output_directory
 
@@ -964,14 +978,26 @@ class Normalization:
     @staticmethod
     def diff(data):
 
-        def get_diff(x, axis=1):
-            return np.concatenate([np.array([0]), np.diff(x, axis=axis)])
-
         if isinstance(data, ak.Array):
-            return ak.Array([get_diff(data[i], axis=0) for i in range(len(data))])
+
+            arr = []
+            zero = np.zeros([1])
+            for i in range(len(data)):
+                row = np.concatenate([zero, np.diff(data[i], axis=0)])
+                arr.append(row)
+
+            return ak.Array(arr)
 
         else:
-            return get_diff(data, axis=1)
+
+            x = np.diff(data, axis=1)
+
+            if len(x.shape) > 1:
+                zero = np.zeros((x.shape[0], 1), dtype=x.dtype)  # Reshape zero to match a single column of x
+            else:
+                zero = np.zeros([1], dtype=x.dtype)
+
+            return np.concatenate([zero, x], axis=1)
 
 class CachedClass:
 
