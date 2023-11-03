@@ -127,17 +127,8 @@ class SubFrameGenerator(tf.keras.utils.Sequence):
 
         # define size of each predictive field of view (X, Y)
         dw, dh = self.input_size
-
-        # enforce tuples for signal and gap frames
-        if isinstance(self.signal_frames, int):
-            signal_frames = (self.signal_frames, self.signal_frames)
-        else:
-            signal_frames = self.signal_frames
-
-        if isinstance(self.gap_frames, int):
-            gap_frames = (self.gap_frames, self.gap_frames)
-        else:
-            gap_frames = self.gap_frames
+        signal_frames = self.signal_frames
+        gap_frames = self.gap_frames
 
         # define prediction length (Z)
         stack_len = signal_frames[0] + gap_frames[0] + 1 + gap_frames[1] + signal_frames[1]
@@ -553,7 +544,7 @@ class SubFrameGenerator(tf.keras.utils.Sequence):
               out_loc=None, dtype="same", chunk_size=None, rescale=True):
 
         # load model if not provided
-        if type(model) in [str, pathlib.PosixPath]:
+        if isinstance(model, (str, pathlib.Path)):
             model = Path(model)
 
             if os.path.isdir(model):
@@ -659,15 +650,8 @@ class SubFrameGenerator(tf.keras.utils.Sequence):
                     mean, std = self.descr[self.items.iloc[0].path]
                     im = (im * std) + mean
 
-                # TODO this shouldn't be hardcoded
-                try:
-                    rec[row.z0+5, x0:x1, y0:y1] = im
-                except:
-                    print(f"padding: {row.padding}")
-                    print(f"x_: {(x0_, x1_)}, y_:{(y0_, y1_)}")
-                    print(f"im.shape: {im_shape_orig} > {im.shape}")
-                    print(f"x: {(x0, x1)}, y:{(y0, y1)}")
-                    print("")
+                gap = self.signal_frames[0] + self.gap_frames[0]
+                rec[row.z0+gap, x0:x1, y0:y1] = im
 
                 c+=1
 

@@ -1,4 +1,5 @@
 import logging
+import shutil
 import tempfile
 from pathlib import Path
 
@@ -13,31 +14,138 @@ from astrocast.preparation import IO
 
 class Test_Generators:
 
+    def setup_method(self):
+
+        self.data = {}
+        self.si_objects = []
+        for extension in [".h5", ".tiff"]:
+
+            si = SampleInput()
+            file_path = si.get_test_data(extension=extension)
+            loc = si.get_h5_loc()
+
+            self.data[extension] = (file_path, loc)
+            self.si_objects.append(si)
+
     @pytest.mark.parametrize("extension", [".h5", ".tiff"])
-    @pytest.mark.parametrize("normalize", [None, "local", "global"])
     @pytest.mark.parametrize("pre_post_frame", [5, (3, 2)])
-    def test_generator_sub_frame(self, extension, pre_post_frame, normalize):
+    @pytest.mark.parametrize("gap_frames", [0, 2, (2, 1)])
+    def test_generator_sub_vanilla(self, extension, pre_post_frame, gap_frames,
+                                   normalize=None, random_offset=False, overlap=None, z_select=None,
+                                   drop_frame_probability=None):
 
-        si = SampleInput()
-        file_path = si.get_test_data(extension=extension)
-        loc = si.get_h5_loc()
-
-        gen = SubFrameGenerator(paths=file_path, loc=loc, pre_post_frame=pre_post_frame,
-                                 input_size=(25, 25), batch_size=25, normalize=normalize)
+        file_path, loc = self.data[extension]
+        gen = SubFrameGenerator(paths=file_path, loc=loc, pre_post_frame=pre_post_frame, gap_frames=gap_frames,
+                                random_offset=random_offset, overlap=overlap, z_select=z_select,
+                                drop_frame_probability=drop_frame_probability,
+                                input_size=(25, 25), batch_size=25, normalize=normalize)
 
         for ep in range(2):
-            for item in gen:
+            for _ in gen:
+                pass
+
+            gen.on_epoch_end()
+    @pytest.mark.parametrize("drop_frame_probability", [0.05, 0.5])
+    def test_generator_sub_drop_frame(self, drop_frame_probability, extension=".h5", pre_post_frame=5, gap_frames=0,
+                                   normalize=None, random_offset=False, overlap=None, z_select=None):
+
+        file_path, loc = self.data[extension]
+        gen = SubFrameGenerator(paths=file_path, loc=loc, pre_post_frame=pre_post_frame, gap_frames=gap_frames,
+                                random_offset=random_offset, overlap=overlap, z_select=z_select,
+                                drop_frame_probability=drop_frame_probability,
+                                input_size=(25, 25), batch_size=25, normalize=normalize)
+
+        for ep in range(2):
+            for _ in gen:
+                pass
+
+            gen.on_epoch_end()
+
+    @pytest.mark.parametrize("normalize", ["local", "global"])
+    def test_generator_sub_normalize(self, normalize, drop_frame_probability=None, extension=".h5", pre_post_frame=5,
+                                     gap_frames=0, random_offset=False, overlap=None, z_select=None):
+
+        file_path, loc = self.data[extension]
+        gen = SubFrameGenerator(paths=file_path, loc=loc, pre_post_frame=pre_post_frame, gap_frames=gap_frames,
+                                random_offset=random_offset, overlap=overlap, z_select=z_select,
+                                drop_frame_probability=drop_frame_probability,
+                                input_size=(25, 25), batch_size=25, normalize=normalize)
+
+        for ep in range(2):
+            for _ in gen:
+                pass
+
+            gen.on_epoch_end()
+
+    @pytest.mark.parametrize("overlap", [0, 2, 0.1])
+    def test_generator_sub_overlap(self, overlap, drop_frame_probability=None, extension=".h5", pre_post_frame=5,
+                                     gap_frames=0, random_offset=False, normalize=None, z_select=None):
+
+        file_path, loc = self.data[extension]
+        gen = SubFrameGenerator(paths=file_path, loc=loc, pre_post_frame=pre_post_frame, gap_frames=gap_frames,
+                                random_offset=random_offset, overlap=overlap, z_select=z_select,
+                                drop_frame_probability=drop_frame_probability,
+                                input_size=(25, 25), batch_size=25, normalize=normalize)
+
+        for ep in range(2):
+            for _ in gen:
+                pass
+
+            gen.on_epoch_end()
+
+    @pytest.mark.parametrize("random_offset", [True])
+    def test_generator_sub_random_offset(self, random_offset, drop_frame_probability=None, extension=".h5", pre_post_frame=5,
+                                     gap_frames=0, overlap=None, normalize=None, z_select=None):
+
+        file_path, loc = self.data[extension]
+        gen = SubFrameGenerator(paths=file_path, loc=loc, pre_post_frame=pre_post_frame, gap_frames=gap_frames,
+                                random_offset=random_offset, overlap=overlap, z_select=z_select,
+                                drop_frame_probability=drop_frame_probability,
+                                input_size=(25, 25), batch_size=25, normalize=normalize)
+
+        for ep in range(2):
+            for _ in gen:
+                pass
+
+            gen.on_epoch_end()
+
+    @pytest.mark.parametrize("z_select", [(0, 25), (0, 100)])
+    def test_generator_sub_z_select(self, z_select, drop_frame_probability=None, extension=".h5", pre_post_frame=5,
+                                     gap_frames=0, overlap=None, normalize=None, random_offset=False):
+
+        file_path, loc = self.data[extension]
+        gen = SubFrameGenerator(paths=file_path, loc=loc, pre_post_frame=pre_post_frame, gap_frames=gap_frames,
+                                random_offset=random_offset, overlap=overlap, z_select=z_select,
+                                drop_frame_probability=drop_frame_probability,
+                                input_size=(25, 25), batch_size=25, normalize=normalize)
+
+        for ep in range(2):
+            for _ in gen:
                 pass
 
             gen.on_epoch_end()
 
     @pytest.mark.xdist_group(name="tensorflow")
     @pytest.mark.parametrize("extension", [".h5", ".tiff"])
-    def test_network(self, extension):
+    @pytest.mark.parametrize("n_stacks", [1, 2])
+    def test_network(self, extension, n_stacks):
 
-        si = SampleInput()
-        file_path = si.get_test_data(extension=extension)
-        loc = si.get_h5_loc()
+        file_path, loc = self.data[extension]
+
+        param = dict(paths=file_path, loc=loc, input_size=(32, 32), pre_post_frame=5, gap_frames=0,
+                     normalize="global", cache_results=True, in_memory=True)
+
+        train_gen = SubFrameGenerator(padding=None, batch_size=25, max_per_file=50,
+                                       allowed_rotation=[1, 2, 3], allowed_flip=[0, 1], shuffle=True, **param)
+
+        net = Network(train_generator=train_gen, val_generator=train_gen, n_stacks=n_stacks, kernel=4,
+                      batchNormalize=False, use_cpu=True)
+        net.run(batch_size=train_gen.batch_size, num_epochs=2, patience=1, min_delta=0.01)
+
+    @pytest.mark.xdist_group(name="tensorflow")
+    def test_network_retrain(self, extension=".h5"):
+
+        file_path, loc = self.data[extension]
 
         param = dict(paths=file_path, loc=loc, input_size=(25, 25), pre_post_frame=5, gap_frames=0,
                      normalize="global", cache_results=True, in_memory=True)
@@ -46,16 +154,38 @@ class Test_Generators:
                                        allowed_rotation=[1, 2, 3], allowed_flip=[0, 1], shuffle=True, **param)
 
         net = Network(train_generator=train_gen, val_generator=train_gen, n_stacks=1, kernel=4, batchNormalize=False, use_cpu=True)
-        net.run(batch_size=train_gen.batch_size, num_epochs=2, patience=1, min_delta=0.01, save_model=None)
+        net.run(batch_size=train_gen.batch_size, num_epochs=2, patience=1, min_delta=0.01)
+
+        net.retrain_model(5, 5)
+
+    @pytest.mark.xdist_group(name="tensorflow")
+    def test_network_save(self, extension=".h5"):
+
+        file_path, loc = self.data[extension]
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+
+            save_model_dir = Path(tmpdir)
+            save_model_path = save_model_dir.joinpath("model.h5")
+
+            param = dict(paths=file_path, loc=loc, input_size=(25, 25), pre_post_frame=5, gap_frames=0,
+                         normalize="global", cache_results=True, in_memory=True)
+
+            train_gen = SubFrameGenerator(padding=None, batch_size=25, max_per_file=50,
+                                           allowed_rotation=[1, 2, 3], allowed_flip=[0, 1], shuffle=True, **param)
+
+            net = Network(train_generator=train_gen, val_generator=train_gen, n_stacks=1, kernel=4, batchNormalize=False, use_cpu=True)
+            net.run(batch_size=train_gen.batch_size, num_epochs=2, patience=1, min_delta=0.01, save_model=save_model_dir)
+
+            res = train_gen.infer(model=save_model_path, output=None, out_loc="inf/ch0", rescale=False)
 
     @pytest.mark.xdist_group(name="tensorflow")
     @pytest.mark.parametrize("extension", [".h5", ".tiff"])
     @pytest.mark.parametrize("output_file", [None, "inf.tiff", "inf.h5"])
-    def test_inference_sub(self, extension, output_file):
+    @pytest.mark.parametrize("rescale", [True, False])
+    def test_inference_sub(self, extension, output_file, rescale):
 
-        si = SampleInput()
-        file_path = si.get_test_data(extension=extension)
-        loc = si.get_h5_loc()
+        file_path, loc = self.data[extension]
 
         with tempfile.TemporaryDirectory() as tmpdir:
 
@@ -86,7 +216,7 @@ class Test_Generators:
                                         **param)
 
             inf_loc = "inf/ch0"
-            res = inf_gen.infer(model=model, output=out_path, out_loc=inf_loc, rescale=False)
+            res = inf_gen.infer(model=model, output=out_path, out_loc=inf_loc, rescale=rescale)
 
             # Check result
             io = IO()
@@ -99,5 +229,8 @@ class Test_Generators:
             assert res.shape == data.shape, f"inferred output has incorrect shape: " \
                                                 f"orig>{data.shape} vs. inf>{res.shape}"
 
+    def teardown_method(self):
 
-
+        for si in self.si_objects:
+            if Path(si.tmp_dir.name).is_dir():
+                shutil.rmtree(si.tmp_dir.name)
