@@ -118,23 +118,24 @@ class UserFeedback:
                 ctx = None
 
             default_map = ctx.default_map if ctx else {}
+            if default_map is not None:
 
-            for key, value in params.items():
-                str_value = str(value)
-                if key in default_map and default_map[key] != value:
-                    overridden = True
-                    str_value += " *"
+                for key, value in params.items():
+                    str_value = str(value)
+                    if key in default_map and default_map[key] != value:
+                        overridden = True
+                        str_value += " *"
 
-                if len(str_value) > v_len:
-                    str_value = "..." + str_value[-v_len:]
+                    if len(str_value) > v_len:
+                        str_value = "..." + str_value[-v_len:]
 
-                table.add_row([key, str_value])
+                    table.add_row([key, str_value])
 
-            table_str = f"\n{self.table_color}{table.get_string()}"
-            print(table_str)
+                table_str = f"\n{self.table_color}{table.get_string()}"
+                print(table_str)
 
-            if overridden:
-                print(self.table_color + "  * config value was replaced by user input\n")
+                if overridden:
+                    print(self.table_color + "  * config value was replaced by user input\n")
 
     def start(self, level=1):
         module_name = inspect.stack()[level].function
