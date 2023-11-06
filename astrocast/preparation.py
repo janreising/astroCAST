@@ -38,7 +38,7 @@ class Input:
             sep="_", channels=1, z_slice=None, lazy=True,
             subtract_background=None, subtract_func="mean",
             rescale=None, dtype=np.uint,
-            in_memory=False, h5_loc="data", chunks=None, compression=None):
+            in_memory=False, h5_loc_in=None, h5_loc_out="data", chunks=None, compression=None):
 
         """ Loads input data from a specified path, performs data processing, and optionally saves the processed data.
 
@@ -67,7 +67,7 @@ class Input:
 
         logging.info("loading data ...")
         io = IO()
-        data = io.load(input_path, sep=sep, z_slice=z_slice, lazy=lazy, chunks=(1, -1, -1))
+        data = io.load(input_path, h5_loc=h5_loc_in, sep=sep, z_slice=z_slice, lazy=lazy, chunks=(1, -1, -1))
 
         logging.info("preparing data ...")
         data = self.prepare_data(data, channels=channels, subtract_background=subtract_background,
@@ -91,7 +91,7 @@ class Input:
             return data
 
         logging.info("saving data ...")
-        io.save(output_path, data, h5_loc=h5_loc, chunks=chunks, compression=compression)
+        io.save(output_path, data, h5_loc=h5_loc_out, chunks=chunks, compression=compression)
 
     @staticmethod
     def subtract_background(data, channels, subtract_background, subtract_func):

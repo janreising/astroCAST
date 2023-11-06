@@ -192,7 +192,8 @@ def cli(ctx, config):
 @click_custom_option('--subtract-func', default="mean", help='Function to use for background subtraction.')
 @click_custom_option('--rescale', type=click.FLOAT, default=1.0, help='Rescale parameter.')
 @click_custom_option('--in-memory', is_flag=True, help='If True, the processed data is loaded into memory.')
-@click_custom_option('--h5-loc', default="data", help='Prefix to use when saving the processed data.')
+@click_custom_option('--h5-loc-in', default=None, help='Prefix to use when loading the processed data.')
+@click_custom_option('--h5-loc-out', default="data", help='Prefix to use when saving the processed data.')
 @click_custom_option('--chunks', type=click.STRING, default="infer",
                      help='Chunk size to use when saving to HDF5 or TileDB.'
                      )
@@ -202,7 +203,7 @@ def cli(ctx, config):
                      )
 def convert_input(
         input_path, logging_level, output_path, sep, num_channels, channel_names, z_slice, lazy, subtract_background,
-        subtract_func, rescale, in_memory, h5_loc, chunks, compression, overwrite
+        subtract_func, rescale, in_memory, h5_loc_in, h5_loc_out, chunks, compression, overwrite
         ):
     """
     Convert user files to astroCAST compatible format using the Input class.
@@ -212,7 +213,7 @@ def convert_input(
 
     with UserFeedback(params=locals(), logging_level=logging_level):
         # check output
-        output_path = check_output(output_path, input_path, h5_loc, overwrite)
+        output_path = check_output(output_path, input_path, h5_loc_out, overwrite)
         if output_path == 0:
             logging.warning("skipping this step because output exists.")
             return 0
@@ -231,7 +232,8 @@ def convert_input(
         input_instance = Input(logging_level=logging_level)
         input_instance.run(input_path=input_path, output_path=output_path, sep=sep, channels=channels, z_slice=z_slice,
                            lazy=lazy, subtract_background=subtract_background, subtract_func=subtract_func,
-                           rescale=rescale, in_memory=in_memory, h5_loc=h5_loc, chunks=chunks, compression=compression)
+                           rescale=rescale, in_memory=in_memory, h5_loc_in=h5_loc_in, h5_loc_out=h5_loc_out,
+                           chunks=chunks, compression=compression)
 
 @cli.command()
 @click.argument('input-path', type=click.Path())
