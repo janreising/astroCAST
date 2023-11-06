@@ -16,6 +16,8 @@ from colorama import Fore
 import inspect
 from prettytable import PrettyTable
 
+from astrocast.preparation import Input
+
 init_colorama(autoreset=True)
 
 click_custom_option = partial(click.option, show_default=True)
