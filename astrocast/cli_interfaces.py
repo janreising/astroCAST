@@ -894,13 +894,17 @@ def view_detection_results(event_dir, video_path, h5_loc, z_select, lazy):
                      )
 @click_custom_option('--lazy', type=click.BOOL, default=True, help='Whether to implement lazy loading.')
 @click_custom_option('--chunk-size', type=(int, int), default=None,
-                     help='Chunk size for saving the results in the output file. If not provided, a default chunk size will be used.'
+                     help='Chunk size for saving the results in the output file. If not provided, a default chunk '
+                          'size will be used.'
                      )
 @click_custom_option('--compression', default=None, help='Compression method to use when saving to HDF5 or TileDB.')
+@click_custom_option('--rescale', default=None, help="(tuple, list, int, float): The rescaling factor or factors to "
+                                                     "apply to the data arrays.")
 @click_custom_option('--overwrite', type=click.BOOL, default=False,
                      help='Flag for overwriting previous result in output location'
                      )
-def export_video(input_path, output_path, h5_loc_in, h5_loc_out, z_select, lazy, chunk_size, compression, overwrite):
+def export_video(input_path, output_path, h5_loc_in, h5_loc_out, z_select, lazy, chunk_size, compression, overwrite,
+                 rescale):
     """
     Exports a video dataset from the input file to another file with various configurable options.
 
@@ -939,6 +943,12 @@ def export_video(input_path, output_path, h5_loc_in, h5_loc_out, z_select, lazy,
 
     io = IO()
     data = io.load(input_path, h5_loc=h5_loc_in, z_slice=z_select, lazy=lazy)
+
+    if rescale is not None:
+
+        data = {"dummy": data}
+        data = Input.rescale_data(data, rescale=rescale)
+        data = data["dummy"]
 
     io.save(output_path, data=data, h5_loc=h5_loc_out, chunks=chunk_size, compression=compression, overwrite=overwrite)
 
