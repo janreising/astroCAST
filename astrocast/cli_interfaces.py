@@ -905,7 +905,7 @@ def view_detection_results(event_dir, video_path, h5_loc, z_select, lazy):
                           'size will be used.'
                      )
 @click_custom_option('--compression', default=None, help='Compression method to use when saving to HDF5 or TileDB.')
-@click_custom_option('--rescale', default=None, help='(tuple, list, int, float): The rescaling factor or factors to '
+@click_custom_option('--rescale', default=None, help='(float): The rescaling factor or factors to '
                                                      'apply to the data arrays.')
 @click_custom_option('--overwrite', type=click.BOOL, default=False,
                      help='Flag for overwriting previous result in output location'
@@ -955,7 +955,7 @@ def export_video(input_path, output_path, h5_loc_in, h5_loc_out, z_select, lazy,
     if rescale is not None:
 
         data = {"dummy": data}
-        data = Input.rescale_data(data, rescale=rescale)
+        data = Input.rescale_data(data, rescale=float(rescale))
         data = data["dummy"]
 
     io.save(output_path, data=data, h5_loc=h5_loc_out, chunks=chunk_size, compression=compression, overwrite=overwrite)
