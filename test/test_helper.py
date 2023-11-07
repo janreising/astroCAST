@@ -489,6 +489,7 @@ def test_load_yaml():
         # Check if the function read the values correctly
         assert result == {"param1": "value1", "param2": "value2"}
 
+@pytest.mark.long
 def test_sample_download():
 
     with tempfile.TemporaryDirectory() as tmp:
@@ -499,6 +500,7 @@ def test_sample_download():
 
         assert len(list(tmpdir.glob("*/*"))) > 0
 
+@pytest.mark.long
 def test_model_download():
 
     with tempfile.TemporaryDirectory() as tmp:
