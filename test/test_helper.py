@@ -480,10 +480,11 @@ def test_load_yaml():
         """
 
         yaml_file = tmpdir.joinpath("test_config.yaml")
-        yaml_file.write(yaml_content)
+        with open(yaml_file.as_posix(), "w") as yaml_f:
+            yaml_f.write(yaml_content)
 
         # Run the load_yaml_defaults function
-        result = load_yaml_defaults(yaml_file.strpath)
+        result = load_yaml_defaults(yaml_file.as_posix())
 
         # Check if the function read the values correctly
         assert result == {"param1": "value1", "param2": "value2"}
@@ -518,18 +519,23 @@ def test_data_dimensions(data_type):
         arr = np.random.random((10, 10, 10))
         h5_loc = "data/ch0"
 
-        if data_type == "np.ndarray":
-            input_ = arr
-
-        elif data_type == ".err":
+        if data_type == ".err":
 
             input_ = tmpdir.joinpath(f"file.{data_type}")
             with open(input_.as_posix(), "w") as w:
                 w.write("hello")
 
-        else:
-            input_ = tmpdir.joinpath(f"file.{data_type}")
-            io = IO()
-            io.save(input_, data=arr, h5_loc=h5_loc)
+            with pytest.raises(TypeError):
+                _ = get_data_dimensions(input_, loc=h5_loc, return_dtype=True)
 
-        _ = get_data_dimensions(input_, loc=h5_loc, return_dtype=True)
+        else:
+
+            if data_type == "np.ndarray":
+                input_ = arr
+
+            else:
+                input_ = tmpdir.joinpath(f"file.{data_type}")
+                io = IO()
+                io.save(input_, data=arr, h5_loc=h5_loc)
+
+            _ = get_data_dimensions(input_, loc=h5_loc, return_dtype=True)
