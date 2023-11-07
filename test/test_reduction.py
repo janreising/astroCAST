@@ -8,6 +8,9 @@ from astrocast.autoencoders import CNN_Autoencoder
 from astrocast.reduction import *
 from astrocast.helper import DummyGenerator
 
+import matplotlib
+matplotlib.use('Agg')  # Use the Agg backend
+
 DG_equal = DummyGenerator()
 DG_ragged = DummyGenerator(ragged=True)
 
