@@ -55,6 +55,7 @@ datashader = "^0.15.2"
 llvmlite = "~0.39"
 gdown = "^4.7.1"
 climage = "^0.2.0"
+simple-slurm = "^0.2.6"
 
 [tool.poetry.scripts]
 astrocast = 'astrocast.cli_interfaces:cli'
