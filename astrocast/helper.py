@@ -9,6 +9,7 @@ from pathlib import Path
 import awkward as ak
 import dask.array as da
 import h5py
+import pytest
 import yaml
 from skimage.util import img_as_uint
 
@@ -1026,6 +1027,7 @@ def load_yaml_defaults(yaml_file_path):
 
         return params
 
+@pytest.mark.long
 def download_sample_data(save_path, public_datasets=True, custom_datasets=True):
 
     import gdown
@@ -1045,6 +1047,7 @@ def download_sample_data(save_path, public_datasets=True, custom_datasets=True):
 
     logging.info(f"Downloaded sample datasets to: {save_path}")
 
+@pytest.mark.long
 def download_pretrained_models(save_path):
 
     import gdown

@@ -111,6 +111,7 @@ class Test_UMAP:
         um = UMAP()
         embedded = um.train(data)
 
+    @pytest.mark.long
     @pytest.mark.parametrize("use_napari", [True, False])
     @pytest.mark.parametrize("use_data", [True, False])
     @pytest.mark.parametrize("custom_axis", [True, False])
