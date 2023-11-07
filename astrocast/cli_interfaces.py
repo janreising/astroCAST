@@ -1071,5 +1071,67 @@ def delete_h5_dataset(input_path):
             elif in_ == "exit":
                 break
 
+
+@cli.command
+@click.argument('data-path', type=click.Path())
+@click_custom_option('--cfg-path', type=click.Path(), default=Path("config.yaml"))
+@click_custom_option('--log-path', type=click.Path(), default=Path("."))
+@click_custom_option('--tasks', default=None)
+@click_custom_option('--base-command', type=click.STRING, default="")
+@click_custom_option('--A', type=click.STRING)
+def push_slurm_tasks(log_path, cfg_path, data_path, tasks, base_command, A):
+
+    import h5py as h5
+    from simple_slurm import Slurm
+
+    if tasks is None:
+        raise ValueError(f"Please provide a dictionary of tasks.")
+
+    files = [data_path] if data_path.is_file() else list(data_path.glob("*/*.h5"))
+
+    task_ids = sorted(list(tasks.keys()))
+    for f in files:
+
+        last_jobid = None
+        with h5.File(f, "r") as file:
+            print(f"{f}:")
+
+            for i in task_ids:
+
+                dict_ = tasks[i]
+
+                cmd = base_command.copy()
+
+                k = dict_["key"]
+                print(f"\tchecking: {k}")
+
+                base_name = f.name.replace(".h5", "")
+                log_path = log_path.joinpath(f"slurm-%A-{base_name}-{k}.out").as_posix()
+                job_name = f"{k}_{base_name}"
+
+                if (k == "roi" and "df" in file and not f.with_suffix(".roi").exists()) or (k not in file):
+
+                    cmd += f"astrocast --config {cfg_path} {dict_['script']} {f};"
+                    print(f"\tcmd {k}>{base_name}:\n {cmd}")
+
+                    dependency = dict(afterok=last_jobid) if last_jobid is not None else None
+
+                    slurm = Slurm()
+                    slurm.add_arguments(A=A)
+                    slurm.add_arguments(time=dict_["time"])
+                    slurm.add_arguments(c=dict_["cores"])
+
+                    if job_name is not None:
+                        slurm.add_arguments(J=job_name)
+
+                    if log_path is not None:
+                        slurm.add_arguments(output=log_path)
+
+                    if dependency is not None:
+                        slurm.add_arguments(dependency=dependency)
+
+                    last_jobid = slurm.sbatch(cmd)
+
+
 if __name__ == '__main__':
     cli()
