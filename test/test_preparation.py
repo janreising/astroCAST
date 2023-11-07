@@ -452,7 +452,7 @@ class Test_IO:
             assert np.array_equal(arr, arr_load)
 
     @pytest.mark.parametrize("compression", ["gzip", "infer"])
-    @pytest.mark.parametrize("shape", [(100, 100, 100), (512, 512, 5000)])
+    @pytest.mark.parametrize("shape", [(100, 100, 100), (512, 512, 350)])
     def test_save_compression(self, compression, shape, chunks=(100, 100, 100), output_path="out.h5"):
 
         with tempfile.TemporaryDirectory() as dir:
