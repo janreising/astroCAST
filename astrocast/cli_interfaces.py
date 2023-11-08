@@ -1103,7 +1103,7 @@ def push_slurm_tasks(log_path, cfg_path, data_path, tasks, base_command, account
 
     files = [data_path] if data_path.is_file() else list(data_path.glob("*/*.h5"))
 
-    task_ids = sorted(list(tasks.keys()))
+    task_ids = sorted(tasks.keys())
     for f in files:
 
         last_jobid = None
