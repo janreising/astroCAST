@@ -1053,7 +1053,8 @@ def climage(input_path, loc, z, size, equalize, clip_limit):
 
 @cli.command
 @click.argument('input-path', type=click.Path())
-def delete_h5_dataset(input_path):
+@click_custom_option('--loc', type=click.STRING, default=None)
+def delete_h5_dataset(input_path, loc):
     import h5py as h5
     from pathlib import Path
     
@@ -1062,14 +1063,23 @@ def delete_h5_dataset(input_path):
 
     with h5.File(input_path.as_posix(), "a") as f:
 
-        while True:
-            visualize_h5_recursive(f['/'])
+        if loc is None:
 
-            in_ = input("Choose dataset or 'exit': ")
-            if in_ in f:
-                del f[in_]
-            elif in_ == "exit":
-                break
+            while True:
+                visualize_h5_recursive(f['/'])
+
+                in_ = input("Choose dataset or 'exit': ")
+                if in_ in f:
+                    del f[in_]
+                elif in_ == "exit":
+                    break
+
+        else:
+
+            for ds in loc.split(","):
+
+                if ds in f:
+                    del f[ds]
 
 
 @cli.command
@@ -1078,8 +1088,8 @@ def delete_h5_dataset(input_path):
 @click_custom_option('--log-path', type=click.Path(), default=Path("."))
 @click_custom_option('--tasks', default=None)
 @click_custom_option('--base-command', type=click.STRING, default="")
-@click_custom_option('--A', type=click.STRING)
-def push_slurm_tasks(log_path, cfg_path, data_path, tasks, base_command, A):
+@click_custom_option('--account', type=click.STRING)
+def push_slurm_tasks(log_path, cfg_path, data_path, tasks, base_command, account):
 
     import h5py as h5
     from simple_slurm import Slurm
@@ -1117,7 +1127,7 @@ def push_slurm_tasks(log_path, cfg_path, data_path, tasks, base_command, A):
                     dependency = dict(afterok=last_jobid) if last_jobid is not None else None
 
                     slurm = Slurm()
-                    slurm.add_arguments(A=A)
+                    slurm.add_arguments(A=account)
                     slurm.add_arguments(time=dict_["time"])
                     slurm.add_arguments(c=dict_["cores"])
 
