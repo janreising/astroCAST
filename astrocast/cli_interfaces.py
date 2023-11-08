@@ -1125,7 +1125,7 @@ def push_slurm_tasks(log_path, cfg_path, data_path, tasks, base_command, account
                 print(f"\tchecking: {k}")
 
                 base_name = f.name.replace(".h5", "")
-                log_path = log_path.joinpath(f"slurm-%A-{base_name}-{k}.out").as_posix()
+                log_name = log_path.joinpath(f"slurm-%A-{base_name}-{k}.out").as_posix()
                 job_name = f"{k}_{base_name}"
 
                 if (k == "roi" and "df" in file and not f.with_suffix(".roi").exists()) or (k not in file):
@@ -1144,7 +1144,7 @@ def push_slurm_tasks(log_path, cfg_path, data_path, tasks, base_command, account
                         slurm.add_arguments(J=job_name)
 
                     if log_path is not None:
-                        slurm.add_arguments(output=log_path)
+                        slurm.add_arguments(output=log_name)
 
                     if dependency is not None:
                         slurm.add_arguments(dependency=dependency)
