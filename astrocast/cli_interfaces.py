@@ -189,7 +189,7 @@ def cli(ctx, config):
 @click_custom_option('--sep', default="_", help='Separator used for sorting file names.')
 @click_custom_option('--num-channels', default=1, help='Number of channels.')
 @click_custom_option('--channel-names', default="ch0", help='Channel names as comma separated list.')
-@click_custom_option('--z-slice', default=None, help='Z slice index.')
+@click_custom_option('--z-slice', type=(click.INT, click.INT), default=None, help='Z slice index.')
 @click_custom_option('--lazy', is_flag=True, help='Lazy loading flag.')
 @click_custom_option('--subtract-background', default=None, help='Background subtraction parameter.')
 @click_custom_option('--subtract-func', default="mean", help='Function to use for background subtraction.')
@@ -824,7 +824,8 @@ def move_h5_dataset(input_path, output_path, loc_in, loc_out, overwrite):
                      help='Range of frames to select in the Z dimension, given as a tuple (start, end).'
                      )
 @click_custom_option('--lazy', type=click.BOOL, default=True, help='Whether to implement lazy loading.')
-def view_data(input_path, h5_loc, z_select, lazy, show_trace, window, colormap):
+@click_custom_option('--testing', type=click.BOOL, default=False, help='Auto closes napari for testing purposes.')
+def view_data(input_path, h5_loc, z_select, lazy, show_trace, window, colormap, testing):
     """
     Displays a video from a data file (.h5, .tiff, .tdb).
 
@@ -849,21 +850,23 @@ def view_data(input_path, h5_loc, z_select, lazy, show_trace, window, colormap):
     from astrocast.analysis import Video
 
     vid = Video(data=input_path, z_slice=z_select, h5_loc=h5_loc, lazy=lazy)
-    vid.show(show_trace=show_trace, window=window, colormap=colormap)
-    napari.run()
+    viewer = vid.show(show_trace=show_trace, window=window, colormap=colormap)
 
+    if not testing:
+        napari.run()
 
 @cli.command()
 @click.argument('event_dir', type=click.Path())
 @click_custom_option('--video-path', type=click.STRING, default="infer", help='Path to the data used for detection.')
-@click_custom_option('--h5-loc', type=click.STRING, default="",
+@click_custom_option('--h5-loc', type=click.STRING, default="df/ch0",
                      help='Name or identifier of the dataset used for detection.'
                      )
 @click_custom_option('--z-select', type=(click.INT, click.INT), default=None,
                      help='Range of frames to select in the Z dimension, given as a tuple (start, end).'
                      )
 @click_custom_option('--lazy', type=click.BOOL, default=True, help='Whether to implement lazy loading.')
-def view_detection_results(event_dir, video_path, h5_loc, z_select, lazy):
+@click_custom_option('--testing', type=click.BOOL, default=False, help='Automatically closes viewer for testing purposes.')
+def view_detection_results(event_dir, video_path, h5_loc, z_select, lazy, testing):
     """
     view the detection results; optionally overlayed on the input video.
 
@@ -888,9 +891,10 @@ def view_detection_results(event_dir, video_path, h5_loc, z_select, lazy):
 
     event = Events(event_dir=event_dir, data=video_path, h5_loc=h5_loc, z_slice=z_select, lazy=lazy)
     viewer = event.show_event_map(video=None, h5_loc=None, z_slice=z_select)
-    viewer.show()
-    napari.run()
 
+    if not testing:
+        viewer.show()
+        napari.run()
 
 @cli.command()
 @click.argument('input-path', type=click.Path())
@@ -905,7 +909,7 @@ def view_detection_results(event_dir, video_path, h5_loc, z_select, lazy):
                      help='Range of frames to select in the Z dimension, given as a tuple (start, end).'
                      )
 @click_custom_option('--lazy', type=click.BOOL, default=True, help='Whether to implement lazy loading.')
-@click_custom_option('--chunk-size', type=(int, int), default=None,
+@click_custom_option('--chunk-size', type=(click.INT, click.INT, click.INT), default=None,
                      help='Chunk size for saving the results in the output file. If not provided, a default chunk '
                           'size will be used.'
                      )
@@ -945,7 +949,7 @@ def export_video(input_path, output_path, h5_loc_in, h5_loc_out, z_select, lazy,
     export_video('input.h5', 'output.h5', h5_loc_in='dataset1', h5_loc_out='dataset2', z_select=(10, 20), lazy=True, chunk_size=(100, 100), compression='gzip', overwrite=True)
     """
 
-    if Path(output_path).exists():
+    if Path(output_path).exists() and not overwrite:
         logging.error(f"file already exists {output_path}. Please choose a different output location "
                       f"or use '--overwrite True'."
                       )
@@ -965,12 +969,10 @@ def export_video(input_path, output_path, h5_loc_in, h5_loc_out, z_select, lazy,
 
     io.save(output_path, data=data, h5_loc=h5_loc_out, chunks=chunk_size, compression=compression, overwrite=overwrite)
 
-
 @cli.command()
 @click_custom_option('--input-path', type=click.Path(), default=None, help='Path to input file.')
 @click_custom_option('--h5-loc', type=click.STRING, default=None,
-                     help='Name or identifier of the dataset in the h5 file.'
-                     )
+                     help='Name or identifier of the dataset in the h5 file.')
 def explorer(input_path, h5_loc):
 
     from astrocast.app_preparation import Explorer
@@ -1033,6 +1035,9 @@ def climage(input_path, loc, z, size, equalize, clip_limit):
     io = IO()
     data = io.load(input_path, h5_loc=loc, lazy=True, z_slice=(z0, z1))
     print(f"input path: {input_path}")
+
+    # enforce even size
+    size = [size[0] + size[0] % 2, size[1] + size[1] % 2]
 
     for zi in z:
         img = data[zi-z0, :, :].astype(float).compute()

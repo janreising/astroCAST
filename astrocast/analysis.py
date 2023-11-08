@@ -685,7 +685,6 @@ class Events(CachedClass):
     def show_event_map(self, video=None, h5_loc=None, z_slice=None, lazy=True):
 
         import napari
-        from napari.utils.events import Event
 
         viewer = napari.Viewer()
 
@@ -693,11 +692,11 @@ class Events(CachedClass):
 
         # check if video was loaded at initialization
         if video is None and self.data is not None:
+
             logging.info(f"loading video from path provided during initialization."
                          f" Users need to ensure that the z_slice parameters matches.")
             data = self.data.get_data()
-            logging.warning("data: ", type(data))
-            viewer.add_image(data, )
+            viewer.add_image(data)
 
         else:
             data = io.load(path=video, h5_loc=h5_loc, z_slice=z_slice, lazy=lazy)

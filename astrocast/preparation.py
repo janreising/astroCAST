@@ -220,9 +220,24 @@ class Input:
             with warnings.catch_warnings():
                 warnings.filterwarnings("ignore", category=UserWarning)
 
+                cz, _, _ = data[k].chunks
+                dtype = data[k].dtype
+
+                if not isinstance(cz, (int, float)):
+                    cz = cz[0]
+
+                def custom_resize(arr, shape):
+
+                    dtype = arr.dtype
+
+                    arr = resize(image=arr, output_shape=shape, anti_aliasing=True)
+                    arr = arr.astype(dtype)
+
+                    return arr
+
                 data[k] = data[k].map_blocks(
-                    lambda chunk: resize(chunk, (chunk.shape[0], rX, rY), anti_aliasing=True),
-                    chunks=(1, rX, rY))
+                    lambda chunk: custom_resize(chunk, (cz, rX, rY)),
+                    chunks=(cz, rX, rY), dtype=dtype)
 
             data[k] = data[k].astype(int)
 
@@ -749,6 +764,7 @@ class IO:
                 logging.info(f"saving channel {k} to '{loc}'")
 
                 if isinstance(channel, da.Array):
+
                     # Save Dask array
                     with ProgressBar(minimum=10, dt=1):
                         da.to_hdf5(fpath, loc, channel, chunks=chunks, compression=compression, shuffle=False)
