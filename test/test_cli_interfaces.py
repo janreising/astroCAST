@@ -194,6 +194,143 @@ class Test_ConvertInput:
             else:
                 assert f["data/ch0"].chunks == tuple(map(int, chunks.split(",")))
 
+class Test_MotionCorrection:
+
+    def setup_method(self):
+        pass
+
+    def teardown_method(self):
+        pass
+
+    def test_default(self):
+        raise NotImplementedError
+
+class Test_SubtractDelta:
+
+    def setup_method(self):
+
+        temp_dir = tempfile.TemporaryDirectory()
+        temp_file = Path(temp_dir.name).joinpath("temp.h5")
+
+        with h5.File(temp_file.as_posix(), "a") as f:
+            f.create_dataset("data/ch0", data=np.random.randint(0, 100, size=(10, 100, 100)))
+
+        self.runner = CliRunner()
+
+        self.temp_dir = temp_dir
+        self.temp_file = temp_file
+
+    def teardown_method(self):
+        self.temp_dir.cleanup()
+
+    def test_default(self):
+
+        out_file = self.temp_file.with_suffix(".def.h5")
+        result = self.runner.invoke(subtract_delta, [self.temp_file.as_posix(),
+                                                     "--output-path", out_file.as_posix(),
+                                                     "--h5-loc-in", "data/ch0",
+                                                     "--window", 2])
+
+        # Check that the command ran successfully
+        assert result.exit_code == 0, f"error: {result.output}"
+
+        with h5.File(self.temp_file.as_posix(), "r") as f:
+            assert "data/ch0" in f
+
+    @pytest.mark.parametrize("method", ['background', 'dF', 'dFF'])
+    def test_method(self, method):
+
+        out_file = self.temp_file.with_suffix(".met.h5")
+        result = self.runner.invoke(subtract_delta, [self.temp_file.as_posix(),
+                                                     "--output-path", out_file.as_posix(),
+                                                     "--h5-loc-in", "data/ch0",
+                                                     "--method", method,
+                                                     "--window", 2])
+
+        # Check that the command ran successfully
+        assert result.exit_code == 0, f"error: {result.output}"
+
+        with h5.File(self.temp_file.as_posix(), "r") as f:
+            assert "data/ch0" in f
+
+    def test_pchunks(self):
+
+        out_file = self.temp_file.with_suffix(".met.h5")
+        result = self.runner.invoke(subtract_delta, [self.temp_file.as_posix(),
+                                                     "--output-path", out_file.as_posix(),
+                                                     "--h5-loc-in", "data/ch0",
+                                                     "--processing-chunks", "1,25,25",
+                                                     "--window", 3])
+
+        # Check that the command ran successfully
+        assert result.exit_code == 0, f"error: {result.output}"
+
+        with h5.File(self.temp_file.as_posix(), "r") as f:
+            assert "data/ch0" in f
+
+    def test_overwrite(self):
+
+        out_file = self.temp_file.with_suffix(".ov.h5")
+        result = self.runner.invoke(subtract_delta, [self.temp_file.as_posix(),
+                                                     "--output-path", out_file.as_posix(),
+                                                     "--h5-loc-in", "data/ch0",
+                                                     "--overwrite-first-frame", False,
+                                                     "--window", 3])
+
+        # Check that the command ran successfully
+        assert result.exit_code == 0, f"error: {result.output}"
+
+        with h5.File(self.temp_file.as_posix(), "r") as f:
+            assert "data/ch0" in f
+
+    def test_lazy(self):
+
+        out_file = self.temp_file.with_suffix(".laz.h5")
+        result = self.runner.invoke(subtract_delta, [self.temp_file.as_posix(),
+                                                     "--output-path", out_file.as_posix(),
+                                                     "--h5-loc-in", "data/ch0",
+                                                     "--lazy", False,
+                                                     "--window", 3])
+
+        # Check that the command ran successfully
+        assert result.exit_code == 0, f"error: {result.output}"
+
+        with h5.File(self.temp_file.as_posix(), "r") as f:
+            assert "data/ch0" in f
+
+class Test_TrainDenoiser:
+
+    def setup_method(self):
+        pass
+
+    def teardown_method(self):
+        pass
+
+    def test_default(self):
+        raise NotImplementedError
+
+class Test_Denoise:
+
+    def setup_method(self):
+        pass
+
+    def teardown_method(self):
+        pass
+
+    def test_default(self):
+        raise NotImplementedError
+
+class Test_Detection:
+
+    def setup_method(self):
+        pass
+
+    def teardown_method(self):
+        pass
+
+    def test_default(self):
+        raise NotImplementedError
+
 class Test_Export_Video:
 
     def setup_method(self):

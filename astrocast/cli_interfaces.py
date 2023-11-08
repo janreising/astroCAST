@@ -346,7 +346,7 @@ def motion_correction(
 @click_custom_option('--h5-loc-in', type=click.STRING, default="",
                      help='Location of the data in the HDF5 file (if applicable).'
                      )
-@click_custom_option('--method', type=click.Choice(['background', 'dF', 'dFF']), default='background',
+@click_custom_option('--method', type=click.Choice(['background', 'dF', 'dFF']), default='dF',
                      help='Method to use for delta calculation.'
                      )
 @click_custom_option('--processing-chunks', type=click.STRING, default="infer", help='Chunk size for data processing.')
