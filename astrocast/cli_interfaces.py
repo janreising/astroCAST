@@ -1119,7 +1119,7 @@ def push_slurm_tasks(log_path, cfg_path, data_path, tasks, base_command, account
 
                 dict_ = tasks[i]
 
-                cmd = base_command.copy()
+                cmd = base_command[:]
 
                 k = dict_["key"]
                 print(f"\tchecking: {k}")
