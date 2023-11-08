@@ -1,7 +1,9 @@
+import ast
 import datetime as dt
 import logging
 import os
 import shutil
+import sys
 import time
 import warnings
 from pathlib import Path
@@ -1102,6 +1104,9 @@ def push_slurm_tasks(log_path, cfg_path, data_path, tasks, base_command, account
     log_path = Path(log_path)
 
     files = [data_path] if data_path.is_file() else list(data_path.glob("*/*.h5"))
+
+    if isinstance(tasks, str):
+        tasks = ast.literal_eval(tasks)
 
     task_ids = sorted(tasks.keys())
     for f in files:
