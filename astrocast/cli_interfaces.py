@@ -1097,6 +1097,10 @@ def push_slurm_tasks(log_path, cfg_path, data_path, tasks, base_command, account
     if tasks is None:
         raise ValueError(f"Please provide a dictionary of tasks.")
 
+    data_path = Path(data_path)
+    cfg_path = Path(cfg_path)
+    log_path = Path(log_path)
+
     files = [data_path] if data_path.is_file() else list(data_path.glob("*/*.h5"))
 
     task_ids = sorted(list(tasks.keys()))
