@@ -1,9 +1,9 @@
 import tempfile
 import time
 
-import numpy as np
 import pytest
 
+from astrocast.autoencoders import CNN_Autoencoder
 from astrocast.reduction import *
 from astrocast.helper import DummyGenerator
 
@@ -19,17 +19,7 @@ class Test_FeatureExtraction:
         events = DG.get_events()
 
         FE = FeatureExtraction(events)
-        features = FE.get_features()
-
-        assert len(events) == len(features)
-
-    def test_add_columns(self):
-
-        DG = DummyGenerator(ragged=False)
-        events = DG.get_events()
-
-        FE = FeatureExtraction(events)
-        features = FE.get_features(additional_columns=["dz"])
+        features = FE.all_features()
 
         assert len(events) == len(features)
 
@@ -44,12 +34,12 @@ class Test_FeatureExtraction:
 
             FE = FeatureExtraction(events, cache_path=tmp_path)
             t0 = time.time()
-            features_1 = FE.get_features()
+            features_1 = FE.all_features()
             d1 = time.time() - t0
 
             FE = FeatureExtraction(events, cache_path=tmp_path)
             t0 = time.time()
-            features_2 = FE.get_features()
+            features_2 = FE.all_features()
             d2 = time.time() - t0
 
             assert d2 < d1, f"caching is taking too long: {d2} > {d1}"
@@ -60,52 +50,52 @@ class Test_CNN:
 
     def test_training(self):
 
-        DG = DummyGenerator(num_rows=11, trace_length=16, ragged=False)
+        trace_length = 16
+        DG = DummyGenerator(num_rows=32, trace_length=trace_length, ragged=False)
         data = DG.get_array()
 
-        cnn = CNN()
-        cnn.train(data, epochs=2)
-
-    def test_training_modified(self):
-
-        DG = DummyGenerator(num_rows=11, trace_length=16, ragged=False)
-        data = DG.get_array()
-
-        cnn = CNN()
-        cnn.train(data, epochs=2, dropout=0.1, regularize_latent=0.01)
+        cnn = CNN_Autoencoder(target_length=trace_length)
+        train_dataset, val_dataset, test_dataset = cnn.split_dataset(data)
+        losses = cnn.train_autoencoder(X_train=train_dataset, X_val=val_dataset, X_test=test_dataset,
+                              epochs=2, batch_size=4)
 
     def test_embeding(self):
-        DG = DummyGenerator(num_rows=11, trace_length=16, ragged=False)
+
+        trace_length = 16
+        DG = DummyGenerator(num_rows=32, trace_length=trace_length, ragged=False)
         data = DG.get_array()
 
-        cnn = CNN()
-        _, X_test, _, _ = cnn.train(data, epochs=2)
+        cnn = CNN_Autoencoder(target_length=trace_length)
+        train_dataset, val_dataset, test_dataset = cnn.split_dataset(data)
+        losses = cnn.train_autoencoder(X_train=train_dataset, X_val=val_dataset, X_test=test_dataset,
+                              epochs=2, batch_size=4)
 
-        Y_test = cnn.embed(X_test)
+        Y_test = cnn.embed(data)
 
     def test_plotting(self):
 
-        DG = DummyGenerator(num_rows=11, trace_length=16, ragged=False)
+        trace_length = 16
+        DG = DummyGenerator(num_rows=32, trace_length=trace_length, ragged=False)
         data = DG.get_array()
 
-        cnn = CNN()
-        hist, X_test, Y_test, MSE = cnn.train(data, epochs=1)
+        cnn = CNN_Autoencoder(target_length=trace_length)
+        train_dataset, val_dataset, test_dataset = cnn.split_dataset(data)
+        losses = cnn.train_autoencoder(X_train=train_dataset, X_val=val_dataset, X_test=test_dataset,
+                              epochs=2, batch_size=4)
 
-        cnn.plot_history()
-        cnn.plot_examples(X_test, Y_test)
+        cnn.plot_examples_pytorch(test_dataset)
 
-    def test_save_load(self, tmp_path):
+    def test_save_load(self, tmp_path, target_length=18):
 
-        DG = DummyGenerator(num_rows=11, trace_length=16, ragged=False)
-        data = DG.get_array()
+        with tempfile.TemporaryDirectory() as temp:
 
-        cnn = CNN()
-        hist, X_test, Y_test, MSE = cnn.train(data, epochs=1)
-        cnn.save_model(tmp_path)
+            tempdir = Path(temp)
+            save_path = tempdir.joinpath("model_paramters.pth")
 
-        cnn_naive = CNN()
-        cnn_naive.load_model(tmp_path)
-        cnn_naive.embed(X_test)
+            autoencoder = CNN_Autoencoder(target_length=target_length)
+            autoencoder.save(save_path)
+
+            loaded_model = CNN_Autoencoder.load(save_path, target_length=target_length)
 
 @pytest.mark.serial
 class Test_UMAP:

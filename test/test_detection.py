@@ -10,8 +10,8 @@ from astrocast.preparation import IO
 class Test_Detector:
 
     @pytest.mark.parametrize("extension", [".h5", ".tiff"])
-    @pytest.mark.parametrize("save_active_pixels", [True, False])
-    def test_real_data(self, extension, save_active_pixels):
+    @pytest.mark.parametrize("debug", [True, False])
+    def test_real_data(self, extension, debug):
 
         si = SampleInput()
         input_ = si.get_test_data(extension=extension)
@@ -20,8 +20,8 @@ class Test_Detector:
             tmpdir = Path(dir)
             assert tmpdir.is_dir()
 
-            det = Detector(input_,  output=tmpdir)
-            det.run(dataset = "dff/ch0", lazy=False, save_activepixels = save_active_pixels)
+            det = Detector(input_,  output=tmpdir.joinpath("tempData"))
+            det.run(h5_loc="dff/ch0", lazy=False, debug=debug)
 
             dir_ = det.output_directory
 
@@ -35,8 +35,10 @@ class Test_Detector:
                 is_file = dir_.joinpath(file_name)
                 assert is_file, f"{file_name} file does not exist in output directory"
 
-            if save_active_pixels:
-                assert dir_.joinpath("active_pixels.tiff").is_file()
+            if debug:
+                assert dir_.joinpath("debug_smoothed_input.tiff").is_file()
+                assert dir_.joinpath("debug_active_pixels.tiff").is_file()
+                assert dir_.joinpath("debug_active_pixels_morphed.tiff").is_file()
 
     def test_sim_data(self):
 
@@ -46,14 +48,14 @@ class Test_Detector:
 
             path = tmpdir.joinpath("sim.h5")
             h5_loc = "dff/ch0"
-            save_active_pixels = False
 
             sim = EventSim()
-            video, num_events = sim.simulate(shape=(50, 100, 100))
-            IO.save(path=path, data={h5_loc:video})
+            video, num_events = sim.simulate(shape=(50, 100, 100), skip_n=5, event_intensity=100, background_noise=1)
+            io = IO()
+            io.save(path=path, data={h5_loc:video})
 
             det = Detector(path.as_posix(),  output=None)
-            events = det.run(dataset=h5_loc, lazy=True, save_activepixels=save_active_pixels)
+            events = det.run(h5_loc=h5_loc, lazy=True, debug=False)
 
             dir_ = det.output_directory
 
@@ -65,12 +67,6 @@ class Test_Detector:
             expected_files = ["event_map.tdb", "event_map.tiff", "time_map.npy", "events.npy", "meta.json"]
             for file_name in expected_files:
                 assert dir_.joinpath(file_name).exists(), f"cannot find {file_name}"
-
-            # optional
-            if save_active_pixels:
-                assert dir_.joinpath("active_pixels.tiff").is_file(), "can't find active_pixels.tiff but should"
-            else:
-                assert not dir_.joinpath("active_pixels.tiff").is_file(), "can find active_pixels.tiff but shouldn't"
 
             # check event detection
             assert np.allclose(len(events), num_events, rtol=0.15), f"Found {len(events)} instead of {num_events}."

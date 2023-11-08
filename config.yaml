@@ -71,10 +71,10 @@ denoise:
   overlap: 10
   padding: edge 
   normalize: global
-  loc: "data/ch0"
+  loc: "mc/ast"
   in_memory: false
   logging_level: 20  # INFO level
-  out_loc: null 
+  out_loc: "dn/ast"
   dtype: "same"
   chunk_size: null
   rescale: true

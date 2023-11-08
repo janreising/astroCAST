@@ -279,8 +279,20 @@ class Test_normalization:
         res = norm.run({0: "diff"})
 
         for r in range(len(data)):
-            a = res[r].astype(float) if isinstance(res[r], np.ndarray) else res[r].to_numpy().astype(float)
-            b = np.diff(norm.data[r].astype(float)) if isinstance(norm.data[r], np.ndarray) else np.diff(norm.data[r].to_numpy().astype(float))
+
+            a = res[r]
+            if not isinstance(a, np.ndarray):
+                a = a.to_numpy()
+            a = a.astype(float)
+
+            b = norm.data[r]
+            if not isinstance(b, np.ndarray):
+                b = b.to_numpy()
+            b = b.astype(float)
+            b = np.diff(b)
+            b = np.concatenate([np.array([0]), b])
+
+            assert a.shape == b.shape
             assert np.allclose(a, b)
 
     @staticmethod

@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "astrocast"
-version = "0.2.2.1"
+version = "0.3.1"
 description = "Package to analyze calcium fluorescence events in astrocytes"
 authors = ["Jan Philipp Reising <jan.reising@ki.se>", "Ana Cristina González"]
 
@@ -54,6 +54,8 @@ keras = "*"
 datashader = "^0.15.2"
 llvmlite = "~0.39"
 gdown = "^4.7.1"
+climage = "^0.2.0"
+simple-slurm = "^0.2.6"
 
 [tool.poetry.scripts]
 astrocast = 'astrocast.cli_interfaces:cli'
@@ -68,6 +70,7 @@ optional = true
 [tool.poetry.group.vis.dependencies]
 napari = {version = "0.4.14", extras = ["all"]}
 napari-plot = "^0.1.5"
+napari-time-series-plotter = "*"
 
 [build-system]
 requires = ["poetry-core"]

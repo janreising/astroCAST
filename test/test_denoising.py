@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from astrocast.denoising import FullFrameGenerator, SubFrameGenerator
+from astrocast.denoising import SubFrameGenerator
 from astrocast.denoising import Network
 import os
 
@@ -12,23 +12,6 @@ from astrocast.helper import SampleInput
 from astrocast.preparation import IO
 
 class Test_Generators:
-
-    @pytest.mark.parametrize("extension", [".h5", ".tiff"])
-    @pytest.mark.parametrize("pre_post_frame", [5, (3, 2)])
-    def test_generator_full_frame(self, extension, pre_post_frame):
-
-        si = SampleInput()
-        file_path = si.get_test_data(extension=extension)
-        loc = si.get_h5_loc()
-
-        gen = FullFrameGenerator(file_path=file_path, loc=loc, pre_post_frame=pre_post_frame,
-                                 batch_size=25)
-
-        for ep in range(2):
-            for item in gen:
-                pass
-
-            gen.on_epoch_end()
 
     @pytest.mark.parametrize("extension", [".h5", ".tiff"])
     @pytest.mark.parametrize("normalize", [None, "local", "global"])
@@ -63,29 +46,7 @@ class Test_Generators:
                                        allowed_rotation=[1, 2, 3], allowed_flip=[0, 1], shuffle=True, **param)
 
         net = Network(train_generator=train_gen, val_generator=train_gen, n_stacks=1, kernel=4, batchNormalize=False, use_cpu=True)
-        net.run(batch_size=train_gen.batch_size, num_epochs=2, patience=1, min_delta=0.01, save_model=None, load_weights=False)
-
-    @pytest.mark.xdist_group(name="tensorflow")
-    @pytest.mark.parametrize("extension", [".h5", ".tiff"])
-    def test_inference_full(self, extension, out_path=None):
-
-        si = SampleInput()
-        file_path = si.get_test_data(extension=extension)
-        loc = si.get_h5_loc()
-
-        gen = FullFrameGenerator(file_path=file_path, loc=loc, pre_post_frame=5,
-                                 batch_size=25, total_samples=50)
-
-        net = Network(train_generator=gen, val_generator=gen, n_stacks=1, kernel=8, batchNormalize=False, use_cpu=True)
-        net.run(batch_size=gen.batch_size, num_epochs=2, patience=1, min_delta=0.01, save_model=None, load_weights=False)
-        model = net.model
-
-        # out_path = "testdata/sample_0_inf.tiff"
-        gen.infer(model=model, output=out_path, )
-
-        if out_path is not None:
-            assert os.path.isfile(out_path), "cannot find output tiff: {}".format(out_path)
-            os.remove(out_path)
+        net.run(batch_size=train_gen.batch_size, num_epochs=2, patience=1, min_delta=0.01, save_model=None)
 
     @pytest.mark.xdist_group(name="tensorflow")
     @pytest.mark.parametrize("extension", [".h5", ".tiff"])
@@ -115,7 +76,7 @@ class Test_Generators:
                                            allowed_rotation=[0], allowed_flip=[-1], shuffle=True, **param)
 
             net = Network(train_generator=train_gen, val_generator=val_gen, n_stacks=1, kernel=8, batchNormalize=False, use_cpu=True)
-            net.run(batch_size=train_gen.batch_size, num_epochs=2, patience=1, min_delta=0.01, save_model=None, load_weights=False)
+            net.run(batch_size=train_gen.batch_size, num_epochs=2, patience=1, min_delta=0.01, save_model=None)
             model = net.model
 
             inf_gen = SubFrameGenerator(padding="edge", batch_size=25,
