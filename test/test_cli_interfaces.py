@@ -198,13 +198,54 @@ class Test_ConvertInput:
 class Test_MotionCorrection:
 
     def setup_method(self):
-        pass
+
+        temp_dir = tempfile.TemporaryDirectory()
+        tmpdir = Path(temp_dir.name)
+        assert tmpdir.is_dir()
+
+        path = tmpdir.joinpath("sim.h5")
+        h5_loc = "data/ch0"
+
+        sim = EventSim()
+        video, num_events = sim.simulate(shape=(250, 250, 250),
+                                         skip_n=5, event_intensity=100, background_noise=1,
+                                         gap_space=5, gap_time=3)
+
+        io = IO()
+        io.save(path=path, data=video, h5_loc=h5_loc)
+
+        assert path.exists()
+
+        self.temp_dir = temp_dir
+        self.video_path = path
+        self.h5_loc = h5_loc
+        self.num_events = num_events
+
+        self.runner = CliRunner()
 
     def teardown_method(self):
-        pass
+        self.temp_dir.cleanup()
 
-    def test_default(self):
-        raise NotImplementedError
+    def run_with_parameters(self, params):
+
+        args = [self.video_path.as_posix(), "--h5-loc", self.h5_loc]
+        args += params
+
+        result = self.runner.invoke(motion_correction, args)
+
+        assert result.exit_code == 0, f"error: {result.output}"
+
+    def test_custom_output_path(self):
+
+        out = self.video_path.with_suffix(f".custom.h5")
+        self.run_with_parameters(["--output-path", out.as_posix()])
+
+    def test_custom_chunks(self):
+        self.run_with_parameters(["--infer-chunks", "--chunks", "2", "10", "10"])
+
+    def test_non_inference(self):
+        self.run_with_parameters(["--infer-chunks"])
+
 
 class Test_SubtractDelta:
 
@@ -318,8 +359,6 @@ class Test_Denoise:
     def teardown_method(self):
         pass
 
-    def test_default(self):
-        raise NotImplementedError
 
 class Test_Detection:
 

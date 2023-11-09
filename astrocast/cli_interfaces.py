@@ -69,17 +69,25 @@ def check_output(output_path, input_path, h5_loc_save, overwrite):
     return output_path
 
 
-def parse_chunks(chunks):
-    if chunks is None or chunks == "infer":
-        return chunks
+def parse_chunks(infer_chunks, chunks):
 
-    else:
+    if infer_chunks:
+
+        if chunks is not None:
+            logging.warning(f"inferring chunks, although 'chunks' parameter was provided.")
+
+        chunks = "infer"
+
+    elif chunks is None or isinstance(chunks, tuple):
+        pass
+
+    elif isinstance(chunks, str):
         chunks = tuple(int(c) for c in chunks.split(","))
         if len(chunks) != 3:
-            raise ValueError(
-                f"please provide 'chunks' parameter as None, infer or comma-separated list of 3 int values."
-                )
-        return chunks
+            raise ValueError(f"Provide 'chunks' parameter as None, infer or comma-separated list of 3 int values."
+                             f"Not: {type(chunks)}, {chunks}")
+
+    return chunks
 
 
 class UserFeedback:
@@ -197,7 +205,8 @@ def cli(ctx, config):
 @click_custom_option('--in-memory', is_flag=True, help='If True, the processed data is loaded into memory.')
 @click_custom_option('--h5-loc-in', default=None, help='Prefix to use when loading the processed data.')
 @click_custom_option('--h5-loc-out', default="data", help='Prefix to use when saving the processed data.')
-@click_custom_option('--chunks', type=click.STRING, default="infer",
+@click_custom_option('--infer-chunks', is_flag=True, default=True, help='Infer chunks size.')
+@click_custom_option('--chunks', type=(click.INT, click.INT, click.INT), default=None,
                      help='Chunk size to use when saving to HDF5 or TileDB.'
                      )
 @click_custom_option('--compression', default=None, help='Compression method to use when saving to HDF5 or TileDB.')
@@ -206,7 +215,7 @@ def cli(ctx, config):
                      )
 def convert_input(
         input_path, logging_level, output_path, sep, num_channels, channel_names, z_slice, lazy, subtract_background,
-        subtract_func, rescale, in_memory, h5_loc_in, h5_loc_out, chunks, compression, overwrite
+        subtract_func, rescale, in_memory, h5_loc_in, h5_loc_out, chunks, compression, overwrite, infer_chunks
         ):
     """
     Convert user files to astroCAST compatible format using the Input class.
@@ -222,7 +231,7 @@ def convert_input(
             return 0
 
         # check chunks
-        chunks = parse_chunks(chunks)
+        chunks = parse_chunks(infer_chunks, chunks)
 
         channel_names = channel_names.split(",")
         if len(channel_names) != num_channels:
@@ -251,7 +260,7 @@ def convert_input(
 @click_custom_option('--h5-loc-save', type=click.STRING, default="mc/ch0",
                      help='Location within the HDF5 file to save the data.'
                      )
-@click_custom_option('--max-shifts', type=click.Tuple([int, int]), default=(50, 50),
+@click_custom_option('--max-shifts', type=(click.INT, click.INT), default=(50, 50),
                      help='Maximum allowed rigid shift.'
                      )
 @click_custom_option('--niter-rig', type=click.INT, default=3,
@@ -287,10 +296,11 @@ def convert_input(
 @click_custom_option('--nonneg-movie', type=click.BOOL, default=True,
                      help='Make the saved movie and template mostly nonnegative by removing min_mov from movie.'
                      )
-@click_custom_option('--gsig-filt', type=click.Tuple([int, int]), default=(20, 20),
+@click_custom_option('--gsig-filt', type=(click.INT, click.INT), default=(20, 20),
                      help='Tuple indicating the size of the filter.'
                      )
-@click_custom_option('--chunks', type=click.STRING, default=None,
+@click_custom_option('--infer-chunks', is_flag=True, default=True, help='Infer the chunks for the HDF5 file.')
+@click_custom_option('--chunks', type=(click.INT, click.INT, click.INT), default=None,
                      help='Chunk shape for creating a dask array when saving to an HDF5 file.'
                      )
 @click_custom_option('--compression', type=click.STRING, default=None,
@@ -303,7 +313,7 @@ def motion_correction(
         input_path, working_directory, logging_level, output_path, h5_loc,
         max_shifts, niter_rig, splits_rig, num_splits_to_process_rig, strides,
         overlaps, pw_rigid, splits_els, num_splits_to_process_els, upsample_factor_grid,
-        max_deviation_rigid, nonneg_movie, gsig_filt, h5_loc_save, chunks, compression, overwrite
+        max_deviation_rigid, nonneg_movie, gsig_filt, h5_loc_save, infer_chunks, chunks, compression, overwrite
         ):
     """
     Correct motion artifacts of input data using the MotionCorrection class.
@@ -319,7 +329,7 @@ def motion_correction(
             return 0
 
         # check chunks
-        chunks = parse_chunks(chunks)
+        chunks = parse_chunks(infer_chunks, chunks)
 
         # Initialize the MotionCorrection instance
         logging.info("creating motion correction instance ...")
@@ -349,8 +359,10 @@ def motion_correction(
 @click_custom_option('--method', type=click.Choice(['background', 'dF', 'dFF']), default='dF',
                      help='Method to use for delta calculation.'
                      )
-@click_custom_option('--processing-chunks', type=click.STRING, default="infer", help='Chunk size for data processing.')
-@click_custom_option('--save-chunks', type=click.STRING, default="infer", help='Chunk size for saving.')
+@click_custom_option('--infer-processing-chunks', is_flag=True, default=True, help='Infer the chunks for data processing.')
+@click_custom_option('--processing-chunks', type=(click.INT, click.INT, click.INT), default=None, help='Chunk size for data processing.')
+@click_custom_option('--infer-save-chunks', is_flag=True, default=True, help='Infer the chunks for the HDF5 file.')
+@click_custom_option('--save-chunks', type=(click.INT, click.INT, click.INT), default=None, help='Chunk size for saving.')
 @click_custom_option('--overwrite-first-frame', type=click.BOOL, default=True,
                      help='Whether to overwrite the first frame with the second frame after delta calculation.'
                      )
@@ -366,8 +378,9 @@ def motion_correction(
                      help='Flag for overwriting previous result in output location'
                      )
 def subtract_delta(
-        input_path, output_path, h5_loc_in, method, window, processing_chunks, save_chunks, overwrite_first_frame, lazy, h5_loc_out,
-        compression, logging_level, overwrite
+        input_path, output_path, h5_loc_in, method, window,
+        infer_processing_chunks, processing_chunks, infer_save_chunks, save_chunks,
+        overwrite_first_frame, lazy, h5_loc_out, compression, logging_level, overwrite
         ):
     """
     Subtract baseline of input using the Delta class.
@@ -386,8 +399,8 @@ def subtract_delta(
             return 0
 
         # check chunks
-        processing_chunks = parse_chunks(processing_chunks)
-        save_chunks = parse_chunks(save_chunks)
+        processing_chunks = parse_chunks(infer_processing_chunks, processing_chunks)
+        save_chunks = parse_chunks(infer_save_chunks, save_chunks)
 
         # Initialize the Delta instance
         logging.info("creating delta instance ...")
