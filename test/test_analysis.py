@@ -2,18 +2,14 @@ import tempfile
 import time
 
 import dask.array
-import numpy as np
 import pytest
 
 from astrocast.analysis import *
-from astrocast.clustering import Distance
-from astrocast.detection import Detector
-from astrocast.helper import EventSim, DummyGenerator
+from astrocast.helper import EventSim
 
 import matplotlib
 matplotlib.use('Agg')  # Use the Agg backend
 
-import matplotlib.pyplot as plt
 
 class Test_Events:
 

@@ -1236,7 +1236,7 @@ class Video:
                     self.data[loc] = io.load(data, h5_loc=loc, lazy=lazy, z_slice=z_slice)
 
             else:
-                print("loaded")
+                logging.info("Data already loaded into memory.")
                 self.data = io.load(data, h5_loc="", lazy=lazy, z_slice=z_slice)
                 self.Z, self.X, self.Y = self.data.shape
 

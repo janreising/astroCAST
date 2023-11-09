@@ -742,6 +742,8 @@ class Test_ViewData:
     def teardown_method(self):
         self.temp_dir.cleanup()
 
+    @pytest.mark.napari
+    @pytest.mark.xdist_group(name="napari")
     def test_view_data(self):
 
         result = self.runner.invoke(view_data, [self.temp_file.as_posix(), "data/ch0",
@@ -749,6 +751,8 @@ class Test_ViewData:
 
         assert result.exit_code == 0, f"error: {result.output}"
 
+    @pytest.mark.napari
+    @pytest.mark.xdist_group(name="napari")
     def test_view_data_color(self):
 
         result = self.runner.invoke(view_data, [self.temp_file.as_posix(), "data/ch0",
@@ -757,6 +761,8 @@ class Test_ViewData:
 
         assert result.exit_code == 0, f"error: {result.output}"
 
+    @pytest.mark.napari
+    @pytest.mark.xdist_group(name="napari")
     def test_view_data_z_select(self):
 
         result = self.runner.invoke(view_data, [self.temp_file.as_posix(), "data/ch0",
@@ -765,6 +771,8 @@ class Test_ViewData:
 
         assert result.exit_code == 0, f"error: {result.output}"
 
+    @pytest.mark.napari
+    @pytest.mark.xdist_group(name="napari")
     def test_view_data_lazy(self):
 
         result = self.runner.invoke(view_data, [self.temp_file.as_posix(), "data/ch0",
@@ -773,6 +781,8 @@ class Test_ViewData:
 
         assert result.exit_code == 0, f"error: {result.output}"
 
+    @pytest.mark.napari
+    @pytest.mark.xdist_group(name="napari")
     def test_view_data_trace(self):
 
         result = self.runner.invoke(view_data, [self.temp_file.as_posix(), "data/ch0",
@@ -782,6 +792,8 @@ class Test_ViewData:
 
         assert result.exit_code == 0, f"error: {result.output}"
 
+    @pytest.mark.napari
+    @pytest.mark.xdist_group(name="napari")
     def test_view_data_multi(self):
 
         result = self.runner.invoke(view_data, [self.temp_file.as_posix(), "data/ch0", "data/ch1",
@@ -826,6 +838,8 @@ class Test_ViewDetectionResults:
     def teardown_method(self):
         self.temp_dir.cleanup()
 
+    @pytest.mark.napari
+    @pytest.mark.xdist_group(name="napari")
     def test_view_detection_results(self):
 
         event_dir = str(self.event_dir.as_posix())
@@ -834,6 +848,8 @@ class Test_ViewDetectionResults:
                                                              "--testing", True])
         assert result.exit_code == 0, f"error: {result.output}"
 
+    @pytest.mark.napari
+    @pytest.mark.xdist_group(name="napari")
     def test_view_detection_infer(self):
 
         result = self.runner.invoke(view_detection_results, [self.event_dir.as_posix(),
@@ -842,6 +858,8 @@ class Test_ViewDetectionResults:
                                                              "--testing", True])
         assert result.exit_code == 0, f"error: {result.output}"
 
+    @pytest.mark.napari
+    @pytest.mark.xdist_group(name="napari")
     def test_view_detection_z(self):
 
         result = self.runner.invoke(view_detection_results, [self.event_dir.as_posix(),
@@ -851,6 +869,8 @@ class Test_ViewDetectionResults:
                                                              "--testing", True])
         assert result.exit_code == 0, f"error: {result.output}"
 
+    @pytest.mark.napari
+    @pytest.mark.xdist_group(name="napari")
     def test_view_detection_lazy(self):
 
         result = self.runner.invoke(view_detection_results, [self.event_dir.as_posix(),

@@ -878,7 +878,7 @@ def view_data(input_path, h5_loc, z_select, lazy, show_trace, window, colormap, 
     from astrocast.analysis import Video
 
     vid = Video(data=input_path, z_slice=z_select, h5_loc=h5_loc, lazy=lazy)
-    viewer = vid.show(show_trace=show_trace, window=window, colormap=colormap)
+    vid.show(show_trace=show_trace, window=window, colormap=colormap)
 
     if not testing:
         napari.run()
