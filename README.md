@@ -16,7 +16,9 @@ Astrocytic calcium event analysis is challenging due to its complex nature, spat
 ## Table of contents
 1. [Installation](#installation)
 2. [Documentation](#documentation)
-3. [Docker container](#docker-container)
+3. [Containers](#containers)
+    1. [Docker container](#docker-container)
+    2. [Singularity container](#singularity-container)
 4. [Contributing](#contributing)
 
 ## Installation<a name="installation">
@@ -30,10 +32,12 @@ Alternatively, clone this repository and install it locally:
 pip install poetry
 poetry install --with vis
 ```
+## Containers<a name="containers">
+Now astroCAST implementation can run from inside docker and singularity.
 
-## Docker container<a name="docker-container">
-Currently, we support astroCAST in MacOS through docker, but other operating systems supporting docker may as well run astroCAST docker container. For more infomation on how to install docker and create an acconsult, please refer to https://docs.docker.com/engine/install/.
+Currently, we support astroCAST in MacOS through docker, but other operating systems supporting docker may as well run astroCAST docker container. For more infomation on how to install docker and create an account, please refer to https://docs.docker.com/engine/install/. For more information on how to install singularity and create an account visit https://apptainer.org/docs/admin/main/installation.html.
 
+### Docker container<a name="docker-container">
 Once docker has been installed, run the following commands in the terminal:
 ```shell
 docker pull anacgon/astrocast:1.1
@@ -57,6 +61,23 @@ jupyter-lab --allow-root --no-browser --port=8888 --ip="*"
 Note: the explorer window will not be open automatically, instead you must copy and paste the URL provided in the console.
 
 For more detailed examples and usage instructions, please refer to to the companion paper [here](https://papers.ssrn.com/sol3/papers.cfm?abstract_id=4491483) (currently in preprint).
+
+### Singularity container<a name="singularity">
+Singularity (apptainer) now supports direct conversion of docker images into singularity. To pull and run the image use the following commands:
+NOTE: singularity must be installed.
+
+Pull singularity image directly from dockerhub.
+```shell
+singularity pull docker://anacgon/astrocast:1.1
+```
+
+Once image has been pulled, an SIF file will be created in the directory where the previous command was run. To run the singularity image then run:
+
+```shell
+singularity run --writable-tmpfs astrocast_1.1.sif
+```
+Note1: Singularity automatically mounts host file system, so manual mounting is not required.
+Note2: For the moment, we don't support running jupyer-labs inside singularity containers.
 
 ## Documentation<a name="documentation">
 
