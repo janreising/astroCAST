@@ -533,7 +533,6 @@ class IO:
 
         return df
 
-
     @staticmethod
     def _load_czi(path, lazy=False, z_slice=None):
 
@@ -678,7 +677,7 @@ class IO:
 
         return stack
 
-    def save(self, path, data, h5_loc=None, chunks=None, compression=None, overwrite=False):
+    def save(self, path, data, h5_loc=None, chunks=None, infer_strategy="balanced", compression=None, overwrite=False):
 
         """
         Save data to a specified file format.
@@ -718,15 +717,7 @@ class IO:
 
             # infer chunks if necessary
             if chunks == "infer":
-
-                new_chunks = []
-                for dim in channel.shape:
-                    dim = int(dim * 0.1)
-                    dim = min(100, dim)
-                    dim = max(1, dim)
-                    new_chunks.append(dim)
-
-                chunks = tuple(new_chunks)
+                chunks = self.infer_chunks(channel.shape, channel.dtype, strategy=infer_strategy)
                 logging.warning(f"inferred chunk size: {chunks}")
 
             # infer compression
@@ -902,6 +893,55 @@ class IO:
 
             else:
                 raise FileExistsError(f"output exists ({path}). Please choose a different output or set 'overwrite=True'")
+
+    @staticmethod
+    def infer_chunks(shape, dtype, strategy="balanced", chunk_bytes=int(1e6)):
+
+        """
+        Infer the chunks for the input data.
+        """
+
+        Z, X, Y = shape
+        item_size = np.dtype(dtype).itemsize
+
+        if strategy == "balanced":
+
+            exp = 0
+            while (2**exp)**3 * item_size < chunk_bytes:
+                exp += 1
+
+            c = int(2**exp)
+            cz = min(Z, c)
+            cx = min(X, c)
+            cy = min(Y, c)
+
+        elif strategy == "Z":
+
+            exp = 0
+            while Z * (2**exp)**2 * item_size < chunk_bytes:
+                exp += 1
+
+            c = int(2 ** exp)
+            cz = Z
+            cx = min(X, c)
+            cy = min(Y, c)
+
+        elif strategy == "XY":
+
+            exp = 0
+            while X * Y * (2 ** exp) * item_size < chunk_bytes:
+                exp += 1
+
+            c = int(2 ** exp)
+            cz = min(Z, c)
+            cx = X
+            cy = Y
+
+        else:
+            raise ValueError(f"Unknown strategy, please provide one of 'balanced', 'Z' or 'XY'")
+
+        return (cz, cx, cy)
+
 
 class MotionCorrection:
 

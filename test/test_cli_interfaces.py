@@ -340,25 +340,89 @@ class Test_SubtractDelta:
         with h5.File(self.temp_file.as_posix(), "r") as f:
             assert "data/ch0" in f
 
-class Test_TrainDenoiser:
+class Test_TrainDenoiser_Denoise:
 
     def setup_method(self):
-        pass
+        temp_dir = tempfile.TemporaryDirectory()
+        tmpdir = Path(temp_dir.name)
+        assert tmpdir.is_dir()
+
+        # parameters
+        h5_loc = "data/ch0"
+        X, Y = (250, 250)
+
+        sim = EventSim()
+        io = IO()
+        train_dir = tmpdir.joinpath("train")
+        train_dir.mkdir()
+
+        # create training files
+        for i in range(5):
+            video, _ = sim.simulate(shape=(100, X, Y), skip_n=5, event_intensity=100, background_noise=1,
+                                             gap_space=5, gap_time=3)
+            io.save(path=train_dir.joinpath(f"train_{i}.h5"), data=video, h5_loc=h5_loc)
+
+        # create validation files
+        for i in range(2):
+            video, _ = sim.simulate(shape=(50, X, Y), skip_n=5, event_intensity=100, background_noise=1,
+                                             gap_space=5, gap_time=3)
+            io.save(path=train_dir.joinpath(f"val_{i}.h5"), data=video, h5_loc=h5_loc)
+
+        # create inf file
+        video, _ = sim.simulate(shape=(25, X, Y), skip_n=5, event_intensity=100, background_noise=1,
+                                gap_space=5, gap_time=3)
+
+        inf_path = tmpdir.joinpath(f"inf.h5")
+        io.save(path=inf_path, data=video, h5_loc=h5_loc)
+
+        # model path
+        model_path = tmpdir.joinpath("model.h5")
+
+        # make sure directories exist
+        assert inf_path.is_file()
+        assert train_dir.is_dir()
+        assert len(list(train_dir.glob("*"))) > 3
+
+        self.temp_dir = temp_dir
+        self.runner = CliRunner()
+        self.h5_loc = h5_loc
+        self.train_dir = train_dir
+        self.inf_path = inf_path
+        self.model_path = model_path
 
     def teardown_method(self):
-        pass
+        self.temp_dir.cleanup()
 
-    def test_default(self):
-        raise NotImplementedError
+    def test_train_inf(self):
 
-class Test_Denoise:
+        args = ["--training-files", self.train_dir.joinpath("train_*.h5").as_posix()]
+        args += ["--validation-files", self.train_dir.joinpath("val_*.h5").as_posix()]
+        args += ["--input-size", "128", "128"]
+        args += ["--loc", self.h5_loc]
+        args += ["--epochs", 2]
+        args += ["--pre-post-frames", 2]
+        args += ["--max-per-file", 2]
+        args += ["--max-per-val-file", 2]
+        args += ["--save-path", self.model_path]
+        results = self.runner.invoke(train_denoiser, args)
 
-    def setup_method(self):
-        pass
+        assert results.exit_code == 0, f"error: {results.output}"
+        assert self.model_path.exists(), f"{list(self.train_dir.parent.glob('*'))}"
 
-    def teardown_method(self):
-        pass
+        args = []
+        args += [self.inf_path.as_posix()]
+        args += ["--model", self.model_path]
+        args += ["--loc", self.h5_loc]
+        args += ["--out-loc", "inf/ch0"]
+        args += ["--input-size", "128", "128"]
+        args += ["--pre-post-frames", 2]
+        results = self.runner.invoke(denoise, args)
 
+        assert results.exit_code == 0, f"error: {results.output}"
+        assert self.inf_path.is_file()
+        with h5.File(self.inf_path.as_posix(), "r") as f:
+            assert "inf/ch0" in f
+            assert f["data/ch0"].shape == f["inf/ch0"].shape
 
 class Test_Detection:
 

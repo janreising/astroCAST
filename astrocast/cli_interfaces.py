@@ -476,8 +476,7 @@ def subtract_delta(
                      help="Toggles between training on CPU and GPU. "
                           "GPU is significantly faster, but might not be available on all systems.")
 @click_custom_option('--in-memory', type=click.BOOL, default=False,
-                     help="Toggle if training data is loaded into memory."
-                          "GPU is significantly faster, but might not be available on all systems.")
+                     help="Toggle if training data is loaded into memory.")
 @click_custom_option('--logging-level', type=click.INT, default=logging.INFO, help='Logging level for messages.')
 def train_denoiser(training_files, validation_files, input_size, learning_rate, decay_rate, decay_steps,
                    n_stacks, kernel, batch_normalize, loss, pretrained_weights, use_cpu, train_rotation,
@@ -491,9 +490,14 @@ def train_denoiser(training_files, validation_files, input_size, learning_rate, 
         # Trainer
         if "*" in training_files:
             train_str = Path(training_files)
-            train_paths = list(train_str.stem.glob(train_str.name))
+            train_paths = list(Path(train_str.parent).glob(train_str.name))
         else:
             train_paths = Path(training_files)
+
+        if isinstance(train_paths, list) and len(train_paths) < 1:
+            raise FileNotFoundError(f"No training files found in folder "
+                                    f"{Path(train_str.parent)} with search string "
+                                    f"{train_str.name}")
 
         train_gen = denoising.SubFrameGenerator(
             paths=train_paths, max_per_file=max_per_file, loc=loc, input_size=input_size,
@@ -505,9 +509,16 @@ def train_denoiser(training_files, validation_files, input_size, learning_rate, 
         if validation_files is not None:
             if "*" in validation_files:
                 val_str = Path(validation_files)
-                val_paths = list(val_str.stem.glob(val_str.name))
+                val_paths = list(Path(val_str.parent).glob(val_str.name))
             else:
                 val_paths = Path(validation_files)
+
+            if isinstance(val_paths, list) and len(val_paths) < 1:
+                raise FileNotFoundError(
+                    f"No validation files found in folder "
+                    f"{Path(val_str.parent)} with search string "
+                    f"{val_str.name}"
+                    )
 
             val_gen = denoising.SubFrameGenerator(
                 paths=val_paths, max_per_file=max_per_val_file, batch_size=batch_size_val, loc=loc, input_size=input_size,
@@ -536,8 +547,8 @@ def train_denoiser(training_files, validation_files, input_size, learning_rate, 
                      help='Path to the output file where the results will be saved. If not provided, the result will be returned instead of being saved to a file.'
                      )
 @click_custom_option('--batch-size', type=click.INT, default=8, help='batch size processed in each step.')
-@click_custom_option('--input-size', type=(int, int), default=(256, 256), help='size of the denoising window')
-@click_custom_option('--pre-post-frame', type=click.INT, default=5,
+@click_custom_option('--input-size', type=(click.INT, click.INT), default=(256, 256), help='size of the denoising window')
+@click_custom_option('--pre-post-frames', type=click.INT, default=5,
                      help='Number of frames before and after the central frame in each data chunk.'
                      )
 @click_custom_option('--gap-frames', type=click.INT, default=0,
@@ -561,12 +572,13 @@ def train_denoiser(training_files, validation_files, input_size, learning_rate, 
 @click_custom_option('--dtype', type=click.STRING, default="same",
                      help='Data type for the output. If "same", the data type of the input will be used.'
                      )
-@click_custom_option('--chunk-size', type=(int, int), default=None,
+@click_custom_option("--infer-chunks", is_flag=True, default=True, help="Whether to infer the chunks in the output file.")
+@click_custom_option('--chunks', type=(click.INT, click.INT, click.INT), default=None,
                      help='Chunk size for saving the results in the output file. If not provided, a default chunk size will be used.'
                      )
 @click_custom_option('--rescale', type=click.BOOL, default=True, help='Whether to rescale the output values.')
-def denoise(input_path, batch_size, input_size, pre_post_frame, gap_frames, z_select,
-            logging_level, model, out_loc, dtype, chunk_size, rescale,
+def denoise(input_path, batch_size, input_size, pre_post_frames, gap_frames, z_select,
+            logging_level, model, out_loc, dtype, infer_chunks, chunks, rescale,
             overlap, padding, normalize, loc, in_memory, output_file):
     """
     Denoise the input data using the SubFrameGenerator class and infer method.
@@ -577,9 +589,11 @@ def denoise(input_path, batch_size, input_size, pre_post_frame, gap_frames, z_se
 
     if output_file is None:
         output_file = input_path
-        logging.warning(f"ni output_file provided. Choosing input_file: {input_path}")
+        logging.warning(f"No output_file provided. Choosing input_file: {input_path}")
 
     from astrocast.denoising import SubFrameGenerator
+
+    chunks = parse_chunks(infer_chunks, chunks)
 
     with UserFeedback(params=locals(), logging_level=logging_level):
         # Initializing the SubFrameGenerator instance
@@ -587,7 +601,7 @@ def denoise(input_path, batch_size, input_size, pre_post_frame, gap_frames, z_se
             paths=input_path,
             batch_size=batch_size,
             input_size=input_size,
-            pre_post_frame=pre_post_frame,
+            pre_post_frame=pre_post_frames,
             gap_frames=gap_frames,
             # z_steps=None,
             z_select=z_select,
@@ -615,7 +629,7 @@ def denoise(input_path, batch_size, input_size, pre_post_frame, gap_frames, z_se
             output=output_file,
             out_loc=out_loc,
             dtype=dtype,
-            chunk_size=chunk_size,
+            chunk_size=chunks,
             rescale=rescale
         )
 
