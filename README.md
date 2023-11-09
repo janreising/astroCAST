@@ -34,7 +34,6 @@ poetry install --with vis
 ```
 ## Containers<a name="containers">
 Now astroCAST implementation can run from inside docker and singularity.
-
 Currently, we support astroCAST in MacOS through docker, but other operating systems supporting docker may as well run astroCAST docker container. For more infomation on how to install docker and create an account, please refer to https://docs.docker.com/engine/install/. For more information on how to install singularity and create an account visit https://apptainer.org/docs/admin/main/installation.html.
 
 ### Docker container<a name="docker-container">
