@@ -5,6 +5,7 @@ import tifffile
 from click.testing import CliRunner
 import h5py as h5
 
+from astrocast.analysis import Events
 from astrocast.cli_interfaces import *
 from astrocast.detection import Detector
 from astrocast.helper import EventSim
@@ -323,13 +324,85 @@ class Test_Denoise:
 class Test_Detection:
 
     def setup_method(self):
-        pass
+
+        temp_dir = tempfile.TemporaryDirectory()
+        tmpdir = Path(temp_dir.name)
+        assert tmpdir.is_dir()
+
+        path = tmpdir.joinpath("sim.h5")
+        h5_loc = "df/ch0"
+
+        sim = EventSim()
+        video, num_events = sim.simulate(shape=(250, 250, 250),
+                                         skip_n=5, event_intensity=100, background_noise=1,
+                                         gap_space=5, gap_time=3)
+
+        io = IO()
+        io.save(path=path, data=video, h5_loc=h5_loc)
+
+        assert path.exists()
+
+        self.temp_dir = temp_dir
+        self.video_path = path
+        self.h5_loc = h5_loc
+        self.num_events = num_events
+
+        self.runner = CliRunner()
 
     def teardown_method(self):
-        pass
+        self.temp_dir.cleanup()
+
+    def run_with_parameters(self, params):
+
+        out = self.video_path.with_suffix(f".{np.random.randint(1, int(10e6), size=1)}.roi")
+        args = [self.video_path.as_posix(), "--h5-loc", self.h5_loc, "--output-path", out.as_posix()]
+        args += params
+
+        result = self.runner.invoke(detect_events, args)
+
+        assert result.exit_code == 0, f"error: {result.output}"
+
+        events = Events(out)
+
+        assert out.is_dir(), "Output folder does not exist"
+
+        if "--split-events" in params:
+            assert len(events) >= self.num_events
+        else:
+            assert np.allclose(len(events), self.num_events, rtol=0.1), f"Number of events does not match: {len(events)} vs {self.num_events}"
 
     def test_default(self):
-        raise NotImplementedError
+        self.run_with_parameters([])
+
+    def test_threshold(self):
+        self.run_with_parameters(["--threshold", "10"])
+
+    def test_exclude_border(self):
+        self.run_with_parameters(["--exclude-border", "5"])
+
+    def test_no_spatial(self):
+        self.run_with_parameters(["--use-spatial", False])
+
+    def test_no_temporal(self):
+        self.run_with_parameters(["--use-temporal", False])
+
+    def test_lazy(self):
+        self.run_with_parameters(["--lazy", False])
+
+    def test_adjust_for_noise(self):
+        self.run_with_parameters(["--adjust-for-noise", True])
+
+    def test_serial(self):
+        self.run_with_parameters(["--parallel", False])
+
+    def test_split_events(self):
+        self.run_with_parameters(["--split-events", True])
+
+    def test_subset(self):
+        self.run_with_parameters(["--subset", "0,10,0,50,0,50"])
+
+    def test_depth(self):
+        self.run_with_parameters(["--holes-depth", "2", "--objects-depth", "2"])
 
 class Test_Export_Video:
 

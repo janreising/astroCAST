@@ -666,7 +666,7 @@ def denoise(input_path, batch_size, input_size, pre_post_frame, gap_frames, z_se
 @click_custom_option('--adjust-for-noise', type=click.BOOL, default=False,
                      help='Whether to adjust event detection for background noise.'
                      )
-@click_custom_option('--subset', type=click.STRING, default=None, help='Subset of the dataset to process.')
+@click_custom_option('--subset', type=(click.INT, ), default=None, help='Subset of the dataset to process.')
 @click_custom_option('--split-events', type=click.BOOL, default=False,
                      help='Whether to split detected events into smaller events if multiple peaks are detected.'
                      )
