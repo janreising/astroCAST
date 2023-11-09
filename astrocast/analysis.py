@@ -1,5 +1,6 @@
 import copy
 import logging
+import traceback
 from collections import defaultdict
 from functools import lru_cache
 from pathlib import Path
@@ -521,8 +522,11 @@ class Events(CachedClass):
                     events[column_name] = func(events)
 
                 elif custom_column in custom_column_functions.keys():
-                    func = custom_column_functions[custom_column]
-                    events[custom_column] = func(events)
+                    try:
+                        func = custom_column_functions[custom_column]
+                        events[custom_column] = func(events)
+                    except AttributeError:
+                        logging.error(f"Unable to add custom column {custom_column}: {traceback.print_exc()}")
                 else:
                     raise ValueError(f"Could not find 'custom_columns' value {custom_column}. "
                                      f"Please provide one of {list(custom_column_functions.keys())} or dict('column_name'=lambda events: ...)")
@@ -685,7 +689,6 @@ class Events(CachedClass):
     def show_event_map(self, video=None, h5_loc=None, z_slice=None, lazy=True):
 
         import napari
-        from napari.utils.events import Event
 
         viewer = napari.Viewer()
 
@@ -693,11 +696,11 @@ class Events(CachedClass):
 
         # check if video was loaded at initialization
         if video is None and self.data is not None:
+
             logging.info(f"loading video from path provided during initialization."
                          f" Users need to ensure that the z_slice parameters matches.")
             data = self.data.get_data()
-            logging.warning("data: ", type(data))
-            viewer.add_image(data, )
+            viewer.add_image(data)
 
         else:
             data = io.load(path=video, h5_loc=h5_loc, z_slice=z_slice, lazy=lazy)
@@ -1233,7 +1236,7 @@ class Video:
                     self.data[loc] = io.load(data, h5_loc=loc, lazy=lazy, z_slice=z_slice)
 
             else:
-                print("loaded")
+                logging.info("Data already loaded into memory.")
                 self.data = io.load(data, h5_loc="", lazy=lazy, z_slice=z_slice)
                 self.Z, self.X, self.Y = self.data.shape
 
