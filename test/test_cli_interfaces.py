@@ -19,8 +19,9 @@ class Test_ConvertInput:
         temp_dir = tempfile.TemporaryDirectory()
 
         temp_file = Path(temp_dir.name).joinpath("temp.h5")
+        self.arr_size = (10, 25, 25)
         with h5.File(temp_file.as_posix(), "a") as f:
-            f.create_dataset("data/ch0", data=np.random.randint(0, 100, size=(10, 25, 25)))
+            f.create_dataset("data/ch0", data=np.random.randint(0, 100, size=self.arr_size))
 
         temp_tiffs = Path(temp_dir.name).joinpath("imgs/")
         temp_tiffs.mkdir()
@@ -167,16 +168,22 @@ class Test_ConvertInput:
         assert out_file.exists()
 
         with h5.File(out_file.as_posix(), "r") as f:
-            assert "data/ch0" in f
+            assert "data/ch1" in f
 
-    @pytest.mark.parametrize("chunks", [None, "infer", "1, 10, 10"])
+    @pytest.mark.parametrize("chunks", [None, "infer", ["2", "10", "10"]])
     def test_chunks(self, chunks):
         out_file = self.temp_tiffs.parent.joinpath(f"out_inf.h5")
         args = [self.temp_tiffs.as_posix(),
                 "--output-path", out_file.as_posix(),
-                "--num-channels", "1",
-                "--chunks", chunks
-                ]
+                "--num-channels", "1"]
+
+        if chunks is None:
+            args += []
+        elif chunks == "infer":
+            args += ["--infer-chunks"]
+        else:
+            args += ["--chunks"] + chunks
+
         result = self.runner.invoke(convert_input, args)
 
         # Check that the command ran successfully
@@ -187,13 +194,13 @@ class Test_ConvertInput:
             assert "data/ch0" in f
 
             if chunks is None:
-                assert f["data/ch0"].chunks == (10, 25, 25)
+                assert f["data/ch0"].chunks == None
 
             elif chunks == "infer":
                 assert f["data/ch0"].chunks != None
 
             else:
-                assert f["data/ch0"].chunks == tuple(map(int, chunks.split(",")))
+                assert f["data/ch0"].chunks == tuple(map(int, chunks))
 
 class Test_MotionCorrection:
 
@@ -301,7 +308,7 @@ class Test_SubtractDelta:
         result = self.runner.invoke(subtract_delta, [self.temp_file.as_posix(),
                                                      "--output-path", out_file.as_posix(),
                                                      "--h5-loc-in", "data/ch0",
-                                                     "--processing-chunks", "1,25,25",
+                                                     "--processing-chunks", "1", "10", "10",
                                                      "--window", 3])
 
         # Check that the command ran successfully

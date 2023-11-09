@@ -205,7 +205,7 @@ def cli(ctx, config):
 @click_custom_option('--in-memory', is_flag=True, help='If True, the processed data is loaded into memory.')
 @click_custom_option('--h5-loc-in', default=None, help='Prefix to use when loading the processed data.')
 @click_custom_option('--h5-loc-out', default="data", help='Prefix to use when saving the processed data.')
-@click_custom_option('--infer-chunks', is_flag=True, default=True, help='Infer chunks size.')
+@click_custom_option('--infer-chunks', is_flag=True, default=False, help='Infer chunks size.')
 @click_custom_option('--chunks', type=(click.INT, click.INT, click.INT), default=None,
                      help='Chunk size to use when saving to HDF5 or TileDB.'
                      )
@@ -299,7 +299,7 @@ def convert_input(
 @click_custom_option('--gsig-filt', type=(click.INT, click.INT), default=(20, 20),
                      help='Tuple indicating the size of the filter.'
                      )
-@click_custom_option('--infer-chunks', is_flag=True, default=True, help='Infer the chunks for the HDF5 file.')
+@click_custom_option('--infer-chunks', is_flag=True, default=False, help='Infer the chunks for the HDF5 file.')
 @click_custom_option('--chunks', type=(click.INT, click.INT, click.INT), default=None,
                      help='Chunk shape for creating a dask array when saving to an HDF5 file.'
                      )
@@ -359,9 +359,9 @@ def motion_correction(
 @click_custom_option('--method', type=click.Choice(['background', 'dF', 'dFF']), default='dF',
                      help='Method to use for delta calculation.'
                      )
-@click_custom_option('--infer-processing-chunks', is_flag=True, default=True, help='Infer the chunks for data processing.')
+@click_custom_option('--infer-processing-chunks', is_flag=True, default=False, help='Infer the chunks for data processing.')
 @click_custom_option('--processing-chunks', type=(click.INT, click.INT, click.INT), default=None, help='Chunk size for data processing.')
-@click_custom_option('--infer-save-chunks', is_flag=True, default=True, help='Infer the chunks for the HDF5 file.')
+@click_custom_option('--infer-save-chunks', is_flag=True, default=False, help='Infer the chunks for the HDF5 file.')
 @click_custom_option('--save-chunks', type=(click.INT, click.INT, click.INT), default=None, help='Chunk size for saving.')
 @click_custom_option('--overwrite-first-frame', type=click.BOOL, default=True,
                      help='Whether to overwrite the first frame with the second frame after delta calculation.'
@@ -572,7 +572,7 @@ def train_denoiser(training_files, validation_files, input_size, learning_rate, 
 @click_custom_option('--dtype', type=click.STRING, default="same",
                      help='Data type for the output. If "same", the data type of the input will be used.'
                      )
-@click_custom_option("--infer-chunks", is_flag=True, default=True, help="Whether to infer the chunks in the output file.")
+@click_custom_option("--infer-chunks", is_flag=True, default=False, help="Whether to infer the chunks in the output file.")
 @click_custom_option('--chunks', type=(click.INT, click.INT, click.INT), default=None,
                      help='Chunk size for saving the results in the output file. If not provided, a default chunk size will be used.'
                      )
