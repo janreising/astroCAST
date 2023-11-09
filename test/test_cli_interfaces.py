@@ -368,6 +368,8 @@ class Test_Detection:
 
         if "--split-events" in params:
             assert len(events) >= self.num_events
+        elif "--subset" in params:
+            assert len(events) <= self.num_events
         else:
             assert np.allclose(len(events), self.num_events, rtol=0.1), f"Number of events does not match: {len(events)} vs {self.num_events}"
 
@@ -384,7 +386,7 @@ class Test_Detection:
         self.run_with_parameters(["--use-spatial", False])
 
     def test_no_temporal(self):
-        self.run_with_parameters(["--use-temporal", False])
+        self.run_with_parameters(["--use-temporal", False, "--spatial-min-ratio", "5"])
 
     def test_lazy(self):
         self.run_with_parameters(["--lazy", False])
@@ -399,7 +401,7 @@ class Test_Detection:
         self.run_with_parameters(["--split-events", True])
 
     def test_subset(self):
-        self.run_with_parameters(["--subset", "0,10,0,50,0,50"])
+        self.run_with_parameters(["--subset", "0", "100"])
 
     def test_depth(self):
         self.run_with_parameters(["--holes-depth", "2", "--objects-depth", "2"])

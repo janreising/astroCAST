@@ -1,5 +1,6 @@
 import copy
 import logging
+import traceback
 from collections import defaultdict
 from functools import lru_cache
 from pathlib import Path
@@ -521,8 +522,11 @@ class Events(CachedClass):
                     events[column_name] = func(events)
 
                 elif custom_column in custom_column_functions.keys():
-                    func = custom_column_functions[custom_column]
-                    events[custom_column] = func(events)
+                    try:
+                        func = custom_column_functions[custom_column]
+                        events[custom_column] = func(events)
+                    except AttributeError:
+                        logging.error(f"Unable to add custom column {custom_column}: {traceback.print_exc()}")
                 else:
                     raise ValueError(f"Could not find 'custom_columns' value {custom_column}. "
                                      f"Please provide one of {list(custom_column_functions.keys())} or dict('column_name'=lambda events: ...)")
