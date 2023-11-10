@@ -74,8 +74,6 @@ class Test_AppAnalysis:
 
         dir_ = det.output_directory
 
-        # TODO check default setting loading
-
         # create explorer
         ana = Analysis(input_path=dir_.as_posix(), video_path=path.as_posix(), h5_loc=h5_loc)
 
