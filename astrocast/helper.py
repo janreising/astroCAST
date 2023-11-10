@@ -573,7 +573,7 @@ class EventSim:
 
         return section
 
-    def simulate(self, shape, z_fraction=0.2, xy_fraction=0.1, gap_space=1, gap_time=1,
+    def simulate(self, shape, z_fraction=0.2, xy_fraction=0.1, gap_space=5, gap_time=3,
                  event_intensity="incr", background_noise=None,
                  blob_size_fraction=0.05, event_probability=0.2, skip_n=5):
 
