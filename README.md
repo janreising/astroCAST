@@ -21,17 +21,27 @@ Astrocytic calcium event analysis is challenging due to its complex nature, spat
     2. [Singularity container](#singularity-container)
 4. [Contributing](#contributing)
 
-## Installation<a name="installation">
-You can install astroCAST using pip: 
-```shell 
-pip install astrocast[all]
+## Installation
+
+**Via pip:**
+```shell
+pip install astrocast
 ```
 
-Alternatively, clone this repository and install it locally:
+**From source:**
 ```shell
+git clone <repository-url>
 pip install poetry
-poetry install --with vis
+poetry install
 ```
+
+**With optional features:**
+```shell
+pip install astrocast[video-player,testing]
+# or using poetry
+poetry install -E video-player -E testing
+```
+
 ## Containers<a name="containers">
 Now astroCAST implementation can run as stand-alone docker and singularity images.
 
