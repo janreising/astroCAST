@@ -100,7 +100,7 @@ class Test_Delta:
 
             assert np.allclose(ctrl, res)
 
-    @pytest.mark.xfail(reason="Not implemented")
+    @pytest.mark.skip(reason="Not implemented")
     def test_quality_of_dff(self):
         raise NotImplementedError
 
@@ -329,7 +329,7 @@ class Test_Input:
             output_path = tmpdir.joinpath(output_path)
 
             inp.run(input_path=tmpdir, output_path=output_path,
-                            dtype=None, in_memory=False, h5_loc="data")
+                            dtype=None, in_memory=False, h5_loc_out="data")
 
             assert output_path.is_file() or output_path.is_dir(), f"cannot find output file: {output_path}"
 
@@ -373,7 +373,7 @@ class Test_IO:
 
         assert names == names_sorted, "sorting did not work"
 
-    @pytest.mark.xfail
+    @pytest.mark.skip(reason="Cannot create dummy .czi file.")
     def test_load_czi(self, output_path="out.czi", shape=(10, 5, 5)):
         with tempfile.TemporaryDirectory() as dir:
             tmpdir = Path(dir)
@@ -616,7 +616,7 @@ class Test_MotionCorrection:
 
 
     @pytest.mark.parametrize("input_type", [".tdb"])
-    @pytest.mark.skip("currently doesn't work. revisit later.")
+    @pytest.mark.skip(reason="currently doesn't work. revisit later.")
     def test_random_tdb(self, input_type, shape=(100, 100, 100)):
 
         data = np.random.random(shape)
@@ -646,7 +646,7 @@ class Test_MotionCorrection:
             elif input_type == ".tdb":
 
                 temp_path = tmpdir.joinpath("test.tdb")
-                temp_path = io.save(temp_path, data={"ch0":data}, h5_loc=None)
+                temp_path = io.save(temp_path, data={"ch0":data}, h5_loc="")
 
                 assert temp_path.is_file(), f"cannot find {temp_path}"
                 data = temp_path

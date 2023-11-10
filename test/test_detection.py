@@ -8,7 +8,6 @@ from astrocast.preparation import IO
 
 class Test_Detector:
 
-    @pytest.mark.xdist_group(name="detection")
     @pytest.mark.parametrize("extension", [".h5", ".tiff"])
     @pytest.mark.parametrize("debug", [True, False])
     def test_real_data(self, extension, debug):
@@ -40,7 +39,6 @@ class Test_Detector:
                 assert dir_.joinpath("debug_active_pixels.tiff").is_file()
                 assert dir_.joinpath("debug_active_pixels_morphed.tiff").is_file()
 
-    @pytest.mark.xdist_group(name="detection")
     def test_sim_data(self):
 
         with tempfile.TemporaryDirectory() as dir:

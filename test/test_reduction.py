@@ -7,6 +7,9 @@ from astrocast.autoencoders import CNN_Autoencoder
 from astrocast.reduction import *
 from astrocast.helper import DummyGenerator
 
+import matplotlib
+matplotlib.use('Agg')  # Use the Agg backend
+
 DG_equal = DummyGenerator()
 DG_ragged = DummyGenerator(ragged=True)
 
@@ -47,7 +50,7 @@ class Test_FeatureExtraction:
 
 class Test_CNN:
 
-    @pytest.mark.xdist_group(name="CNN")
+    @pytest.mark.tensorflow
     def test_training(self):
 
         trace_length = 16
@@ -59,7 +62,7 @@ class Test_CNN:
         losses = cnn.train_autoencoder(X_train=train_dataset, X_val=val_dataset, X_test=test_dataset,
                               epochs=2, batch_size=4)
 
-    @pytest.mark.xdist_group(name="CNN")
+    @pytest.mark.tensorflow
     def test_embeding(self):
 
         trace_length = 16
@@ -73,7 +76,7 @@ class Test_CNN:
 
         Y_test = cnn.embed(data)
 
-    @pytest.mark.xdist_group(name="CNN")
+    @pytest.mark.tensorflow
     def test_plotting(self):
 
         trace_length = 16
@@ -87,7 +90,7 @@ class Test_CNN:
 
         cnn.plot_examples_pytorch(test_dataset)
 
-    @pytest.mark.xdist_group(name="CNN")
+    @pytest.mark.tensorflow
     def test_save_load(self, tmp_path, target_length=18):
 
         with tempfile.TemporaryDirectory() as temp:
@@ -102,7 +105,6 @@ class Test_CNN:
 
 class Test_UMAP:
 
-    @pytest.mark.xdist_group(name="UMAP")
     def test_training(self):
 
         data = np.random.random(size=(12, 25))
@@ -110,7 +112,7 @@ class Test_UMAP:
         um = UMAP()
         embedded = um.train(data)
 
-    @pytest.mark.xdist_group(name="UMAP")
+    @pytest.mark.vis
     def test_plotting(self):
 
         data = np.random.random(size=(12, 8))
@@ -136,7 +138,6 @@ class Test_UMAP:
         labels = np.random.randint(0, 5, size=len(data))
         um.plot(data=embedded, labels=labels)
 
-    @pytest.mark.xdist_group(name="UMAP")
     def test_save_load(self, tmp_path):
 
         data = np.random.random(size=(12, 25))

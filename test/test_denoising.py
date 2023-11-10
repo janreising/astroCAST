@@ -31,7 +31,7 @@ class Test_Generators:
 
             gen.on_epoch_end()
 
-    @pytest.mark.xdist_group(name="tensorflow")
+    @pytest.mark.tensorflow
     @pytest.mark.parametrize("extension", [".h5", ".tiff"])
     def test_network(self, extension):
 
@@ -48,7 +48,7 @@ class Test_Generators:
         net = Network(train_generator=train_gen, val_generator=train_gen, n_stacks=1, kernel=4, batchNormalize=False, use_cpu=True)
         net.run(batch_size=train_gen.batch_size, num_epochs=2, patience=1, min_delta=0.01, save_model=None)
 
-    @pytest.mark.xdist_group(name="tensorflow")
+    @pytest.mark.tensorflow
     @pytest.mark.parametrize("extension", [".h5", ".tiff"])
     @pytest.mark.parametrize("output_file", [None, "inf.tiff", "inf.h5"])
     def test_inference_sub(self, extension, output_file):
