@@ -70,6 +70,12 @@ astrocast = 'astrocast.cli_interfaces:cli'
 video_player = ["napari", "napari-plot", "napari-time-series-plotter"]
 testing = ["pytest", "pytest-cov", "pytest-xdist"]
 
+[tool.pytest.ini_options]
+markers = [
+    "tensorflow: marks tests as using tensorflow (deselect with '-m \"not tensorflow\"')",
+    "vis: marks tests as visualization tests (deselect with '-m \"not vis\"')",
+]
+
 [build-system]
 requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
