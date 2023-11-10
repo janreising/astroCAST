@@ -1,13 +1,9 @@
-import json
-import logging
+import threading
 import traceback
-from itertools import combinations, permutations
 from pathlib import Path
 
-import click
 import dask.array as da
 import numpy as np
-import pandas as pd
 import yaml
 from matplotlib import pyplot as plt, gridspec
 from shiny import App, ui, render, reactive
@@ -24,7 +20,7 @@ class Explorer:
         self.h5_loc = h5_loc
 
         self.app_ui = self.create_ui()
-        self.app = App(self.app_ui, self.server)
+        self.app = App(self.app_ui, self.server,)
 
     def create_ui(self):
         return ui.page_fluid(
@@ -767,8 +763,8 @@ class Explorer:
 
         return fig
 
-    def run(self):
-        self.app.run()
+    def run(self, port=8000):
+        self.app.run(port=port)
 
 
 # Run the app

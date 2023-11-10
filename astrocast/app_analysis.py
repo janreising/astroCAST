@@ -2503,8 +2503,8 @@ class Analysis:
 
             return df.map(custom_formatter)
 
-    def run(self):
-        self.app.run()
+    def run(self, port=8000):
+        self.app.run(port=port)
 
 
 # Run the app
