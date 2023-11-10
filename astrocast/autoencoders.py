@@ -1,17 +1,14 @@
 from pathlib import Path
 
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
-
-import numpy as np
-
 from matplotlib import pyplot as plt
 from sklearn.model_selection import train_test_split
 from torch.nn.utils.rnn import pad_packed_sequence, pack_padded_sequence, pad_sequence
 from torch.utils.data import Dataset, DataLoader, TensorDataset
 from tqdm import tqdm
-
 
 
 ##############################################

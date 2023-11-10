@@ -9,14 +9,12 @@ import dask.array as da
 import numpy as np
 import pandas as pd
 import psutil
+import seaborn as sns
 import xxhash
 from matplotlib import pyplot as plt
-import seaborn as sns
 from scipy.cluster.hierarchy import fcluster
 from sklearn import metrics
 from tqdm import tqdm
-
-import awkward as ak
 
 import astrocast.detection
 from astrocast import helper

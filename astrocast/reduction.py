@@ -4,14 +4,13 @@ import logging
 import pickle
 from pathlib import Path
 
-
 import numpy as np
 import pandas as pd
 import pyinform.shannon
+import seaborn as sns
 import umap
 import umap.plot
 from matplotlib import pyplot as plt
-import seaborn as sns
 from scipy import stats
 from scipy.cluster import hierarchy
 

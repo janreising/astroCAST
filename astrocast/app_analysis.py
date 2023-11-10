@@ -1,5 +1,4 @@
 import logging
-import time
 import traceback
 import warnings
 from pathlib import Path
@@ -8,6 +7,8 @@ import hdbscan
 import numpy as np
 import pandas as pd
 import seaborn
+import seaborn as sns
+import shiny.experimental.ui as xui
 import sklearn.decomposition
 import yaml
 from matplotlib import pyplot as plt, gridspec
@@ -15,18 +16,15 @@ from matplotlib.lines import Line2D
 from numba import NumbaDeprecationWarning
 from scipy.cluster.hierarchy import dendrogram
 from shiny import App, ui, render, reactive, req
-import shiny.experimental.ui as xui
 from sklearn.manifold import TSNE
 from sklearn.metrics import ConfusionMatrixDisplay
 
 from astrocast.analysis import Events, Video
-from astrocast.clustering import CoincidenceDetection, Discriminator, Linkage
-from astrocast.helper import Normalization, is_ragged
-from astrocast.preparation import IO
-import seaborn as sns
-
-from astrocast.reduction import FeatureExtraction
 from astrocast.autoencoders import TimeSeriesRnnAE, Parameters, PaddedDataLoader, CNN_Autoencoder
+from astrocast.clustering import CoincidenceDetection, Discriminator, Linkage
+from astrocast.helper import is_ragged
+from astrocast.preparation import IO
+from astrocast.reduction import FeatureExtraction
 
 with warnings.catch_warnings():
     warnings.simplefilter(action='ignore', category=NumbaDeprecationWarning)

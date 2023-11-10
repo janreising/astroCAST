@@ -1,21 +1,20 @@
 import ast
 import datetime as dt
+import inspect
 import logging
 import os
 import shutil
-import sys
 import time
 import warnings
+from functools import partial
 from pathlib import Path
+
 import click
 import humanize
-import yaml
-from functools import partial
 import numpy as np
-
-from colorama import init as init_colorama
+import yaml
 from colorama import Fore
-import inspect
+from colorama import init as init_colorama
 from prettytable import PrettyTable
 
 from astrocast.preparation import Input

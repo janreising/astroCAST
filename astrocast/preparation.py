@@ -8,24 +8,25 @@ from pathlib import Path
 
 import czifile
 import dask
+import dask.array as da
+import dask_image.imread
 import h5py
 import numpy as np
 import pandas as pd
 import psutil
 import tifffile
 import tiledb
-import dask.array as da
-import dask_image.imread
+from dask.diagnostics import ProgressBar
 from dask.distributed import Client, LocalCluster
+from deprecated import deprecated
 from scipy import signal
+from scipy.ndimage import minimum_filter1d
 from skimage.transform import resize
 from skimage.util import img_as_uint
-from deprecated import deprecated
-from scipy.ndimage import minimum_filter1d
 from tqdm import tqdm
 
 from astrocast.helper import get_data_dimensions
-from dask.diagnostics import ProgressBar
+
 
 class Input:
 

@@ -1,16 +1,19 @@
-import threading
+import traceback
+from pathlib import Path
+
 import traceback
 from pathlib import Path
 
 import dask.array as da
 import numpy as np
+import seaborn as sns
 import yaml
 from matplotlib import pyplot as plt, gridspec
 from shiny import App, ui, render, reactive
 
 from astrocast import detection
 from astrocast.preparation import IO, Delta
-import seaborn as sns
+
 
 class Explorer:
 
