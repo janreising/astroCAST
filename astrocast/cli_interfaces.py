@@ -808,7 +808,7 @@ def visualize_h5(input_path):
     """
 
     file_size = humanize.naturalsize(os.path.getsize(input_path))
-    print(f"\n> {os.path.basename(input_path)} ({file_size})")
+    print(f"> {os.path.basename(input_path)} ({file_size})")
 
     import h5py
 
