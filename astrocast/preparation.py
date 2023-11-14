@@ -37,7 +37,7 @@ class Input:
     def run(
             self, input_path, output_path=None, sep="_", channels=1, z_slice=None, lazy=True, subtract_background=None,
             subtract_func="mean", rescale=None, dtype=np.uint, in_memory=False, h5_loc_in=None, h5_loc_out="data",
-           infer_strategy="balanced", chunks=None, compression=None
+            infer_strategy="balanced", chunks=None, compression=None
             ):
 
         """ Loads input data from a specified path, performs data processing, and optionally saves the processed data.
