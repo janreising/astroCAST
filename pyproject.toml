@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "astrocast"
-version = "0.3.4"
+version = "0.3.5"
 description = "Package to analyze calcium fluorescence events in astrocytes"
 authors = ["Jan Philipp Reising <jan.reising@ki.se>", "Ana Cristina González"]
 
@@ -62,6 +62,7 @@ napari-time-series-plotter = {version = "*", optional = true }
 pytest-cov = {version = "^4.1.0", optional = true}
 pytest-xdist = {version = "^3.3.1", optional = true}
 pytest = {extras = ["testing"], version = "^7.4.3"}
+pydantic = {version = "^1", extras = ["video-player"]}
 
 [tool.poetry.scripts]
 astrocast = 'astrocast.cli_interfaces:cli'
