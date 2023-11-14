@@ -1400,6 +1400,32 @@ class Video:
 
         return viewer
 
+    def plot_overview(self):
+
+        projection = self.get_image_project()
+
+        data = self.data
+
+        frame0, frame1 = data[0], data[-1]
+        signal = np.mean(data, axis=(1, 2))
+
+        fig, axx = plt.subplot_mosaic("ABC\nDDD", figsize=(12, 6))
+        axx["A"].imshow(projection, cmap="gray")
+        axx["B"].imshow(frame0, cmap="gray")
+        axx["C"].imshow(frame1, cmap="gray")
+        axx["D"].plot(signal, label="mean trace")
+
+        for key in ["A", "B", "C"]:
+            axx[key].axis('off')
+        axx["D"].legend()
+
+        axx["A"].set_title("Projection")
+        axx["B"].set_title("First frame")
+        axx["C"].set_title("Last frame")
+        axx["D"].set_xlabel("Frame number")
+        axx["D"].set_ylabel("Average signal (AU)")
+
+        return fig
 
 class Plotting:
 
