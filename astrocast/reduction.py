@@ -399,7 +399,7 @@ class UMAP:
 
                 if labels is not None:
 
-                    palette = sns.color_palette("husl", len(np.unique(labels)))
+                    palette = sns.color_palette("husl", len(np.unique(labels))+1)
                     ax.scatter(data[:, 0], data[:, 1], alpha=0.1, s=size,
                                color=[palette[v] for v in labels])
 
@@ -479,3 +479,16 @@ class ClusterTree():
             return right
 
         return None
+
+    def is_leaf(self):
+        """
+        Determines if the given node is a leaf in the tree.
+
+        Args:
+            tree (ClusterNode): The node to check.
+
+        Returns:
+            bool: True if the node is a leaf, False otherwise.
+        """
+        return self.tree.get_left() is None and self.tree.get_right() is None
+

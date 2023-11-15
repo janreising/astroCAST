@@ -1,11 +1,8 @@
-import tempfile
-import time
-
-import numpy as np
-import pandas as pd
 import pytest
 
 from astrocast.helper import *
+from astrocast.preparation import IO
+
 
 class Test_LocalCache:
 
@@ -125,6 +122,7 @@ def test_is_ragged(typ, ragged, num_rows=10):
 
     ragged = True if ragged == "ragged" else False
     assert is_ragged(data) == ragged
+
 
 @pytest.mark.parametrize("num_rows", [1, 10])
 @pytest.mark.parametrize("ragged", ["equal", "ragged"])
@@ -314,6 +312,24 @@ class Test_normalization:
         norm.min_max()
 
     @staticmethod
+    @pytest.mark.parametrize("data_type", ["list", "dataframe", "array"])
+    def test_mean_std(data_type, num_rows, ragged):
+
+        DG = DummyGenerator(num_rows=num_rows, ragged=ragged)
+
+        if data_type == "list":
+            data = DG.get_list()
+        elif data_type == "dataframe":
+            data = DG.get_dataframe().trace
+        elif data_type == "array":
+            data = DG.get_array()
+        else:
+            raise NotImplementedError
+
+        norm = Normalization(data)
+        norm.mean_std()
+
+    @staticmethod
     @pytest.mark.parametrize("fixed_value", [None, 999])
     @pytest.mark.parametrize("nan_value", [np.nan])
     def test_impute_nan(num_rows, nan_value, ragged, fixed_value):
@@ -376,6 +392,24 @@ class Test_normalization:
             res = norm.run(instr)
             np.allclose(data[:, 2], res[:, 2])
 
+    @pytest.mark.parametrize("data_type", ["list", "dataframe", "array"])
+    def test_not_inplace(self, data_type, num_rows, ragged):
+
+        DG = DummyGenerator(num_rows=num_rows, ragged=False)
+
+        if data_type == "list":
+            data = DG.get_list()
+        elif data_type == "dataframe":
+            data = DG.get_dataframe().trace
+        elif data_type == "array":
+            data = DG.get_array()
+        else:
+            raise NotImplementedError
+
+        norm = Normalization(data, inplace=False)
+        res = norm.run({0: ["subtract", dict(mode="mean", population_wide=False)]})
+
+
 class Test_EventSim:
     def test_simulate_default_arguments(self):
         sim = EventSim()
@@ -402,6 +436,7 @@ class Test_EventSim:
 
         assert event_map.shape == shape
         assert num_events >= 0
+
 
 class Test_SampleInput:
 
@@ -431,3 +466,78 @@ class Test_SampleInput:
 
         h5_loc = si.get_h5_loc(ref=loc)
         assert isinstance(h5_loc, str), f"h5_loc is type: {type(h5_loc)}"
+
+def test_load_yaml():
+
+    with tempfile.TemporaryDirectory() as tmp:
+
+        tmpdir = Path(tmp)
+
+        # Create a temporary YAML file for testing
+        yaml_content = """
+        param1: value1
+        param2: value2
+        """
+
+        yaml_file = tmpdir.joinpath("test_config.yaml")
+        with open(yaml_file.as_posix(), "w") as yaml_f:
+            yaml_f.write(yaml_content)
+
+        # Run the load_yaml_defaults function
+        result = load_yaml_defaults(yaml_file.as_posix())
+
+        # Check if the function read the values correctly
+        assert result == {"param1": "value1", "param2": "value2"}
+
+@pytest.mark.long
+def test_sample_download():
+
+    with tempfile.TemporaryDirectory() as tmp:
+
+        tmpdir = Path(tmp)
+
+        download_sample_data(tmpdir)
+
+        assert len(list(tmpdir.glob("*/*"))) > 0
+
+@pytest.mark.long
+def test_model_download():
+
+    with tempfile.TemporaryDirectory() as tmp:
+
+        tmpdir = Path(tmp)
+
+        download_pretrained_models(tmpdir)
+
+        assert len(list(tmpdir.glob("*/*"))) > 0
+
+@pytest.mark.parametrize("data_type", ["np.ndarray", ".h5", ".tiff", ".tdb", ".err"])
+def test_data_dimensions(data_type):
+
+    with tempfile.TemporaryDirectory() as tmp:
+
+        tmpdir = Path(tmp)
+
+        arr = np.random.random((10, 10, 10))
+        h5_loc = "data/ch0"
+
+        if data_type == ".err":
+
+            input_ = tmpdir.joinpath(f"file.{data_type}")
+            with open(input_.as_posix(), "w") as w:
+                w.write("hello")
+
+            with pytest.raises(TypeError):
+                _ = get_data_dimensions(input_, loc=h5_loc, return_dtype=True)
+
+        else:
+
+            if data_type == "np.ndarray":
+                input_ = arr
+
+            else:
+                input_ = tmpdir.joinpath(f"file.{data_type}")
+                io = IO()
+                io.save(input_, data=arr, h5_loc=h5_loc)
+
+            _ = get_data_dimensions(input_, loc=h5_loc, return_dtype=True)
