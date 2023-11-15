@@ -605,6 +605,10 @@ class SubFrameGenerator(tf.keras.utils.Sequence):
 
             assert out_loc is not None, "when exporting results to .h5 file please provide 'out_loc' flag"
 
+            if chunk_size == "infer":
+                io = IO()
+                chunk_size = io.infer_chunks(output_shape, dtype, strategy="Z")
+
             f = h5.File(output, "a")
             rec = f.create_dataset(out_loc, shape=output_shape, chunks=chunk_size, dtype=dtype)
         else:

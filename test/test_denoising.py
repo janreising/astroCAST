@@ -125,7 +125,7 @@ class Test_Generators:
 
             gen.on_epoch_end()
 
-    @pytest.mark.xdist_group(name="tensorflow")
+    @pytest.mark.tensorflow
     @pytest.mark.parametrize("extension", [".h5", ".tiff"])
     @pytest.mark.parametrize("n_stacks", [1, 2])
     def test_network(self, extension, n_stacks):
@@ -179,7 +179,7 @@ class Test_Generators:
 
             res = train_gen.infer(model=save_model_path, output=None, out_loc="inf/ch0", rescale=False)
 
-    @pytest.mark.xdist_group(name="tensorflow")
+    @pytest.mark.tensorflow
     @pytest.mark.parametrize("extension", [".h5", ".tiff"])
     @pytest.mark.parametrize("output_file", [None, "inf.tiff", "inf.h5"])
     @pytest.mark.parametrize("rescale", [True, False])

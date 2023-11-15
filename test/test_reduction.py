@@ -49,9 +49,9 @@ class Test_FeatureExtraction:
             assert d2 < d1, f"caching is taking too long: {d2} > {d1}"
             assert features_1.equals(features_2)
 
-@pytest.mark.serial
 class Test_CNN:
 
+    @pytest.mark.tensorflow
     def test_training(self):
 
         trace_length = 16
@@ -63,6 +63,7 @@ class Test_CNN:
         losses = cnn.train_autoencoder(X_train=train_dataset, X_val=val_dataset, X_test=test_dataset,
                               epochs=2, batch_size=4)
 
+    @pytest.mark.tensorflow
     def test_embeding(self):
 
         trace_length = 16
@@ -76,6 +77,7 @@ class Test_CNN:
 
         Y_test = cnn.embed(data)
 
+    @pytest.mark.tensorflow
     def test_plotting(self):
 
         trace_length = 16
@@ -89,6 +91,7 @@ class Test_CNN:
 
         cnn.plot_examples_pytorch(test_dataset)
 
+    @pytest.mark.tensorflow
     def test_save_load(self, tmp_path, target_length=18):
 
         with tempfile.TemporaryDirectory() as temp:
@@ -101,7 +104,6 @@ class Test_CNN:
 
             loaded_model = CNN_Autoencoder.load(save_path, target_length=target_length)
 
-@pytest.mark.serial
 class Test_UMAP:
 
     def test_training(self):
@@ -111,7 +113,7 @@ class Test_UMAP:
         um = UMAP()
         embedded = um.train(data)
 
-    @pytest.mark.long
+    @pytest.mark.vis
     @pytest.mark.parametrize("use_napari", [True, False])
     @pytest.mark.parametrize("use_data", [True, False])
     @pytest.mark.parametrize("custom_axis", [True, False])

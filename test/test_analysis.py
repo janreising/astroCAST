@@ -2,18 +2,14 @@ import tempfile
 import time
 
 import dask.array
-import numpy as np
 import pytest
 
 from astrocast.analysis import *
-from astrocast.clustering import Distance
-from astrocast.detection import Detector
-from astrocast.helper import EventSim, DummyGenerator
+from astrocast.helper import EventSim
 
 import matplotlib
 matplotlib.use('Agg')  # Use the Agg backend
 
-import matplotlib.pyplot as plt
 
 class Test_Events:
 
@@ -375,7 +371,7 @@ class Test_Events:
                 num_events = len(comb_events.events)
                 assert total_num_events == num_events
 
-    @pytest.mark.xfail
+    @pytest.mark.skip(reason="legacy")
     def test_get_event_timing(self, shape=(50, 100, 100)):
         with tempfile.TemporaryDirectory() as tmpdir:
 
@@ -386,7 +382,7 @@ class Test_Events:
             events = Events(event_dir)
             events.get_event_timing()
 
-    @pytest.mark.xfail
+    @pytest.mark.skip(reason="legacy")
     def test_set_timings(self, shape=(50, 100, 100)):
         with tempfile.TemporaryDirectory() as tmpdir:
 
@@ -397,7 +393,7 @@ class Test_Events:
             events = Events(event_dir)
             events.set_timings()
 
-    @pytest.mark.xfail
+    @pytest.mark.skip(reason="Not implemented")
     def test_align(self, shape=(50, 100, 100)):
         with tempfile.TemporaryDirectory() as tmpdir:
 

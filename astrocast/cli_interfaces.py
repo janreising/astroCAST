@@ -1,7 +1,9 @@
+import ast
 import datetime as dt
 import logging
 import os
 import shutil
+import sys
 import time
 import warnings
 from pathlib import Path
@@ -15,6 +17,8 @@ from colorama import init as init_colorama
 from colorama import Fore
 import inspect
 from prettytable import PrettyTable
+
+from astrocast.preparation import Input
 
 init_colorama(autoreset=True)
 
@@ -65,17 +69,25 @@ def check_output(output_path, input_path, h5_loc_save, overwrite):
     return output_path
 
 
-def parse_chunks(chunks):
-    if chunks is None or chunks == "infer":
-        return chunks
+def parse_chunks(infer_chunks, chunks):
 
-    else:
+    if infer_chunks:
+
+        if chunks is not None:
+            logging.warning(f"inferring chunks, although 'chunks' parameter was provided.")
+
+        chunks = "infer"
+
+    elif chunks is None or isinstance(chunks, tuple):
+        pass
+
+    elif isinstance(chunks, str):
         chunks = tuple(int(c) for c in chunks.split(","))
         if len(chunks) != 3:
-            raise ValueError(
-                f"please provide 'chunks' parameter as None, infer or comma-separated list of 3 int values."
-                )
-        return chunks
+            raise ValueError(f"Provide 'chunks' parameter as None, infer or comma-separated list of 3 int values."
+                             f"Not: {type(chunks)}, {chunks}")
+
+    return chunks
 
 
 class UserFeedback:
@@ -116,23 +128,24 @@ class UserFeedback:
                 ctx = None
 
             default_map = ctx.default_map if ctx else {}
+            if default_map is not None:
 
-            for key, value in params.items():
-                str_value = str(value)
-                if key in default_map and default_map[key] != value:
-                    overridden = True
-                    str_value += " *"
+                for key, value in params.items():
+                    str_value = str(value)
+                    if key in default_map and default_map[key] != value:
+                        overridden = True
+                        str_value += " *"
 
-                if len(str_value) > v_len:
-                    str_value = "..." + str_value[-v_len:]
+                    if len(str_value) > v_len:
+                        str_value = "..." + str_value[-v_len:]
 
-                table.add_row([key, str_value])
+                    table.add_row([key, str_value])
 
-            table_str = f"\n{self.table_color}{table.get_string()}"
-            print(table_str)
+                table_str = f"\n{self.table_color}{table.get_string()}"
+                print(table_str)
 
-            if overridden:
-                print(self.table_color + "  * config value was replaced by user input\n")
+                if overridden:
+                    print(self.table_color + "  * config value was replaced by user input\n")
 
     def start(self, level=1):
         module_name = inspect.stack()[level].function
@@ -184,14 +197,16 @@ def cli(ctx, config):
 @click_custom_option('--sep', default="_", help='Separator used for sorting file names.')
 @click_custom_option('--num-channels', default=1, help='Number of channels.')
 @click_custom_option('--channel-names', default="ch0", help='Channel names as comma separated list.')
-@click_custom_option('--z-slice', default=None, help='Z slice index.')
+@click_custom_option('--z-slice', type=(click.INT, click.INT), default=None, help='Z slice index.')
 @click_custom_option('--lazy', is_flag=True, help='Lazy loading flag.')
 @click_custom_option('--subtract-background', default=None, help='Background subtraction parameter.')
 @click_custom_option('--subtract-func', default="mean", help='Function to use for background subtraction.')
 @click_custom_option('--rescale', type=click.FLOAT, default=1.0, help='Rescale parameter.')
 @click_custom_option('--in-memory', is_flag=True, help='If True, the processed data is loaded into memory.')
-@click_custom_option('--h5-loc', default="data", help='Prefix to use when saving the processed data.')
-@click_custom_option('--chunks', type=click.STRING, default="infer",
+@click_custom_option('--h5-loc-in', default=None, help='Prefix to use when loading the processed data.')
+@click_custom_option('--h5-loc-out', default="data", help='Prefix to use when saving the processed data.')
+@click_custom_option('--infer-chunks', is_flag=True, default=False, help='Infer chunks size.')
+@click_custom_option('--chunks', type=(click.INT, click.INT, click.INT), default=None,
                      help='Chunk size to use when saving to HDF5 or TileDB.'
                      )
 @click_custom_option('--compression', default=None, help='Compression method to use when saving to HDF5 or TileDB.')
@@ -200,7 +215,7 @@ def cli(ctx, config):
                      )
 def convert_input(
         input_path, logging_level, output_path, sep, num_channels, channel_names, z_slice, lazy, subtract_background,
-        subtract_func, rescale, in_memory, h5_loc, chunks, compression, overwrite
+        subtract_func, rescale, in_memory, h5_loc_in, h5_loc_out, chunks, compression, overwrite, infer_chunks
         ):
     """
     Convert user files to astroCAST compatible format using the Input class.
@@ -210,13 +225,13 @@ def convert_input(
 
     with UserFeedback(params=locals(), logging_level=logging_level):
         # check output
-        output_path = check_output(output_path, input_path, h5_loc, overwrite)
+        output_path = check_output(output_path, input_path, h5_loc_out, overwrite)
         if output_path == 0:
             logging.warning("skipping this step because output exists.")
             return 0
 
         # check chunks
-        chunks = parse_chunks(chunks)
+        chunks = parse_chunks(infer_chunks, chunks)
 
         channel_names = channel_names.split(",")
         if len(channel_names) != num_channels:
@@ -229,7 +244,8 @@ def convert_input(
         input_instance = Input(logging_level=logging_level)
         input_instance.run(input_path=input_path, output_path=output_path, sep=sep, channels=channels, z_slice=z_slice,
                            lazy=lazy, subtract_background=subtract_background, subtract_func=subtract_func,
-                           rescale=rescale, in_memory=in_memory, h5_loc=h5_loc, chunks=chunks, compression=compression)
+                           rescale=rescale, in_memory=in_memory, h5_loc_in=h5_loc_in, h5_loc_out=h5_loc_out,
+                           chunks=chunks, compression=compression)
 
 @cli.command()
 @click.argument('input-path', type=click.Path())
@@ -244,7 +260,7 @@ def convert_input(
 @click_custom_option('--h5-loc-save', type=click.STRING, default="mc/ch0",
                      help='Location within the HDF5 file to save the data.'
                      )
-@click_custom_option('--max-shifts', type=click.Tuple([int, int]), default=(50, 50),
+@click_custom_option('--max-shifts', type=(click.INT, click.INT), default=(50, 50),
                      help='Maximum allowed rigid shift.'
                      )
 @click_custom_option('--niter-rig', type=click.INT, default=3,
@@ -280,10 +296,11 @@ def convert_input(
 @click_custom_option('--nonneg-movie', type=click.BOOL, default=True,
                      help='Make the saved movie and template mostly nonnegative by removing min_mov from movie.'
                      )
-@click_custom_option('--gsig-filt', type=click.Tuple([int, int]), default=(20, 20),
+@click_custom_option('--gsig-filt', type=(click.INT, click.INT), default=(20, 20),
                      help='Tuple indicating the size of the filter.'
                      )
-@click_custom_option('--chunks', type=click.STRING, default=None,
+@click_custom_option('--infer-chunks', is_flag=True, default=False, help='Infer the chunks for the HDF5 file.')
+@click_custom_option('--chunks', type=(click.INT, click.INT, click.INT), default=None,
                      help='Chunk shape for creating a dask array when saving to an HDF5 file.'
                      )
 @click_custom_option('--compression', type=click.STRING, default=None,
@@ -296,7 +313,7 @@ def motion_correction(
         input_path, working_directory, logging_level, output_path, h5_loc,
         max_shifts, niter_rig, splits_rig, num_splits_to_process_rig, strides,
         overlaps, pw_rigid, splits_els, num_splits_to_process_els, upsample_factor_grid,
-        max_deviation_rigid, nonneg_movie, gsig_filt, h5_loc_save, chunks, compression, overwrite
+        max_deviation_rigid, nonneg_movie, gsig_filt, h5_loc_save, infer_chunks, chunks, compression, overwrite
         ):
     """
     Correct motion artifacts of input data using the MotionCorrection class.
@@ -312,7 +329,7 @@ def motion_correction(
             return 0
 
         # check chunks
-        chunks = parse_chunks(chunks)
+        chunks = parse_chunks(infer_chunks, chunks)
 
         # Initialize the MotionCorrection instance
         logging.info("creating motion correction instance ...")
@@ -339,11 +356,13 @@ def motion_correction(
 @click_custom_option('--h5-loc-in', type=click.STRING, default="",
                      help='Location of the data in the HDF5 file (if applicable).'
                      )
-@click_custom_option('--method', type=click.Choice(['background', 'dF', 'dFF']), default='background',
+@click_custom_option('--method', type=click.Choice(['background', 'dF', 'dFF']), default='dF',
                      help='Method to use for delta calculation.'
                      )
-@click_custom_option('--processing-chunks', type=click.STRING, default="infer", help='Chunk size for data processing.')
-@click_custom_option('--save-chunks', type=click.STRING, default="infer", help='Chunk size for saving.')
+@click_custom_option('--infer-processing-chunks', is_flag=True, default=False, help='Infer the chunks for data processing.')
+@click_custom_option('--processing-chunks', type=(click.INT, click.INT, click.INT), default=None, help='Chunk size for data processing.')
+@click_custom_option('--infer-save-chunks', is_flag=True, default=False, help='Infer the chunks for the HDF5 file.')
+@click_custom_option('--save-chunks', type=(click.INT, click.INT, click.INT), default=None, help='Chunk size for saving.')
 @click_custom_option('--overwrite-first-frame', type=click.BOOL, default=True,
                      help='Whether to overwrite the first frame with the second frame after delta calculation.'
                      )
@@ -359,8 +378,9 @@ def motion_correction(
                      help='Flag for overwriting previous result in output location'
                      )
 def subtract_delta(
-        input_path, output_path, h5_loc_in, method, window, processing_chunks, save_chunks, overwrite_first_frame, lazy, h5_loc_out,
-        compression, logging_level, overwrite
+        input_path, output_path, h5_loc_in, method, window,
+        infer_processing_chunks, processing_chunks, infer_save_chunks, save_chunks,
+        overwrite_first_frame, lazy, h5_loc_out, compression, logging_level, overwrite
         ):
     """
     Subtract baseline of input using the Delta class.
@@ -379,8 +399,8 @@ def subtract_delta(
             return 0
 
         # check chunks
-        processing_chunks = parse_chunks(processing_chunks)
-        save_chunks = parse_chunks(save_chunks)
+        processing_chunks = parse_chunks(infer_processing_chunks, processing_chunks)
+        save_chunks = parse_chunks(infer_save_chunks, save_chunks)
 
         # Initialize the Delta instance
         logging.info("creating delta instance ...")
@@ -456,8 +476,7 @@ def subtract_delta(
                      help="Toggles between training on CPU and GPU. "
                           "GPU is significantly faster, but might not be available on all systems.")
 @click_custom_option('--in-memory', type=click.BOOL, default=False,
-                     help="Toggle if training data is loaded into memory."
-                          "GPU is significantly faster, but might not be available on all systems.")
+                     help="Toggle if training data is loaded into memory.")
 @click_custom_option('--logging-level', type=click.INT, default=logging.INFO, help='Logging level for messages.')
 def train_denoiser(training_files, validation_files, input_size, learning_rate, decay_rate, decay_steps,
                    n_stacks, kernel, batch_normalize, loss, pretrained_weights, use_cpu, train_rotation,
@@ -471,9 +490,14 @@ def train_denoiser(training_files, validation_files, input_size, learning_rate, 
         # Trainer
         if "*" in training_files:
             train_str = Path(training_files)
-            train_paths = list(train_str.stem.glob(train_str.name))
+            train_paths = list(Path(train_str.parent).glob(train_str.name))
         else:
             train_paths = Path(training_files)
+
+        if isinstance(train_paths, list) and len(train_paths) < 1:
+            raise FileNotFoundError(f"No training files found in folder "
+                                    f"{Path(train_str.parent)} with search string "
+                                    f"{train_str.name}")
 
         train_gen = denoising.SubFrameGenerator(
             paths=train_paths, max_per_file=max_per_file, loc=loc, input_size=input_size,
@@ -485,9 +509,16 @@ def train_denoiser(training_files, validation_files, input_size, learning_rate, 
         if validation_files is not None:
             if "*" in validation_files:
                 val_str = Path(validation_files)
-                val_paths = list(val_str.stem.glob(val_str.name))
+                val_paths = list(Path(val_str.parent).glob(val_str.name))
             else:
                 val_paths = Path(validation_files)
+
+            if isinstance(val_paths, list) and len(val_paths) < 1:
+                raise FileNotFoundError(
+                    f"No validation files found in folder "
+                    f"{Path(val_str.parent)} with search string "
+                    f"{val_str.name}"
+                    )
 
             val_gen = denoising.SubFrameGenerator(
                 paths=val_paths, max_per_file=max_per_val_file, batch_size=batch_size_val, loc=loc, input_size=input_size,
@@ -516,8 +547,8 @@ def train_denoiser(training_files, validation_files, input_size, learning_rate, 
                      help='Path to the output file where the results will be saved. If not provided, the result will be returned instead of being saved to a file.'
                      )
 @click_custom_option('--batch-size', type=click.INT, default=8, help='batch size processed in each step.')
-@click_custom_option('--input-size', type=(int, int), default=(256, 256), help='size of the denoising window')
-@click_custom_option('--pre-post-frame', type=click.INT, default=5,
+@click_custom_option('--input-size', type=(click.INT, click.INT), default=(256, 256), help='size of the denoising window')
+@click_custom_option('--pre-post-frames', type=click.INT, default=5,
                      help='Number of frames before and after the central frame in each data chunk.'
                      )
 @click_custom_option('--gap-frames', type=click.INT, default=0,
@@ -541,12 +572,13 @@ def train_denoiser(training_files, validation_files, input_size, learning_rate, 
 @click_custom_option('--dtype', type=click.STRING, default="same",
                      help='Data type for the output. If "same", the data type of the input will be used.'
                      )
-@click_custom_option('--chunk-size', type=(int, int), default=None,
+@click_custom_option("--infer-chunks", is_flag=True, default=False, help="Whether to infer the chunks in the output file.")
+@click_custom_option('--chunks', type=(click.INT, click.INT, click.INT), default=None,
                      help='Chunk size for saving the results in the output file. If not provided, a default chunk size will be used.'
                      )
 @click_custom_option('--rescale', type=click.BOOL, default=True, help='Whether to rescale the output values.')
-def denoise(input_path, batch_size, input_size, pre_post_frame, gap_frames, z_select,
-            logging_level, model, out_loc, dtype, chunk_size, rescale,
+def denoise(input_path, batch_size, input_size, pre_post_frames, gap_frames, z_select,
+            logging_level, model, out_loc, dtype, infer_chunks, chunks, rescale,
             overlap, padding, normalize, loc, in_memory, output_file):
     """
     Denoise the input data using the SubFrameGenerator class and infer method.
@@ -557,9 +589,11 @@ def denoise(input_path, batch_size, input_size, pre_post_frame, gap_frames, z_se
 
     if output_file is None:
         output_file = input_path
-        logging.warning(f"ni output_file provided. Choosing input_file: {input_path}")
+        logging.warning(f"No output_file provided. Choosing input_file: {input_path}")
 
     from astrocast.denoising import SubFrameGenerator
+
+    chunks = parse_chunks(infer_chunks, chunks)
 
     with UserFeedback(params=locals(), logging_level=logging_level):
         # Initializing the SubFrameGenerator instance
@@ -567,7 +601,7 @@ def denoise(input_path, batch_size, input_size, pre_post_frame, gap_frames, z_se
             paths=input_path,
             batch_size=batch_size,
             input_size=input_size,
-            pre_post_frame=pre_post_frame,
+            pre_post_frame=pre_post_frames,
             gap_frames=gap_frames,
             # z_steps=None,
             z_select=z_select,
@@ -595,7 +629,7 @@ def denoise(input_path, batch_size, input_size, pre_post_frame, gap_frames, z_se
             output=output_file,
             out_loc=out_loc,
             dtype=dtype,
-            chunk_size=chunk_size,
+            chunk_size=chunks,
             rescale=rescale
         )
 
@@ -659,7 +693,8 @@ def denoise(input_path, batch_size, input_size, pre_post_frame, gap_frames, z_se
 @click_custom_option('--adjust-for-noise', type=click.BOOL, default=False,
                      help='Whether to adjust event detection for background noise.'
                      )
-@click_custom_option('--subset', type=click.STRING, default=None, help='Subset of the dataset to process.')
+@click_custom_option('--subset', type=(click.INT, click.INT),
+                     default=None, help='Subset of frames (z0, z1) of the dataset to process.')
 @click_custom_option('--split-events', type=click.BOOL, default=False,
                      help='Whether to split detected events into smaller events if multiple peaks are detected.'
                      )
@@ -817,7 +852,8 @@ def move_h5_dataset(input_path, output_path, loc_in, loc_out, overwrite):
                      help='Range of frames to select in the Z dimension, given as a tuple (start, end).'
                      )
 @click_custom_option('--lazy', type=click.BOOL, default=True, help='Whether to implement lazy loading.')
-def view_data(input_path, h5_loc, z_select, lazy, show_trace, window, colormap):
+@click_custom_option('--testing', type=click.BOOL, default=False, help='Auto closes napari for testing purposes.')
+def view_data(input_path, h5_loc, z_select, lazy, show_trace, window, colormap, testing):
     """
     Displays a video from a data file (.h5, .tiff, .tdb).
 
@@ -843,20 +879,22 @@ def view_data(input_path, h5_loc, z_select, lazy, show_trace, window, colormap):
 
     vid = Video(data=input_path, z_slice=z_select, h5_loc=h5_loc, lazy=lazy)
     vid.show(show_trace=show_trace, window=window, colormap=colormap)
-    napari.run()
 
+    if not testing:
+        napari.run()
 
 @cli.command()
 @click.argument('event_dir', type=click.Path())
 @click_custom_option('--video-path', type=click.STRING, default="infer", help='Path to the data used for detection.')
-@click_custom_option('--h5-loc', type=click.STRING, default="",
+@click_custom_option('--h5-loc', type=click.STRING, default="df/ch0",
                      help='Name or identifier of the dataset used for detection.'
                      )
 @click_custom_option('--z-select', type=(click.INT, click.INT), default=None,
                      help='Range of frames to select in the Z dimension, given as a tuple (start, end).'
                      )
 @click_custom_option('--lazy', type=click.BOOL, default=True, help='Whether to implement lazy loading.')
-def view_detection_results(event_dir, video_path, h5_loc, z_select, lazy):
+@click_custom_option('--testing', type=click.BOOL, default=False, help='Automatically closes viewer for testing purposes.')
+def view_detection_results(event_dir, video_path, h5_loc, z_select, lazy, testing):
     """
     view the detection results; optionally overlayed on the input video.
 
@@ -881,9 +919,10 @@ def view_detection_results(event_dir, video_path, h5_loc, z_select, lazy):
 
     event = Events(event_dir=event_dir, data=video_path, h5_loc=h5_loc, z_slice=z_select, lazy=lazy)
     viewer = event.show_event_map(video=None, h5_loc=None, z_slice=z_select)
-    viewer.show()
-    napari.run()
 
+    if not testing:
+        viewer.show()
+        napari.run()
 
 @cli.command()
 @click.argument('input-path', type=click.Path())
@@ -898,14 +937,18 @@ def view_detection_results(event_dir, video_path, h5_loc, z_select, lazy):
                      help='Range of frames to select in the Z dimension, given as a tuple (start, end).'
                      )
 @click_custom_option('--lazy', type=click.BOOL, default=True, help='Whether to implement lazy loading.')
-@click_custom_option('--chunk-size', type=(int, int), default=None,
-                     help='Chunk size for saving the results in the output file. If not provided, a default chunk size will be used.'
+@click_custom_option('--chunk-size', type=(click.INT, click.INT, click.INT), default=None,
+                     help='Chunk size for saving the results in the output file. If not provided, a default chunk '
+                          'size will be used.'
                      )
 @click_custom_option('--compression', default=None, help='Compression method to use when saving to HDF5 or TileDB.')
+@click_custom_option('--rescale', default=None, help='(float): The rescaling factor or factors to '
+                                                     'apply to the data arrays.')
 @click_custom_option('--overwrite', type=click.BOOL, default=False,
                      help='Flag for overwriting previous result in output location'
                      )
-def export_video(input_path, output_path, h5_loc_in, h5_loc_out, z_select, lazy, chunk_size, compression, overwrite):
+def export_video(input_path, output_path, h5_loc_in, h5_loc_out, z_select, lazy, chunk_size, compression,
+                 rescale, overwrite):
     """
     Exports a video dataset from the input file to another file with various configurable options.
 
@@ -924,6 +967,7 @@ def export_video(input_path, output_path, h5_loc_in, h5_loc_out, z_select, lazy,
     lazy (bool, optional): Whether to implement lazy loading, which can improve performance when working with large datasets by only loading data into memory as it is needed. Defaults to True.
     chunk_size (tuple of int, optional): A tuple specifying the chunk size for saving the results in the output file. If not provided, a default chunk size will be used. Defaults to None.
     compression (str, optional): The compression method to use when saving data to the output file. If not provided, no compression is applied. Defaults to None.
+    rescale (tuple, list, int, float): The rescaling factor or factors to apply to the data arrays.
     overwrite (bool, optional): Whether to overwrite previous results in the output location if they exist. Defaults to False.
 
     Returns:
@@ -933,7 +977,7 @@ def export_video(input_path, output_path, h5_loc_in, h5_loc_out, z_select, lazy,
     export_video('input.h5', 'output.h5', h5_loc_in='dataset1', h5_loc_out='dataset2', z_select=(10, 20), lazy=True, chunk_size=(100, 100), compression='gzip', overwrite=True)
     """
 
-    if Path(output_path).exists():
+    if Path(output_path).exists() and not overwrite:
         logging.error(f"file already exists {output_path}. Please choose a different output location "
                       f"or use '--overwrite True'."
                       )
@@ -945,14 +989,18 @@ def export_video(input_path, output_path, h5_loc_in, h5_loc_out, z_select, lazy,
     io = IO()
     data = io.load(input_path, h5_loc=h5_loc_in, z_slice=z_select, lazy=lazy)
 
-    io.save(output_path, data=data, h5_loc=h5_loc_out, chunks=chunk_size, compression=compression, overwrite=overwrite)
+    if rescale is not None:
 
+        data = {"dummy": data}
+        data = Input.rescale_data(data, rescale=float(rescale))
+        data = data["dummy"]
+
+    io.save(output_path, data=data, h5_loc=h5_loc_out, chunks=chunk_size, compression=compression, overwrite=overwrite)
 
 @cli.command()
 @click_custom_option('--input-path', type=click.Path(), default=None, help='Path to input file.')
 @click_custom_option('--h5-loc', type=click.STRING, default=None,
-                     help='Name or identifier of the dataset in the h5 file.'
-                     )
+                     help='Name or identifier of the dataset in the h5 file.')
 def explorer(input_path, h5_loc):
 
     from astrocast.app_preparation import Explorer
@@ -1016,6 +1064,9 @@ def climage(input_path, loc, z, size, equalize, clip_limit):
     data = io.load(input_path, h5_loc=loc, lazy=True, z_slice=(z0, z1))
     print(f"input path: {input_path}")
 
+    # enforce even size
+    size = [size[0] + size[0] % 2, size[1] + size[1] % 2]
+
     for zi in z:
         img = data[zi-z0, :, :].astype(float).compute()
 
@@ -1037,7 +1088,8 @@ def climage(input_path, loc, z, size, equalize, clip_limit):
 
 @cli.command
 @click.argument('input-path', type=click.Path())
-def delete_h5_dataset(input_path):
+@click_custom_option('--loc', type=click.STRING, default=None)
+def delete_h5_dataset(input_path, loc):
     import h5py as h5
     from pathlib import Path
     
@@ -1046,14 +1098,92 @@ def delete_h5_dataset(input_path):
 
     with h5.File(input_path.as_posix(), "a") as f:
 
-        while True:
-            visualize_h5_recursive(f['/'])
+        if loc is None:
 
-            in_ = input("Choose dataset or 'exit': ")
-            if in_ in f:
-                del f[in_]
-            elif in_ == "exit":
-                break
+            while True:
+                visualize_h5_recursive(f['/'])
+
+                in_ = input("Choose dataset or 'exit': ")
+                if in_ in f:
+                    del f[in_]
+                elif in_ == "exit":
+                    break
+
+        else:
+
+            for ds in loc.split(","):
+
+                if ds in f:
+                    del f[ds]
+
+
+@cli.command
+@click.argument('data-path', type=click.Path())
+@click_custom_option('--cfg-path', type=click.Path(), default=Path("config.yaml"))
+@click_custom_option('--log-path', type=click.Path(), default=Path("."))
+@click_custom_option('--tasks', default=None)
+@click_custom_option('--base-command', type=click.STRING, default="")
+@click_custom_option('--account', type=click.STRING)
+def push_slurm_tasks(log_path, cfg_path, data_path, tasks, base_command, account):
+
+    import h5py as h5
+    from simple_slurm import Slurm
+
+    if tasks is None:
+        raise ValueError(f"Please provide a dictionary of tasks.")
+
+    data_path = Path(data_path)
+    cfg_path = Path(cfg_path)
+    log_path = Path(log_path)
+
+    files = [data_path] if data_path.is_file() else list(data_path.glob("*/*.h5"))
+
+    if isinstance(tasks, str):
+        tasks = ast.literal_eval(tasks)
+
+    task_ids = sorted(tasks.keys())
+    for f in files:
+
+        last_jobid = None
+        with h5.File(f, "r") as file:
+            print(f"{f}:")
+
+            for i in task_ids:
+
+                dict_ = tasks[i]
+
+                cmd = base_command[:]
+
+                k = dict_["key"]
+                print(f"\tchecking: {k}")
+
+                base_name = f.name.replace(".h5", "")
+                log_name = log_path.joinpath(f"slurm-%A-{base_name}-{k}.out").as_posix()
+                job_name = f"{k}_{base_name}"
+
+                if (k == "roi" and "df" in file and not f.with_suffix(".roi").exists()) or (k not in file):
+
+                    cmd += f"astrocast --config {cfg_path} {dict_['script']} {f};"
+                    print(f"\tcmd {k}>{base_name}:\n {cmd}")
+
+                    dependency = dict(afterok=last_jobid) if last_jobid is not None else None
+
+                    slurm = Slurm()
+                    slurm.add_arguments(A=account)
+                    slurm.add_arguments(time=dict_["time"])
+                    slurm.add_arguments(c=dict_["cores"])
+
+                    if job_name is not None:
+                        slurm.add_arguments(J=job_name)
+
+                    if log_path is not None:
+                        slurm.add_arguments(output=log_name)
+
+                    if dependency is not None:
+                        slurm.add_arguments(dependency=dependency)
+
+                    last_jobid = slurm.sbatch(cmd)
+
 
 if __name__ == '__main__':
     cli()

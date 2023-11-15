@@ -6,7 +6,6 @@ from astrocast.detection import *
 from astrocast.helper import EventSim, SampleInput
 from astrocast.preparation import IO
 
-@pytest.mark.serial
 class Test_Detector:
 
     @pytest.mark.parametrize("extension", [".h5", ".tiff"])
