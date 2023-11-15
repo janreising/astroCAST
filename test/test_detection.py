@@ -49,9 +49,8 @@ class Test_Detector:
             h5_loc = "dff/ch0"
 
             sim = EventSim()
-            video, num_events = sim.simulate(shape=(50, 100, 100),
-                                             skip_n=5, event_intensity=100, background_noise=1,
-                                             gap_time=3, gap_space=5)
+            video, num_events = sim.simulate(shape=(50, 100, 100), skip_n=5, gap_space=5, gap_time=3,
+                                             event_intensity=100, background_noise=1)
             io = IO()
             io.save(path=path, data={h5_loc:video})
 
