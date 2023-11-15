@@ -1426,7 +1426,7 @@ class Delta:
         self.loc = loc
 
     def run(
-            self, window, method="background", processing_chunks="infer", output_path=None, overwrite_first_frame=True,
+            self, window, method="dF", processing_chunks="infer", output_path=None, overwrite_first_frame=True,
             lazy=True
             ):
         """
