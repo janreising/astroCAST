@@ -54,7 +54,14 @@ class Detector:
 
     """
     def __init__(self, input_path: str, output=None, logging_level=logging.INFO):
+        """
+        Args:
+            input_path (str): Path to the input file.
+            output (Optional[str]): Path to the output directory. If None, the output directory is created in the input directory.
+            logging_level (int): Logging level.
+        """
 
+        # logging
         logging.basicConfig(format="%(asctime)s %(levelname)s: %(message)s", level=logging_level)
 
         # paths
@@ -72,6 +79,7 @@ class Detector:
             raise FileExistsError(f"output folder already exists: {output}")
 
         # shared variables
+        self.output_directory = None
         self.file = None
         self.data = None
         self.Z, self.X, self.Y = None, None, None
@@ -90,8 +98,9 @@ class Detector:
             lazy: bool = True, adjust_for_noise: bool = False,
             subset: Optional[str] = None, split_events: bool = False,
             debug: bool = False,
+            event_map_export_format: str = "tiff",
             parallel=True
-            ) -> None:
+            ) -> Path:
         """
         Runs the event detection process on the specified dataset.
 
@@ -111,7 +120,7 @@ class Detector:
             parallel: parallel execution of event characterization. Recommended to be true.
 
         Returns:
-            dictionary of events
+            Path to event directory.
 
         Notes:
             - The output and intermediate results are stored in the output directory.
@@ -150,8 +159,8 @@ class Detector:
         logging.info(f"data: {data.shape}") if lazy else logging.info(f"data: {data}")
 
         # calculate event map
-        event_map_path = self.output_directory.joinpath("event_map.tdb")
-        if not os.path.isdir(event_map_path):
+        event_map_path = self.output_directory.joinpath(f"event_map.{event_map_export_format}")
+        if not event_map_path.exists():
             logging.info("Estimating noise")
             # TODO maybe should be adjusted since it might already be calculated
             noise = self.estimate_background(data) if adjust_for_noise else 1
@@ -170,20 +179,11 @@ class Detector:
                                         )
 
             logging.info(f"Saving event map to: {event_map_path}")
-            event_map.rechunk((100, 100, 100)).to_tiledb(event_map_path.as_posix())
-
-            tiff_path = event_map_path.with_suffix(".tiff")
-            logging.info(f"Saving tiff to: {tiff_path}")
-            tf.imwrite(tiff_path, event_map, dtype=event_map.dtype)
+            io.save(event_map_path, data=event_map)
 
         else:
             logging.info(f"Loading event map from: {event_map_path}")
-            event_map = da.from_tiledb(event_map_path.as_posix())
-
-            tiff_path = event_map_path.with_suffix(".tiff")
-            if not tiff_path.is_file():
-                logging.info(f"Saving tiff to: {tiff_path}")
-                tf.imwrite(tiff_path, event_map, dtype=event_map.dtype)
+            event_map = io.load(event_map_path, lazy=lazy)
 
         # calculate time map
         logging.info("Calculating time map")
@@ -207,7 +207,7 @@ class Detector:
 
         logging.info("Run complete! [{}]".format(self.input_path))
 
-        return events
+        return self.output_directory
 
     @staticmethod
     def estimate_background(data: np.array, mask_xy: np.array = None) -> float:
