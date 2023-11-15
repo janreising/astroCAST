@@ -29,6 +29,7 @@ from dask.diagnostics import ProgressBar
 from tqdm import tqdm
 from multiprocess import shared_memory
 
+from astrocast.helper import get_data_dimensions
 from astrocast.preparation import IO
 
 
@@ -54,7 +55,14 @@ class Detector:
 
     """
     def __init__(self, input_path: str, output=None, logging_level=logging.INFO):
+        """
+        Args:
+            input_path (str): Path to the input file.
+            output (Optional[str]): Path to the output directory. If None, the output directory is created in the input directory.
+            logging_level (int): Logging level.
+        """
 
+        # logging
         logging.basicConfig(format="%(asctime)s %(levelname)s: %(message)s", level=logging_level)
 
         # paths
@@ -72,6 +80,7 @@ class Detector:
             raise FileExistsError(f"output folder already exists: {output}")
 
         # shared variables
+        self.output_directory = None
         self.file = None
         self.data = None
         self.Z, self.X, self.Y = None, None, None
@@ -90,8 +99,9 @@ class Detector:
             lazy: bool = True, adjust_for_noise: bool = False,
             subset: Optional[str] = None, split_events: bool = False,
             debug: bool = False,
+            event_map_export_format: str = "tiff",
             parallel=True
-            ) -> None:
+            ) -> Path:
         """
         Runs the event detection process on the specified dataset.
 
@@ -111,7 +121,7 @@ class Detector:
             parallel: parallel execution of event characterization. Recommended to be true.
 
         Returns:
-            dictionary of events
+            Path to event directory.
 
         Notes:
             - The output and intermediate results are stored in the output directory.
@@ -143,15 +153,14 @@ class Detector:
 
         # load data
         io = IO()
-        # todo: add chunks flag and/or re-chunking
         data = io.load(path=self.input_path, h5_loc=h5_loc, z_slice=subset, lazy=lazy)
         self.Z, self.X, self.Y = data.shape
         self.data = data
         logging.info(f"data: {data.shape}") if lazy else logging.info(f"data: {data}")
 
         # calculate event map
-        event_map_path = self.output_directory.joinpath("event_map.tdb")
-        if not os.path.isdir(event_map_path):
+        event_map_path = self.output_directory.joinpath(f"event_map.{event_map_export_format}")
+        if not event_map_path.exists():
             logging.info("Estimating noise")
             # TODO maybe should be adjusted since it might already be calculated
             noise = self.estimate_background(data) if adjust_for_noise else 1
@@ -170,20 +179,11 @@ class Detector:
                                         )
 
             logging.info(f"Saving event map to: {event_map_path}")
-            event_map.rechunk((100, 100, 100)).to_tiledb(event_map_path.as_posix())
-
-            tiff_path = event_map_path.with_suffix(".tiff")
-            logging.info(f"Saving tiff to: {tiff_path}")
-            tf.imwrite(tiff_path, event_map, dtype=event_map.dtype)
+            io.save(event_map_path, data=event_map)
 
         else:
             logging.info(f"Loading event map from: {event_map_path}")
-            event_map = da.from_tiledb(event_map_path.as_posix())
-
-            tiff_path = event_map_path.with_suffix(".tiff")
-            if not tiff_path.is_file():
-                logging.info(f"Saving tiff to: {tiff_path}")
-                tf.imwrite(tiff_path, event_map, dtype=event_map.dtype)
+            event_map = io.load(event_map_path, lazy=lazy)
 
         # calculate time map
         logging.info("Calculating time map")
@@ -199,15 +199,15 @@ class Detector:
 
         # calculate features
         logging.info("Calculating features")
-        events = self.custom_slim_features(time_map, event_map_path, split_events=split_events, parallel=parallel)
+        _ = self.custom_slim_features(time_map, event_map_path, split_events=split_events, parallel=parallel)
 
-        logging.info("Saving features")
+        logging.info("Saving meta file")
         with open(self.output_directory.joinpath("meta.json"), 'w') as outfile:
             json.dump(self.meta, outfile)
 
         logging.info("Run complete! [{}]".format(self.input_path))
 
-        return events
+        return self.output_directory
 
     @staticmethod
     def estimate_background(data: np.array, mask_xy: np.array = None) -> float:
@@ -553,42 +553,36 @@ class Detector:
 
     def custom_slim_features(self, time_map, event_path, split_events: bool = True, parallel=True):
 
-        # print(event_map)
-        # sh_em = shared_memory.SharedMemory(create=True, size=event_map.nbytes)
-        # shn_em = np.ndarray(event_map.shape, dtype=event_map.dtype, buffer=sh_em.buf)
-        # shn_em[:] = event_map
-        #
-        # num_events = np.max(shn_em)
+        io = IO()
 
-        # create chunks
-
-        # shared memory
-
+        # define event output path
         combined_path = event_path.parent.joinpath("events.npy")
         if combined_path.is_file():
             print("combined event path already exists! moving on ...")
             return True
 
-        # self.vprint("creating shared memory arrays ...", 3)
+        # create shared memory array for the fluorescence data
         logging.info("Creating shared memory arrays...")
-        data = self.data
+        data_shape, _, data_dtype = get_data_dimensions(self.data, return_dtype=True)
         # Calculate n_bytes needed for data.
-        n_bytes = data.shape[0] * data.shape[1] * data.shape[2] * data.dtype.itemsize
+        n_bytes = data_shape[0] * data_shape[1] * data_shape[2] * data_dtype.itemsize
         # Create shared buffer
         data_sh = shared_memory.SharedMemory(create=True, size=n_bytes)
         # Buffer to array
-        data_ = np.ndarray(data.shape, data.dtype, buffer=data_sh.buf)
-        data_[:] = data[:]
+        data_ = np.ndarray(data_shape, data_dtype, buffer=data_sh.buf)
+        data_[:] = self.data[:]
         # save data info for use in task
-        data_info = (data.shape, data.dtype, data_sh.name)
+        data_info = (data_shape, data_dtype, data_sh.name)
 
-        event = tiledb.open(event_path.as_posix())
-        n_bytes = event.shape[0] * event.shape[1] * event.shape[2] * event.dtype.itemsize
+        # create shared memory array for the event map
+        event_shape, event_chunksize, event_dtype = get_data_dimensions(event_path, return_dtype=True)
+        event_map = io.load(event_path, lazy=False)
+        n_bytes = event_shape[0] * event_shape[1] * event_shape[2] * event_dtype.itemsize
         event_sh = shared_memory.SharedMemory(create=True, size=n_bytes)
-        event_ = np.ndarray(event.shape, event.dtype, buffer=event_sh.buf)
-        event_[:] = event[:]
-        event_info = (event.shape, event.dtype, event_sh.name)
-        del event
+        event_ = np.ndarray(event_shape, event_dtype, buffer=event_sh.buf)
+        event_[:] = event_map[:]
+        event_info = (event_shape, event_dtype, event_sh.name)
+        del event_map
 
         logging.info("data_.dtype: {}".format(data_.dtype))
         logging.info("event_.dtype: {}".format(event_.dtype))

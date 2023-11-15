@@ -255,7 +255,11 @@ def get_data_dimensions(input_, loc=None, return_dtype=False):
     # Check if the input is a numpy ndarray
     if isinstance(input_, (np.ndarray, da.Array)):
         # Return the shape of the ndarray and None for chunksize
-        return input_.shape, None
+
+        if return_dtype:
+            return input_.shape, None, input_.dtype
+        else:
+            return input_.shape, None
 
     elif isinstance(input_, Path):
         path = input_
@@ -299,9 +303,9 @@ def get_data_dimensions(input_, loc=None, return_dtype=False):
         raise TypeError(f"data format not recognized: {type(path)}")
 
     if return_dtype:
-        return (shape, chunksize, dtype)
+        return shape, chunksize, dtype
     else:
-        return (shape, chunksize)
+        return shape, chunksize
 
 class DummyGenerator:
 
