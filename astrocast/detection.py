@@ -1,40 +1,34 @@
-import argparse
-import os
-import logging
 import json
-import traceback
-
-import numpy as np
-from pathlib import Path
-from typing import Optional
-
-import tifffile as tf
-import dask.array as da
+import logging
+import os
 import random
 import shutil
-import tiledb
+import traceback
 import warnings
+from pathlib import Path
+from typing import Optional, Union
 
+import dask.array as da
+import numpy as np
+import scipy.ndimage as ndimage
+from dask.diagnostics import ProgressBar
+from dask.distributed import Client
+from dask.distributed import progress
+from dask_image import ndfilters
+from multiprocess import shared_memory
 from scipy import signal
 from skimage import morphology
-from skimage.filters import threshold_triangle, gaussian
 from skimage.feature import peak_local_max
-from skimage.segmentation import watershed
+from skimage.filters import threshold_triangle, gaussian
 from skimage.measure import regionprops_table, find_contours
-import scipy.ndimage as ndimage
-from dask_image import ndmorph, ndfilters
-from dask.distributed import progress
-from dask.distributed import Client
-from dask.diagnostics import ProgressBar
+from skimage.segmentation import watershed
 from tqdm import tqdm
-from multiprocess import shared_memory
 
 from astrocast.helper import get_data_dimensions
 from astrocast.preparation import IO
 
 
 class Detector:
-
     """
     The detector class provides a method and dependency functions to detect events, estimate background noise, identify methods based on a threshold (user provided or calculated), characterize events...
 
@@ -54,7 +48,8 @@ class Detector:
         binary_struct_connectivity (int): Connectivity of binary structuring element.
 
     """
-    def __init__(self, input_path: str, output=None, logging_level=logging.INFO):
+
+    def __init__(self, input_path: str, output: Union[str, Path] = None, logging_level=logging.INFO):
         """
         Args:
             input_path (str): Path to the input file.
@@ -86,22 +81,15 @@ class Detector:
         self.Z, self.X, self.Y = None, None, None
         self.meta = {}
 
-    def run(self, h5_loc: Optional[str] = None, exclude_border=0,
-            threshold: Optional[float] = None,
-            use_smoothing=True, smooth_radius=2, smooth_sigma=2,
-            use_spatial=True, spatial_min_ratio=1, spatial_z_depth=1,
+    def run(
+            self, h5_loc: Optional[str] = None, exclude_border=0, threshold: Optional[float] = None, use_smoothing=True,
+            smooth_radius=2, smooth_sigma=2, use_spatial=True, spatial_min_ratio=1, spatial_z_depth=1,
             use_temporal=True, temporal_prominence=10, temporal_width=3, temporal_rel_height=0.9, temporal_wlen=60,
-            temporal_plateau_size=None,
-            comb_type="&",
-            fill_holes=True, area_threshold=10, holes_connectivity=1, holes_depth=1,
-            remove_objects=True, min_size=20, object_connectivity=1, objects_depth=1,
-            fill_holes_first=True,
-            lazy: bool = True, adjust_for_noise: bool = False,
-            subset: Optional[str] = None, split_events: bool = False,
-            debug: bool = False,
-            event_map_export_format: str = "tiff",
-            parallel=True
-            ) -> Path:
+            temporal_plateau_size=None, comb_type="&", fill_holes=True, area_threshold=10, holes_connectivity=1,
+            holes_depth=1, remove_objects=True, min_size=20, object_connectivity=1, objects_depth=1,
+            fill_holes_first=True, lazy: bool = True, adjust_for_noise: bool = False, subset: Optional[str] = None,
+            split_events: bool = False, debug: bool = False, event_map_export_format: str = "tiff", parallel=True
+    ) -> Path:
         """
         Runs the event detection process on the specified dataset.
 
@@ -116,8 +104,6 @@ class Detector:
             subset (Optional[str]): Subset of the dataset to process.
             split_events (bool): Whether to split detected events into smaller events 
                 if multiple peaks are detected.
-            binary_struct_iterations (int): Number of iterations for binary structuring element. 
-            binary_struct_connectivity (int): Connectivity of binary structuring element.
             parallel: parallel execution of event characterization. Recommended to be true.
 
         Returns:
@@ -131,17 +117,14 @@ class Detector:
             - The metadata is saved in a JSON file.
         """
 
-        self.meta.update({
-            "subset": subset,
-            "threshold": threshold,
-            "min_size": min_size,
-            "adjust_for_noise": adjust_for_noise,
-        })
+        self.meta.update(
+            {"subset": subset, "threshold": threshold, "min_size": min_size, "adjust_for_noise": adjust_for_noise, }
+        )
 
         # output folder
-        self.output_directory = self.output if self.output is not None \
-            else self.input_path.with_suffix(".roi") if h5_loc is None \
-            else self.input_path.with_suffix(".{}.roi".format(h5_loc.split("/")[-1]))
+        self.output_directory = self.output if self.output is not None else self.input_path.with_suffix(
+            ".roi"
+        ) if h5_loc is None else self.input_path.with_suffix(".{}.roi".format(h5_loc.split("/")[-1]))
 
         if not self.output_directory.is_dir():
             self.output_directory.mkdir()
@@ -166,17 +149,17 @@ class Detector:
             noise = self.estimate_background(data) if adjust_for_noise else 1
 
             logging.info("Thresholding events")
-            event_map = self.get_events(data, exclude_border=exclude_border, roi_threshold=threshold, var_estimate=noise,
-                                        use_smoothing=use_smoothing, smooth_radius=smooth_radius, smooth_sigma=smooth_sigma,
-                                        use_spatial=use_spatial, spatial_min_ratio=spatial_min_ratio, spatial_z_depth=spatial_z_depth,
-                                        use_temporal=use_temporal, temporal_prominence=temporal_prominence, temporal_width=temporal_width,
-                                        temporal_rel_height=temporal_rel_height, temporal_wlen=temporal_wlen, temporal_plateau_size=temporal_plateau_size,
-                                        comb_type=comb_type,
-                                        fill_holes=fill_holes, area_threshold=area_threshold, holes_connectivity=holes_connectivity, holes_depth=holes_depth,
-                                        remove_objects=remove_objects, min_size=min_size, object_connectivity=object_connectivity, objects_depth=objects_depth,
-                                        fill_holes_first=fill_holes_first, morph_dtype=np.bool_,
-                                        debug=debug
-                                        )
+            event_map = self.get_events(
+                data, exclude_border=exclude_border, roi_threshold=threshold, var_estimate=noise,
+                use_smoothing=use_smoothing, smooth_radius=smooth_radius, smooth_sigma=smooth_sigma,
+                use_spatial=use_spatial, spatial_min_ratio=spatial_min_ratio, spatial_z_depth=spatial_z_depth,
+                use_temporal=use_temporal, temporal_prominence=temporal_prominence, temporal_width=temporal_width,
+                temporal_rel_height=temporal_rel_height, temporal_wlen=temporal_wlen,
+                temporal_plateau_size=temporal_plateau_size, comb_type=comb_type, fill_holes=fill_holes,
+                area_threshold=area_threshold, holes_connectivity=holes_connectivity, holes_depth=holes_depth,
+                remove_objects=remove_objects, min_size=min_size, object_connectivity=object_connectivity,
+                objects_depth=objects_depth, fill_holes_first=fill_holes_first, morph_dtype=np.bool_, debug=debug
+            )
 
             logging.info(f"Saving event map to: {event_map_path}")
             io.save(event_map_path, data=event_map)
@@ -228,16 +211,14 @@ class Detector:
 
         return stdEst
 
-    def get_events(self, data: np.array, roi_threshold: float, var_estimate: float,
-                   mask_xy: np.array = None, exclude_border=0,
-                   use_smoothing=True, smooth_radius = 2, smooth_sigma = 2,
-                   use_spatial=True, spatial_min_ratio=1, spatial_z_depth=1,
-                   use_temporal=True, temporal_prominence=10, temporal_width=3, temporal_rel_height=0.9, temporal_wlen=60, temporal_plateau_size=None,
-                   comb_type="&",
-                   fill_holes=True, area_threshold=10, holes_connectivity=1, holes_depth=1,
-                   remove_objects=True, min_size=0, object_connectivity=1, objects_depth=1,
-                   fill_holes_first=True, morph_dtype=np.bool_,
-                   debug: bool = False) -> (np.array, dict):
+    def get_events(
+            self, data: np.array, roi_threshold: float, var_estimate: float, mask_xy: np.array = None, exclude_border=0,
+            use_smoothing=True, smooth_radius=2, smooth_sigma=2, use_spatial=True, spatial_min_ratio=1,
+            spatial_z_depth=1, use_temporal=True, temporal_prominence=10, temporal_width=3, temporal_rel_height=0.9,
+            temporal_wlen=60, temporal_plateau_size=None, comb_type="&", fill_holes=True, area_threshold=10,
+            holes_connectivity=1, holes_depth=1, remove_objects=True, min_size=0, object_connectivity=1,
+            objects_depth=1, fill_holes_first=True, morph_dtype=np.bool_, debug: bool = False
+    ) -> (np.array, dict):
 
         """ identifies events in data based on threshold
 
@@ -245,7 +226,6 @@ class Detector:
                     expected to be photobleach corrected.
         :param roi_threshold: minimum threshold to be considered an active pixel.
         :param var_estimate: estimated variance of data.
-        :param min_roi_size: minimum size of active regions of interest.
         :param mask_xy: (optional) 2D binary array masking pixels.
         :return:
             event_map: 3D array in which pixels are labelled with event identifier.
@@ -258,8 +238,7 @@ class Detector:
             active_pixels = da.from_array(np.zeros(data.shape, dtype=np.bool_))
 
             # Abs. threshold is roi_threshold * np.sqrt(var_estimate) when var_estimate != None.
-            absolute_threshold = roi_threshold * np.sqrt(var_estimate) \
-                if var_estimate is not None else roi_threshold
+            absolute_threshold = roi_threshold * np.sqrt(var_estimate) if var_estimate is not None else roi_threshold
             # Active pixels are those whose gaussian filter-processed intensities, sigma=smoXY
             # are higher than then calculated absolute threshold.
             active_pixels[:] = ndfilters.gaussian_filter(data, smooth_sigma) > absolute_threshold
@@ -272,18 +251,23 @@ class Detector:
 
             # 3D smooth
             if use_smoothing:
-                data = self.gaussian_smooth_3d(data, sigma=smooth_sigma, radius=smooth_radius, mode='nearest', rechunk=True)
+                data = self.gaussian_smooth_3d(
+                    data, sigma=smooth_sigma, radius=smooth_radius, mode='nearest', rechunk=True
+                )
 
                 if debug:
                     io.save(self.output_directory.joinpath("debug_smoothed_input.tiff"), data=data)
 
             # Threshold
             if use_spatial:
-                active_pixels_spatial = self.spatial_threshold(data, min_ratio=spatial_min_ratio,
-                                                               threshold_z_depth=spatial_z_depth)
+                active_pixels_spatial = self.spatial_threshold(
+                    data, min_ratio=spatial_min_ratio, threshold_z_depth=spatial_z_depth
+                )
             if use_temporal:
-                active_pixels_temporal = self.temporal_threshold(data, prominence=temporal_prominence, width=temporal_width, rel_height=temporal_rel_height,
-                                                                 wlen=temporal_wlen, plateau_size=temporal_plateau_size)
+                active_pixels_temporal = self.temporal_threshold(
+                    data, prominence=temporal_prominence, width=temporal_width, rel_height=temporal_rel_height,
+                    wlen=temporal_wlen, plateau_size=temporal_plateau_size
+                )
 
             if use_spatial and use_temporal:
 
@@ -329,28 +313,40 @@ class Detector:
         if fill_holes and remove_objects:
 
             if fill_holes_first:
-                active_pixels = self.fill_holes(active_pixels, area_threshold=area_threshold, connectivity=holes_connectivity,
-                                                depth=holes_depth, dtype=np.bool_)
-                active_pixels = self.remove_objects(active_pixels, min_size=min_size, connectivity=object_connectivity,
-                                                depth=objects_depth, dtype=morph_dtype)
+                active_pixels = self.fill_holes(
+                    active_pixels, area_threshold=area_threshold, connectivity=holes_connectivity, depth=holes_depth,
+                    dtype=np.bool_
+                )
+                active_pixels = self.remove_objects(
+                    active_pixels, min_size=min_size, connectivity=object_connectivity, depth=objects_depth,
+                    dtype=morph_dtype
+                )
 
                 logging.info("Applied morphologic operations")
 
             else:
-                active_pixels = self.remove_objects(active_pixels, min_size=min_size, connectivity=object_connectivity,
-                                                depth=objects_depth, dtype=morph_dtype)
-                active_pixels = self.fill_holes(active_pixels, area_threshold=area_threshold, connectivity=holes_connectivity,
-                                                depth=holes_depth, dtype=morph_dtype)
+                active_pixels = self.remove_objects(
+                    active_pixels, min_size=min_size, connectivity=object_connectivity, depth=objects_depth,
+                    dtype=morph_dtype
+                )
+                active_pixels = self.fill_holes(
+                    active_pixels, area_threshold=area_threshold, connectivity=holes_connectivity, depth=holes_depth,
+                    dtype=morph_dtype
+                )
                 logging.info("Applied morphologic operations")
 
         elif fill_holes:
-            active_pixels = self.fill_holes(active_pixels, area_threshold=area_threshold, connectivity=holes_connectivity,
-                                                depth=holes_depth, dtype=morph_dtype)
+            active_pixels = self.fill_holes(
+                active_pixels, area_threshold=area_threshold, connectivity=holes_connectivity, depth=holes_depth,
+                dtype=morph_dtype
+            )
             logging.info("Applied morphologic operations")
 
         elif remove_objects:
-            active_pixels = self.remove_objects(active_pixels, min_size=min_size, connectivity=object_connectivity,
-                                            depth=objects_depth, dtype=morph_dtype)
+            active_pixels = self.remove_objects(
+                active_pixels, min_size=min_size, connectivity=object_connectivity, depth=objects_depth,
+                dtype=morph_dtype
+            )
             logging.info("Applied morphologic operations")
 
         if debug and (fill_holes or remove_objects):
@@ -369,8 +365,9 @@ class Detector:
         return event_map
 
     @staticmethod
-    def gaussian_smooth_3d(arr, sigma=3, radius=2, mode='nearest',
-                           rechunk=True, chunks=('auto', 'auto', 'auto')):
+    def gaussian_smooth_3d(
+            arr, sigma=3, radius=2, mode='nearest', rechunk=True, chunks=('auto', 'auto', 'auto')
+    ):
 
         if not isinstance(arr, da.Array):
             arr = da.from_array(arr)
@@ -378,12 +375,13 @@ class Detector:
         if rechunk:
             arr = arr.rechunk(chunks)
 
-
-        depth = {i:radius*2+1 for i in range(3)}
+        depth = {i: radius * 2 + 1 for i in range(3)}
         overlap = da.overlap.overlap(arr, depth=depth, boundary=mode)
-        mapped = overlap.map_blocks(lambda x: ndimage.gaussian_filter(x,
-                                                                      sigma=sigma, radius=radius, mode=mode),
-                                    dtype=arr.dtype)
+        mapped = overlap.map_blocks(
+            lambda x: ndimage.gaussian_filter(
+                x, sigma=sigma, radius=radius, mode=mode
+            ), dtype=arr.dtype
+        )
         arr = da.overlap.trim_internal(mapped, depth, boundary=mode)
 
         return arr
@@ -393,43 +391,43 @@ class Detector:
 
         def threshold(arr, min_ratio=min_ratio, depth=threshold_z_depth):
 
-                Z, X, Y = arr.shape
-                binary_mask = np.zeros(arr.shape, dtype=np.bool_)
+            Z, X, Y = arr.shape
+            binary_mask = np.zeros(arr.shape, dtype=np.bool_)
 
-                for i in range(depth, Z-depth):
-                    z0, z1 = i-depth, i+depth+1
-                    arr_s = arr[z0:z1, :, :]
+            for i in range(depth, Z - depth):
+                z0, z1 = i - depth, i + depth + 1
+                arr_s = arr[z0:z1, :, :]
 
-                    # calculate threshold
-                    threshold = threshold_triangle(arr_s)
+                # calculate threshold
+                threshold = threshold_triangle(arr_s)
 
-                    # threshold image
-                    center_index = (len(arr_s) - 1) // 2
-                    imc = arr_s[center_index, :, :]
-                    binary_mask_s = imc > threshold
+                # threshold image
+                center_index = (len(arr_s) - 1) // 2
+                imc = arr_s[center_index, :, :]
+                binary_mask_s = imc > threshold
 
-                    # calculate ratio foreground/background
-                    active_ind = np.where(binary_mask_s == 1) # TODO more efficient solution?
-                    inactive_ind = np.where(binary_mask_s == 0)
+                # calculate ratio foreground/background
+                active_ind = np.where(binary_mask_s == 1)  # TODO more efficient solution?
+                inactive_ind = np.where(binary_mask_s == 0)
 
-                    fg = np.mean(imc[active_ind])
-                    bg = abs(np.mean(imc[inactive_ind]))
-                    ratio = fg/bg
+                fg = np.mean(imc[active_ind])
+                bg = abs(np.mean(imc[inactive_ind]))
+                ratio = fg / bg
 
-                    if ratio > min_ratio:
-                        binary_mask[i, :, :] = binary_mask_s
+                if ratio > min_ratio:
+                    binary_mask[i, :, :] = binary_mask_s
 
-                return binary_mask
+            return binary_mask
 
         data = arr.rechunk((1, -1, -1))
-        depth = {0:threshold_z_depth, 1:0, 2:0} #(threshold_z_depth, 0, 0)
+        depth = {0: threshold_z_depth, 1: 0, 2: 0}  # (threshold_z_depth, 0, 0)
 
         binary_mask = data.map_overlap(threshold, boundary="nearest", depth=depth, trim=True, dtype=np.bool_)
 
         return binary_mask
 
     @staticmethod
-    def temporal_threshold(arr,  prominence=10, width=3, rel_height=0.9, wlen=60, plateau_size=None):
+    def temporal_threshold(arr, prominence=10, width=3, rel_height=0.9, wlen=60, plateau_size=None):
 
         """
 
@@ -453,7 +451,9 @@ class Detector:
 
         arr = arr.rechunk((-1, "auto", "auto"))
 
-        def find_peaks(arr, prominence=prominence, width=width, rel_height=rel_height, wlen=wlen, plateau_size=plateau_size):
+        def find_peaks(
+                arr, prominence=prominence, width=width, rel_height=rel_height, wlen=wlen, plateau_size=plateau_size
+        ):
 
             binary_mask = np.zeros(arr.shape, dtype=int)
 
@@ -461,12 +461,15 @@ class Detector:
             for x in range(X):
                 for y in range(Y):
 
-                    peaks, prominences = signal.find_peaks(arr[:, x, y], prominence=prominence, wlen=wlen,
-                                                           width=width, rel_height=rel_height, plateau_size=plateau_size)
+                    peaks, prominences = signal.find_peaks(
+                        arr[:, x, y], prominence=prominence, wlen=wlen, width=width, rel_height=rel_height,
+                        plateau_size=plateau_size
+                    )
 
-
-                    for (left, right, prom) in list(zip(prominences['left_ips'], prominences['right_ips'], prominences['prominences'])):
-                        binary_mask[int(left):int(right), x, y] = 1 # prom
+                    for (left, right, prom) in list(
+                            zip(prominences['left_ips'], prominences['right_ips'], prominences['prominences'])
+                    ):
+                        binary_mask[int(left):int(right), x, y] = 1  # prom
 
             return binary_mask
 
@@ -489,10 +492,11 @@ class Detector:
             Z, X, Y = frame.shape
             binary_mask = np.zeros(frame.shape, dtype=dtype)
 
-            for i in range(depth, Z-depth):
-                z0, z1 = i-depth, i+depth+1
-                removed = morphology.remove_small_objects(frame[z0:z1, :, :],
-                                                          min_size=min_size, connectivity=connectivity)
+            for i in range(depth, Z - depth):
+                z0, z1 = i - depth, i + depth + 1
+                removed = morphology.remove_small_objects(
+                    frame[z0:z1, :, :], min_size=min_size, connectivity=connectivity
+                )
                 binary_mask[i, :, :] = removed[depth:-depth, :, :]
 
             return binary_mask
@@ -516,10 +520,11 @@ class Detector:
             Z, X, Y = frame.shape
             binary_mask = np.zeros(frame.shape, dtype=dtype)
 
-            for i in range(depth, Z-depth):
-                z0, z1 = i-depth, i+depth+1
-                removed = morphology.remove_small_holes(frame[z0:z1, :, :],
-                                                        area_threshold=area_threshold, connectivity=connectivity)
+            for i in range(depth, Z - depth):
+                z0, z1 = i - depth, i + depth + 1
+                removed = morphology.remove_small_holes(
+                    frame[z0:z1, :, :], area_threshold=area_threshold, connectivity=connectivity
+                )
                 binary_mask[i, :, :] = removed[depth:-depth, :, :]
 
             return binary_mask
@@ -606,14 +611,14 @@ class Detector:
 
         if parallel:
 
-            with Client(memory_limit='auto', processes=False,
-                        silence_logs=logging.ERROR) as client:
+            with Client(
+                    memory_limit='auto', processes=False, silence_logs=logging.ERROR
+            ) as client:
                 for e_id in e_ids:
                     futures.append(
                         client.submit(
-                            self.characterize_event,
-                            e_id, e_start[e_id], e_stop[e_id],
-                            data_info, event_info, out_path, split_events
+                            self.characterize_event, e_id, e_start[e_id], e_stop[e_id], data_info, event_info, out_path,
+                            split_events
                         )
                     )
                 progress(futures)
@@ -623,10 +628,10 @@ class Detector:
         else:
 
             for event_id in e_ids:
-                npy_path = self.characterize_event(event_id,
-                                                   t0=e_start[event_id], t1=e_stop[event_id],
-                                                   data_info=data_info, event_info=event_info,
-                                                   out_path=out_path.as_posix(), split_events=split_events)
+                npy_path = self.characterize_event(
+                    event_id, t0=e_start[event_id], t1=e_stop[event_id], data_info=data_info, event_info=event_info,
+                    out_path=out_path.as_posix(), split_events=split_events
+                )
                 futures.append(npy_path)
 
         # close shared memory
@@ -649,8 +654,9 @@ class Detector:
 
         return events
 
-    def characterize_event(self, event_id, t0, t1, data_info,
-                           event_info, out_path, split_events=True):
+    def characterize_event(
+            self, event_id, t0, t1, data_info, event_info, out_path, split_events=True
+    ):
 
         # check if result already exists
         if not isinstance(out_path, Path):
@@ -722,7 +728,7 @@ class Detector:
                 res[event_id_key]["v_length"] = dz
                 res[event_id_key]["dx"] = dx
                 res[event_id_key]["dy"] = dy
-                res[event_id_key]["v_diameter"] = np.sqrt(dx**2 + dy**2)
+                res[event_id_key]["v_diameter"] = np.sqrt(dx ** 2 + dy ** 2)
 
                 # area
                 res[event_id_key]["v_area"] = len(z)
@@ -739,10 +745,11 @@ class Detector:
                         warnings.simplefilter("ignore")
 
                         try:
-                            props = regionprops_table(np.invert(mask).astype(np.uint8),
-                                                      properties=['centroid_local', 'axis_major_length',
-                                                                  "axis_minor_length", 'extent', 'solidity', 'area',
-                                                                  'equivalent_diameter_area'])
+                            props = regionprops_table(
+                                np.invert(mask).astype(np.uint8),
+                                properties=['centroid_local', 'axis_major_length', "axis_minor_length", 'extent',
+                                            'solidity', 'area', 'equivalent_diameter_area']
+                            )
 
                             props["centroid_local-0"] = props["centroid_local-0"] / dz
                             props["centroid_local-1"] = props["centroid_local-1"] / dx
@@ -755,8 +762,9 @@ class Detector:
                             error = 1
 
                 # contour
-                mask_padded = np.pad(np.invert(mask), pad_width=((1, 1), (1, 1), (1, 1)), mode="constant",
-                                     constant_values=0)
+                mask_padded = np.pad(
+                    np.invert(mask), pad_width=((1, 1), (1, 1), (1, 1)), mode="constant", constant_values=0
+                )
 
                 contours = []
                 for cz in range(1, mask_padded.shape[0] - 1):
@@ -785,12 +793,12 @@ class Detector:
                 fp = np.invert(np.min(mask, axis=0))
                 res[event_id_key]["footprint"] = fp.flatten()
 
-                props = regionprops_table(fp.astype(np.uint8), properties=['centroid_local', 'axis_major_length',
-                                                                           'axis_minor_length', 'eccentricity',
-                                                                           'equivalent_diameter_area', 'extent',
-                                                                           'feret_diameter_max', 'orientation',
-                                                                           'perimeter', 'solidity', 'area',
-                                                                           'area_convex'])
+                props = regionprops_table(
+                    fp.astype(np.uint8),
+                    properties=['centroid_local', 'axis_major_length', 'axis_minor_length', 'eccentricity',
+                                'equivalent_diameter_area', 'extent', 'feret_diameter_max', 'orientation', 'perimeter',
+                                'solidity', 'area', 'area_convex']
+                )
 
                 props["cx"] = gx0 + props["centroid_local-0"]
                 props["cy"] = gy0 + props["centroid_local-1"]
@@ -837,11 +845,12 @@ class Detector:
                 res[event_id_key]["v_signal_to_noise_ratio"] = temp_v_signal_to_noise_ratio
 
                 if temp_v_noise_mask_std != 0:
-                    temp_v_signal_to_noise_ratio_fold = abs((temp_v_max_height - temp_v_noise_mask_mean) / temp_v_noise_mask_std)
+                    temp_v_signal_to_noise_ratio_fold = abs(
+                        (temp_v_max_height - temp_v_noise_mask_mean) / temp_v_noise_mask_std
+                    )
                     res[event_id_key]["v_signal_to_noise_ratio_fold"] = temp_v_signal_to_noise_ratio_fold
                 else:
                     res[event_id_key]["v_signal_to_noise_ratio_fold"] = np.nan
-
 
                 # clean up
                 del signal
@@ -866,12 +875,13 @@ class Detector:
             print("An error occured during shared memory closing: {}".format(err))
 
     @staticmethod
-    def detect_subevents(img, mask_indices, sigma: int = 2,
-                         min_local_max_distance: int = 5, local_max_threshold: float = 0.5, min_roi_frame_area: int = 5,
-                         reject_if_original: bool = True):
+    def detect_subevents(
+            img, mask_indices, sigma: int = 2, min_local_max_distance: int = 5, local_max_threshold: float = 0.5,
+            min_roi_frame_area: int = 5, reject_if_original: bool = True
+    ):
 
         mask = np.ones(img.shape, dtype=bool)
-        mask[mask_indices] = 0 # TODO does this need to be inverted?
+        mask[mask_indices] = 0  # TODO does this need to be inverted?
         Z, X, Y = mask.shape
 
         new_mask = np.zeros((Z, X, Y), dtype="i2")
@@ -885,11 +895,13 @@ class Detector:
             frame_raw = np.ma.masked_array(frame_raw, frame_mask)
 
             # Find Local Maxima
-            local_maxima = peak_local_max(frame_raw, min_distance=min_local_max_distance,
-                                          threshold_rel=local_max_threshold)
+            local_maxima = peak_local_max(
+                frame_raw, min_distance=min_local_max_distance, threshold_rel=local_max_threshold
+            )
             local_maxima = np.array(
                 [(lmx, lmy, last_mask_frame[lmx, lmy]) for (lmx, lmy) in zip(local_maxima[:, 0], local_maxima[:, 1])],
-                dtype="i2")
+                dtype="i2"
+            )
 
             # Try to find global maximum if no local maxima were found
             if len(local_maxima) == 0:

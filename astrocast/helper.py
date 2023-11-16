@@ -6,17 +6,18 @@ import tempfile
 import time
 import types
 from pathlib import Path
+
 import awkward as ak
 import dask.array as da
 import h5py
-import yaml
-from skimage.util import img_as_uint
-
 import numpy as np
 import pandas as pd
 import tifffile
 import tiledb
 import xxhash
+import yaml
+from skimage.util import img_as_uint
+
 
 def wrapper_local_cache(f):
     """ Wrapper that creates a local save of the function call based on a hash of the arguments
@@ -94,8 +95,10 @@ def wrapper_local_cache(f):
                 continue
 
             if key in ["in_place", "inplace"]:
-                logging.warning(f"cached value was loaded, which is incompatible with inplace option. "
-                                f"Please overwrite value manually!")
+                logging.warning(
+                    f"cached value was loaded, which is incompatible with inplace option. "
+                    f"Please overwrite value manually!"
+                )
                 continue
 
             # save key name
@@ -114,7 +117,7 @@ def wrapper_local_cache(f):
         for a in args_:
             hash_string += f"{a}_"
 
-        hash_string +=  get_hash_from_dict(kwargs)
+        hash_string += get_hash_from_dict(kwargs)
 
         logging.warning(f"hash_string: {hash_string}")
         return hash_string
@@ -223,6 +226,27 @@ def wrapper_local_cache(f):
 
     return inner_function
 
+
+def experimental(func):
+    """
+    Decorator to mark functions as experimental and log a warning upon their usage.
+
+    Args:
+        func (Callable): The function to be decorated.
+
+    Returns:
+        Callable: The decorated function with a warning.
+    """
+
+    def wrapper(*args, **kwargs):
+        logger = logging.getLogger(func.__module__)
+        message = f"Warning: {func.__name__} is an experimental function and may be unstable."
+        logger.warning(message)
+        return func(*args, **kwargs)
+
+    return wrapper
+
+
 def get_data_dimensions(input_, loc=None, return_dtype=False):
     """
     This function takes an input object and returns the shape and chunksize of the data it represents.
@@ -307,12 +331,16 @@ def get_data_dimensions(input_, loc=None, return_dtype=False):
     else:
         return shape, chunksize
 
+
 class DummyGenerator:
 
-    def __init__(self, num_rows=25, trace_length=12, ragged=False, offset=0, min_length=2, n_groups=None, n_clusters=None):
+    def __init__(
+            self, num_rows=25, trace_length=12, ragged=False, offset=0, min_length=2, n_groups=None, n_clusters=None
+    ):
 
-        self.data = self.get_data(num_rows=num_rows, trace_length=trace_length,
-                                  ragged=ragged, offset=offset, min_length=min_length)
+        self.data = self.get_data(
+            num_rows=num_rows, trace_length=trace_length, ragged=ragged, offset=offset, min_length=min_length
+        )
 
         self.groups = None if n_groups is None else np.random.randint(0, n_groups, size=len(self.data), dtype=int)
         self.clusters = None if n_clusters is None else np.random.randint(0, n_clusters, size=len(self.data), dtype=int)
@@ -327,8 +355,9 @@ class DummyGenerator:
 
             data = []
             for _ in range(num_rows):
-
-                random_length = max(min_length, trace_length + np.random.randint(low=-trace_length, high=trace_length) + offset)
+                random_length = max(
+                    min_length, trace_length + np.random.randint(low=-trace_length, high=trace_length) + offset
+                )
                 data.append(np.random.random(size=(random_length)))
 
         else:
@@ -395,7 +424,7 @@ class DummyGenerator:
             if chunks is None:
 
                 if len(data.shape) == 1:
-                    chunks=(1)
+                    chunks = (1)
                 elif len(data.shape) == 2:
                     chunks = (1, -1)
                 else:
@@ -428,18 +457,14 @@ class DummyGenerator:
 
     def get_by_name(self, name, param={}):
 
-        options = {
-            "numpy": self.get_array(**param),
-            "dask": self.get_dask(**param),
-            "list": self.get_list(**param),
-            "pandas": self.get_dataframe(**param),
-            "events": self.get_events(**param)
-        }
+        options = {"numpy": self.get_array(**param), "dask": self.get_dask(**param), "list": self.get_list(**param),
+                   "pandas": self.get_dataframe(**param), "events": self.get_events(**param)}
 
         if name not in options.keys():
             raise ValueError(f"unknown attribute: {name}")
 
         return options[name]
+
 
 class EventSim:
 
@@ -553,23 +578,20 @@ class EventSim:
             visited.add((z, x, y))
 
             # Generate random neighbors within the min_gap distance
-            neighbors = [(z + dz, x + dx, y + dy)
-                         for dz in range(-min_gap, min_gap + 1)
-                         for dx in range(-min_gap, min_gap + 1)
-                         for dy in range(-min_gap, min_gap + 1)
-                         if abs(dz) + abs(dx) + abs(dy) <= min_gap
-                         and 0 <= z + dz < depth
-                         and 0 <= x + dx < rows
-                         and 0 <= y + dy < cols]
+            neighbors = [(z + dz, x + dx, y + dy) for dz in range(-min_gap, min_gap + 1) for dx in
+                         range(-min_gap, min_gap + 1) for dy in range(-min_gap, min_gap + 1) if abs(dz) + abs(dx) + abs(
+                    dy
+                ) <= min_gap and 0 <= z + dz < depth and 0 <= x + dx < rows and 0 <= y + dy < cols]
 
             # Add the neighbors to the queue
             queue.extend(neighbors)
 
         return section
 
-    def simulate(self, shape, z_fraction=0.2, xy_fraction=0.1, gap_space=5, gap_time=3,
-                 event_intensity="incr", background_noise=None,
-                 blob_size_fraction=0.05, event_probability=0.2, skip_n=5):
+    def simulate(
+            self, shape, z_fraction=0.2, xy_fraction=0.1, gap_space=5, gap_time=3, event_intensity="incr",
+            background_noise=None, blob_size_fraction=0.05, event_probability=0.2, skip_n=5
+    ):
 
         """
         Simulate the generation of random blobs in a 3D array.
@@ -602,8 +624,9 @@ class EventSim:
         Z, X, Y = shape
 
         # Get indices for splitting the array into sections
-        indices = self.split_3d_array_indices(event_map, int(Z*z_fraction), int(X*xy_fraction), int(Y*xy_fraction),
-                                              skip_n=skip_n)
+        indices = self.split_3d_array_indices(
+            event_map, int(Z * z_fraction), int(X * xy_fraction), int(Y * xy_fraction), skip_n=skip_n
+        )
 
         # Fill with blobs
         num_events = 0
@@ -627,10 +650,14 @@ class EventSim:
             elif isinstance(event_intensity, (int, float)):
                 event_num = event_intensity
             else:
-                raise ValueError(f"event_intensity must be 'infer' or int/float; not {event_intensity}:{event_intensity.dtype}")
+                raise ValueError(
+                    f"event_intensity must be 'infer' or int/float; not {event_intensity}:{event_intensity.dtype}"
+                )
 
             section = event_map[z0:z1, x0:x1, y0:y1]
-            event_map[z0:z1, x0:x1, y0:y1] = self.create_random_blob(section, event_num=event_num, blob_size_fraction=blob_size_fraction)
+            event_map[z0:z1, x0:x1, y0:y1] = self.create_random_blob(
+                section, event_num=event_num, blob_size_fraction=blob_size_fraction
+            )
 
             num_events += 1
 
@@ -640,20 +667,22 @@ class EventSim:
 
         return event_map, num_events
 
-    def create_dataset(self, h5_path, h5_loc="dff/ch0", debug=False, shape=(50, 100, 100),
-                       z_fraction=0.2, xy_fraction=0.1, gap_space=5, gap_time=3,
-                       event_intensity=100, background_noise=1,
-                       blob_size_fraction=0.05, event_probability=0.2):
+    def create_dataset(
+            self, h5_path, h5_loc="dff/ch0", debug=False, shape=(50, 100, 100), z_fraction=0.2, xy_fraction=0.1,
+            gap_space=5, gap_time=3, event_intensity=100, background_noise=1, blob_size_fraction=0.05,
+            event_probability=0.2
+    ):
 
         from astrocast.analysis import IO
         from astrocast.detection import Detector
 
         h5_path = Path(h5_path)
 
-        data, num_events = self.simulate(shape=shape, z_fraction=z_fraction, xy_fraction=xy_fraction,
-                                         event_intensity=event_intensity, background_noise=background_noise,
-                                         gap_space=gap_space, gap_time=gap_time,
-                                         blob_size_fraction=blob_size_fraction, event_probability=event_probability)
+        data, num_events = self.simulate(
+            shape=shape, z_fraction=z_fraction, xy_fraction=xy_fraction, event_intensity=event_intensity,
+            background_noise=background_noise, gap_space=gap_space, gap_time=gap_time,
+            blob_size_fraction=blob_size_fraction, event_probability=event_probability
+        )
 
         io = IO()
         io.save(path=h5_path, data=data, h5_loc=h5_loc)
@@ -662,6 +691,7 @@ class EventSim:
         det.run(h5_loc=h5_loc, lazy=True, debug=debug)
 
         return det.output_directory
+
 
 class SampleInput:
 
@@ -738,7 +768,6 @@ class SampleInput:
 
 
 def is_ragged(data):
-
     # check if ragged and convert to appropriate type
     ragged = False
     if isinstance(data, list):
@@ -788,6 +817,7 @@ def is_ragged(data):
 
     return ragged
 
+
 class Normalization:
 
     def __init__(self, data, inplace=True):
@@ -811,8 +841,9 @@ class Normalization:
 
     def run(self, instructions):
 
-        assert isinstance(instructions,
-                          dict), "please provide 'instructions' as {0: 'func_name'} or {0: ['func_name', params]}"
+        assert isinstance(
+            instructions, dict
+        ), "please provide 'instructions' as {0: 'func_name'} or {0: ['func_name', params]}"
 
         data = self.data
 
@@ -834,18 +865,12 @@ class Normalization:
 
     def min_max(self):
 
-        instructions = {
-            0: ["subtract", {"mode": "min"}],
-            1: ["divide", {"mode": "max_abs"}]
-        }
+        instructions = {0: ["subtract", {"mode": "min"}], 1: ["divide", {"mode": "max_abs"}]}
         return self.run(instructions)
 
     def mean_std(self):
 
-        instructions = {
-            0: ["subtract", {"mode": "mean"}],
-            1: ["divide", {"mode": "std"}]
-        }
+        instructions = {0: ["subtract", {"mode": "mean"}], 1: ["divide", {"mode": "std"}]}
         return self.run(instructions)
 
     @staticmethod
@@ -854,14 +879,11 @@ class Normalization:
         summary_axis = None if population_wide else axis
 
         mode_options = {
-            "first": lambda x: np.mean(x[:, 0] if axis else x[0, :]) if population_wide else x[:, 0] if axis else x[0, :],
-            "mean": lambda x: np.mean(x, axis=summary_axis),
-            "min": lambda x: np.min(x, axis=summary_axis),
-            "min_abs": lambda x: np.min(np.abs(x), axis=summary_axis),
-            "max": lambda x: np.max(x, axis=summary_axis),
-            "max_abs": lambda x: np.max(np.abs(x), axis=summary_axis),
-            "std": lambda x: np.std(x, axis=summary_axis)
-        }
+            "first": lambda x: np.mean(x[:, 0] if axis else x[0, :]) if population_wide else x[:, 0] if axis else x[0,
+                                                                                                                  :],
+            "mean": lambda x: np.mean(x, axis=summary_axis), "min": lambda x: np.min(x, axis=summary_axis),
+            "min_abs": lambda x: np.min(np.abs(x), axis=summary_axis), "max": lambda x: np.max(x, axis=summary_axis),
+            "max_abs": lambda x: np.max(np.abs(x), axis=summary_axis), "std": lambda x: np.std(x, axis=summary_axis)}
         assert mode in mode_options.keys(), f"please provide valid mode: {mode_options.keys()}"
 
         ret = mode_options[mode](data)
@@ -993,6 +1015,7 @@ class Normalization:
 
             return np.concatenate([zero, x], axis=1)
 
+
 class CachedClass:
 
     def __init__(self, cache_path=None, logging_level=logging.INFO):
@@ -1016,11 +1039,14 @@ class CachedClass:
         time.sleep(0.5)
         return np.random.random(1)
 
+
 def load_yaml_defaults(yaml_file_path):
     """Load default values from a YAML file."""
 
-    logging.warning("loading configuration from yaml file. "
-                    "Be advised that command line parameters take priority over configurations in the yaml.")
+    logging.warning(
+        "loading configuration from yaml file. "
+        "Be advised that command line parameters take priority over configurations in the yaml."
+    )
 
     with open(yaml_file_path, 'r') as file:
         params = yaml.safe_load(file)
@@ -1030,34 +1056,36 @@ def load_yaml_defaults(yaml_file_path):
 
         return params
 
-def download_sample_data(save_path, public_datasets=True, custom_datasets=True):
 
+def download_sample_data(save_path, public_datasets=True, custom_datasets=True):
     import gdown
 
     save_path = Path(save_path)
 
     if public_datasets:
-
         folder_url = "https://drive.google.com/drive/u/0/folders/10hhWg4XdVGlPmqmSXy4devqfjs2xE6A6"
-        gdown.download_folder(folder_url, output=save_path.joinpath("public_data").as_posix(),
-                              quiet=False, use_cookies=False)
+        gdown.download_folder(
+            folder_url, output=save_path.joinpath("public_data").as_posix(), quiet=False, use_cookies=False
+        )
 
     if custom_datasets:
         folder_url = "https://drive.google.com/drive/u/0/folders/13I_1q3osfIGlLhjEiAnLBoJSfPux688g"
-        gdown.download_folder(folder_url, output=save_path.joinpath("custom_data").as_posix(),
-                              quiet=False, use_cookies=False, remaining_ok=True)
+        gdown.download_folder(
+            folder_url, output=save_path.joinpath("custom_data").as_posix(), quiet=False, use_cookies=False,
+            remaining_ok=True
+        )
 
     logging.info(f"Downloaded sample datasets to: {save_path}")
 
-def download_pretrained_models(save_path):
 
+def download_pretrained_models(save_path):
     import gdown
 
     save_path = Path(save_path)
 
     folder_url = "https://drive.google.com/drive/u/0/folders/1RJU-JjQIpoRJOqxivOVo44Q3irs88YX8"
-    gdown.download_folder(folder_url, output=save_path.joinpath("models").as_posix(),
-                          quiet=False, use_cookies=False, remaining_ok=True)
+    gdown.download_folder(
+        folder_url, output=save_path.joinpath("models").as_posix(), quiet=False, use_cookies=False, remaining_ok=True
+    )
 
     logging.info(f"Downloaded sample datasets to: {save_path}")
-

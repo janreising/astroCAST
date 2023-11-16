@@ -8,24 +8,24 @@ from pathlib import Path
 
 import czifile
 import dask
+import dask.array as da
+import dask_image.imread
 import h5py
 import numpy as np
 import pandas as pd
 import psutil
 import tifffile
 import tiledb
-import dask.array as da
-import dask_image.imread
+from dask.diagnostics import ProgressBar
 from dask.distributed import Client, LocalCluster
+from deprecated import deprecated
 from scipy import signal
+from scipy.ndimage import minimum_filter1d
 from skimage.transform import resize
 from skimage.util import img_as_uint
-from deprecated import deprecated
-from scipy.ndimage import minimum_filter1d
 from tqdm import tqdm
 
 from astrocast.helper import get_data_dimensions
-from dask.diagnostics import ProgressBar
 
 
 class Input:
@@ -36,9 +36,9 @@ class Input:
 
     def run(
             self, input_path, output_path=None, sep="_", channels=1, z_slice=None, lazy=True, subtract_background=None,
-            subtract_func="mean", rescale=None, dtype=np.uint, in_memory=False, h5_loc_in=None, h5_loc_out="data",
+            subtract_func="mean", rescale=None, dtype=int, in_memory=False, h5_loc_in=None, h5_loc_out="data/ch0",
             infer_strategy="balanced", chunks=None, compression=None
-            ):
+    ):
 
         """ Loads input data from a specified path, performs data processing, and optionally saves the processed data.
 
@@ -52,7 +52,6 @@ class Input:
             rescale (float, int, or tuple, optional): Scale factor or tuple specifying the new dimensions. (default: None)
             dtype (numpy.dtype, optional): Data type to convert the processed data. (default: np.uint)
             in_memory (bool, optional): If True, the processed data is loaded into memory. (default: False)
-            prefix (str, optional): Prefix to use when saving the processed data. (default: "data")
             chunks (tuple or int, optional): Chunk size to use when saving to HDF5 or TileDB. (default: None)
             compression (str or int, optional): Compression method to use when saving to HDF5 or TileDB. (default: None)
 
@@ -70,10 +69,15 @@ class Input:
         data = io.load(input_path, h5_loc=h5_loc_in, sep=sep, z_slice=z_slice, lazy=lazy, chunks=(1, -1, -1))
 
         logging.info("preparing data ...")
+        if isinstance(rescale, int) or (isinstance(rescale, (tuple, list)) and isinstance(rescale[0], int)):
+            absolute_rescale = True
+        else:
+            absolute_rescale = False
+
         data = self.prepare_data(
             data, channels=channels, subtract_background=subtract_background, subtract_func=subtract_func,
-            rescale=rescale, dtype=dtype, in_memory=in_memory
-            )
+            rescale=rescale, absolute_rescale=absolute_rescale, dtype=dtype, in_memory=in_memory
+        )
 
         logging.debug(f"data type: {type(data[list(data.keys())[0]])}")
 
@@ -93,8 +97,9 @@ class Input:
             return data
 
         logging.info("saving data ...")
-        io.save(output_path, data, h5_loc=h5_loc_out, infer_strategy=infer_strategy, chunks=chunks,
-                compression=compression)
+        io.save(
+            output_path, data, h5_loc=h5_loc_out, infer_strategy=infer_strategy, chunks=chunks, compression=compression
+        )
 
     @staticmethod
     def subtract_background(data, channels, subtract_background, subtract_func):
@@ -138,7 +143,7 @@ class Input:
             if len(background_keys) != 1:
                 raise ValueError(
                     f"cannot find channel to subtract or found too many. Choose only one of : {list(channels.values())}."
-                    )
+                )
 
             background = data[background_keys[0]]
             for k in background_keys:
@@ -159,7 +164,7 @@ class Input:
             if background.shape != img_0.shape:
                 raise ValueError(
                     f"incorrect dimension after reduction: data.shape {img_0.shape} vs. reduced.shape {background.shape}"
-                    )
+                )
 
             # Subtract the reduced background from each channel
             for k in data.keys():
@@ -171,12 +176,12 @@ class Input:
         else:
             raise ValueError(
                 "Please provide 'subtract_background' flag with one of: np.ndarray, callable function or str"
-                )
+            )
 
         return data
 
     @staticmethod
-    def rescale_data(data, rescale):
+    def rescale_data(data, rescale, absolute_rescale=False):
         """
         Rescale the data arrays to a new size.
 
@@ -187,6 +192,7 @@ class Input:
                 If an int or float, the same scaling factor will be applied to both axes.
                 If given an int, it will assume that this is the requested final size.
                 If given a float, it will multiply the current size by that value.
+            absolute_rescale (bool): If True, rescale is assumed to be in absolute units (e.g., pixels), otherwise it is in relative units (e.g., percent).
 
         Returns:
             dict: A dictionary mapping channel names to the rescaled data arrays.
@@ -195,66 +201,84 @@ class Input:
             ValueError: If the rescale type is mixed (e.g., int and float) or not one of tuple, list, int, or float.
             ValueError: If the length of the rescale tuple or list is not 2.
             TypeError: If the rescale type is not tuple, list, int, or float.
+
         """
 
-        # Get the original size
-        X, Y = list(data.values())[0][0, :, :].shape
+        return_array = False
+        if isinstance(data, (np.ndarray, da.Array)):
+            data = {"dummy": data}
+            return_array = True
 
         # Convert numbers to tuple (same factor for X and Y)
         if isinstance(rescale, (int, float)):
             rescale = (rescale, rescale)
 
-        # validate rescale value
-        if type(rescale[0]) != type(rescale[1]):
-            raise ValueError(
-                f"mixed rescale type not allowed for 'rescale' flag: {type(rescale[0])} vs {type(rescale[1])}"
-                )
-        elif len(rescale) != 2:
+        # validate the rescale type
+        if not isinstance(rescale, (tuple, list, int, float)):
             raise ValueError("please provide 'rescale' flag as 2D tuple, list or number")
-
-        # Calculate the new size
-        if isinstance(rescale[0], int):
-            rX, rY = rescale[0], rescale[1]
-        elif isinstance(rescale[0], float):
-            rX, rY = (int(X * rescale[0]), int(Y * rescale[1]))
-        else:
-            raise TypeError("'rescale' flag should be of type tuple, list, int or float")
+        elif isinstance(rescale, (tuple, list)) and len(rescale) != 2:
+            raise ValueError("please provide 'rescale' flag as 2D tuple or list")
+        elif isinstance(rescale, (tuple, list)) and type(rescale[0]) != type(rescale[1]):
+            raise ValueError(
+                f"mixed rescale type not allowed for 'rescale' flag:"
+                f" {type(rescale[0])} vs {type(rescale[1])}"
+            )
 
         # Apply resizing to each channel
         for k in data.keys():
             # Rescale the data array using the specified scaling factors and anti-aliasing
 
-            data[k] = data[k].astype(float)
+            arr = data[k]
+
+            # Get the original size
+            Z, X, Y = arr.shape
+            dtype_original = arr.dtype
+            chunks_original = arr.chunks
+
+            # convert to relative scale if absolute size was provided
+            if absolute_rescale:
+                rescale = rescale[0] / X, rescale[1] / Y
+
+            # Calculate the requested output dimensions
+            new_shape = (Z, int(X * rescale[0]), int(Y * rescale[1]))
+            new_chunks = (
+                tuple([c for c in chunks_original[0]]), tuple([int(c * rescale[0]) for c in chunks_original[1]]),
+                tuple([int(c * rescale[1]) for c in chunks_original[2]]))
+
+            logging.warning(f"Resizing {k} from {arr.shape} to {new_shape}")
+            logging.warning(f"Rescaling {k} from {chunks_original} to {new_chunks}")
 
             with warnings.catch_warnings():
                 warnings.filterwarnings("ignore", category=UserWarning)
 
-                cz, _, _ = data[k].chunks
-                dtype = data[k].dtype
+                def custom_resize(chunk):
+                    dtype = chunk.dtype
+                    z, x, y = chunk.shape
 
-                if not isinstance(cz, (int, float)):
-                    cz = cz[0]
+                    new_shape_ = (z, int(x * rescale[0]), int(y * rescale[1]))
 
-                def custom_resize(arr, shape):
-                    dtype = arr.dtype
+                    chunk = resize(image=chunk.astype(float), output_shape=new_shape_, anti_aliasing=True)
+                    chunk = chunk.astype(dtype)
 
-                    arr = resize(image=arr, output_shape=shape, anti_aliasing=True)
-                    arr = arr.astype(dtype)
+                    return chunk
 
-                    return arr
-
-                data[k] = data[k].map_blocks(
-                    lambda chunk: custom_resize(chunk, (cz, rX, rY)), chunks=(cz, rX, rY), dtype=dtype
+                arr = arr.map_blocks(
+                    lambda chunk: custom_resize(chunk), chunks=new_chunks,
+                    meta=np.zeros(new_shape, dtype=dtype_original)
                 )
 
-            data[k] = data[k].astype(int)
+            # restore initial chunks and convert to original dtype
+            data[k] = arr.astype(dtype_original)
+
+        if return_array:
+            data = data["dummy"]
 
         return data
 
     def prepare_data(
-            self, data, channels=1, subtract_background=None, subtract_func="mean", rescale=None, dtype=np.uint,
-            in_memory=False
-            ):
+            self, data, channels=1, subtract_background=None, subtract_func="mean", rescale=None,
+            absolute_rescale=False, dtype=np.int, in_memory=False
+    ):
 
         """Prepares the input data by applying various processing steps.
 
@@ -287,7 +311,7 @@ class Input:
             if len(stack.shape) != 3:
                 raise NotImplementedError(
                     f"dimensions incorrect: {len(stack.shape)}. Currently not implemented for dim != 3D"
-                    )
+                )
 
             # Validate the channels input and determine the number of channels
             if not isinstance(channels, (int, dict)):
@@ -298,7 +322,7 @@ class Input:
             if stack.shape[0] % num_channels != 0:
                 logging.warning(
                     f"cannot divide frames into channel number: {stack.shape[0]} % {num_channels} != 0. May lead to unexpacted behavior"
-                    )
+                )
 
             channels = channels if isinstance(channels, dict) else {i: f"ch{i}" for i in range(num_channels)}
 
@@ -313,7 +337,7 @@ class Input:
 
             # Rescale the prep_data if specified
             if (rescale is not None) and rescale != 1 and rescale != 1.0:
-                self.rescale_data(prep_data, rescale)
+                self.rescale_data(prep_data, rescale, absolute_rescale=absolute_rescale)
 
             # Convert the prep_data type if specified
             if dtype is not None:
@@ -387,7 +411,7 @@ class IO:
             if path.suffix in [".tdb"]:
                 data = self._load_tdb(
                     path, lazy=lazy, chunks=chunks, infer_strategy=infer_strategy, z_slice=z_slice
-                    )
+                )
 
             elif path.suffix in [".tif", ".tiff", ".TIF", ".TIFF"]:
                 data = self._load_tiff(path, sep, lazy=lazy, infer_strategy=infer_strategy, z_slice=z_slice)
@@ -398,7 +422,7 @@ class IO:
             elif path.suffix in [".h5", ".hdf5", ".H5", ".HDF5"]:
                 data = self._load_h5(
                     path, h5_loc=h5_loc, lazy=lazy, infer_strategy=infer_strategy, chunks=chunks, z_slice=z_slice
-                    )
+                )
 
             elif path.suffix in [".npy", ".NPY"]:
                 data = self._load_npy(path, lazy=lazy, chunks=chunks, infer_strategy=infer_strategy, z_slice=z_slice)
@@ -416,7 +440,7 @@ class IO:
                 else:
                     data = self._load_tiff(
                         path, sep, lazy=lazy, infer_strategy=infer_strategy, chunks=chunks, z_slice=z_slice
-                        )
+                    )
 
             else:
                 raise ValueError("unrecognized file format! Choose one of [.tiff, .h5, .tdb, .czi]")
@@ -603,7 +627,6 @@ class IO:
 
         # convert to dask array
         if lazy:
-
             chunks = self.infer_chunks_from_array(arr=data, strategy=infer_strategy, chunks=chunks)
             data = da.from_array(data, chunks=chunks)
 
@@ -704,16 +727,16 @@ class IO:
             if len(stack.shape) != 3:
                 raise NotImplementedError(
                     f"dimensions incorrect: {len(stack.shape)}. Currently not implemented for dim != 3D"
-                    )
+                )
 
         elif path.is_file():
             # If the path is a file, load a single TIFF file
 
             if lazy:
-                stack = dask_image.imread.imread(path)
+                stack = tifffile.imread(path.as_posix())
 
                 chunks = self.infer_chunks_from_array(stack, strategy=infer_strategy, chunks=chunks)
-                stack = da.rechunk(stack, chunks=chunks)
+                stack = da.from_array(stack, chunks=chunks)
 
             else:
                 stack = tifffile.imread(path.as_posix())
@@ -815,7 +838,7 @@ class IO:
                         ds = f.create_dataset(
                             loc, shape=channel.shape, chunks=chunks, compression=compression, shuffle=False,
                             dtype=channel.dtype
-                            )
+                        )
                         ds[:] = channel
 
                 saved_paths.append(fpath)
@@ -882,7 +905,7 @@ class IO:
                 # fourcc = cv2.VideoWriter_fourcc(*'XVID')
                 out = cv2.VideoWriter(
                     fpath, fourcc=cv2.VideoWriter_fourcc('M', 'J', 'P', 'G'), fps=16, frameSize=(X, Y), isColor=True
-                    )
+                )
 
                 for i in tqdm(range(frames)):
                     # Get the current frame
@@ -931,7 +954,7 @@ class IO:
                         raise FileExistsError(
                             f"output dataset exists {path} [{h5_loc}]. "
                             f"Please choose a different dataset or set 'overwrite=True'"
-                            )
+                        )
 
         # Everything else
         else:
@@ -948,7 +971,7 @@ class IO:
             else:
                 raise FileExistsError(
                     f"output exists ({path}). Please choose a different output or set 'overwrite=True'"
-                    )
+                )
 
     @staticmethod
     def infer_chunks(shape, dtype, strategy="balanced", chunk_bytes=int(1e6), chunks=None):
@@ -1064,7 +1087,7 @@ class MotionCorrection:
             self, input_, h5_loc="", max_shifts=(50, 50), niter_rig=3, splits_rig=14, num_splits_to_process_rig=None,
             strides=(48, 48), overlaps=(24, 24), pw_rigid=False, splits_els=14, num_splits_to_process_els=None,
             upsample_factor_grid=4, max_deviation_rigid=3, nonneg_movie=True, gSig_filt=(20, 20), bigtiff=True
-            ):
+    ):
 
         """
 
@@ -1135,7 +1158,7 @@ class MotionCorrection:
             logging.warning(
                 f"dimension 1 of max_shifts parameter > 1/2 img.X ({max_shifts[0]}>{int(self.X / 2)}."
                 f"Automatically adjusting to: {max_shifts_adj}"
-                )
+            )
             max_shifts = tuple((max_shifts_adj, max_shifts[1]))
 
         if max_shifts[1] >= int(self.Y / 2):
@@ -1143,7 +1166,7 @@ class MotionCorrection:
             logging.warning(
                 f"dimension 1 of max_shifts parameter > 1/2 img.X ({max_shifts[1]}>{int(self.Y / 2)}."
                 f"Automatically adjusting to: {max_shifts_adj}"
-                )
+            )
             max_shifts = tuple((max_shifts[0], max_shifts_adj))
 
         # Create MotionCorrect instance
@@ -1153,7 +1176,7 @@ class MotionCorrection:
             splits_els=splits_els, num_splits_to_process_els=num_splits_to_process_els,
             upsample_factor_grid=upsample_factor_grid, max_deviation_rigid=max_deviation_rigid,
             nonneg_movie=nonneg_movie, gSig_filt=gSig_filt, bigtiff=bigtiff
-            )
+        )
 
         # Perform motion correction
         obj, registered_filename = mc.motion_correct(save_movie=True)
@@ -1238,7 +1261,7 @@ class MotionCorrection:
 
             logging.warning(
                 "caiman.motion_correction requires a .tiff or .h5 file to perform the correction. A temporary .tiff file is created which needs to be deleted later by calling the 'clean_up()' method of this module."
-                )
+            )
 
             if self.working_directory is None:
                 self.working_directory = tempfile.TemporaryDirectory()
@@ -1294,7 +1317,7 @@ class MotionCorrection:
         if self.working_directory is not None:
             temp_h5_path = Path(self.working_directory.name) if isinstance(
                 self.working_directory, tempfile.TemporaryDirectory
-                ) else Path(self.working_directory)
+            ) else Path(self.working_directory)
             temp_h5_path = temp_h5_path.joinpath(f"{self.dummy_folder_name}.h5").as_posix()
             if temp_h5_path.is_file():
                 os.remove(temp_h5_path.as_posix())
@@ -1314,7 +1337,7 @@ class MotionCorrection:
             if ram_size < array_size * 2:
                 logging.warning(
                     f"available RAM ({ram_size}) is smaller than twice the data size ({array_size}. Automatically splitting files into smaller fragments. Might lead to unexpected behavior on the boundary between fragments."
-                    )
+                )
                 frames_per_file = int(Z / np.floor(array_size / ram_size) / 2)
 
         elif isinstance(frames_per_file, int):
@@ -1328,8 +1351,10 @@ class MotionCorrection:
 
         return frames_per_file
 
-    def save(self, output=None, h5_loc="mc/ch0", infer_strategy="balanced", chunks=None, compression=None,
-             remove_intermediate=True):
+    def save(
+            self, output=None, h5_loc="mc/ch0", infer_strategy="balanced", chunks=None, compression=None,
+            remove_intermediate=True
+    ):
 
         """
         Retrieve the motion-corrected data and optionally save it to a file.
@@ -1369,7 +1394,7 @@ class MotionCorrection:
         if not tiff_path.is_file():
             raise FileNotFoundError(
                 f"could not find tiff file: {tiff_path}. Maybe the 'clean_up()' function was called too early?"
-                )
+            )
 
         data = tifffile.imread(tiff_path.as_posix())
 
@@ -1381,8 +1406,9 @@ class MotionCorrection:
             output = Path(output) if isinstance(output, Path) else output
 
             # Save the motion-corrected data to the output file using the I/O module
-            self.io.save(output, data=data, h5_loc=h5_loc, infer_strategy=infer_strategy, chunks=chunks,
-                         compression=compression)
+            self.io.save(
+                output, data=data, h5_loc=h5_loc, infer_strategy=infer_strategy, chunks=chunks, compression=compression
+            )
 
         else:
             raise ValueError(f"please provide output as None, str or pathlib.Path instead of {output}")
@@ -1459,10 +1485,7 @@ class Delta:
         # The location of the data in the HDF5 file (optional, only applicable for .h5 files)
         self.loc = loc
 
-    def run(
-            self, window, method="dF", infer_strategy="Z", output_path=None, overwrite_first_frame=True,
-            lazy=True
-            ):
+    def run(self, window, method="dF", infer_strategy="Z", chunks=None, overwrite_first_frame=True):
         """
         Runs the delta calculation on the input data.
 
@@ -1484,9 +1507,7 @@ class Delta:
 
         """
         # Prepare the data for processing
-        data = self.prepare_data(
-            self.input_, h5_loc=self.loc, infer_strategy=infer_strategy, output_path=output_path, lazy=lazy
-            )
+        data = self.prepare_data(self.input_, h5_loc=self.loc, infer_strategy=infer_strategy, chunks=chunks)
 
         # Sequential execution
         if isinstance(data, np.ndarray):
@@ -1509,7 +1530,7 @@ class Delta:
                     data = tdb[:, x0:x1, y0:y1]
                     res = calculate_delta_min_filter(
                         data, window, method=method, inplace=False
-                        )  # TODO does this make sense?
+                    )  # TODO does this make sense?
 
                 # Overwrite the range with the calculated delta values
                 with tiledb.open(path, mode="w") as tdb:
@@ -1560,10 +1581,12 @@ class Delta:
     def save(self, output_path, h5_loc="df", infer_strategy="XY", chunks=None, compression=None, overwrite=False):
 
         io = IO()
-        io.save(output_path, data=self.res, h5_loc=h5_loc, infer_strategy=infer_strategy, chunks=chunks,
-                compression=compression, overwrite=overwrite)
+        io.save(
+            output_path, data=self.res, h5_loc=h5_loc, infer_strategy=infer_strategy, chunks=chunks,
+            compression=compression, overwrite=overwrite
+        )
 
-    def prepare_data(self, input_, infer_strategy="Z", h5_loc=None, lazy=True):
+    def prepare_data(self, input_, infer_strategy="Z", chunks=None, h5_loc=None):
 
         """
         Preprocesses the input data by converting it to a TileDB array and optionally loading it into memory
@@ -1583,31 +1606,23 @@ class Delta:
 
         if isinstance(input_, Path):
 
-            data = io.load(input_, h5_loc=h5_loc, infer_strategy=infer_strategy, lazy=lazy)
-
-            if not isinstance(data, da.Array):
-                data = da.from_array(data, chunks=(self.dim))
-
-            data = da.rechunk(data, chunks=(-1, "auto", "auto"))
+            data = io.load(input_, h5_loc=h5_loc, infer_strategy=infer_strategy, chunks=chunks)
             data = data.astype(int)
+
             return data
 
-        elif isinstance(input_, np.ndarray):
+        elif isinstance(input_, (np.ndarray, da.Array)):
 
-            if chunks == "infer":
-                chunks = (-1, "auto", "auto")
+            chunks = io.infer_chunks_from_array(arr=input_, strategy=infer_strategy, chunks=chunks)
 
-            input_ = da.from_array(input_, chunks=chunks)
-            input_ = input_.astype(int)
-            return input_
+            if not isinstance(input_, da.Array):
+                input_ = da.from_array(input_, chunks=chunks)
 
-        elif isinstance(input_, da.Array):
+            if input_.chunks != chunks:
+                input_ = input_.rechunk(chunks)
 
-            if chunks == "infer":
-                chunks = (-1, "auto", "auto")
+            input_ = input_.astype(int)  # TODO this should not be hardcoded
 
-            input_ = input_.rechunk(chunks)
-            input_ = input_.astype(int)
             return input_
 
         else:
@@ -1617,7 +1632,7 @@ class Delta:
     @deprecated(reason="faster implementation but superseded by: calculate_background_even_faster")
     def calculate_background_pandas(
             arr: np.ndarray, window: int, method="background", inplace: bool = True
-            ) -> np.ndarray:
+    ) -> np.ndarray:
 
         if len(np.squeeze(arr)) < 2:
             arr = np.expand_dims(arr, axis=0)
@@ -1628,7 +1643,7 @@ class Delta:
             res = np.zeros(arr.shape, arr.dtype)
 
         methods = {"background": lambda x, background: background, "dF": lambda x, background: x - background,
-            "dFF": lambda x, background: np.divide(x - background, background)}
+                   "dFF": lambda x, background: np.divide(x - background, background)}
         if method not in methods.keys(): raise ValueError(
             f"please provide a valid argument for 'method'; one of : {methods.keys()}"
         )
@@ -1673,7 +1688,7 @@ class Delta:
 
         # choose delta function
         methods = {"background": lambda x, background: background, "dF": lambda x, background: x - background,
-            "dFF": lambda x, background: np.divide(x - background, background)}
+                   "dFF": lambda x, background: np.divide(x - background, background)}
         if method not in methods.keys(): raise ValueError(
             f"please provide a valid argument for 'method'; one of : {methods.keys()}"
         )
@@ -1709,12 +1724,12 @@ class Delta:
                 if len(MIN_even_expanded) < len(z_padded):
                     MIN_even_expanded = np.pad(
                         MIN_even_expanded, pad_width=(0, len(z_padded) - len(MIN_even_expanded)), mode="edge"
-                        )
+                    )
 
                 if len(MIN_odd_expanded) < len(z_padded):
                     MIN_odd_expanded = np.pad(
                         MIN_odd_expanded, pad_width=(0, len(z_padded) - len(MIN_odd_expanded)), mode="edge"
-                        )
+                    )
 
                 # Get the maximum value at each point from the two expanded series to get the new baseline
                 MIN = np.maximum(MIN_even_expanded, MIN_odd_expanded)
@@ -1784,7 +1799,7 @@ class XII:
             if not found_unit:
                 raise ValueError(
                     f"when providing the sampling_rate as string, the value has to end in one of these units: {units.keys()}"
-                    )
+                )
 
         # define steps
         timestep = sampling_rate * num_channels
@@ -1810,7 +1825,7 @@ class XII:
             else:
                 raise ValueError(
                     f"sampling_rate should be able to be cast to int or float instead of: {type(timestep)}"
-                    )
+                )
 
             data_ch = pd.Series(data_ch, index=idx)
             if channel_names is None:
@@ -1859,7 +1874,7 @@ class XII:
         if len(idx) != len(video):
             raise ValueError(
                 f"video length and indices don't align: video ({len(video)}) vs. idx ({len(idx)}). \n{idx}"
-                )
+            )
 
         mapping = timing.to_dict()
         idx = pd.Index([np.round(mapping[id_], decimals=3) for id_ in idx])
@@ -1869,7 +1884,7 @@ class XII:
     def show(
             self, dataset_name, mapping, viewer=None, viewer1d=None, down_sample=100, colormap=None, window=160,
             ylabel="XII", xlabel="step"
-            ):
+    ):
 
         # todo: test with Video
 

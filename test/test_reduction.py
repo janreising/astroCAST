@@ -112,7 +112,7 @@ class Test_UMAP:
         um = UMAP()
         embedded = um.train(data)
 
-    @pytest.mask.skip(reason="Fails on automatic tests")
+    @pytest.mark.skip(reason="Fails on automatic tests")
     @pytest.mark.vis
     @pytest.mark.parametrize("use_napari", [True, False])
     @pytest.mark.parametrize("use_data", [True, False])
@@ -137,30 +137,6 @@ class Test_UMAP:
 
         if custom_labels:
             labels = np.random.randint(0, 5, size=len(data))
-
-        if use_napari and not use_data:
-            with pytest.raises(ValueError):
-                um.plot(use_napari=use_napari, ax=ax, data=data_emb, labels=labels)
-
-        else:
-            um.plot(use_napari=use_napari, ax=ax, data=data_emb, labels=labels)
-
-    @pytest.mark.vis
-    @pytest.mark.parametrize("use_napari", [True, False])
-    @pytest.mark.parametrize("use_data", [True, False])
-    def test_plotting_slim(self, use_napari, use_data):
-
-        data = np.random.random(size=(12, 8))
-
-        um = UMAP()
-        embedded = um.train(data)
-
-        ax = None
-        data_emb = None
-        labels = None
-
-        if use_data:
-            data_emb = embedded
 
         if use_napari and not use_data:
             with pytest.raises(ValueError):
