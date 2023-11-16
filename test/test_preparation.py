@@ -1,19 +1,15 @@
-import tempfile
-
 import pytest
-import dask
 
 from astrocast.helper import SampleInput
 from astrocast.preparation import *
 
+
 class Test_Delta:
 
     @pytest.mark.parametrize("input_type", [np.ndarray, ".tiff", ".h5", "tiledb"])
-    @pytest.mark.parametrize("lazy", (True, False))
-    def test_load(self, input_type, lazy, shape=(50, 10, 10)):
+    def test_load_save(self, input_type, shape=(50, 10, 10)):
 
         Z, X, Y = shape
-        output_path = None
         loc = None
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -22,13 +18,11 @@ class Test_Delta:
 
             if input_type == np.ndarray:
                 data = np.random.randint(0, 100, (Z, X, Y), dtype=int)
-                output_path = tmpdir.joinpath("temp.tdb")
 
             elif input_type == "tiledb":
 
                 arr = da.from_array(
-                    x=np.random.randint(0, 100, (Z, X, Y), dtype=int),
-                    chunks=(Z, "auto", "auto")
+                    x=np.random.randint(0, 100, (Z, X, Y), dtype=int), chunks=(Z, "auto", "auto")
                 )
 
                 loc = None
@@ -42,23 +36,23 @@ class Test_Delta:
                 data = si.get_test_data(extension=input_type)
                 loc = si.get_h5_loc()
 
-                output_path = tmpdir.joinpath("temp.tdb")
-
             else:
                 raise TypeError
 
             delta = Delta(data, loc=loc)
 
-            delta.run(method="background", window=5, output_path=output_path, lazy=lazy)
+            delta.run(method="background", window=5)
+
+            # save
+            output_path = tmpdir.joinpath("out.tiff")
+            delta.save(output_path)
+            assert output_path.exists()
 
     @pytest.mark.parametrize("method", ("background", "dF", "dFF"))
     @pytest.mark.parametrize("lazy", (True, False))
     def test_methods_run(self, method, lazy):
 
         with tempfile.TemporaryDirectory() as tmpdir:
-
-            tmp_path = Path(tmpdir).joinpath("out.tdb")
-
             Z, X, Y = 25, 2, 2
 
             data = np.random.randint(0, 100, (Z, X, Y), dtype=int)
@@ -66,7 +60,7 @@ class Test_Delta:
 
             delta = Delta(data, loc=loc)
 
-            delta.run(method=method, output_path=tmp_path, window=5, lazy=lazy)
+            delta.run(method=method, window=5)
 
     @pytest.mark.parametrize("dim", [(100), (100, 5), (100, 5, 5), (100, 2, 10)])
     def test_background_dimensions(self, dim):
@@ -88,21 +82,18 @@ class Test_Delta:
         arr = np.random.randint(0, 100, dim, dtype=int)
 
         with tempfile.TemporaryDirectory() as tmpdir:
-
-            tmp_path = Path(tmpdir).joinpath("out.tdb")
-
             ctrl = Delta.calculate_delta_min_filter(arr.copy(), window, method=method)
             logging.warning(f"sum of ctrl: {np.sum(ctrl)}")
 
             delta = Delta(arr, loc=None)
-            res = delta.run(method=method, output_path=tmp_path,
-                            window=window, lazy=lazy, overwrite_first_frame=False)
+            res = delta.run(method=method, window=window, overwrite_first_frame=False)
 
             assert np.allclose(ctrl, res)
 
     @pytest.mark.skip(reason="Not implemented")
     def test_quality_of_dff(self):
         raise NotImplementedError
+
 
 class Test_Input:
 
@@ -147,16 +138,15 @@ class Test_Input:
             assert tmpdir.is_dir()
 
             # Reference
-            images = {f"ch{n}":[] for n in range(num_channels)}
-            c=0
+            images = {f"ch{n}": [] for n in range(num_channels)}
+            c = 0
             for n in range(7):
                 for n in range(num_channels):
-
                     img = np.random.random((1, 10, 10))
                     images[f"ch{n}"].append(img)
 
                     tifffile.imwrite(tmpdir.joinpath(f"ss_single_{c}.tiff"), img)
-                    c=c+1
+                    c = c + 1
 
             for k in images.keys():
                 images[k] = np.squeeze(np.stack(images[k]))
@@ -166,7 +156,6 @@ class Test_Input:
             stack = inp.run(input_path=tmpdir, channels=num_channels, dtype=None, in_memory=in_memory)
 
             for ch in images.keys():
-
                 ref = np.squeeze(images[ch])
                 res = np.squeeze(stack[ch])
 
@@ -185,16 +174,15 @@ class Test_Input:
             X, Y = 10, 10
 
             # Reference
-            images = {f"ch{n}":[] for n in range(num_channels)}
-            c=0
+            images = {f"ch{n}": [] for n in range(num_channels)}
+            c = 0
             for n in range(7):
                 for n in range(num_channels):
-
                     img = np.random.random((1, X, Y))
                     images[f"ch{n}"].append(img)
 
                     tifffile.imwrite(tmpdir.joinpath(f"ss_single_{c}.tiff"), img)
-                    c=c+1
+                    c = c + 1
 
             for k in images.keys():
                 images[k] = np.squeeze(np.stack(images[k]))
@@ -207,18 +195,18 @@ class Test_Input:
 
             # Loaded
             inp = Input()
-            stack = inp.run(input_path=tmpdir, channels=num_channels,
-                                  subtract_background=subtract_background, subtract_func=subtract_func,
-                                  dtype=None, in_memory=in_memory)
+            stack = inp.run(
+                input_path=tmpdir, channels=num_channels, subtract_background=subtract_background,
+                subtract_func=subtract_func, dtype=None, in_memory=in_memory
+            )
 
             # check result
-            func_reduction = {"mean": np.mean, "std": np.std, "min": np.min, "max":np.max}
+            func_reduction = {"mean": np.mean, "std": np.std, "min": np.min, "max": np.max}
 
             if num_channels == 1:
 
                 assert np.array_equal(
-                    stack["ch0"],
-                    images["ch0"] - subtract_background
+                    stack["ch0"], images["ch0"] - subtract_background
                 )
 
             else:
@@ -244,48 +232,52 @@ class Test_Input:
             tmpdir = Path(dir)
             assert tmpdir.is_dir()
 
-            Z, X, Y = 20, 12, 12
+            Z = np.random.randint(5, 25)
+            X = np.random.randint(10, 50)
+            Y = np.random.randint(10, 50)
+            logging.warning(f"random video shape: {(Z, X, Y)}")
 
             # Reference
-            images = {f"ch{n}":[] for n in range(num_channels)}
-            c=0
-            for n in range(20):
-                for n in range(num_channels):
-
+            images = {f"ch{n}": [] for n in range(num_channels)}
+            c = 0
+            for n in range(Z):
+                for channel_num in range(num_channels):
                     img = np.random.random((1, X, Y))
-                    images[f"ch{n}"].append(img)
+                    images[f"ch{channel_num}"].append(img)
 
                     tifffile.imwrite(tmpdir.joinpath(f"ss_single_{c}.tiff"), img)
-                    c=c+1
+                    c = c + 1
 
             for k in images.keys():
                 images[k] = np.squeeze(np.stack(images[k]))
 
             inp = Input()
-            stack = inp.run(input_path=tmpdir, channels=num_channels, rescale=rescale,
-                                  subtract_background=None, subtract_func=None,
-                                  dtype=None, in_memory=True)
+            stack = inp.run(
+                input_path=tmpdir, channels=num_channels, rescale=rescale, subtract_background=None, subtract_func=None,
+                dtype=None, in_memory=True
+            )
 
             res = stack["ch0"]
 
             if rescale == 1:
                 assert res.shape == (Z, X, Y)
+                return True
 
-            elif isinstance(rescale, float):
-                assert res.shape == (Z, int(X*rescale), int(Y*rescale))
+            if isinstance(rescale, (int, float)):
+                r0 = r1 = rescale
 
-            elif isinstance(rescale, int):
-                assert res.shape == (Z, rescale, rescale)
+            elif isinstance(rescale, (tuple, list)):
+                r0, r1 = rescale
+            else:
+                raise ValueError(f"unknown rescale format: {rescale}")
 
-            elif isinstance(rescale, tuple):
-                rx, ry = rescale
+            if isinstance(r0, int):
+                # absolute value
+                assert np.allclose(res.shape, (Z, r0, r1), atol=1)
 
-                if isinstance(rx, int):
-                    assert res.shape == (Z, rx, ry)
-
-                elif isinstance(rx, float):
-
-                    assert res.shape == (Z, int(X*rx), int(Y*ry))
+            elif isinstance(r1, float):
+                # relative value
+                assert np.allclose(res.shape, (Z, int(X * r0), int(Y * r1)), atol=1)
 
     @pytest.mark.parametrize("output_path", ["out.h5", "out.tdb", "out.tiff"])
     @pytest.mark.parametrize("chunks", [None, (5, 5, 5)])
@@ -328,8 +320,9 @@ class Test_Input:
             tmpdir = list(tmpdir.glob("*"))[0] if num_files == 1 else tmpdir
             output_path = tmpdir.joinpath(output_path)
 
-            inp.run(input_path=tmpdir, output_path=output_path,
-                            dtype=None, in_memory=False, h5_loc_out="data")
+            inp.run(
+                input_path=tmpdir, output_path=output_path, dtype=None, in_memory=False, h5_loc_out="data"
+            )
 
             assert output_path.is_file() or output_path.is_dir(), f"cannot find output file: {output_path}"
 
@@ -352,6 +345,7 @@ class Test_Input:
 
             assert img_stack.shape == res.shape
             assert np.array_equal(img_stack, res)
+
 
 class Test_IO:
 
@@ -389,7 +383,7 @@ class Test_IO:
 
             prefix = None if output_path.suffix != ".h5" else "data/"
             h5loc = None if output_path.suffix != ".h5" else "data/ch0"
-            data = {"ch0":arr}
+            data = {"ch0": arr}
 
             output_path = io.save(output_path, data, h5_loc=prefix)
 
@@ -416,7 +410,7 @@ class Test_IO:
 
             prefix = None if output_path.suffix != ".h5" else "data/"
             h5loc = None if output_path.suffix != ".h5" else "data/ch0"
-            data = {"ch0":arr}
+            data = {"ch0": arr}
 
             output_path = io.save(output_path, data, h5_loc=prefix)
 
@@ -424,6 +418,7 @@ class Test_IO:
 
             assert arr.shape == arr_load.shape
             assert np.array_equal(arr, arr_load)
+
     @pytest.mark.parametrize("shape", [(10, 5, 5), (100, 100, 100)])
     @pytest.mark.parametrize("chunks", [None, (2, 2, 2), "infer"])
     def test_save_chunks(self, shape, chunks, output_path="out.h5"):
@@ -442,7 +437,7 @@ class Test_IO:
 
             prefix = None if output_path.suffix != ".h5" else "data/"
             h5loc = None if output_path.suffix != ".h5" else "data/ch0"
-            data = {"ch0":arr}
+            data = {"ch0": arr}
 
             output_path = io.save(output_path, data, h5_loc=prefix, chunks=chunks)
 
@@ -469,7 +464,7 @@ class Test_IO:
 
             prefix = None if output_path.suffix != ".h5" else "data/"
             h5loc = None if output_path.suffix != ".h5" else "data/ch0"
-            data = {"ch0":arr}
+            data = {"ch0": arr}
 
             output_path = io.save(output_path, data, h5_loc=prefix, chunks=chunks, compression=compression)
 
@@ -499,7 +494,7 @@ class Test_IO:
 
             prefix = None if output_path.suffix != ".h5" else "data/"
             h5loc = None if output_path.suffix != ".h5" else "data/ch0"
-            data = {"ch0":arr}
+            data = {"ch0": arr}
 
             output_path = io.save(output_path, data, h5_loc=prefix)
 
@@ -525,7 +520,7 @@ class Test_IO:
 
             prefix = None if output_path.suffix != ".h5" else "data/"
             h5loc = None if output_path.suffix != ".h5" else "data/ch0"
-            data = {"ch0":arr}
+            data = {"ch0": arr}
 
             output_path = io.save(output_path, data, h5_loc=prefix)
             logging.warning(output_path)
@@ -561,6 +556,7 @@ class Test_IO:
             assert arr.shape == arr_load.shape
             assert np.array_equal(arr, arr_load)
 
+
 class Test_MotionCorrection:
 
     @pytest.mark.parametrize("input_type", ["array", ".h5", ".tiff"])
@@ -586,7 +582,7 @@ class Test_MotionCorrection:
             elif input_type == ".tiff":
 
                 temp_path = tmpdir.joinpath("test.tiff")
-                io.save(temp_path, data={"ch0":data})
+                io.save(temp_path, data={"ch0": data})
 
                 data = temp_path
 
@@ -614,7 +610,6 @@ class Test_MotionCorrection:
             data = mc.save(output=None)
             assert type(data) == np.ndarray
 
-
     @pytest.mark.parametrize("input_type", [".tdb"])
     @pytest.mark.skip(reason="currently doesn't work. revisit later.")
     def test_random_tdb(self, input_type, shape=(100, 100, 100)):
@@ -632,21 +627,21 @@ class Test_MotionCorrection:
 
                 h5_loc = "mc/ch0"
                 temp_path = tmpdir.joinpath("test.h5")
-                io.save(temp_path, data={"test/ch0":data}, h5_loc="mc")
+                io.save(temp_path, data={"test/ch0": data}, h5_loc="mc")
 
                 data = temp_path
 
             elif input_type == ".tiff":
 
                 temp_path = tmpdir.joinpath("test.tiff")
-                io.save(temp_path, data={"ch0":data})
+                io.save(temp_path, data={"ch0": data})
 
                 data = temp_path
 
             elif input_type == ".tdb":
 
                 temp_path = tmpdir.joinpath("test.tdb")
-                temp_path = io.save(temp_path, data={"ch0":data}, h5_loc="")
+                temp_path = io.save(temp_path, data={"ch0": data}, h5_loc="")
 
                 assert temp_path.is_file(), f"cannot find {temp_path}"
                 data = temp_path
@@ -675,9 +670,10 @@ class Test_MotionCorrection:
         data = mc.save(output=None)
         assert type(data) == np.ndarray
 
-    @pytest.mark.parametrize("video_param",
-        [{"speed": 0, "size": (100, 50, 50)}, {"speed": 0.1, "size": (100, 50, 50)},
-         {"speed": 0.01, "size": (1000, 250, 250)}, {"speed": 0.01, "size": (1000, 250, 250)}])
+    @pytest.mark.parametrize(
+        "video_param", [{"speed": 0, "size": (100, 50, 50)}, {"speed": 0.1, "size": (100, 50, 50)},
+                        {"speed": 0.01, "size": (1000, 250, 250)}, {"speed": 0.01, "size": (1000, 250, 250)}]
+    )
     def test_motion_correct_performance(self, video_param, dtype=np.uint8):
 
         motion_speed = video_param["speed"]
@@ -694,7 +690,7 @@ class Test_MotionCorrection:
             data[t] = shifted_structure
 
         mc = MotionCorrection()
-        mc.run(data, max_shifts=(int(X/2)-1, int(Y/2)-1))
+        mc.run(data, max_shifts=(int(X / 2) - 1, int(Y / 2) - 1))
 
         data = mc.save(output=None)
         assert type(data) == np.ndarray

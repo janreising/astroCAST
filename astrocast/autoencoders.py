@@ -1,17 +1,15 @@
 from pathlib import Path
+from typing import Union
 
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
-
-import numpy as np
-
 from matplotlib import pyplot as plt
 from sklearn.model_selection import train_test_split
 from torch.nn.utils.rnn import pad_packed_sequence, pack_padded_sequence, pad_sequence
 from torch.utils.data import Dataset, DataLoader, TensorDataset
 from tqdm import tqdm
-
 
 
 ##############################################
@@ -74,14 +72,17 @@ class CNN_Autoencoder(nn.Module):
         autoencoder = CNN_Autoencoder(target_length=18, dropout=0.2, latent_size=128, add_noise=0.1)
     """
 
-    
-    def __init__(self, target_length:int, dropout:float=0.15, l1_reg:float=0.0001, latent_size=64*6, add_noise=None):
+    def __init__(
+            self, target_length: int, dropout: float = 0.15, l1_reg: float = 0.0001, latent_size=64 * 6, add_noise=None
+    ):
         super(CNN_Autoencoder, self).__init__()
 
         self.l1_reg = l1_reg
         self.latent_size = latent_size
 
-        self.encoder, self.decoder = self.define_layers(dropout=dropout, add_noise=add_noise, target_length=target_length)
+        self.encoder, self.decoder = self.define_layers(
+            dropout=dropout, add_noise=add_noise, target_length=target_length
+        )
 
         # Manually defining a linear layer to serve as the dense layer for the encoder output
         self.latent_size = latent_size
@@ -96,24 +97,18 @@ class CNN_Autoencoder(nn.Module):
             encoder_layers += [nn.Dropout(dropout)]
         if add_noise is not None:
             encoder_layers += [GaussianNoise(std=add_noise)]
-        encoder_layers += [nn.Conv1d(1, 128, 3, padding=1),]
-        encoder_layers += [nn.ReLU(),]
-        encoder_layers += [nn.MaxPool1d(2),]
-        encoder_layers += [nn.Conv1d(128, 64, 3, padding=1),]
-        encoder_layers += [nn.ReLU(),]
-        encoder_layers += [nn.MaxPool1d(2),]
+        encoder_layers += [nn.Conv1d(1, 128, 3, padding=1), ]
+        encoder_layers += [nn.ReLU(), ]
+        encoder_layers += [nn.MaxPool1d(2), ]
+        encoder_layers += [nn.Conv1d(128, 64, 3, padding=1), ]
+        encoder_layers += [nn.ReLU(), ]
+        encoder_layers += [nn.MaxPool1d(2), ]
         encoder = nn.Sequential(*encoder_layers)
 
         decoder = nn.Sequential(
-            nn.Conv1d(64, 64, 3, padding=1),
-            nn.ReLU(),
-            nn.Upsample(scale_factor=2),
-            nn.Conv1d(64, 128, 3, padding=1),
-            nn.ReLU(),
-            nn.Upsample(scale_factor=2),
-            CustomUpsample(target_length=target_length),
-            nn.Conv1d(128, 1, 3, padding=1),
-            nn.Sigmoid()
+            nn.Conv1d(64, 64, 3, padding=1), nn.ReLU(), nn.Upsample(scale_factor=2), nn.Conv1d(64, 128, 3, padding=1),
+            nn.ReLU(), nn.Upsample(scale_factor=2), CustomUpsample(target_length=target_length),
+            nn.Conv1d(128, 1, 3, padding=1), nn.Sigmoid()
         )
 
         return encoder, decoder
@@ -176,8 +171,10 @@ class CNN_Autoencoder(nn.Module):
         train_dataset, val_dataset, test_dataset = random_split(data, [train_size, val_size, test_size])
         return train_dataset, val_dataset, test_dataset
 
-    def train_autoencoder(self, X_train, X_val=None, X_test=None, patience=5, min_delta=0.0005, epochs=100,
-                          learning_rate=0.001, batch_size=32):
+    def train_autoencoder(
+            self, X_train, X_val=None, X_test=None, patience=5, min_delta=0.0005, epochs=100, learning_rate=0.001,
+            batch_size=32
+    ):
 
         # ensure equal length input
         for X in [X_train, X_val, X_test]:
@@ -260,7 +257,9 @@ class CNN_Autoencoder(nn.Module):
                 print("Early stopping!")
                 break
 
-            pbar.set_description(f"train_Loss:{train_loss/len(train_loader):.4f}, val_loss:{val_loss/len(val_loader):.4f}")
+            pbar.set_description(
+                f"train_Loss:{train_loss / len(train_loader):.4f}, val_loss:{val_loss / len(val_loader):.4f}"
+            )
             pbar.update(1)
         pbar.close()
 
@@ -277,7 +276,7 @@ class CNN_Autoencoder(nn.Module):
                     loss = reconstruction_loss + l1_loss
                     test_loss += loss.item()
 
-                print(f"Test Loss: {test_loss/len(test_loader):.4f}")
+                print(f"Test Loss: {test_loss / len(test_loader):.4f}")
             model.train()
 
         self.losses = losses
@@ -327,8 +326,9 @@ class CNN_Autoencoder(nn.Module):
 
         return reshaped_matrix
 
-    def plot_examples_pytorch(self, X_test, Y_test=None,
-                              show_diff=False, num_samples=9, figsize=(10, 6)):
+    def plot_examples_pytorch(
+            self, X_test, Y_test=None, show_diff=False, num_samples=9, figsize=(10, 6)
+    ):
 
         model = self
 
@@ -381,11 +381,11 @@ class CNN_Autoencoder(nn.Module):
 
                 cmap = 'binary' if not show_diff else 'bwr'
                 vmin = 0 if not show_diff else -1
-                axx[2, i].imshow(latent_output, cmap=cmap, interpolation='nearest', aspect='auto',
-                                 vmin=vmin, vmax=1)
+                axx[2, i].imshow(
+                    latent_output, cmap=cmap, interpolation='nearest', aspect='auto', vmin=vmin, vmax=1
+                )
                 axx[2, i].get_xaxis().set_visible(False)
                 axx[2, i].get_yaxis().set_visible(False)
-
 
                 axx[0, i].get_xaxis().set_visible(False)
                 axx[1, i].get_xaxis().set_visible(False)
@@ -399,7 +399,7 @@ class CNN_Autoencoder(nn.Module):
 
         return fig
 
-    def save(self, filepath:str):
+    def save(self, filepath: Union[str, Path]):
         """
         Save the model parameters to a file.
 
@@ -410,10 +410,14 @@ class CNN_Autoencoder(nn.Module):
             model = CNN_Autoencoder(target_length=18)
             model.save("path/to/save/model.pth")
         """
+
+        if isinstance(filepath, Path):
+            filepath = filepath.as_posix()
+
         torch.save(self.state_dict(), filepath)
 
     @classmethod
-    def load(cls, filepath:str, *args, **kwargs):
+    def load(cls, filepath: Union[str, Path], *args, **kwargs):
         """
         Load the model parameters from a file and return an instance of the model.
 
@@ -426,10 +430,15 @@ class CNN_Autoencoder(nn.Module):
         Example usage:
             loaded_model = CNN_Autoencoder.load("path/to/save/model.pth", target_length=18)
         """
-        model = cls(*args, **kwargs) # Create a new instance of the model
+
+        if isinstance(filepath, Path):
+            filepath = filepath.as_posix()
+
+        model = cls(*args, **kwargs)  # Create a new instance of the model
         model.load_state_dict(torch.load(filepath))
-        model.eval() # Set the model to evaluation mode
+        model.eval()  # Set the model to evaluation mode
         return model
+
 
 ##########################################
 ## Recurrent Neural Network Autoencoder ##
@@ -513,7 +522,7 @@ class TimeSeriesRnnAE:
     def train_epochs(
             self, dataloader_train, dataloader_val=None, num_epochs=10, diminish_learning_rate=0.99, patience=5,
             min_delta=0.001, smooth_loss_len=3, safe_after_epoch=None, show_mode=None
-            ):
+    ):
         """
         Train one epoch of the TimeSeriesRnnAE model.
 
@@ -553,7 +562,7 @@ class TimeSeriesRnnAE:
                 # Pack the batch
                 packed_batch_data = pack_padded_sequence(
                     batch_data, batch_lengths.cpu().numpy(), batch_first=True
-                    )  # .to(self.device)
+                )  # .to(self.device)
 
                 # Your existing code for training on a single batch
                 batch_loss = self.train_batch(packed_batch_data, batch_lengths)
@@ -635,8 +644,8 @@ class TimeSeriesRnnAE:
             else:
                 losses = train_losses
 
-            smoothed_loss = np.median(np.array(losses[-smooth_loss_len-1:-1]))
-            if smoothed_loss - losses[-1]  > min_delta:
+            smoothed_loss = np.median(np.array(losses[-smooth_loss_len - 1:-1]))
+            if smoothed_loss - losses[-1] > min_delta:
                 patience_counter = 0
             else:
                 patience_counter += 1
@@ -705,7 +714,7 @@ class TimeSeriesRnnAE:
             # Pack the batch
             packed_batch_data = pack_padded_sequence(
                 batch_data, batch_lengths.cpu().numpy(), batch_first=True
-                )  # .to(self.device)
+            )  # .to(self.device)
 
             batch_size = packed_batch_data.batch_sizes[0]  # The first element contains the batch size
 
@@ -754,7 +763,7 @@ class TimeSeriesRnnAE:
             # Pack the batch
             packed_batch_data = pack_padded_sequence(
                 batch_data, batch_lengths.cpu().numpy(), batch_first=True
-                )  # .to(self.device)
+            )  # .to(self.device)
             batch_size = packed_batch_data.batch_sizes[0]  # The first element contains the batch size
 
             # encode
@@ -822,7 +831,7 @@ class Encoder(nn.Module):
         if self.params.rnn_type not in [RnnType.GRU, RnnType.LSTM]:
             raise Exception(
                 "Unknown RNN type for encoder. Valid options: {}".format(', '.join([str(t) for t in RnnType]))
-                )
+            )
 
         # RNN layer
         self.num_directions = 1
@@ -838,7 +847,7 @@ class Encoder(nn.Module):
         self.rnn = rnn(
             self.params.num_features, self.params.rnn_hidden_dim, num_layers=self.params.num_layers,
             bidirectional=False, dropout=self.params.dropout, batch_first=True
-            )
+        )
 
         # Initialize hidden state
         self.hidden = None
@@ -848,13 +857,13 @@ class Encoder(nn.Module):
         if self.params.rnn_type == RnnType.GRU:
             return torch.zeros(self.params.num_layers * self.num_directions, batch_size, self.params.rnn_hidden_dim).to(
                 self.device
-                )
+            )
         elif self.params.rnn_type == RnnType.LSTM:
             return (
-            torch.zeros(self.params.num_layers * self.num_directions, batch_size, self.params.rnn_hidden_dim).to(
-                self.device
+                torch.zeros(self.params.num_layers * self.num_directions, batch_size, self.params.rnn_hidden_dim).to(
+                    self.device
                 ), torch.zeros(self.params.num_layers * self.num_directions, batch_size, self.params.rnn_hidden_dim).to(
-                self.device
+                    self.device
                 ))
 
     def forward(self, packed_inputs, initial_hidden=None):
@@ -914,7 +923,7 @@ class Decoder(nn.Module):
         if not self.params.initialize_repeat:
             self.transformation_layer = nn.Linear(
                 self.params.rnn_hidden_dim, self.params.rnn_hidden_dim * self.params.num_layers
-                )
+            )
 
         # RNN layer
         self.num_directions = 1
@@ -929,7 +938,7 @@ class Decoder(nn.Module):
         self.rnn = rnn(
             self.params.num_features, self.params.rnn_hidden_dim * self.num_directions,
             num_layers=self.params.num_layers, dropout=self.params.dropout, batch_first=True
-            )
+        )
 
         self.out = nn.Linear(self.params.rnn_hidden_dim * self.num_directions, self.params.num_features)
 
@@ -1015,7 +1024,7 @@ class PaddedDataLoader():
 
     def get_datasets(
             self, batch_size=(32, "auto", "auto"), val_size=0.15, test_size=0.15, shuffle=(True, False, False)
-            ):
+    ):
 
         # First, split into training and temp sets
         train_data, temp_data = train_test_split(self.data, test_size=(val_size + test_size))
