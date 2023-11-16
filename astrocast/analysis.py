@@ -9,14 +9,12 @@ import dask.array as da
 import numpy as np
 import pandas as pd
 import psutil
+import seaborn as sns
 import xxhash
 from matplotlib import pyplot as plt
-import seaborn as sns
 from scipy.cluster.hierarchy import fcluster
 from sklearn import metrics
 from tqdm import tqdm
-
-import awkward as ak
 
 import astrocast.detection
 from astrocast import helper
@@ -26,16 +24,18 @@ from astrocast.preparation import IO
 
 class Events(CachedClass):
 
-    def __init__(self, event_dir, lazy=True, data=None, h5_loc=None, group=None, subject_id=None,
-                 z_slice=None, index_prefix=None, custom_columns=("v_area_norm", "cx", "cy"), frame_to_time_mapping=None,
-                 frame_to_time_function=None, cache_path=None, seed=1):
+    def __init__(
+            self, event_dir, lazy=True, data=None, h5_loc=None, group=None, subject_id=None, z_slice=None,
+            index_prefix=None, custom_columns=("v_area_norm", "cx", "cy"), frame_to_time_mapping=None,
+            frame_to_time_function=None, cache_path=None, seed=1
+    ):
 
         super().__init__(cache_path=cache_path)
 
         self.seed = seed
         self.z_slice = z_slice
 
-        if not isinstance(event_dir, list): # single file support
+        if not isinstance(event_dir, list):  # single file support
 
             if event_dir is None:
                 logging.warning("event_dir is None. Creating empty Events instance!")
@@ -51,7 +51,7 @@ class Events(CachedClass):
                     raise FileNotFoundError(f"cannot find provided event directory: {event_dir}")
 
                 # load event map
-                event_map, event_map_shape, event_map_dtype = self.get_event_map(event_dir, lazy=lazy) # todo slicing
+                event_map, event_map_shape, event_map_dtype = self.get_event_map(event_dir, lazy=lazy)  # todo slicing
                 self.event_map = event_map
                 self.num_frames, self.X, self.Y = event_map_shape
 
@@ -59,29 +59,28 @@ class Events(CachedClass):
                 # time_map, events_start_frame, events_end_frame = self.get_time_map(event_dir=event_dir, event_map=event_map)
 
                 # load events
-                self.events = self.load_events(event_dir, z_slice=z_slice, index_prefix=index_prefix, custom_columns=custom_columns)
+                self.events = self.load_events(
+                    event_dir, z_slice=z_slice, index_prefix=index_prefix, custom_columns=custom_columns
+                )
 
                 # z slicing
                 if z_slice is not None:
                     z_min, z_max = z_slice
                     self.events = self.events[(self.events.z0 >= z_min) & (self.events.z1 <= z_max)]
 
-                    # TODO how does this effect:
-                    #   - time_map, events_start_frame, events_end_frame
-                    #   - data
-                    #   - indices in the self.events dataframe
+                    # TODO how does this effect:  # - time_map, events_start_frame, events_end_frame  # - data  # - indices in the self.events dataframe
 
                 self.z_range = (self.events.z0.min(), self.events.z1.max())
 
                 # align time
                 if frame_to_time_mapping is not None or frame_to_time_function is not None:
-                    self.events["t0"] = self.convert_frame_to_time(self.events.z0.tolist(),
-                                                                mapping=frame_to_time_mapping,
-                                                                function=frame_to_time_function)
+                    self.events["t0"] = self.convert_frame_to_time(
+                        self.events.z0.tolist(), mapping=frame_to_time_mapping, function=frame_to_time_function
+                    )
 
-                    self.events["t1"] = self.convert_frame_to_time(self.events.z1.tolist(),
-                                                                mapping=frame_to_time_mapping,
-                                                                function=frame_to_time_function)
+                    self.events["t1"] = self.convert_frame_to_time(
+                        self.events.z1.tolist(), mapping=frame_to_time_mapping, function=frame_to_time_function
+                    )
 
                     self.events.dt = self.events.t1 - self.events.t0
 
@@ -127,21 +126,21 @@ class Events(CachedClass):
             else:
                 self.data = data
 
-        else: # multi file support
+        else:  # multi file support
 
             event_objects = []
             for i in range(len(event_dir)):
-
-                event = Events(event_dir[i],
-                               data=data if not isinstance(data, list) else data[i],
-                               h5_loc=h5_loc if not isinstance(h5_loc, list) else h5_loc[i],
-                               z_slice=z_slice if not isinstance(z_slice, list) else z_slice[i],
-                               group=group if not isinstance(group, list) else group[i],
-                               lazy=lazy,
-                               index_prefix=f"{i}x", subject_id=i,
-                               custom_columns=custom_columns,
-                               frame_to_time_mapping=frame_to_time_mapping if not isinstance(frame_to_time_mapping, list) else frame_to_time_mapping[i],
-                               frame_to_time_function=frame_to_time_function if not isinstance(frame_to_time_function, list) else frame_to_time_function[i])
+                event = Events(
+                    event_dir[i], data=data if not isinstance(data, list) else data[i],
+                    h5_loc=h5_loc if not isinstance(h5_loc, list) else h5_loc[i],
+                    z_slice=z_slice if not isinstance(z_slice, list) else z_slice[i],
+                    group=group if not isinstance(group, list) else group[i], lazy=lazy, index_prefix=f"{i}x",
+                    subject_id=i, custom_columns=custom_columns,
+                    frame_to_time_mapping=frame_to_time_mapping if not isinstance(frame_to_time_mapping, list) else
+                    frame_to_time_mapping[i],
+                    frame_to_time_function=frame_to_time_function if not isinstance(frame_to_time_function, list) else
+                    frame_to_time_function[i]
+                )
 
                 event_objects.append(event)
 
@@ -197,8 +196,10 @@ class Events(CachedClass):
         events = self.events
 
         if column_name in events.columns:
-            logging.warning(f"column_name ({column_name}) already exists in events table > overwriting column. "
-                            f"Please provide a different column_name if this is not the expected behavior.")
+            logging.warning(
+                f"column_name ({column_name}) already exists in events table > overwriting column. "
+                f"Please provide a different column_name if this is not the expected behavior."
+            )
 
         events[column_name] = events.index.map(cluster_lookup_table)
 
@@ -206,15 +207,14 @@ class Events(CachedClass):
     def score_clustering(groups, pred_groups):
 
         # ensure number as group id
-        lut_groups = {g:i for i, g in enumerate(np.unique(groups))}
+        lut_groups = {g: i for i, g in enumerate(np.unique(groups))}
         groups = [lut_groups[g] for g in groups]
 
         selected_metrics = [metrics.adjusted_rand_score, metrics.adjusted_mutual_info_score,
-                            metrics.normalized_mutual_info_score,  metrics.homogeneity_score,
-                            metrics.completeness_score, metrics.v_measure_score,
-                            metrics.fowlkes_mallows_score]
+                            metrics.normalized_mutual_info_score, metrics.homogeneity_score, metrics.completeness_score,
+                            metrics.v_measure_score, metrics.fowlkes_mallows_score]
 
-        results = {f.__name__:np.round(f(groups, pred_groups), 2) for f in selected_metrics}
+        results = {f.__name__: np.round(f(groups, pred_groups), 2) for f in selected_metrics}
         return results
 
     def get_counts_per_cluster(self, cluster_col, group_col=None):
@@ -225,15 +225,14 @@ class Events(CachedClass):
         else:
 
             unique_clusters = self.events[cluster_col].unique()
-            lut_cluster = {c:i for i, c in enumerate(unique_clusters)}
+            lut_cluster = {c: i for i, c in enumerate(unique_clusters)}
 
             unique_groups = self.events[group_col].unique()
-            lut_groups = {g:i for i, g in enumerate(unique_groups)}
+            lut_groups = {g: i for i, g in enumerate(unique_groups)}
 
             counts = np.zeros(shape=(len(unique_clusters), len(unique_groups)), dtype=int)
 
             for _, row in self.events.iterrows():
-
                 x = lut_cluster[row[cluster_col]]
                 y = lut_groups[row[group_col]]
                 counts[x, y] += 1
@@ -242,10 +241,10 @@ class Events(CachedClass):
 
         return counts
 
-    def plot_cluster_counts(self, counts, normalize_instructions=None,
-                            method="average", metric="euclidean", z_score=0, center=0,
-                            transpose=False,
-                            color_palette="viridis", group_cmap=None, cmap="vlag"):
+    def plot_cluster_counts(
+            self, counts, normalize_instructions=None, method="average", metric="euclidean", z_score=0, center=0,
+            transpose=False, color_palette="viridis", group_cmap=None, cmap="vlag"
+    ):
 
         # normalize
         if normalize_instructions is not None:
@@ -256,19 +255,17 @@ class Events(CachedClass):
         unique_groups = np.unique(counts.columns)
         if group_cmap == "auto":
             color_palette_ = sns.color_palette(color_palette, len(unique_groups))
-            group_cmap = {g:c for g, c in list(zip(unique_groups, color_palette_))}
+            group_cmap = {g: c for g, c in list(zip(unique_groups, color_palette_))}
 
         if transpose:
             counts = counts.transpose()
 
         # plot
-        clustermap = sns.clustermap(data=counts,
-                                    col_colors=[group_cmap[g] for g in counts.columns] if group_cmap is not None else None,
-                                    row_cluster=True,
-                                    col_cluster=True,
-                                    method=method, metric=metric, z_score=z_score, center=center,
-                                    cmap=cmap, cbar_pos=None
-                                    )
+        clustermap = sns.clustermap(
+            data=counts, col_colors=[group_cmap[g] for g in counts.columns] if group_cmap is not None else None,
+            row_cluster=True, col_cluster=True, method=method, metric=metric, z_score=z_score, center=center, cmap=cmap,
+            cbar_pos=None
+        )
 
         # quality of clustering
         linkage = clustermap.dendrogram_col.linkage
@@ -298,7 +295,7 @@ class Events(CachedClass):
                 min_, max_ = filters[column]
 
                 if min_ in [-1, None]:
-                    min_ = events[column].min() -1
+                    min_ = events[column].min() - 1
 
                 if max_ in [-1, None]:
                     max_ = events[column].max() + 1
@@ -315,12 +312,12 @@ class Events(CachedClass):
             self.events = events
 
         L2 = len(events)
-        logging.info(f"#events: {L1} > {L2} ({L2/L1*100:.1f}%)")
+        logging.info(f"#events: {L1} > {L2} ({L2 / L1 * 100:.1f}%)")
 
         return events
 
     @staticmethod
-    def get_event_map(event_dir:Path, lazy=True):
+    def get_event_map(event_dir: Path, lazy=True):
 
         """
         Retrieve the event map from the specified directory.
@@ -344,11 +341,13 @@ class Events(CachedClass):
             path = event_dir.joinpath("event_map.tiff")
             shape, chunksize, dtype = get_data_dimensions(path, return_dtype=True)
 
-        else: # Neither 'event_map.tdb' directory nor 'event_map.tiff' file found
+        else:  # Neither 'event_map.tdb' directory nor 'event_map.tiff' file found
 
-            logging.warning(f"Cannot find 'event_map.tdb' or 'event_map.tiff'."
-                            f"Consider recreating the file with 'create_event_map()', "
-                            f"otherwise errors downstream might occur'.")
+            logging.warning(
+                f"Cannot find 'event_map.tdb' or 'event_map.tiff'."
+                f"Consider recreating the file with 'create_event_map()', "
+                f"otherwise errors downstream might occur'."
+            )
             shape, chunksize, dtype = (None, None, None), None, None
             event_map = None
 
@@ -469,7 +468,7 @@ class Events(CachedClass):
         return time_map, events_start_frame, events_end_frame
 
     @staticmethod
-    def load_events(event_dir:Path, z_slice=None, index_prefix=None, custom_columns=("v_area_norm", "cx", "cy")):
+    def load_events(event_dir: Path, z_slice=None, index_prefix=None, custom_columns=("v_area_norm", "cx", "cy")):
 
         """
         Load events from the specified directory and perform optional preprocessing.
@@ -500,12 +499,10 @@ class Events(CachedClass):
         events.sort_index(inplace=True)
 
         # Dictionary of custom column functions
-        custom_column_functions = {
-            "v_area_norm": lambda events: events.v_area / events.dz,
-            "v_area_footprint": lambda events: events.footprint.apply(sum),
+        custom_column_functions = {"v_area_norm": lambda events: events.v_area / events.dz,
+                                   "v_area_footprint": lambda events: events.footprint.apply(sum),
             "cx": lambda events: events.x0 + events.dx * events["v_fp_centroid_local-0"],
-            "cy": lambda events: events.y0 + events.dy * events["v_fp_centroid_local-1"]
-        }
+                                   "cy": lambda events: events.y0 + events.dy * events["v_fp_centroid_local-1"]}
 
         if custom_columns is not None:
 
@@ -528,8 +525,10 @@ class Events(CachedClass):
                     except AttributeError:
                         logging.error(f"Unable to add custom column {custom_column}: {traceback.print_exc()}")
                 else:
-                    raise ValueError(f"Could not find 'custom_columns' value {custom_column}. "
-                                     f"Please provide one of {list(custom_column_functions.keys())} or dict('column_name'=lambda events: ...)")
+                    raise ValueError(
+                        f"Could not find 'custom_columns' value {custom_column}. "
+                        f"Please provide one of {list(custom_column_functions.keys())} or dict('column_name'=lambda events: ...)"
+                    )
 
         if index_prefix is not None:
             events.index = ["{}{}".format(index_prefix, i) for i in events.index]
@@ -539,7 +538,6 @@ class Events(CachedClass):
             events = events[(events.z0 >= z0) & (events.z1 <= z1)]
 
         return events
-
 
     def to_numpy(self, events=None, empty_as_nan=True, simple=False):
 
@@ -588,17 +586,18 @@ class Events(CachedClass):
             # take care of NaN
             trace = np.nan_to_num(trace)
 
-            ids = ids + [id_]*len(trace)
+            ids = ids + [id_] * len(trace)
             times = times + list(range(len(trace)))
             dim_0s = dim_0s + list(trace)
 
-        X = pd.DataFrame({"id":ids, "time":times, "dim_0":dim_0s})
+        X = pd.DataFrame({"id": ids, "time": times, "dim_0": dim_0s})
         return X
 
     @wrapper_local_cache
-    def get_average_event_trace(self, events: pd.DataFrame = None, empty_as_nan: bool = True,
-                                agg_func: callable = np.nanmean, index: list = None,
-                                gradient: bool = False, smooth: int = None) -> pd.Series:
+    def get_average_event_trace(
+            self, events: pd.DataFrame = None, empty_as_nan: bool = True, agg_func: callable = np.nanmean,
+            index: list = None, gradient: bool = False, smooth: int = None
+    ) -> pd.Series:
         """
         Calculate the average event trace.
 
@@ -697,8 +696,10 @@ class Events(CachedClass):
         # check if video was loaded at initialization
         if video is None and self.data is not None:
 
-            logging.info(f"loading video from path provided during initialization."
-                         f" Users need to ensure that the z_slice parameters matches.")
+            logging.info(
+                f"loading video from path provided during initialization."
+                f" Users need to ensure that the z_slice parameters matches."
+            )
             data = self.data.get_data()
             viewer.add_image(data)
 
@@ -707,8 +708,7 @@ class Events(CachedClass):
 
             viewer.add_image(data, name="data")
 
-        for debug_file in ["debug_smoothed_input.tiff", "debug_active_pixels.tiff",
-                            "debug_active_pixels_morphed.tiff"]:
+        for debug_file in ["debug_smoothed_input.tiff", "debug_active_pixels.tiff", "debug_active_pixels_morphed.tiff"]:
 
             dpath = self.event_dir.joinpath(debug_file)
             if dpath.is_file():
@@ -732,14 +732,17 @@ class Events(CachedClass):
         return viewer
 
     @wrapper_local_cache
-    def get_summary_statistics(self, decimals=2, groupby=None,
-        columns_excluded=('file_name', 'subject_id', 'group', 'z0', 'z1', 'x0', 'x1', 'y0', 'y1', 'mask', 'contours', 'footprint', 'fp_cx', 'fp_cy', 'trace', 'error',  'cx', 'cy')):
+    def get_summary_statistics(
+            self, decimals=2, groupby=None, columns_excluded=(
+                    'file_name', 'subject_id', 'group', 'z0', 'z1', 'x0', 'x1', 'y0', 'y1', 'mask', 'contours',
+                    'footprint', 'fp_cx', 'fp_cy', 'trace', 'error', 'cx', 'cy')
+    ):
 
         events = self.events
 
         # select columns
         if columns_excluded is not None:
-            cols = [c for c in events.columns if c not in columns_excluded ] + [] if groupby is None else [groupby]
+            cols = [c for c in events.columns if c not in columns_excluded] + [] if groupby is None else [groupby]
             ev = events[cols]
         else:
             ev = events.copy()
@@ -813,18 +816,17 @@ class Events(CachedClass):
         # print(f"num_timings:\n{events.num_timings}")
         # print(f"timings:\n{events.timings}")
 
-        #create trial matrix
+        # create trial matrix
         array = np.empty((num_rows, trial_length))
 
         # fill array
         i = 0
         for ev_idx, row in events.iterrows():
             for t in row.timings:
-
                 # get boundaries
                 z0, z1 = row.z0, row.z1
                 t0, t1 = t - leading, t + trailing
-                delta_left, delta_right = t0-z0, t1-z1
+                delta_left, delta_right = t0 - z0, t1 - z1
 
                 # calculate offsets
                 eve_idx_left = max(0, delta_left)
@@ -855,23 +857,23 @@ class Events(CachedClass):
             values = []
             timepoints = []
             for row in range(len(array)):
-
-                trial_ids += [row]*trial_length
+                trial_ids += [row] * trial_length
                 values += array[row, :].tolist()
                 timepoints += t_range
 
-            res = pd.DataFrame({"trial_ids":trial_ids, "timepoint":timepoints, "value":values})
+            res = pd.DataFrame({"trial_ids": trial_ids, "timepoint": timepoints, "value": values})
 
         else:
             res = array
 
         return res
+
     @wrapper_local_cache
-    def get_extended_events(self, events=None, video=None, dtype=float, use_footprint=False,
-                            extend=-1, ensure_min=None, ensure_max=None, pad_borders=False,
-                            return_array=False, in_place=False,
-                            normalization_instructions=None, show_progress=True,
-                            memmap_path=None, save_path=None, save_param={}):
+    def get_extended_events(
+            self, events=None, video=None, dtype=float, use_footprint=False, extend=-1, ensure_min=None,
+            ensure_max=None, pad_borders=False, return_array=False, in_place=False, normalization_instructions=None,
+            show_progress=True, memmap_path=None, save_path=None, save_param={}
+    ):
 
         """ takes the footprint of each individual event and extends it over the whole z-range
 
@@ -898,8 +900,10 @@ class Events(CachedClass):
         elif self.data is not None:
             video = self.data.get_data()
         else:
-            raise ValueError("to extend the event traces you either have to provide the 'video' argument "
-                             "when calling this function or the 'data' argument during Event creation.")
+            raise ValueError(
+                "to extend the event traces you either have to provide the 'video' argument "
+                "when calling this function or the 'data' argument during Event creation."
+            )
 
         # get video dimensions
         n_frames, X, Y = video.shape
@@ -910,15 +914,19 @@ class Events(CachedClass):
 
             # create array
             if memmap_path:
-                memmap_path = Path(memmap_path).with_suffix(f".dtype_{np.dtype(dtype).name}_shape_{n_events}x{n_frames}.mmap")
+                memmap_path = Path(memmap_path).with_suffix(
+                    f".dtype_{np.dtype(dtype).name}_shape_{n_events}x{n_frames}.mmap"
+                )
                 arr_ext = np.memmap(memmap_path.as_posix(), dtype=dtype, mode='w+', shape=(n_events, n_frames))
             else:
                 arr_ext = np.zeros((n_events, n_frames), dtype=dtype)
 
-            arr_size = arr_ext.itemsize*n_events*n_frames
+            arr_size = arr_ext.itemsize * n_events * n_frames
             ram_size = psutil.virtual_memory().total
             if arr_size > 0.9 * ram_size:
-                logging.warning(f"array size ({n_events}, {n_frames}) is larger than 90% RAM size ({arr_size*1e-9:.2f}GB, {arr_size/ram_size*100}%). Consider using smaller dtype or providing a 'mmemap_path'")
+                logging.warning(
+                    f"array size ({n_events}, {n_frames}) is larger than 90% RAM size ({arr_size * 1e-9:.2f}GB, {arr_size / ram_size * 100}%). Consider using smaller dtype or providing a 'mmemap_path'"
+                )
 
         else:
             extended = list()
@@ -927,7 +935,9 @@ class Events(CachedClass):
 
         # extract footprints
         c = 0
-        iterator = tqdm(events.iterrows(), total=len(events), desc="extending events") if show_progress else events.iterrows()
+        iterator = tqdm(
+            events.iterrows(), total=len(events), desc="extending events"
+        ) if show_progress else events.iterrows()
         for i, event in iterator:
 
             if use_footprint:
@@ -958,7 +968,7 @@ class Events(CachedClass):
                 if z1 + dz1 > n_frames:
                     dz1 = n_frames - z1
 
-                full_z0, full_z1 = z0-dz0, z1+dz1
+                full_z0, full_z1 = z0 - dz0, z1 + dz1
 
             elif isinstance(extend, (list, tuple)):
 
@@ -979,7 +989,7 @@ class Events(CachedClass):
                 elif z1 + dz1 > n_frames:
                     dz1 = n_frames - z1
 
-                full_z0, full_z1 = z0-dz0, z1+dz1
+                full_z0, full_z1 = z0 - dz0, z1 + dz1
 
             else:
                 raise ValueError("provide 'extend' flag as int or tuple (ext_left, ext_right")
@@ -999,7 +1009,7 @@ class Events(CachedClass):
                 if z1 + dz1 > n_frames:
                     dz1 = n_frames - z1
 
-                full_z0, full_z1 = z0-dz0, z1+dz1
+                full_z0, full_z1 = z0 - dz0, z1 + dz1
 
             elif ensure_max is not None and full_dz > ensure_max:
 
@@ -1009,7 +1019,7 @@ class Events(CachedClass):
                 dz0 -= left
                 dz1 -= right
 
-                full_z0, full_z1 = z0-dz0, z1+dz1
+                full_z0, full_z1 = z0 - dz0, z1 + dz1
 
             # extract new signal
 
@@ -1030,13 +1040,12 @@ class Events(CachedClass):
             # combine
             full_trace = [np.squeeze(tr) for tr in [pre_trace, event.trace, post_trace]]
             full_trace = [tr for tr in full_trace if len(tr.shape) > 0]
-            #logging.warning(f"{[(tr.shape, len(tr.shape)) for tr in full_trace]}, {z0}:{z1}, {full_z0}:{full_z1}")
+            # logging.warning(f"{[(tr.shape, len(tr.shape)) for tr in full_trace]}, {z0}:{z1}, {full_z0}:{full_z1}")
             trace = np.concatenate(full_trace)
 
             if ensure_max is not None and len(trace) > ensure_max:
-
-                c0 = max(0, full_z0-z0)
-                c1 = len(trace) - max(0, z1-full_z1)
+                c0 = max(0, full_z0 - z0)
+                c1 = len(trace) - max(0, z1 - full_z1)
                 trace = trace[c0:c1]
 
             # padding to enforce equal length
@@ -1278,8 +1287,9 @@ class Video:
             return self.data
 
     @lru_cache(maxsize=None)
-    def get_image_project(self, agg_func=np.mean, window=None, window_agg=np.sum, axis=0,
-                          show_progress=True):
+    def get_image_project(
+            self, agg_func=np.mean, window=None, window_agg=np.sum, axis=0, show_progress=True
+    ):
 
         img = self.data
 
@@ -1294,20 +1304,20 @@ class Video:
             Z, X, Y = img.shape
             proj = np.zeros((X, Y))
 
-            z_step = int(window/2)
+            z_step = int(window / 2)
             for x in tqdm(range(X)) if show_progress else range(X):
                 for y in range(Y):
-
-                    slide_ = sliding_window_view(img[:, x, y], axis=0, window_shape = window) # sliding trick
-                    slide_ = slide_[::z_step, :] # skip most steps
-                    agg = agg_func(slide_, axis=1) # aggregate
-                    proj[x, y] = window_agg(agg) # window aggregate
+                    slide_ = sliding_window_view(img[:, x, y], axis=0, window_shape=window)  # sliding trick
+                    slide_ = slide_[::z_step, :]  # skip most steps
+                    agg = agg_func(slide_, axis=1)  # aggregate
+                    proj[x, y] = window_agg(agg)  # window aggregate
 
         return proj
 
-    def show(self, viewer=None, colormap="gray",
-             show_trace=False, window=160, indices=None, viewer1d=None,
-             xlabel="frames", ylabel="Intensity", reset_y=False):
+    def show(
+            self, viewer=None, colormap="gray", show_trace=False, window=160, indices=None, viewer1d=None,
+            xlabel="frames", ylabel="Intensity", reset_y=False
+    ):
 
         import napari
         import napari_plot
@@ -1354,7 +1364,7 @@ class Video:
                 nonlocal current_frame_line
 
                 Z, _, _ = event.value
-                z0, z1 = Z - window//2, Z + window//2  # Adjusting to center the current frame
+                z0, z1 = Z - window // 2, Z + window // 2  # Adjusting to center the current frame
 
                 left_padding = 0
                 right_padding = 0
@@ -1427,6 +1437,7 @@ class Video:
 
         return fig
 
+
 class Plotting:
 
     def __init__(self, events):
@@ -1454,7 +1465,9 @@ class Plotting:
                 i = i + 1
         return factors
 
-    def _get_square_grid(self, N, figsize=(4, 4), figsize_multiply=4, sharex=False, sharey=False, max_n=5, switch_dim=False):
+    def _get_square_grid(
+            self, N, figsize=(4, 4), figsize_multiply=4, sharex=False, sharey=False, max_n=5, switch_dim=False
+    ):
         """
         Returns a square grid of subplots in a matplotlib figure.
 
@@ -1572,8 +1585,10 @@ class Plotting:
 
         else:
             # If events is neither a pandas DataFrame, numpy ndarray, nor list, raise a ValueError
-            raise ValueError("Please provide one of the following data types: pandas.DataFrame, numpy.ndarray, or list. "
-                             f"Instead of {type(events)}")
+            raise ValueError(
+                "Please provide one of the following data types: pandas.DataFrame, numpy.ndarray, or list. "
+                f"Instead of {type(events)}"
+            )
 
         return traces
 
@@ -1594,8 +1609,9 @@ class Plotting:
 
         return fig
 
-    def plot_distribution(self, column, plot_func=sns.violinplot, outlier_deviation=None,
-                          axx=None, figsize=(8, 3), title=None):
+    def plot_distribution(
+            self, column, plot_func=sns.violinplot, outlier_deviation=None, axx=None, figsize=(8, 3), title=None
+    ):
 
         values = self.events[column]
 
@@ -1633,13 +1649,14 @@ class Plotting:
             if len(axx) != 3:
                 raise ValueError(f"when providing outlier_deviation, len(axx) is expected to be 3 (not: {len(axx)}")
 
-            count = pd.DataFrame({"count": [len(df_low), len(df_mid), len(df_high)], "type":["low", "mid", "high"]})
+            count = pd.DataFrame({"count": [len(df_low), len(df_mid), len(df_high)], "type": ["low", "mid", "high"]})
             sns.barplot(data=count, y="count", x="type", ax=axx[1])
             axx[1].set_title("Outlier count")
 
             # plot swarm plot
-            sns.swarmplot(data=pd.concat((df_low, df_high)),
-                          marker="x", linewidth=2, color="red", ax=axx[2])
+            sns.swarmplot(
+                data=pd.concat((df_low, df_high)), marker="x", linewidth=2, color="red", ax=axx[2]
+            )
             axx[2].set_title("Outliers")
 
         # figure title
