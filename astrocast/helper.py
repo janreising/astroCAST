@@ -19,6 +19,7 @@ import yaml
 from skimage.util import img_as_uint
 
 
+
 def wrapper_local_cache(f):
     """ Wrapper that creates a local save of the function call based on a hash of the arguments
     expects a function from a class with 'lc_path'::pathlib.Path and 'local_cache':bool attribute

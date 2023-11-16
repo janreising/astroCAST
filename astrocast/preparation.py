@@ -39,7 +39,6 @@ class Input:
             subtract_func="mean", rescale=None, dtype=int, in_memory=False, h5_loc_in=None, h5_loc_out="data/ch0",
             infer_strategy="balanced", chunks=None, compression=None
     ):
-
         """ Loads input data from a specified path, performs data processing, and optionally saves the processed data.
 
         Args:
@@ -279,7 +278,6 @@ class Input:
             self, data, channels=1, subtract_background=None, subtract_func="mean", rescale=None,
             absolute_rescale=False, dtype=np.int, in_memory=False
     ):
-
         """Prepares the input data by applying various processing steps.
 
         Args:
@@ -1633,7 +1631,6 @@ class Delta:
     def calculate_background_pandas(
             arr: np.ndarray, window: int, method="background", inplace: bool = True
     ) -> np.ndarray:
-
         if len(np.squeeze(arr)) < 2:
             arr = np.expand_dims(arr, axis=0)
 

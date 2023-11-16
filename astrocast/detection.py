@@ -90,6 +90,7 @@ class Detector:
             fill_holes_first=True, lazy: bool = True, adjust_for_noise: bool = False, subset: Optional[str] = None,
             split_events: bool = False, debug: bool = False, event_map_export_format: str = "tiff", parallel=True
     ) -> Path:
+
         """
         Runs the event detection process on the specified dataset.
 
