@@ -307,7 +307,7 @@ class CNN_Autoencoder(nn.Module):
         return encoded_traces
 
     @staticmethod
-    def reshape_to_squareish_matrix(vector):
+    def reshape_to_square_matrix(vector):
         """
         Reshapes a 1D vector to a square-ish 2D matrix.
         """
@@ -381,7 +381,7 @@ class CNN_Autoencoder(nn.Module):
                 axx[0, i].sharey(axx[1, i])
 
                 latent_output = encoder_output[idx, :]
-                latent_output = self.reshape_to_squareish_matrix(latent_output)
+                latent_output = self.reshape_to_square_matrix(latent_output)
 
                 cmap = 'binary' if not show_diff else 'bwr'
                 min_value = 0 if not show_diff else -1
@@ -447,25 +447,97 @@ class CNN_Autoencoder(nn.Module):
 # Recurrent Neural Network Autoencoder
 # ------------------------------------
 
-class Parameters:
+class PaddedSequenceDataset(Dataset):
+    def __init__(self, data):
+        self.data = data
+        self.lengths = [len(seq) for seq in data]
 
-    def __init__(self, data_dict):
-        for k, v in data_dict.items():
-            exec(f"self.{k}={v}")
+    def __len__(self):
+        return len(self.data)
+
+    def __getitem__(self, index):
+        return self.data[index], self.lengths[index]
+
+
+class PaddedDataLoader:
+
+    def __init__(self, data):
+        self.data = data
+
+    def __len__(self):
+        return len(self.data)
+
+    def get_dataloader(self, data, batch_size, shuffle):
+
+        ds = [torch.tensor(x, dtype=torch.float32) for x in data]
+        ds = PaddedSequenceDataset(ds)
+
+        dl = DataLoader(ds, batch_size=batch_size, shuffle=shuffle, collate_fn=self.collate_fn)
+        return dl
+
+    def get_datasets(
+            self, batch_size=(32, "auto", "auto"), val_size=0.15, test_size=0.15, shuffle=(True, False, False)
+    ):
+
+        # First, split into training and temp sets
+        train_data, temp_data = train_test_split(self.data, test_size=(val_size + test_size))
+        # Then split the temp_data into validation and test sets
+        val_data, test_data = train_test_split(temp_data, test_size=(test_size / (val_size + test_size)))
+
+        if isinstance(batch_size, int):
+            batch_size = (batch_size, batch_size, batch_size)
+        elif isinstance(batch_size, (list, tuple)):
+            if len(batch_size) != 3:
+                raise ValueError(f"please provide batch_size as int or list of length 3.")
+
+        datasets = []
+        for i, ds in enumerate([train_data, val_data, test_data]):
+
+            bs = batch_size[i]
+            if bs == "auto":
+                bs = len(ds)
+
+            dl = self.get_dataloader(ds, batch_size=bs, shuffle=shuffle[i])
+
+            datasets.append(dl)
+
+        return datasets
+
+    @staticmethod
+    def collate_fn(batch):
+        # Sort sequences by length in descending order
+        batch.sort(key=lambda x: x[1], reverse=True)  # x[1] is the length
+
+        # Separate sequence lengths and sequences
+        sequences = [x[0] for x in batch]  # x[0] is the data
+        lengths = [x[1] for x in batch]  # x[1] is the length
+
+        # Pad sequences
+        sequences = pad_sequence(sequences, batch_first=True)
+
+        return sequences, lengths
 
 
 class TimeSeriesRnnAE:
 
-    def __init__(self, params, use_cuda=False):
+    def __init__(
+            self, num_features=1, rnn_hidden_dim=32, num_layers=2, encoder_lr=0.001, decoder_lr=0.001, clip=0.5,
+            dropout=0, initialize_repeat=True, num_directions=1, use_cuda=False
+    ):
         """
         Initialize the TimeSeriesRnnAE model.
 
         Parameters:
-        - input_dim (int): Dimensionality of the input time-series data.
-        - hidden_dim (int): Number of hidden units in the LSTM layers.
+        - num_features (int): Dimensionality of the input time-series data.
+        - rnn_hidden_dim (int): Number of hidden units in the LSTM layers.
         - num_layers (int): Number of LSTM layers.
+        - encoder_lr (float): Learning rate for the encoder model.
+        - decoder_lr (float): Learning rate for the decoder model.
+        - clip (float): Value used for gradient clipping during training.
         - dropout (float): Dropout rate for LSTM layers.
-        - l1_reg (float): L1 regularization term for the latent representation.
+        - initialize_repeat (bool): Whether to initialize the repeat vector in the decoder.
+        - num_directions (int): Number of directions for the LSTM layers.
+        - use_cuda (bool): Whether to use GPU acceleration if available.
 
         """
         super(TimeSeriesRnnAE, self).__init__()
@@ -477,19 +549,26 @@ class TimeSeriesRnnAE:
             device = "cpu"
 
         self.device = device
-        self.params = params
         self.criterion = nn.MSELoss()
+        self.clip = clip
 
         # Create encoder rnn and decoder rnn module
-        self.encoder = Encoder(device, params)
-        self.decoder = Decoder(device, params, self.criterion)
+        self.encoder = Encoder(
+            device=device, num_features=num_features, rnn_hidden_dim=rnn_hidden_dim, num_layers=num_layers,
+            dropout=dropout, num_directions=num_directions
+        )
+        self.decoder = Decoder(
+            device=self.device, criterion=self.criterion, initialize_repeat=initialize_repeat,
+            rnn_hidden_dim=rnn_hidden_dim, num_layers=num_layers, num_features=num_features,
+            num_directions=num_directions, dropout=dropout
+        )
         self.encoder.to(device)
         self.decoder.to(device)
         # Create optimizers for encoder and decoder
-        self.encoder_lr = self.params.encoder_lr
-        self.decoder_lr = self.params.decoder_lr
-        self.encoder_optimizer = optim.Adam(self.encoder.parameters(), lr=self.encoder_lr)
-        self.decoder_optimizer = optim.Adam(self.decoder.parameters(), lr=self.decoder_lr)
+        self.encoder_lr = encoder_lr
+        self.decoder_lr = decoder_lr
+        self.encoder_optimizer = optim.Adam(self.encoder.parameters(), lr=encoder_lr)
+        self.decoder_optimizer = optim.Adam(self.decoder.parameters(), lr=decoder_lr)
 
         # initialize historical variables
         self.learning_rates = None
@@ -528,15 +607,22 @@ class TimeSeriesRnnAE:
             min_delta=0.001, smooth_loss_len=3, safe_after_epoch=None, show_mode=None
     ):
         """
-        Train one epoch of the TimeSeriesRnnAE model.
+        Train the TimeSeriesRnnAE model for multiple epochs.
 
         Parameters:
-        - epoch (int): The current epoch number.
-        - X_iter (DataLoader): DataLoader object for the training data.
-        - verbatim (bool): Whether to print detailed logs.
+        - dataloader_train (DataLoader): DataLoader object for the training data.
+        - dataloader_val (DataLoader): DataLoader object for the validation data (optional).
+        - num_epochs (int): Maximum number of epochs to train the model.
+        - diminish_learning_rate (float): Factor by which to diminish the learning rate after each epoch.
+        - patience (int): Number of epochs to wait for improvement in validation loss before early stopping.
+        - min_delta (float): Minimum change in validation loss to be considered as improvement for early stopping.
+        - smooth_loss_len (int): Number of previous losses to consider for smoothing the loss curve.
+        - safe_after_epoch (str, Path): Path to save the final encoder and decoder models to.
+        - show_mode (str): Mode for displaying training progress ('progress', 'notebook', or None).
 
         Returns:
-        - epoch_loss (float): The total loss for this epoch.
+        - epoch_loss (float): The total loss for the last epoch.
+
         """
 
         self.train()
@@ -699,8 +785,8 @@ class TimeSeriesRnnAE:
         loss.backward()
 
         # Gradient clipping
-        torch.nn.utils.clip_grad_norm_(self.encoder.parameters(), self.params.clip)
-        torch.nn.utils.clip_grad_norm_(self.decoder.parameters(), self.params.clip)
+        torch.nn.utils.clip_grad_norm_(self.encoder.parameters(), self.clip)
+        torch.nn.utils.clip_grad_norm_(self.decoder.parameters(), self.clip)
 
         # Update parameters
         self.encoder_optimizer.step()
@@ -754,8 +840,17 @@ class TimeSeriesRnnAE:
         self.encoder.load_state_dict(torch.load(encoder_file_name))
         self.decoder.load_state_dict(torch.load(decoder_file_name))
 
-    def embedd(self, dataloader):
+    def embedd(self, dataloader: DataLoader):
+        """
+            Embeds the data using the trained encoder-decoder model.
 
+            Args:
+                dataloader (torch.utils.data.DataLoader): The data loader for the input data.
+
+            Returns:
+                Tuple: A tuple containing the embedded input data, the decoded output data, the latent representation, and the losses.
+
+        """
         self.eval()
 
         x_val = []
@@ -832,17 +927,29 @@ class TimeSeriesRnnAE:
 
 class Encoder(nn.Module):
 
-    def __init__(self, device, params):
+    def __init__(self, device="cpu", num_features=1, rnn_hidden_dim=32, num_layers=2, dropout=0, num_directions=1):
+        """ Initializes the Encoder object.
+        Parameters:
+            device (str): The device to use for computations, default is “cpu”.
+            num_features (int): The number of input features, default is 1.
+            rnn_hidden_dim (int): The number of hidden units in the RNN, default is 32.
+            num_layers (int): The number of layers in the RNN, default is 2.
+            dropout (float): The dropout rate, default is 0.
+        """
         super(Encoder, self).__init__()
 
         self.device = device
-        self.params = params
         self.num_hidden_states = 2
         rnn = nn.LSTM
 
+        self.num_features = num_features
+        self.rnn_hidden_dim = rnn_hidden_dim
+        self.num_layers = num_layers
+        self.dropout = dropout
+        self.num_directions = num_directions
+
         self.rnn = rnn(
-            self.params.num_features, self.params.rnn_hidden_dim, num_layers=self.params.num_layers,
-            bidirectional=False, dropout=self.params.dropout, batch_first=True
+            num_features, rnn_hidden_dim, num_layers=num_layers, bidirectional=False, dropout=dropout, batch_first=True
         )
 
         # Initialize hidden state
@@ -850,9 +957,9 @@ class Encoder(nn.Module):
         self._init_weights()
 
     def init_hidden(self, batch_size):
-        return (torch.zeros(self.params.num_layers * self.num_directions, batch_size, self.params.rnn_hidden_dim).to(
+        return (torch.zeros(self.num_layers * self.num_directions, batch_size, self.rnn_hidden_dim).to(
             self.device
-        ), torch.zeros(self.params.num_layers * self.num_directions, batch_size, self.params.rnn_hidden_dim).to(
+        ), torch.zeros(self.num_layers * self.num_directions, batch_size, self.rnn_hidden_dim).to(
             self.device
         ))
 
@@ -898,28 +1005,49 @@ class Encoder(nn.Module):
 
 class Decoder(nn.Module):
 
-    def __init__(self, device, params, criterion):
+    def __init__(
+            self, criterion=nn.MSELoss(), device="cpu", initialize_repeat=True, rnn_hidden_dim=32, num_layers=2,
+            num_features=1, num_directions=1, dropout=0,
+
+    ):
+        """ Initializes the Decoder object.
+            Parameters:
+                criterion (nn.Module): The loss function to use, default is nn.MSELoss().
+                device (str): The device to use for computations, default is “cpu”.
+                initialize_repeat (bool): Whether to initialize the repeat, default is True.
+                rnn_hidden_dim (int): The number of hidden units in the RNN, default is 32.
+                num_layers (int): The number of layers in the RNN, default is 2.
+                num_features (int): The number of input features, default is 1.
+                num_directions (int): The number of directions in the RNN, default is 1.
+                dropout (float): The dropout rate, default is 0.
+
+        """
         super(Decoder, self).__init__()
         self.device = device
-        self.params = params
         self.criterion = criterion
 
-        if not self.params.initialize_repeat:
+        self.initialize_repeat = initialize_repeat
+        self.rnn_hidden_dim = rnn_hidden_dim
+        self.num_layers = num_layers
+        self.num_features = num_features
+        self.num_directions = num_directions
+        self.dropout = dropout
+
+        if not self.initialize_repeat:
             self.transformation_layer = nn.Linear(
-                self.params.rnn_hidden_dim, self.params.rnn_hidden_dim * self.params.num_layers
+                self.rnn_hidden_dim, self.rnn_hidden_dim * self.num_layers
             )
 
         # RNN layer
-        self.num_directions = 1
         self.num_hidden_states = 2
         rnn = nn.LSTM
 
         self.rnn = rnn(
-            self.params.num_features, self.params.rnn_hidden_dim * self.num_directions,
-            num_layers=self.params.num_layers, dropout=self.params.dropout, batch_first=True
+            self.num_features, self.rnn_hidden_dim * self.num_directions, num_layers=self.num_layers,
+            dropout=self.dropout, batch_first=True
         )
 
-        self.out = nn.Linear(self.params.rnn_hidden_dim * self.num_directions, self.params.num_features)
+        self.out = nn.Linear(self.rnn_hidden_dim * self.num_directions, self.num_features)
 
         self._init_weights()
 
@@ -931,7 +1059,7 @@ class Decoder(nn.Module):
         batch_size, num_steps = padded_sequence.shape[0], padded_sequence.shape[1]
 
         # Initialize with the embedding
-        hidden = (z.repeat(self.params.num_layers, 1, 1), z.repeat(self.params.num_layers, 1, 1))
+        hidden = (z.repeat(self.num_layers, 1, 1), z.repeat(self.num_layers, 1, 1))
 
         # Initialize recovered_sequence with zeros
         recovered_sequence = torch.zeros(padded_sequence.shape, dtype=torch.float32).to(self.device)
@@ -974,71 +1102,3 @@ class Decoder(nn.Module):
             elif isinstance(m, nn.Linear):
                 torch.nn.init.xavier_uniform_(m.weight)
                 m.bias.data.fill_(0.01)
-
-
-class PaddedSequenceDataset(Dataset):
-    def __init__(self, data):
-        self.data = data
-        self.lengths = [len(seq) for seq in data]
-
-    def __len__(self):
-        return len(self.data)
-
-    def __getitem__(self, index):
-        return self.data[index], self.lengths[index]
-
-
-class PaddedDataLoader:
-
-    def __init__(self, data):
-        self.data = data
-
-    def get_dataloader(self, data, batch_size, shuffle):
-
-        ds = [torch.tensor(x, dtype=torch.float32) for x in data]
-        ds = PaddedSequenceDataset(ds)
-
-        dl = DataLoader(ds, batch_size=batch_size, shuffle=shuffle, collate_fn=self.collate_fn)
-        return dl
-
-    def get_datasets(
-            self, batch_size=(32, "auto", "auto"), val_size=0.15, test_size=0.15, shuffle=(True, False, False)
-    ):
-
-        # First, split into training and temp sets
-        train_data, temp_data = train_test_split(self.data, test_size=(val_size + test_size))
-        # Then split the temp_data into validation and test sets
-        val_data, test_data = train_test_split(temp_data, test_size=(test_size / (val_size + test_size)))
-
-        if isinstance(batch_size, int):
-            batch_size = (batch_size, batch_size, batch_size)
-        elif isinstance(batch_size, (list, tuple)):
-            if len(batch_size) != 3:
-                raise ValueError(f"please provide batch_size as int or list of length 3.")
-
-        datasets = []
-        for i, ds in enumerate([train_data, val_data, test_data]):
-
-            bs = batch_size[i]
-            if bs == "auto":
-                bs = len(ds)
-
-            dl = self.get_dataloader(ds, batch_size=bs, shuffle=shuffle[i])
-
-            datasets.append(dl)
-
-        return datasets
-
-    @staticmethod
-    def collate_fn(batch):
-        # Sort sequences by length in descending order
-        batch.sort(key=lambda x: x[1], reverse=True)  # x[1] is the length
-
-        # Separate sequence lengths and sequences
-        sequences = [x[0] for x in batch]  # x[0] is the data
-        lengths = [x[1] for x in batch]  # x[1] is the length
-
-        # Pad sequences
-        sequences = pad_sequence(sequences, batch_first=True)
-
-        return sequences, lengths
