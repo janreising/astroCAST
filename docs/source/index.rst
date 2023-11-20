@@ -1,7 +1,7 @@
 .. astrocast documentation master file, created by
-   sphinx-quickstart on Fri Nov 10 18:58:27 2023.
-   You can adapt this file completely to your liking, but it should at least
-   contain the root `toctree` directive.
+sphinx-quickstart on Fri Nov 10 18:58:27 2023.
+You can adapt this file completely to your liking, but it should at least
+contain the root `toctree` directive.
 
 Welcome to astrocast's documentation!
 =====================================
@@ -12,6 +12,7 @@ Welcome to astrocast's documentation!
 
    quickstart
    installation
+   sample_data
    preprocessing
    analysis
    experimental

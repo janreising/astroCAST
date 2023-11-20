@@ -5,6 +5,7 @@ import tempfile
 import warnings
 from collections import OrderedDict
 from pathlib import Path
+from typing import Union, Tuple, Literal, Callable
 
 import czifile
 import dask
@@ -29,35 +30,53 @@ from astrocast.helper import get_data_dimensions
 
 
 class Input:
-    """Class for loading input data, performing data processing, and saving the processed data."""
+    """ Class for loading time series images and converting to an astroCAST compatible format.
 
-    def __init__(self, logging_level=logging.INFO):
+    Args:
+            logging_level: Sets the level at which information is logged to the console as an integer value.
+                The built-in levels in the logging module are, in increasing order of severity:
+                debug (10), info (20), warning (30), error (40), critical (50).
+
+    **Example**::
+
+            inp = Input()
+            inp.run('path/to/images/', output_path='path/to/output.h5' channels=1, h5_loc_out='data')
+
+    """
+
+    def __init__(self, logging_level: int = logging.INFO):
+
         logging.basicConfig(level=logging_level)
 
     def run(
-            self, input_path, output_path=None, sep="_", channels=1, z_slice=None, lazy=True, subtract_background=None,
-            subtract_func="mean", rescale=None, dtype=np.uint, in_memory=False, h5_loc_in=None, h5_loc_out="data",
-            chunks=None, compression=None
-            ):
+            self, input_path: Union[str, Path], output_path: Union[str, Path] = None, sep: str = "_", channels: int = 1,
+            z_slice: Tuple[int, int] = None, lazy: bool = True, subtract_background: Union[str, np.ndarray] = None,
+            subtract_func: Literal['mean', 'std', 'min', 'max', Callable] = "mean",
+            rescale: Union[float, Tuple[int, int]] = None, dtype: type = int, in_memory: bool = False,
+            h5_loc_in: str = None, h5_loc_out: str = "data",
+            infer_strategy: Literal['balanced', 'XY', 'Z'] = "balanced", chunks: Tuple[int, int, int] = None,
+            compression: Literal['gzip', 'szip', 'lz4'] = None
+    ) -> Union[np.ndarray, dict]:
 
         """ Loads input data from a specified path, performs data processing, and optionally saves the processed data.
 
         Args:
-            input_path (str or pathlib.Path): Path to the input file or directory.
-            output_path (str or pathlib.Path, optional): Path to save the processed data. If None, the processed data is returned. (default: None)
-            sep (str, optional): Separator used for sorting file names. (default: "_")
-            channels (int or dict, optional): Number of channels or dictionary specifying channel names. (default: 1)
-            subtract_background (np.ndarray, str, or callable, optional): Background to subtract or channel name to use as background. (default: None)
-            subtract_func (str or callable, optional): Function to use for background subtraction. (default: "mean")
-            rescale (float, int, or tuple, optional): Scale factor or tuple specifying the new dimensions. (default: None)
-            dtype (numpy.dtype, optional): Data type to convert the processed data. (default: np.uint)
-            in_memory (bool, optional): If True, the processed data is loaded into memory. (default: False)
-            prefix (str, optional): Prefix to use when saving the processed data. (default: "data")
-            chunks (tuple or int, optional): Chunk size to use when saving to HDF5 or TileDB. (default: None)
-            compression (str or int, optional): Compression method to use when saving to HDF5 or TileDB. (default: None)
-
-        Returns:
-            numpy.ndarray or dict: Processed data if output_path is None, otherwise None.
+            input_path: Path to the input file or directory.
+            output_path: Path to save the processed data. If None, the processed data is returned.
+            h5_loc_in: Input dataset in the HDF5 file that is loaded.
+            h5_loc_out: Output dataset in the HDF5 file that is saved.
+            z_slice: Selection of frames that are processed.
+            sep: Separator used for sorting file names, `['file_01.tiff', 'file_02.tiff']`.
+            channels: Number of channels or dictionary specifying channel names.
+            subtract_background: Either channel name or array that is subtracted.
+            subtract_func: Function to use for background subtraction.
+            rescale: Scale factor or tuple specifying the new dimensions.
+            dtype: Data type to convert the processed data.
+            in_memory: If True, the processed data is loaded into memory.
+            infer_strategy: Strategy to use when inferring size of chunks.
+            chunks: Chunk size to use when saving to HDF5 or TileDB.
+            compression: Compression method to use when saving to HDF5 or TileDB.
+            lazy: If True, the data is loaded on demand.
 
         """
 
@@ -73,27 +92,18 @@ class Input:
         data = self.prepare_data(
             data, channels=channels, subtract_background=subtract_background, subtract_func=subtract_func,
             rescale=rescale, dtype=dtype, in_memory=in_memory
-            )
+        )
 
         logging.debug(f"data type: {type(data[list(data.keys())[0]])}")
-
-        # rechunk
-        if chunks is not None:
-
-            for k in data:
-                if not isinstance(data[k], np.ndarray) and data[k].chunksize != chunks:
-
-                    if chunks == "infer":
-                        chunks = (10, data[k].shape[1], data[k].shape[2])
-
-                    data[k] = da.rechunk(data[k], chunks=chunks)
 
         # return result
         if output_path is None:
             return data
 
         logging.info("saving data ...")
-        io.save(output_path, data, h5_loc=h5_loc_out, chunks=chunks, compression=compression)
+        io.save(
+            output_path, data, h5_loc=h5_loc_out, infer_strategy=infer_strategy, chunks=chunks, compression=compression
+        )
 
     @staticmethod
     def subtract_background(data, channels, subtract_background, subtract_func):
@@ -107,7 +117,7 @@ class Input:
             subtract_background (np.ndarray or str or callable): The background image to subtract or a string specifying
                 the channel name to use as the background, or a callable function for background reduction.
             subtract_func (str or callable): The reduction function to use for background subtraction if
-                `subtract_background` is a string or a callable function.
+                `subtract_background` is a string or a callable function. Possible options: [mean, std, min, max].
 
         Returns:
             dict: A dictionary mapping channel names to the data arrays after subtracting the background.
@@ -137,7 +147,7 @@ class Input:
             if len(background_keys) != 1:
                 raise ValueError(
                     f"cannot find channel to subtract or found too many. Choose only one of : {list(channels.values())}."
-                    )
+                )
 
             background = data[background_keys[0]]
             for k in background_keys:
@@ -158,7 +168,7 @@ class Input:
             if background.shape != img_0.shape:
                 raise ValueError(
                     f"incorrect dimension after reduction: data.shape {img_0.shape} vs. reduced.shape {background.shape}"
-                    )
+                )
 
             # Subtract the reduced background from each channel
             for k in data.keys():
@@ -170,7 +180,7 @@ class Input:
         else:
             raise ValueError(
                 "Please provide 'subtract_background' flag with one of: np.ndarray, callable function or str"
-                )
+            )
 
         return data
 
@@ -207,7 +217,7 @@ class Input:
         if type(rescale[0]) != type(rescale[1]):
             raise ValueError(
                 f"mixed rescale type not allowed for 'rescale' flag: {type(rescale[0])} vs {type(rescale[1])}"
-                )
+            )
         elif len(rescale) != 2:
             raise ValueError("please provide 'rescale' flag as 2D tuple, list or number")
 
@@ -253,7 +263,7 @@ class Input:
     def prepare_data(
             self, data, channels=1, subtract_background=None, subtract_func="mean", rescale=None, dtype=np.uint,
             in_memory=False
-            ):
+    ):
 
         """Prepares the input data by applying various processing steps.
 
@@ -286,7 +296,7 @@ class Input:
             if len(stack.shape) != 3:
                 raise NotImplementedError(
                     f"dimensions incorrect: {len(stack.shape)}. Currently not implemented for dim != 3D"
-                    )
+                )
 
             # Validate the channels input and determine the number of channels
             if not isinstance(channels, (int, dict)):
@@ -297,7 +307,7 @@ class Input:
             if stack.shape[0] % num_channels != 0:
                 logging.warning(
                     f"cannot divide frames into channel number: {stack.shape[0]} % {num_channels} != 0. May lead to unexpacted behavior"
-                    )
+                )
 
             channels = channels if isinstance(channels, dict) else {i: f"ch{i}" for i in range(num_channels)}
 
@@ -386,7 +396,7 @@ class IO:
             if path.suffix in [".tdb"]:
                 data = self._load_tdb(
                     path, lazy=lazy, chunks=chunks, z_slice=z_slice
-                    )  # Call private method to load TDB file
+                )  # Call private method to load TDB file
 
             elif path.suffix in [".tif", ".tiff", ".TIF", ".TIFF"]:
                 data = self._load_tiff(path, sep, lazy=lazy, z_slice=z_slice)  # Call private method to load TIFF file
@@ -397,7 +407,7 @@ class IO:
             elif path.suffix in [".h5", ".hdf5", ".H5", ".HDF5"]:
                 data = self._load_h5(
                     path, h5_loc=h5_loc, lazy=lazy, chunks=chunks, z_slice=z_slice
-                    )  # Call private method to load HDF5 file
+                )  # Call private method to load HDF5 file
 
             elif path.suffix in [".npy", ".NPY"]:
                 data = self._load_npy(path, lazy=lazy, chunks=chunks, z_slice=z_slice)
@@ -415,7 +425,7 @@ class IO:
                 else:
                     data = self._load_tiff(
                         path, sep, lazy=lazy, z_slice=z_slice
-                        )  # Call private method to load TIFF files from directory
+                    )  # Call private method to load TIFF files from directory
 
             else:
                 raise ValueError("unrecognized file format! Choose one of [.tiff, .h5, .tdb, .czi]")
@@ -679,7 +689,7 @@ class IO:
             if len(stack.shape) != 3:
                 raise NotImplementedError(
                     f"dimensions incorrect: {len(stack.shape)}. Currently not implemented for dim != 3D"
-                    )
+                )
 
         elif path.is_file():
             # If the path is a file, load a single TIFF file
@@ -786,7 +796,7 @@ class IO:
                         ds = f.create_dataset(
                             loc, shape=channel.shape, chunks=chunks, compression=compression, shuffle=False,
                             dtype=channel.dtype
-                            )
+                        )
                         ds[:] = channel
 
                 saved_paths.append(fpath)
@@ -853,7 +863,7 @@ class IO:
                 # fourcc = cv2.VideoWriter_fourcc(*'XVID')
                 out = cv2.VideoWriter(
                     fpath, fourcc=cv2.VideoWriter_fourcc('M', 'J', 'P', 'G'), fps=16, frameSize=(X, Y), isColor=True
-                    )
+                )
 
                 for i in tqdm(range(frames)):
                     # Get the current frame
@@ -902,7 +912,7 @@ class IO:
                         raise FileExistsError(
                             f"output dataset exists {path} [{h5_loc}]. "
                             f"Please choose a different dataset or set 'overwrite=True'"
-                            )
+                        )
 
         # Everything else
         else:
@@ -914,12 +924,12 @@ class IO:
                 if path.is_file():
                     path.unlink()
                 elif path.is_dir():
-                    shutil.rmtree()
+                    shutil.rmtree(path)
 
             else:
                 raise FileExistsError(
                     f"output exists ({path}). Please choose a different output or set 'overwrite=True'"
-                    )
+                )
 
     @staticmethod
     def infer_chunks(shape, dtype, strategy="balanced", chunk_bytes=int(1e6)):
@@ -971,54 +981,47 @@ class IO:
 
 
 class MotionCorrection:
-    """
-    Class for performing motion correction using the Caiman library.
+    """ Class for performing motion correction based on the Jax-accelerated implementation of NoRMCorre.
 
-    Args:
-        working_directory (str or Path, optional): Working directory for temporary files.
-            If not provided, the temporary directory is created.
+    .. note::
 
-    Attributes:
-        working_directory (str or Path): Working directory for temporary files.
-        tempdir: Temporary directory path.
-        io: Instance of the IO class for input/output operations.
-        dummy_folder_name (str): Name of the dummy folder used for motion correction.
-        dview: Cluster setup for Caiman.
-        mmap_path: Path to the memory-mapped file.
+        For more information see the `accelerated <https://github.com/apasarkar/jnormcorre>`_ (used here) or
+        `original implementation <https://github.com/flatironinstitute/NoRMCorre>`_
 
-    Methods:
-        run: Runs the motion correction algorithm.
-        validate_input: Validates the input data for motion correction.
-        clean_up: Cleans up temporary files created during motion correction.
-        get_frames_per_file (deprecated): Computes the number of frames per file.
-        get_data: Retrieves the motion-corrected data.
+    .. hint::
+
+        Non-rigid motion correction is not always necessary. Sometimes, rigid motion correction will be sufficient
+        and it will lead to significant performance gains in terms of speed. Check your data before and after rigid
+        motion correction to decide what is best.
+
+    *Example*::
+
+        mc = MotionCorrection()
+        mc.run('path/to/file.h5', h5_loc='data/ch0')
+        mc.save(output='path/to/file.h5', h5_loc='mc/ch0')
 
     """
 
-    def __init__(self, working_directory=None, logging_level=logging.INFO):
+    def __init__(self, working_directory: Union[str, Path] = None, logging_level: int = logging.INFO):
 
-        """
-        Initializes the MotionCorrection object.
+        """ Constructor function
 
         Args:
-            working_directory (str or Path, optional): Working directory for temporary files.
+            working_directory: Working directory for temporary files.
                 If not provided, the temporary directory is created.
+            logging_level: Sets the level at which information is logged to the console as an
+                integer value. The built-in levels in the logging module are, in increasing order of severity: DEBUG (10), INFO (20), WARNING (30), ERROR (40), CRITICAL (50). (default: INFO)
 
         """
 
-        # is only relevant if provided with a .tdb or np.ndarray
-        # otherwise the .mmap file is created in the same folder
-        # as the input file.
-
+        self.shifts = None
         logging.basicConfig(level=logging_level)
 
+        self.path = None
         self.working_directory = working_directory
         self.tempdir = None
 
         self.io = IO()
-
-        # needed if only one dataset in .h5 files. Weird behavior from caiman.MotionCorrection
-        self.dummy_folder_name = "delete_me"
 
         # output location
         self.mmap_path = None
@@ -1026,73 +1029,43 @@ class MotionCorrection:
         self.frames = self.X = self.Y = None
 
     def run(
-            self, input_, h5_loc="", max_shifts=(50, 50), niter_rig=3, splits_rig=14, num_splits_to_process_rig=None,
-            strides=(48, 48), overlaps=(24, 24), pw_rigid=False, splits_els=14, num_splits_to_process_els=None,
-            upsample_factor_grid=4, max_deviation_rigid=3, nonneg_movie=True, gSig_filt=(20, 20), bigtiff=True
-            ):
+            self, path: Union[str, Path], h5_loc: str = "", max_shifts: Tuple[int, int] = (50, 50), niter_rig: int = 3,
+            splits_rig: int = 14, num_splits_to_process_rig: int = None, strides: Tuple[int, int] = (48, 48),
+            overlaps: Tuple[int, int] = (24, 24), pw_rigid: bool = False, splits_els: int = 14,
+            num_splits_to_process_els: int = None, upsample_factor_grid: int = 4, max_deviation_rigid: int = 3,
+            nonneg_movie: bool = True, gSig_filt: Tuple[int, int] = (20, 20), bigtiff: bool = True
+    ) -> None:
+        """Reduces motion artifacts by performing piecewise rigid motion correction.
+
+        Args:
+            path: The input data to be motion corrected.
+            h5_loc: The dataset name in the .h5 file the data is stored in. Only relevant if
+                path is an .h5 file.
+            max_shifts: A tuple specifying the maximum allowed rigid shift in pixels.
+            niter_rig: The maximum number of iterations for rigid motion correction. More iterations can improve
+                motion correction quality, but increases runtime.
+            splits_rig: The number of splits to parallelize the motion correction for rigid correction.
+            num_splits_to_process_rig: A list specifying the number of splits to process at each iteration for rigid correction.
+            strides: A tuple specifying the intervals at which patches are laid out for motion correction.
+            overlaps: A tuple specifying the overlaps between patches for motion correction.
+            pw_rigid: A boolean indicating whether to perform piecewise or standard rigid motion correction.
+
+            splits_els: The number of splits to parallelize the motion correction for elastic correction.
+            num_splits_to_process_els: A list specifying the number of splits to process at each iteration for elastic correction.
+
+            upsample_factor_grid: The upsample factor for the grid in elastic motion correction.
+            max_deviation_rigid: The maximum deviation from rigid motion allowed in pixels.
+            nonneg_movie: A boolean indicating whether to enforce non-negativity in the motion corrected movie.
+            gSig_filt: A tuple specifying the size of the Gaussian filter for filtering the movie.
+            bigtiff: A boolean indicating whether to save the motion corrected movie as a BigTIFF file.
+                Prevents errors when correcting videos dimensions exceeding the capabilities of the standard tiff format.
 
         """
 
-        Runs the motion correction algorithm on the input data. Adapted from caiman.motion_correction.MotionCorrect.
-
-        max_shifts: tuple
-            maximum allow rigid shift
-
-        niter_rig':int
-            maximum number of iterations rigid motion correction, in general is 1. 0
-            will quickly initialize a template with the first frames
-
-        splits_rig': int
-         for parallelization split the movies in  num_splits chuncks across time
-
-        num_splits_to_process_rig: list,
-            if none all the splits are processed and the movie is saved, otherwise at each iteration
-            num_splits_to_process_rig are considered
-
-        strides: tuple
-            intervals at which patches are laid out for motion correction
-
-        overlaps: tuple
-            overlap between pathes (size of patch strides+overlaps)
-
-        pw_rigid: bool, default: False
-            flag for performing motion correction when calling motion_correct
-
-        splits_els':list
-            for parallelization split the movies in  num_splits chuncks across time
-
-        num_splits_to_process_els: list,
-            if none all the splits are processed and the movie is saved  otherwise at each iteration
-             num_splits_to_process_els are considered
-
-        upsample_factor_grid:int,
-            upsample factor of shifts per patches to avoid smearing when merging patches
-
-        max_deviation_rigid:int
-            maximum deviation allowed for patch with respect to rigid shift
-
-        nonneg_movie: boolean
-            make the SAVED movie and template mostly nonnegative by removing min_mov from movie
-
-        use_cuda : bool, optional
-            Use skcuda.fft (if available). Default: False
-
-        var_name_hdf5: str, default: 'mov'
-            If loading from hdf5, name of the variable to load
-
-         is3D: bool, default: False
-            Flag for 3D motion correction
-
-         indices: tuple(slice), default: (slice(None), slice(None))
-            Use that to apply motion correction only on a part of the FOV
-
-        """
-
-        # import NormCorre module
         from jnormcorre import motion_correction
 
-        input_ = self._validate_input(input_, h5_loc=h5_loc)
-        self.input_ = input_
+        path = self._validate_input(path, h5_loc=h5_loc)
+        self.path = path
 
         # validate parameters
         if max_shifts[0] >= int(self.X / 2):
@@ -1100,7 +1073,7 @@ class MotionCorrection:
             logging.warning(
                 f"dimension 1 of max_shifts parameter > 1/2 img.X ({max_shifts[0]}>{int(self.X / 2)}."
                 f"Automatically adjusting to: {max_shifts_adj}"
-                )
+            )
             max_shifts = tuple((max_shifts_adj, max_shifts[1]))
 
         if max_shifts[1] >= int(self.Y / 2):
@@ -1108,17 +1081,17 @@ class MotionCorrection:
             logging.warning(
                 f"dimension 1 of max_shifts parameter > 1/2 img.X ({max_shifts[1]}>{int(self.Y / 2)}."
                 f"Automatically adjusting to: {max_shifts_adj}"
-                )
+            )
             max_shifts = tuple((max_shifts[0], max_shifts_adj))
 
         # Create MotionCorrect instance
         mc = motion_correction.MotionCorrect(
-            input_, var_name_hdf5=h5_loc, max_shifts=max_shifts, niter_rig=niter_rig, splits_rig=splits_rig,
+            path, var_name_hdf5=h5_loc, max_shifts=max_shifts, niter_rig=niter_rig, splits_rig=splits_rig,
             num_splits_to_process_rig=num_splits_to_process_rig, strides=strides, overlaps=overlaps, pw_rigid=pw_rigid,
             splits_els=splits_els, num_splits_to_process_els=num_splits_to_process_els,
             upsample_factor_grid=upsample_factor_grid, max_deviation_rigid=max_deviation_rigid,
             nonneg_movie=nonneg_movie, gSig_filt=gSig_filt, bigtiff=bigtiff
-            )
+        )
 
         # Perform motion correction
         obj, registered_filename = mc.motion_correct(save_movie=True)
@@ -1134,12 +1107,12 @@ class MotionCorrection:
         self.mmap_path = mc.fname_tot_rig[0]
         self.tiff_path = registered_filename[0]
 
-    def _validate_input(self, input_, h5_loc):
+    def _validate_input(self, path: Union[str, Path], h5_loc: str):
         """
         Validate and process the input for motion correction.
 
         Args:
-            input_ (Union[str, Path, np.ndarray]): Input data for motion correction.
+            path (Union[str, Path, np.ndarray]): Input data for motion correction.
             h5_loc (str): Dataset name in case of input being an HDF5 file.
 
         Returns:
@@ -1155,55 +1128,50 @@ class MotionCorrection:
             - A temporary .tiff file is created if the input is an ndarray, which needs to be deleted later using the 'clean_up()' method.
         """
 
-        if isinstance(input_, (str, Path)):
+        if isinstance(path, (str, Path)):
             # If input is a string or Path object
 
-            input_ = Path(input_)
+            path = Path(path)
 
-            if not input_.exists():
-                raise FileNotFoundError(f"cannot find input_: {input_}")
+            if not path.exists():
+                raise FileNotFoundError(f"cannot find input_: {path}")
 
-            if input_.suffix in [".h5", ".hdf5"]:
+            if path.suffix in [".h5", ".hdf5"]:
                 # If input is an HDF5 file
 
                 if h5_loc is None:
                     raise ValueError("Please provide 'h5_loc' argument when providing .h5 file as data input.")
 
-                with h5py.File(input_.as_posix(), "a") as f:
+                with h5py.File(path.as_posix(), "a") as f:
                     if h5_loc not in f:
-                        raise ValueError(f"cannot find dataset {h5_loc} in provided in {input_}.")
+                        raise ValueError(f"cannot find dataset {h5_loc} in provided in {path}.")
 
                     self.frames, self.X, self.Y = f[h5_loc].shape
 
-                    # TODO after pull request is accepted, this should no longer be true
-                    # Motion Correction fails with custom h5_loc names in cases where there is only one folder (default behavior incorrect)
-                    if len(f.keys()) < 2:
-                        f.create_group(self.dummy_folder_name)
+                return path
 
-                return input_
-
-            elif input_.suffix in [".tiff", ".TIFF", ".tif", ".TIF"]:
+            elif path.suffix in [".tiff", ".TIFF", ".tif", ".TIF"]:
                 # If input is a TIFF file
 
-                with tifffile.TiffFile(input_.as_posix()) as tif:
+                with tifffile.TiffFile(path.as_posix()) as tif:
 
                     self.frames = len(tif.pages)  # number of pages in the file
                     page = tif.pages[0]  # get shape and dtype of image in first page
                     self.X, self.Y = page.shape
 
-                return input_
+                return path
 
             else:
                 raise ValueError(f"unknown input type. Please provide .h5 or .tiff file.")
 
-        elif isinstance(input_, np.ndarray):
+        elif isinstance(path, np.ndarray):
             # If input is a ndarray create a temporary TIFF file to run the motion correction on
 
-            self.frames, self.X, self.Y = input_.shape
+            self.frames, self.X, self.Y = path.shape
 
             logging.warning(
                 "caiman.motion_correction requires a .tiff or .h5 file to perform the correction. A temporary .tiff file is created which needs to be deleted later by calling the 'clean_up()' method of this module."
-                )
+            )
 
             if self.working_directory is None:
                 self.working_directory = tempfile.TemporaryDirectory()
@@ -1215,8 +1183,8 @@ class MotionCorrection:
 
             assert temp_h5_path.exists(), f"working directory doesn't exist: {temp_h5_path}"
 
-            temp_h5_path = temp_h5_path.joinpath(f"{self.dummy_folder_name}.tiff").as_posix()
-            tifffile.imwrite(temp_h5_path, input_)
+            temp_h5_path = temp_h5_path.joinpath(f"temp.tiff").as_posix()
+            tifffile.imwrite(temp_h5_path, path)
 
             return temp_h5_path
 
@@ -1227,9 +1195,6 @@ class MotionCorrection:
         """
         Clean up temporary files and resources associated with motion correction.
 
-        Args:
-            input_ (Union[str, Path]): Input data used for motion correction.
-
         Notes:
             - This method should be called after motion correction is completed to remove temporary files and resources.
 
@@ -1238,15 +1203,7 @@ class MotionCorrection:
 
         """
 
-        input_ = self.input_
-
-        if input_.suffix in [".h5", ".hdf5"]:
-            # If input is an HDF5 file
-
-            with h5py.File(input_.as_posix(), "a") as f:
-                # Delete dummy folder if created earlier; see validation method
-                if self.dummy_folder_name in f:
-                    del f[self.dummy_folder_name]
+        path = self.path
 
         # Remove mmap result
         if self.mmap_path is not None and Path(self.mmap_path).is_file():
@@ -1257,10 +1214,14 @@ class MotionCorrection:
 
         # Remove temp .h5 if necessary
         if self.working_directory is not None:
-            temp_h5_path = Path(self.working_directory.name) if isinstance(
-                self.working_directory, tempfile.TemporaryDirectory
-                ) else Path(self.working_directory)
-            temp_h5_path = temp_h5_path.joinpath(f"{self.dummy_folder_name}.h5").as_posix()
+
+            if isinstance(self.working_directory, tempfile.TemporaryDirectory):
+                temp_h5_path = Path(self.working_directory.name)
+            else:
+                temp_h5_path = Path(self.working_directory)
+
+            temp_h5_path = temp_h5_path.joinpath(f"temp.h5")
+
             if temp_h5_path.is_file():
                 os.remove(temp_h5_path.as_posix())
 
@@ -1279,7 +1240,7 @@ class MotionCorrection:
             if ram_size < array_size * 2:
                 logging.warning(
                     f"available RAM ({ram_size}) is smaller than twice the data size ({array_size}. Automatically splitting files into smaller fragments. Might lead to unexpected behavior on the boundary between fragments."
-                    )
+                )
                 frames_per_file = int(Z / np.floor(array_size / ram_size) / 2)
 
         elif isinstance(frames_per_file, int):
@@ -1293,31 +1254,27 @@ class MotionCorrection:
 
         return frames_per_file
 
-    def save(self, output=None, h5_loc="mc/ch0", chunks=None, compression=None, remove_intermediate=True):
+    def save(
+            self, output: Union[str, Path] = None, h5_loc: str = "mc/ch0",
+            chunk_strategy: Literal['balanced', 'XY', 'Z'] = "balanced", chunks: Tuple[int, int, int] = None,
+            compression: Literal['gzip', 'lzf', 'szip'] = None, remove_intermediate: bool = True
+    ) -> Union[np.ndarray, None]:
 
         """
         Retrieve the motion-corrected data and optionally save it to a file.
 
         Args:
-            output (Optional[Union[str, Path]]): Output file path where the data should be saved.
-            loc (Optional[str]): Location within the HDF5 file to save the data (required when output is an HDF5 file).
-            prefix (str): Prefix to be added to the keys when saving to an HDF5 file.
-            chunks (Optional[Tuple[int]]): Chunk shape for creating a dask array when saving to an HDF5 file.
-            compression (Optional[str]): Compression algorithm to use when saving to an HDF5 file.
-            remove_mmap (bool): Whether to remove the mmap file associated with motion correction after retrieving the data.
-
-        Returns:
-            np.ndarray or None: The motion-corrected data as a NumPy array. If 'output' is specified, returns None.
-
-        Raises:
-            ValueError: If the mmap_path is None or the mmap file is not found.
-            ValueError: If 'output' is an HDF5 file but 'loc' is not provided.
-            ValueError: If 'output' is not None, str, or pathlib.Path.
+            output: Output file path where the data should be saved.
+            h5_loc: Location within the HDF5 file to save the data (required when output is an HDF5 file).
+            chunk_strategy: Chunk strategy to use when saving to an HDF5 file.
+            chunks: Chunk shape for creating a dask array when saving to an HDF5 file.
+            compression: Compression algorithm to use when saving to an HDF5 file.
+            remove_intermediate: Whether to remove the intermediate files associated with motion correction after retrieving the data.
 
         Notes:
-            - This method should be called after motion correction is completed by using the 'run()' function.
-            - If 'output' is specified, the motion-corrected data is saved to the specified file using the I/O module.
-            - If 'remove_mmap' is set to True, the mmap file associated with motion correction is deleted after retrieving the data.
+            - This method should be called after motion correction is completed by using the `run()` function.
+            - If `output` is specified, the motion-corrected data is saved to the specified file using the `IO` class.
+            - If `remove_intermediate` is set to `True`, the mmap file associated with motion correction is deleted after retrieving the data.
 
         """
 
@@ -1333,7 +1290,7 @@ class MotionCorrection:
         if not tiff_path.is_file():
             raise FileNotFoundError(
                 f"could not find tiff file: {tiff_path}. Maybe the 'clean_up()' function was called too early?"
-                )
+            )
 
         data = tifffile.imread(tiff_path.as_posix())
 
@@ -1345,7 +1302,9 @@ class MotionCorrection:
             output = Path(output) if isinstance(output, Path) else output
 
             # Save the motion-corrected data to the output file using the I/O module
-            self.io.save(output, data=data, h5_loc=h5_loc, chunks=chunks, compression=compression)
+            self.io.save(
+                output, data=data, h5_loc=h5_loc, infer_strategy=chunk_strategy, chunks=chunks, compression=compression
+            )
 
         else:
             raise ValueError(f"please provide output as None, str or pathlib.Path instead of {output}")
@@ -1425,7 +1384,7 @@ class Delta:
     def run(
             self, window, method="background", processing_chunks="infer", output_path=None, overwrite_first_frame=True,
             lazy=True
-            ):
+    ):
         """
         Runs the delta calculation on the input data.
 
@@ -1449,7 +1408,7 @@ class Delta:
         # Prepare the data for processing
         data = self.prepare_data(
             self.input_, h5_loc=self.loc, chunks=processing_chunks, output_path=output_path, lazy=lazy
-            )
+        )
 
         # Sequential execution
         if isinstance(data, np.ndarray):
@@ -1472,7 +1431,7 @@ class Delta:
                     data = tdb[:, x0:x1, y0:y1]
                     res = calculate_delta_min_filter(
                         data, window, method=method, inplace=False
-                        )  # TODO does this make sense?
+                    )  # TODO does this make sense?
 
                 # Overwrite the range with the calculated delta values
                 with tiledb.open(path, mode="w") as tdb:
@@ -1606,7 +1565,7 @@ class Delta:
     @deprecated(reason="faster implementation but superseded by: calculate_background_even_faster")
     def calculate_background_pandas(
             arr: np.ndarray, window: int, method="background", inplace: bool = True
-            ) -> np.ndarray:
+    ) -> np.ndarray:
 
         if len(np.squeeze(arr)) < 2:
             arr = np.expand_dims(arr, axis=0)
@@ -1617,7 +1576,7 @@ class Delta:
             res = np.zeros(arr.shape, arr.dtype)
 
         methods = {"background": lambda x, background: background, "dF": lambda x, background: x - background,
-            "dFF": lambda x, background: np.divide(x - background, background)}
+                   "dFF": lambda x, background: np.divide(x - background, background)}
         if method not in methods.keys(): raise ValueError(
             f"please provide a valid argument for 'method'; one of : {methods.keys()}"
         )
@@ -1662,7 +1621,7 @@ class Delta:
 
         # choose delta function
         methods = {"background": lambda x, background: background, "dF": lambda x, background: x - background,
-            "dFF": lambda x, background: np.divide(x - background, background)}
+                   "dFF": lambda x, background: np.divide(x - background, background)}
         if method not in methods.keys(): raise ValueError(
             f"please provide a valid argument for 'method'; one of : {methods.keys()}"
         )
@@ -1698,12 +1657,12 @@ class Delta:
                 if len(MIN_even_expanded) < len(z_padded):
                     MIN_even_expanded = np.pad(
                         MIN_even_expanded, pad_width=(0, len(z_padded) - len(MIN_even_expanded)), mode="edge"
-                        )
+                    )
 
                 if len(MIN_odd_expanded) < len(z_padded):
                     MIN_odd_expanded = np.pad(
                         MIN_odd_expanded, pad_width=(0, len(z_padded) - len(MIN_odd_expanded)), mode="edge"
-                        )
+                    )
 
                 # Get the maximum value at each point from the two expanded series to get the new baseline
                 MIN = np.maximum(MIN_even_expanded, MIN_odd_expanded)
@@ -1773,7 +1732,7 @@ class XII:
             if not found_unit:
                 raise ValueError(
                     f"when providing the sampling_rate as string, the value has to end in one of these units: {units.keys()}"
-                    )
+                )
 
         # define steps
         timestep = sampling_rate * num_channels
@@ -1799,7 +1758,7 @@ class XII:
             else:
                 raise ValueError(
                     f"sampling_rate should be able to be cast to int or float instead of: {type(timestep)}"
-                    )
+                )
 
             data_ch = pd.Series(data_ch, index=idx)
             if channel_names is None:
@@ -1848,7 +1807,7 @@ class XII:
         if len(idx) != len(video):
             raise ValueError(
                 f"video length and indices don't align: video ({len(video)}) vs. idx ({len(idx)}). \n{idx}"
-                )
+            )
 
         mapping = timing.to_dict()
         idx = pd.Index([np.round(mapping[id_], decimals=3) for id_ in idx])
@@ -1858,7 +1817,7 @@ class XII:
     def show(
             self, dataset_name, mapping, viewer=None, viewer1d=None, down_sample=100, colormap=None, window=160,
             ylabel="XII", xlabel="step"
-            ):
+    ):
 
         # todo: test with Video
 
