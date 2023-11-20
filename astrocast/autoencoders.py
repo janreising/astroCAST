@@ -12,10 +12,10 @@ from torch.utils.data import Dataset, DataLoader, TensorDataset
 from tqdm import tqdm
 
 
-##############################################
-## Convolutional Neural Network Autoencoder ##
+# Convolutional Neural Network Autoencoder
+# ----------------------------------------
 class EarlyStopper:
-    def __init__(self, patience=1, min_delta=0):
+    def __init__(self, patience: int = 1, min_delta: Union[int, float] = 0):
         self.patience = patience
         self.min_delta = min_delta
         self.counter = 0
@@ -66,7 +66,7 @@ class CNN_Autoencoder(nn.Module):
     designed for tasks such as dimensionality reduction, feature learning, and data denoising.
 
     Parameters:
-        target_length (int): trace leght.
+        target_length (int): trace lenght.
     
     Example:
         autoencoder = CNN_Autoencoder(target_length=18, dropout=0.2, latent_size=128, add_noise=0.1)
@@ -77,6 +77,7 @@ class CNN_Autoencoder(nn.Module):
     ):
         super(CNN_Autoencoder, self).__init__()
 
+        self.losses = None
         self.l1_reg = l1_reg
         self.latent_size = latent_size
 
@@ -90,7 +91,8 @@ class CNN_Autoencoder(nn.Module):
         self.dense_layer_out = None
         self.add_noise = add_noise
 
-    def define_layers(self, dropout=None, add_noise=None, target_length=18):
+    @staticmethod
+    def define_layers(dropout=None, add_noise=None, target_length=18):
 
         encoder_layers = []
         if dropout is not None:
@@ -146,7 +148,8 @@ class CNN_Autoencoder(nn.Module):
 
         return x, l1_loss, encoder_output
 
-    def split_dataset(self, data, val_split=0.1, train_split=0.8, seed=None):
+    @staticmethod
+    def split_dataset(data, val_split=0.1, train_split=0.8, seed=None):
 
         from torch.utils.data import random_split
 
@@ -200,7 +203,7 @@ class CNN_Autoencoder(nn.Module):
             test_dataset = TensorDataset(test_data, test_data)
             test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
         else:
-            val_loader = None
+            test_loader = None
 
         # Initialize model
         model = self
@@ -357,9 +360,10 @@ class CNN_Autoencoder(nn.Module):
                 Y_test = np.squeeze(Y_test)
 
         num_rounds = 1
-        if type(num_samples) != int:
+        if not isinstance(num_samples, int):
             num_rounds, num_samples = num_samples
 
+        fig = None
         for nr in range(num_rounds):
             fig, axx = plt.subplots(3, num_samples, figsize=figsize, sharey=False)
 
@@ -380,9 +384,9 @@ class CNN_Autoencoder(nn.Module):
                 latent_output = self.reshape_to_squareish_matrix(latent_output)
 
                 cmap = 'binary' if not show_diff else 'bwr'
-                vmin = 0 if not show_diff else -1
+                min_value = 0 if not show_diff else -1
                 axx[2, i].imshow(
-                    latent_output, cmap=cmap, interpolation='nearest', aspect='auto', vmin=vmin, vmax=1
+                    latent_output, cmap=cmap, interpolation='nearest', aspect='auto', vmin=min_value, vmax=1
                 )
                 axx[2, i].get_xaxis().set_visible(False)
                 axx[2, i].get_yaxis().set_visible(False)
@@ -440,13 +444,8 @@ class CNN_Autoencoder(nn.Module):
         return model
 
 
-##########################################
-## Recurrent Neural Network Autoencoder ##
-
-class RnnType:
-    GRU = 1
-    LSTM = 2
-
+# Recurrent Neural Network Autoencoder
+# ------------------------------------
 
 class Parameters:
 
@@ -491,6 +490,11 @@ class TimeSeriesRnnAE:
         self.decoder_lr = self.params.decoder_lr
         self.encoder_optimizer = optim.Adam(self.encoder.parameters(), lr=self.encoder_lr)
         self.decoder_optimizer = optim.Adam(self.decoder.parameters(), lr=self.decoder_lr)
+
+        # initialize historical variables
+        self.learning_rates = None
+        self.val_losses = None
+        self.train_losses = None
 
     def update_learning_rates(self, encoder_factor, decoder_factor):
         self.encoder_lr = self.encoder_lr * encoder_factor
@@ -538,6 +542,7 @@ class TimeSeriesRnnAE:
         self.train()
 
         patience_counter = 0
+        losses = None
 
         if show_mode == "progress":
             iterator = tqdm(range(num_epochs), total=num_epochs)
@@ -613,6 +618,8 @@ class TimeSeriesRnnAE:
 
             elif show_mode == "notebook":
 
+                from IPython.core.display_functions import clear_output, display
+
                 plt.clf()
                 clear_output(wait=True)
 
@@ -675,7 +682,7 @@ class TimeSeriesRnnAE:
         """
         # Get batch size and number of time steps
         batch_size = packed_inputs.batch_sizes[0]  # The first element contains the batch size
-        num_steps = packed_inputs.data.size(0)  # Total number of timesteps across all sequences
+        num_steps = packed_inputs.data.size(0)  # Total number of time steps across all sequences
 
         # Zero the gradients
         self.encoder_optimizer.zero_grad()
@@ -757,7 +764,9 @@ class TimeSeriesRnnAE:
         losses = []
         for batch_data, batch_lengths in tqdm(dataloader):
             batch_data = batch_data.unsqueeze(-1)
-            batch_data = batch_data.to(dtype=torch.float32)  # .to(self.device)  # Move to device and ensure it's float
+            batch_data = batch_data.to(
+                dtype=torch.float32
+            )  # .to(self.device)  # Move to device and ensure it is a float
             batch_lengths = torch.tensor(batch_lengths, dtype=torch.float32)  # , device=self.device)
 
             # Pack the batch
@@ -800,7 +809,7 @@ class TimeSeriesRnnAE:
         n_samples = min(len(x_val), n_samples)
         fig, axx = plt.subplots(n_samples, 2, figsize=figsize, sharey=False, sharex=sharex)
 
-        for i, idx in enumerate(np.random.randint(0, len(x_val), size=(n_samples))):
+        for i, idx in enumerate(np.random.randint(0, len(x_val), size=n_samples)):
             x = np.squeeze(x_val[idx])
             y = np.squeeze(y_val[idx])
 
@@ -825,24 +834,11 @@ class Encoder(nn.Module):
 
     def __init__(self, device, params):
         super(Encoder, self).__init__()
+
         self.device = device
         self.params = params
-        # Check if valid value for RNN type
-        if self.params.rnn_type not in [RnnType.GRU, RnnType.LSTM]:
-            raise Exception(
-                "Unknown RNN type for encoder. Valid options: {}".format(', '.join([str(t) for t in RnnType]))
-            )
-
-        # RNN layer
-        self.num_directions = 1
-        if self.params.rnn_type == RnnType.GRU:
-            self.num_hidden_states = 1
-            rnn = nn.GRU
-        elif self.params.rnn_type == RnnType.LSTM:
-            self.num_hidden_states = 2
-            rnn = nn.LSTM
-        else:
-            raise ValueError
+        self.num_hidden_states = 2
+        rnn = nn.LSTM
 
         self.rnn = rnn(
             self.params.num_features, self.params.rnn_hidden_dim, num_layers=self.params.num_layers,
@@ -854,17 +850,11 @@ class Encoder(nn.Module):
         self._init_weights()
 
     def init_hidden(self, batch_size):
-        if self.params.rnn_type == RnnType.GRU:
-            return torch.zeros(self.params.num_layers * self.num_directions, batch_size, self.params.rnn_hidden_dim).to(
-                self.device
-            )
-        elif self.params.rnn_type == RnnType.LSTM:
-            return (
-                torch.zeros(self.params.num_layers * self.num_directions, batch_size, self.params.rnn_hidden_dim).to(
-                    self.device
-                ), torch.zeros(self.params.num_layers * self.num_directions, batch_size, self.params.rnn_hidden_dim).to(
-                    self.device
-                ))
+        return (torch.zeros(self.params.num_layers * self.num_directions, batch_size, self.params.rnn_hidden_dim).to(
+            self.device
+        ), torch.zeros(self.params.num_layers * self.num_directions, batch_size, self.params.rnn_hidden_dim).to(
+            self.device
+        ))
 
     def forward(self, packed_inputs, initial_hidden=None):
 
@@ -878,21 +868,20 @@ class Encoder(nn.Module):
         _, new_hidden = self.rnn(packed_inputs, initial_hidden)
 
         # Flatten the hidden state
-        last_embedding_layer = self._flatten_hidden(new_hidden, batch_size)
+        last_embedding_layer = self._flatten_hidden(new_hidden)
 
         return last_embedding_layer, new_hidden  # Return the new hidden state
 
-    def _flatten_hidden(self, h, batch_size):
+    @staticmethod
+    def _flatten_hidden(h):
 
         if h is None:
             return None
-        elif isinstance(h, tuple):  # LSTM
-            h_last = h[0][-1]  # Take the last hidden state from the last layer
-        else:  # GRU
-            h_last = h[-1]  # Take the last hidden state from the last layer
-        return h_last
 
-    def _flatten(self, h, batch_size):
+        return h[0][-1]  # Take the last hidden state from the last layer
+
+    @staticmethod
+    def _flatten(h, batch_size):
         # (num_layers*num_directions, batch_size, hidden_dim)  ==>
         # (batch_size, num_directions*num_layers, hidden_dim)  ==>
         # (batch_size, num_directions*num_layers*hidden_dim)
@@ -914,11 +903,6 @@ class Decoder(nn.Module):
         self.device = device
         self.params = params
         self.criterion = criterion
-        # Check if a valid parameter for RNN type is given
-        if self.params.rnn_type not in [RnnType.GRU, RnnType.LSTM]:
-            raise Exception(
-                "Unknown RNN type for encoder. Valid options: {}".format(', '.join([str(t) for t in RnnType]))
-            )
 
         if not self.params.initialize_repeat:
             self.transformation_layer = nn.Linear(
@@ -927,13 +911,8 @@ class Decoder(nn.Module):
 
         # RNN layer
         self.num_directions = 1
-
-        if self.params.rnn_type == RnnType.GRU:
-            self.num_hidden_states = 1
-            rnn = nn.GRU
-        elif self.params.rnn_type == RnnType.LSTM:
-            self.num_hidden_states = 2
-            rnn = nn.LSTM
+        self.num_hidden_states = 2
+        rnn = nn.LSTM
 
         self.rnn = rnn(
             self.params.num_features, self.params.rnn_hidden_dim * self.num_directions,
@@ -973,14 +952,14 @@ class Decoder(nn.Module):
         else:
             return loss
 
-    def _step(self, input, hidden):
+    def _step(self, input_, hidden):
 
         # Ensure the input is 3D: [batch_size, 1, input_dim]
-        if len(input.shape) == 2:
-            input = input.unsqueeze(1)
+        if len(input_.shape) == 2:
+            input_ = input_.unsqueeze(1)
 
         # Push input through RNN layer with current hidden state
-        prediction, hidden = self.rnn(input, hidden)
+        prediction, hidden = self.rnn(input_, hidden)
 
         # print("hidden.shape: ", hidden[0].shape, hidden[1].shape)
 
@@ -1009,7 +988,7 @@ class PaddedSequenceDataset(Dataset):
         return self.data[index], self.lengths[index]
 
 
-class PaddedDataLoader():
+class PaddedDataLoader:
 
     def __init__(self, data):
         self.data = data
@@ -1050,7 +1029,8 @@ class PaddedDataLoader():
 
         return datasets
 
-    def collate_fn(self, batch):
+    @staticmethod
+    def collate_fn(batch):
         # Sort sequences by length in descending order
         batch.sort(key=lambda x: x[1], reverse=True)  # x[1] is the length
 
