@@ -292,7 +292,7 @@ class Test_Input:
             data = {0: np.random.random((25, 10, 10))}
 
             inp = Input()
-            inp.save(output_path, data, chunks=chunks)
+            inp._save(output_path, data, chunks=chunks)
 
     @pytest.mark.parametrize("output_path", ["out.h5", "out.tdb", "out.tiff"])
     def test_intput_output(self, output_path):

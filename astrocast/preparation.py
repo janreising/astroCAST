@@ -93,7 +93,7 @@ class Input:
         else:
             absolute_rescale = False
 
-        data = self.prepare_data(
+        data = self._prepare_data(
             data, channels=channels, subtract_background=subtract_background, subtract_func=subtract_func,
             rescale=rescale, absolute_rescale=absolute_rescale, dtype=dtype, lazy=in_memory
         )
@@ -110,7 +110,7 @@ class Input:
         )
 
     @staticmethod
-    def subtract_background(data, channels, subtract_background, subtract_func):
+    def _subtract_background(data, channels, subtract_background, subtract_func):
 
         """
         Subtract the background from the data.
@@ -189,7 +189,7 @@ class Input:
         return data
 
     @staticmethod
-    def rescale_data(data: Union[np.ndarray, da.Array, dict], rescale, absolute_rescale=False):
+    def _rescale_data(data: Union[np.ndarray, da.Array, dict], rescale, absolute_rescale=False):
         """
         Rescale the data arrays to a new size.
 
@@ -283,7 +283,7 @@ class Input:
 
         return data
 
-    def prepare_data(
+    def _prepare_data(
             self, data: Union[np.ndarray, da.Array], channels: Union[int, dict] = 1, subtract_background: str = None,
             subtract_func: Union[Literal['mean', 'max', 'min', 'std'], Callable] = "mean",
             rescale: Union[float, Tuple[int, int]] = None, absolute_rescale: bool = False, dtype: type = int,
@@ -340,15 +340,15 @@ class Input:
 
             # Subtract background if specified
             if subtract_background is not None:
-                prep_data = self.subtract_background(prep_data, channels, subtract_background, subtract_func)
+                prep_data = self._subtract_background(prep_data, channels, subtract_background, subtract_func)
 
             # Rescale the prep_data if specified
             if (rescale is not None) and rescale != 1 and rescale != 1.0:
-                self.rescale_data(prep_data, rescale, absolute_rescale=absolute_rescale)
+                self._rescale_data(prep_data, rescale, absolute_rescale=absolute_rescale)
 
             # Convert the prep_data type if specified
             if dtype is not None:
-                prep_data = self.convert_dtype(prep_data, dtype=dtype)
+                prep_data = self._convert_dtype(prep_data, dtype=dtype)
 
             # Load the prep_data into memory if requested
             prep_data = prep_data if lazy else dask.compute(prep_data)[0]
@@ -357,7 +357,7 @@ class Input:
             return {channels[i]: prep_data[i] for i in prep_data.keys()}
 
     @staticmethod
-    def convert_dtype(data, dtype):
+    def _convert_dtype(data, dtype):
 
         if dtype == np.uint:
             def func(chunk):
@@ -373,7 +373,7 @@ class Input:
         return data
 
     @staticmethod
-    def save(
+    def _save(
             path: Union[str, Path], data: Union[np.ndarray, da.Array, dict], loc: str = '',
             chunk_strategy: Literal['balanced', 'XY', 'Z'] = "balanced", chunks: Tuple[int, int, int] = None,
             compression: Literal['gzip', 'szip', 'lz4'] = None
@@ -1064,17 +1064,24 @@ class IO:
 class MotionCorrection:
     """ Class for performing motion correction based on the Jax-accelerated implementation of NoRMCorre.
 
+    Args:
+        working_directory: Working directory for temporary files.
+            If not provided, the temporary directory is created.
+        logging_level: Sets the level at which information is logged to the console as an
+            integer value. The built-in levels in the logging module are, in increasing order of severity:
+            debug (10), info (20), warning (30), error (40), critical (50).
+
     .. note::
 
         For more information see the `accelerated <https://github.com/apasarkar/jnormcorre>`_ (used here),
         `original implementation <https://github.com/flatironinstitute/NoRMCorre>`_ and the associated
         publication Pnevmatikakis et al. 2017 [#normcorre]_
 
-    .. hint::
+    .. caution::
 
         Non-rigid motion correction is not always necessary. Sometimes, rigid motion correction will be sufficient,
         and it will lead to significant performance gains in terms of speed. Check your data before and after rigid
-        motion correction to decide what is best.
+        motion correction to decide what is best (pw_rigid flag; see below).
 
     **Example**::
 
@@ -1089,16 +1096,6 @@ class MotionCorrection:
     """
 
     def __init__(self, working_directory: Union[str, Path] = None, logging_level: int = logging.INFO):
-
-        """ Constructor function
-
-        Args:
-            working_directory: Working directory for temporary files.
-                If not provided, the temporary directory is created.
-            logging_level: Sets the level at which information is logged to the console as an
-                integer value. The built-in levels in the logging module are, in increasing order of severity: DEBUG (10), INFO (20), WARNING (30), ERROR (40), CRITICAL (50). (default: INFO)
-
-        """
 
         self.shifts = None
         logging.basicConfig(level=logging_level)
@@ -1277,7 +1274,7 @@ class MotionCorrection:
         else:
             raise ValueError(f"please provide input_ as one of: np.ndarray, str, Path")
 
-    def clean_up(self):
+    def _clean_up(self):
         """
         Clean up temporary files and resources associated with motion correction.
 
@@ -1303,7 +1300,7 @@ class MotionCorrection:
 
     @staticmethod
     @deprecated("use caiman's built-in file splitting function instead")
-    def get_frames_per_file(input_, frames_per_file, loc=None):
+    def _get_frames_per_file(input_, frames_per_file, loc=None):
 
         if frames_per_file == "auto":
 
@@ -1387,7 +1384,7 @@ class MotionCorrection:
 
         # If remove_mmap is True, delete the mmap file associated with motion correction
         if remove_intermediate:
-            self.clean_up()
+            self._clean_up()
 
 
 class Delta:
@@ -1590,7 +1587,7 @@ class Delta:
 
     @staticmethod
     @deprecated(reason="faster implementation but superseded by: calculate_background_even_faster")
-    def calculate_background_pandas(
+    def _calculate_background_pandas(
             arr: np.ndarray, window: int, method="dF", inplace: bool = True
     ) -> np.ndarray:
 

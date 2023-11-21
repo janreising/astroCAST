@@ -4,13 +4,13 @@ Preprocessing
 Input conversion
 -----------------
 .. autoclass:: astrocast.preparation.Input
-    :members: run
+    :members:
 
 Motion correction
 ------------------
 
 .. autoclass:: astrocast.preparation.MotionCorrection
-    :members: run, save
+    :members:
 
 Denoising
 -----------
