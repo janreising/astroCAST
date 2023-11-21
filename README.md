@@ -50,7 +50,7 @@ Currently, we only support astroCAST in MacOS through docker, but other operatin
 ### Docker container<a name="docker-container">
 Once docker has been installed, run the following commands in the terminal:
 ```shell
-docker pull anacgon/astrocast:1.1
+docker pull anacgon/astrocast:latest
 ```
 This may take some minutes as the image is directly pulled from dockerhub. Once the image has been pulled locally, make sure it was correctly fetched by running:
 ```shell
@@ -60,7 +60,7 @@ You should be able to see the docker image listed.
 
 To start a container using the image run:
 ```shell
-docker run -v /path/to/your/data:/home/data -it -p 8888:8888 astrocast:1.1 
+docker run -v /path/to/your/data:/home/data -it -p 8888:8888 astrocast:latest 
 ```
 Note: "/path/to/your/data" must be replaced with your local path to the data you will use for the analysis. -p option allows the container to expose port 8888, necessary to run access jupyterlab from your browser.
 
