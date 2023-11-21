@@ -46,6 +46,6 @@ jobs:
 
       - name: Build and push Docker image
         run: |
-          docker build -t astrocast:latest -f Dockerfile .
+          docker build -t astrocast:latest -f astroContainer/
           docker tag astrocast:latest $username/astrocast:latest
           docker push $username/astrocast:latest
