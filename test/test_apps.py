@@ -1,12 +1,11 @@
 import multiprocessing
-import signal
 import tempfile
-from time import sleep
+import time
 
 import requests
 
-from astrocast.app_preparation import *
 from astrocast.app_analysis import *
+from astrocast.app_preparation import *
 from astrocast.detection import Detector
 from astrocast.helper import EventSim
 
@@ -14,7 +13,6 @@ from astrocast.helper import EventSim
 class Test_AppPreparation:
 
     def setup_method(self):
-
         # create dummy
         temp_dir = tempfile.TemporaryDirectory()
         tmpdir = Path(temp_dir.name)
@@ -24,8 +22,9 @@ class Test_AppPreparation:
         h5_loc = "df/ch0"
 
         sim = EventSim()
-        video, num_events = sim.simulate(shape=(50, 100, 100), skip_n=5,
-                                         event_intensity=100, background_noise=1)
+        video, num_events = sim.simulate(
+            shape=(50, 100, 100), skip_n=5, event_intensity=100, background_noise=1
+        )
         io = IO()
         io.save(path=path, data=video, h5_loc=h5_loc)
 
@@ -50,10 +49,10 @@ class Test_AppPreparation:
         response = requests.get("http://127.0.0.1:8090")
         assert response.status_code == 200
 
+
 class Test_AppAnalysis:
 
     def setup_method(self):
-
         # create dummy
         temp_dir = tempfile.TemporaryDirectory()
         tmpdir = Path(temp_dir.name)
@@ -65,7 +64,7 @@ class Test_AppAnalysis:
         sim = EventSim()
         video, num_events = sim.simulate(
             shape=(50, 100, 100), skip_n=5, event_intensity=100, background_noise=1
-            )
+        )
         io = IO()
         io.save(path=path, data=video, h5_loc=h5_loc)
 

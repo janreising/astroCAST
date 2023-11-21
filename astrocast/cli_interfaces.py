@@ -356,7 +356,7 @@ def motion_correction(
         # Call the run method with the necessary parameters
         logging.info("applying motion correction ...")
         mc.run(
-            input_=input_path, h5_loc=h5_loc, max_shifts=max_shifts, niter_rig=niter_rig, splits_rig=splits_rig,
+            path=input_path, h5_loc=h5_loc, max_shifts=max_shifts, niter_rig=niter_rig, splits_rig=splits_rig,
             num_splits_to_process_rig=num_splits_to_process_rig, strides=strides, overlaps=overlaps, pw_rigid=pw_rigid,
             splits_els=splits_els, num_splits_to_process_els=num_splits_to_process_els,
             upsample_factor_grid=upsample_factor_grid, max_deviation_rigid=max_deviation_rigid,
@@ -421,7 +421,7 @@ def subtract_delta(
 
         # Initialize the Delta instance
         logging.info("creating delta instance ...")
-        delta_instance = Delta(input_=input_path, loc=h5_loc_in)
+        delta_instance = Delta(data=input_path, loc=h5_loc_in)
 
         # Run the delta calculation
         logging.info("subtracting background ...")
@@ -1055,6 +1055,7 @@ def export_video(
 
     chunks = io.infer_chunks_from_array(arr=data, strategy="balanced", chunks=chunk_size)
     io.save(output_path, data=data, h5_loc=h5_loc_out, chunks=chunks, compression=compression, overwrite=overwrite)
+
 
 
 @cli.command()

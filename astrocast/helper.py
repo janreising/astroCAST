@@ -6,6 +6,7 @@ import tempfile
 import time
 import types
 from pathlib import Path
+from typing import Union, Tuple
 
 import awkward as ak
 import dask.array as da
@@ -17,7 +18,6 @@ import tiledb
 import xxhash
 import yaml
 from skimage.util import img_as_uint
-
 
 
 def wrapper_local_cache(f):
@@ -227,7 +227,6 @@ def wrapper_local_cache(f):
 
     return inner_function
 
-
 def experimental(func):
     """
     Decorator to mark functions as experimental and log a warning upon their usage.
@@ -247,85 +246,69 @@ def experimental(func):
 
     return wrapper
 
-
-def get_data_dimensions(input_, loc=None, return_dtype=False):
-    """
-    This function takes an input object and returns the shape and chunksize of the data it represents.
-
-    If the input is a numpy ndarray, it returns the shape of the ndarray and None for chunksize.
-
-    If the input is a Path to an HDF5 file (.h5 extension), it reads the data at the specified location
-    and returns the shape of the data and its chunksize. The location should be specified using the 'loc'
-    parameter. If the 'loc' parameter is not provided, the function raises an AssertionError.
-
-    If the input is a Path to a TIFF file (.tiff or .tif extension), it returns the shape and None for chunksize.
-
-    If the input is a Path to a TileDB array (.tdb extension), it returns the shape and chunksize of the
-    TileDB array.
-
-    If the input is of an unrecognized format, the function raises a TypeError.
+def get_data_dimensions(
+        data: Union[np.ndarray, da.Array, str, Path], loc: str = None, return_dtype: bool = False
+) -> Union[Tuple[Tuple, Tuple], Tuple[Tuple, Tuple, type]]:
+    """ Takes an input object and returns the shape and chunksize of the data it represents. Optionally
+        the chunksize can be returned as well.
 
     Args:
-    - input_: An object representing the data whose dimensions are to be calculated.
+    - data: An object representing the data whose dimensions are to be calculated.
     - loc: A string representing the location of the data in the HDF5 file. This parameter is optional
-      and only applicable when input_ is a Path to an HDF5 file.
+      and only applicable when data is a Path to an HDF file.
+    - return_dtype: A boolean indicating whether to return the data type of the data.
 
-    Returns:
-    - A tuple containing two elements:
-      * The shape of the data represented by the input object.
-      * The chunksize of the data represented by the input object. If the data is not chunked,
-        this value will be None.
+    Raises:
+    - TypeError: If the input is not of a recognized type.
     """
 
-    # Check if the input is a numpy ndarray
-    if isinstance(input_, (np.ndarray, da.Array)):
-        # Return the shape of the ndarray and None for chunksize
+    if isinstance(data, np.ndarray):
+        shape = data.shape
+        chunksize = np.array([])
+        dtype = data.dtype
 
-        if return_dtype:
-            return input_.shape, None, input_.dtype
+    elif isinstance(data, da.Array):
+        shape = data.shape
+        chunksize = data.chunksize
+        dtype = data.dtype
+        
+    elif isinstance(data, [str, Path]):
+        path = Path(data)
+
+        # If the input is a Path to an HDF5 file, check if the file has the .h5 extension
+        if path.suffix in [".h5", ".hdf5"]:
+            # If the 'loc' parameter is not provided, raise an AssertionError
+            assert loc is not None, "please provide a dataset location as 'loc' parameter"
+            # Open the HDF5 file and read the data at the specified location
+            with h5py.File(path.as_posix()) as file:
+                data = file[loc]
+                shape = data.shape
+                chunksize = data.chunks
+                dtype = data.dtype
+
+        # If the input is a Path to a TIFF file, get the shape of the image data
+        elif path.suffix in [".tiff", ".tif", ".TIFF", ".TIF"]:
+
+            # Open the TIFF file and read the data dimensions
+            with tifffile.TiffFile(path.as_posix()) as tif:
+                shape = (len(tif.pages), *tif.pages[0].shape)
+                chunksize = None
+                dtype = tif.pages[0].dtype
+
+        # If the input is not a Path to an HDF5 file, check if it is a Path to a TileDB array
+        elif path.suffix == ".tdb":
+            # Open the TileDB array and get its shape and chunksize
+            with tiledb.open(path.as_posix()) as tdb:
+                shape = tdb.shape
+                chunksize = [int(tdb.schema.domain.dim(i).tile) for i in range(tdb.schema.domain.ndim)]
+                dtype = tdb.schema.domain.dtype
+
         else:
-            return input_.shape, None
-
-    elif isinstance(input_, Path):
-        path = input_
-
-    elif isinstance(input_, str):
-        path = Path(input_)
-
-    else:
-        raise TypeError(f"data type not recognized: {type(input_)}")
-
-    # If the input is a Path to an HDF5 file, check if the file has the .h5 extension
-    if path.suffix in [".h5", ".hdf5"]:
-        # If the 'loc' parameter is not provided, raise an AssertionError
-        assert loc is not None, "please provide a dataset location as 'loc' parameter"
-        # Open the HDF5 file and read the data at the specified location
-        with h5py.File(path.as_posix()) as file:
-            data = file[loc]
-            shape = data.shape
-            chunksize = data.chunks
-            dtype = data.dtype
-
-    # If the input is a Path to a TIFF file, get the shape of the image data
-    elif path.suffix in [".tiff", ".tif", ".TIFF", ".TIF"]:
-
-        # Open the TIFF file and read the data dimensions
-        with tifffile.TiffFile(path.as_posix()) as tif:
-            shape = (len(tif.pages), *tif.pages[0].shape)
-            chunksize = None
-            dtype = tif.pages[0].dtype
-
-    # If the input is not a Path to an HDF5 file, check if it is a Path to a TileDB array
-    elif path.suffix == ".tdb":
-        # Open the TileDB array and get its shape and chunksize
-        with tiledb.open(path.as_posix()) as tdb:
-            shape = tdb.shape
-            chunksize = [int(tdb.schema.domain.dim(i).tile) for i in range(tdb.schema.domain.ndim)]
-            dtype = tdb.schema.domain.dtype
-
+            raise TypeError(f"data type not recognized: {path.suffix}")
+                
     # If the input is of an unrecognized format, raise a TypeError
     else:
-        raise TypeError(f"data format not recognized: {type(path)}")
+        raise TypeError(f"data type not recognized: {type(data)}")
 
     if return_dtype:
         return shape, chunksize, dtype

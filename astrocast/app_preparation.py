@@ -1,16 +1,16 @@
-import threading
 import traceback
 from pathlib import Path
 
 import dask.array as da
 import numpy as np
+import seaborn as sns
 import yaml
 from matplotlib import pyplot as plt, gridspec
 from shiny import App, ui, render, reactive
 
 from astrocast import detection
 from astrocast.preparation import IO, Delta
-import seaborn as sns
+
 
 class Explorer:
 
@@ -20,184 +20,132 @@ class Explorer:
         self.h5_loc = h5_loc
 
         self.app_ui = self.create_ui()
-        self.app = App(self.app_ui, self.server,)
+        self.app = App(self.app_ui, self.server, )
 
     def create_ui(self):
         return ui.page_fluid(
-            ui.panel_title("Argument Explorer"),
-            ui.navset_tab(
-                ui.nav("File",
-                       ui.layout_sidebar(ui.panel_sidebar(
-                               ui.h5(""),
-                               ui.input_text("path", "Path", value=self.path),
-                               ui.input_text("h5_loc", "dataset", value=self.h5_loc),
-                               ui.input_switch("lazy", "lazy loading", value=True),
-                               ui.output_text("data_shape"),
-                               ui.h5(""),
-                               ui.panel_conditional(
-                                   "input.path !== ''",
-                                   ui.h5("Select frames"),
-                                   ui.input_slider("z_select", "", value=(0, 1), min=0, max=100),
-                               ),
-                               ui.h5("Points of Interest"),
-                               ui.input_text("frames", "frames", value=""),
-                               ui.input_text("pixel", "pixels",
-                                             value='')
-                           ),
-                           ui.panel_main(
-                               ui.panel_conditional(
-                                   "input.path !== ''",
-                                   ui.output_plot("original")
-                               )
-                           ))
-                       ),
-                ui.nav("Delta", ui.layout_sidebar(
-                    ui.panel_sidebar(
-                        ui.h5(""),
-                        ui.input_switch("use_delta", "calculate", value=False),
-                        ui.input_select("delta_method", "method", choices=["background", "dF", "dFF"]),
-                        ui.input_numeric("delta_window", "window", 10),
-                        ui.input_switch("delta_overwrite_first_frame", "Overwrite 1st frame", False),
-                        ui.h5("Plotting options"),
-                        ui.input_switch("delta_plot_original", "Plot original", value=True),
-                        ui.input_switch("delta_show_separate", "separate panels"),
-                        ui.input_switch("delta_twinx", "Twin axis", value=False),
-                        ui.input_numeric("delta_alpha", "Original: alpha", value=0.7),
-                        ui.row(
-                            ui.h6("Figsize"),
-                            ui.column(5, ui.input_numeric("delta_figsize_x", "", 20)),
-                            ui.column(2, ui.h6(" x ")),
-                            ui.column(5, ui.input_numeric("delta_figsize_y", "", 5))
+            ui.panel_title("Argument Explorer"), ui.navset_tab(
+                ui.nav(
+                    "File", ui.layout_sidebar(
+                        ui.panel_sidebar(
+                            ui.h5(""), ui.input_text("path", "Path", value=self.path),
+                            ui.input_text("h5_loc", "dataset", value=self.h5_loc),
+                            ui.input_switch("lazy", "lazy loading", value=True), ui.output_text("data_shape"),
+                            ui.h5(""), ui.panel_conditional(
+                                "input.path !== ''", ui.h5("Select frames"),
+                                ui.input_slider("z_select", "", value=(0, 1), min=0, max=100), ),
+                            ui.h5("Points of Interest"), ui.input_text("frames", "frames", value=""), ui.input_text(
+                                "pixel", "pixels", value=''
+                            )
+                        ), ui.panel_main(
+                            ui.panel_conditional(
+                                "input.path !== ''", ui.output_plot("original")
+                            )
                         )
-                    ),
-                    ui.panel_main(
-                        ui.panel_conditional(
-                               "input.use_delta",
-                               ui.output_plot("delta")
-                           )
                     )
-                )),
-                ui.nav("Smoothing", ui.layout_sidebar(
-                       ui.panel_sidebar(
-                           ui.h5(""),
-                           ui.input_switch("use_smoothing", "activate"),
-                           ui.input_numeric("sigma", "Sigma", value=3),
-                           ui.input_numeric("radius", "Radius", value=2),
-                       ),
-                       ui.panel_main(
-                           ui.panel_conditional(
-                               "input.use_smoothing",
-                               ui.output_plot("smooth")
-                           )
-                       )
-                       )),
-                ui.nav("Thresholding", ui.layout_sidebar(
-                       ui.panel_sidebar(
-                           ui.h5(""),
-                           ui.h3("Spatial Thresholding"),
-                           ui.input_switch("use_spatial", "activate"),
-                           ui.input_numeric("min_ratio", "Min Ratio", value=1),
-                           ui.input_numeric("z_depth", "Z-Depth", value=1),
-                           ui.h5(""),
-                           ui.h3("Temporal Thresholding"),
-                           ui.input_numeric("prominence", "Prominence", value=10),
-                           ui.input_numeric("width", "Width", value=3),
-                           ui.input_numeric("rel_height", "Relative Height", value=0.9),
-                           ui.input_numeric("wlen", "Wlen", value=60),
-                           ui.row(
-                               ui.column(6,
-                                         ui.h6("Time Series"),
-                                         ui.input_switch("temp_show_trace", "activate"),
-                                         ui.input_switch("temp_show_separate", "separate panels"),
-                                         ),
-                               ui.column(6,
-                                         ui.h6("Frames"),
-                                         ui.input_switch("use_temporal", "activate"),
-                                         )
-                           ),
-                           ui.panel_conditional(
-                               "input.use_spatial & input.use_temporal",
-                               ui.h5(""),
-                               ui.h5("Combine Spatial and Temporal"),
-                               ui.input_radio_buttons("comb_type", "Union type", ["&", "|"]),
-                           )
-                       ),
-                       ui.panel_main(
-                           ui.panel_conditional(
-                               "input.use_spatial",
-                               ui.h3("Spatial Thresholding"),
-                               ui.output_plot("spatial"),
-                           ),
-                           ui.panel_conditional(
-                               "input.temp_show_trace",
-                               ui.h3("Temporal Thresholding (timeseries)"),
-                               ui.output_plot("temporal_timeseries"),
-                           ),
-                           ui.panel_conditional(
-                               "input.use_temporal",
-                               ui.h3("Temporal Thresholding (images)"),
-                               ui.output_plot("temporal"),
-                           ),
-                           ui.panel_conditional(
-                               "input.use_spatial & input.use_temporal",
-                               ui.h4("Combined image"),
-                               ui.output_plot("combined_"),
-                           )
-                       )
-                       )),
-                ui.nav("Morphology", ui.layout_sidebar(
-                       ui.panel_sidebar(
-                           ui.h5(""),
-                           ui.h5("Fill Small Holes"),
-                           ui.input_switch("use_holes", "fill"),
-                           ui.input_numeric("area_threshold", "Area Threshold", value=10),
-                           ui.input_numeric("connectivity_holes", "Connectivity", value=1),
-                           ui.input_numeric("holes_depth", "z_depth", value=1),
-                           ui.h5("Remove Small Objects"),
-                           ui.input_switch("use_objects", "remove"),
-                           ui.input_numeric("min_size", "Min Size", value=10),
-                           ui.input_numeric("connectivity_objects", "Connectivity", value=1),
-                           ui.input_numeric("objects_depth", "z_depth", value=1),
-                           ui.panel_conditional(
-                               "input.use_holes & input.use_objects",
-                               ui.h5("Sequential Operation"),
-                               ui.input_radio_buttons("comb_options", "Combination order",
-                                                      ["None", "holes > objects", "objects > holes"]),
-                           )
-                       ),
-                       ui.panel_main(
-                           ui.panel_conditional(
-                               "input.use_holes | input.use_objects",
-                               ui.h4("Morphed image"),
-                               ui.output_plot("morph")
-                           ),
+                ), ui.nav(
+                    "Delta", ui.layout_sidebar(
+                        ui.panel_sidebar(
+                            ui.h5(""), ui.input_switch("use_delta", "calculate", value=False),
+                            ui.input_select("delta_method", "method", choices=["background", "dF", "dFF"]),
+                            ui.input_numeric("delta_window", "window", 10),
+                            ui.input_switch("delta_overwrite_first_frame", "Overwrite 1st frame", False),
+                            ui.h5("Plotting options"),
+                            ui.input_switch("delta_plot_original", "Plot original", value=True),
+                            ui.input_switch("delta_show_separate", "separate panels"),
+                            ui.input_switch("delta_twinx", "Twin axis", value=False),
+                            ui.input_numeric("delta_alpha", "Original: alpha", value=0.7), ui.row(
+                                ui.h6("Figsize"), ui.column(5, ui.input_numeric("delta_figsize_x", "", 20)),
+                                ui.column(2, ui.h6(" x ")), ui.column(5, ui.input_numeric("delta_figsize_y", "", 5))
+                            )
+                        ), ui.panel_main(
+                            ui.panel_conditional(
+                                "input.use_delta", ui.output_plot("delta")
+                            )
+                        )
+                    )
+                ), ui.nav(
+                    "Smoothing", ui.layout_sidebar(
+                        ui.panel_sidebar(
+                            ui.h5(""), ui.input_switch("use_smoothing", "activate"),
+                            ui.input_numeric("sigma", "Sigma", value=3),
+                            ui.input_numeric("radius", "Radius", value=2), ), ui.panel_main(
+                            ui.panel_conditional(
+                                "input.use_smoothing", ui.output_plot("smooth")
+                            )
+                        )
+                    )
+                ), ui.nav(
+                    "Thresholding", ui.layout_sidebar(
+                        ui.panel_sidebar(
+                            ui.h5(""), ui.h3("Spatial Thresholding"), ui.input_switch("use_spatial", "activate"),
+                            ui.input_numeric("min_ratio", "Min Ratio", value=1),
+                            ui.input_numeric("z_depth", "Z-Depth", value=1), ui.h5(""), ui.h3("Temporal Thresholding"),
+                            ui.input_numeric("prominence", "Prominence", value=10),
+                            ui.input_numeric("width", "Width", value=3),
+                            ui.input_numeric("rel_height", "Relative Height", value=0.9),
+                            ui.input_numeric("wlen", "Wlen", value=60), ui.row(
+                                ui.column(
+                                    6, ui.h6("Time Series"), ui.input_switch("temp_show_trace", "activate"),
+                                    ui.input_switch("temp_show_separate", "separate panels"), ), ui.column(
+                                    6, ui.h6("Frames"), ui.input_switch("use_temporal", "activate"), )
+                            ), ui.panel_conditional(
+                                "input.use_spatial & input.use_temporal", ui.h5(""),
+                                ui.h5("Combine Spatial and Temporal"),
+                                ui.input_radio_buttons("comb_type", "Union type", ["&", "|"]), )
+                        ), ui.panel_main(
+                            ui.panel_conditional(
+                                "input.use_spatial", ui.h3("Spatial Thresholding"), ui.output_plot("spatial"), ),
+                            ui.panel_conditional(
+                                "input.temp_show_trace", ui.h3("Temporal Thresholding (timeseries)"),
+                                ui.output_plot("temporal_timeseries"), ), ui.panel_conditional(
+                                "input.use_temporal", ui.h3("Temporal Thresholding (images)"),
+                                ui.output_plot("temporal"), ), ui.panel_conditional(
+                                "input.use_spatial & input.use_temporal", ui.h4("Combined image"),
+                                ui.output_plot("combined_"), )
+                        )
+                    )
+                ), ui.nav(
+                    "Morphology", ui.layout_sidebar(
+                        ui.panel_sidebar(
+                            ui.h5(""), ui.h5("Fill Small Holes"), ui.input_switch("use_holes", "fill"),
+                            ui.input_numeric("area_threshold", "Area Threshold", value=10),
+                            ui.input_numeric("connectivity_holes", "Connectivity", value=1),
+                            ui.input_numeric("holes_depth", "z_depth", value=1), ui.h5("Remove Small Objects"),
+                            ui.input_switch("use_objects", "remove"),
+                            ui.input_numeric("min_size", "Min Size", value=10),
+                            ui.input_numeric("connectivity_objects", "Connectivity", value=1),
+                            ui.input_numeric("objects_depth", "z_depth", value=1), ui.panel_conditional(
+                                "input.use_holes & input.use_objects", ui.h5("Sequential Operation"),
+                                ui.input_radio_buttons(
+                                    "comb_options", "Combination order", ["None", "holes > objects", "objects > holes"]
+                                ), )
+                        ), ui.panel_main(
+                            ui.panel_conditional(
+                                "input.use_holes | input.use_objects", ui.h4("Morphed image"), ui.output_plot("morph")
+                            ),
 
-                       )
-                       )),
-                ui.nav("Export", ui.layout_sidebar(
-                    ui.panel_sidebar(
-                        ui.h5(""),
-                        ui.h5("Additional parameters"),
-                        ui.input_text("output_path", "Output path", value="infer"),
-                        ui.input_numeric("exclude_border", "Border exclusion", value=0),
-                        ui.input_switch("split_events", "Split events", value=False),
-                        ui.input_switch("overwrite", "Overwrite Output", value=False),
-                        ui.input_numeric("logging_level", "Logging level", value=20),
-                        ui.input_switch("debug", "Debugging", value=False),
-                        ui.h5(""),
-                        ui.h5("Export"),
-                        ui.input_text("save_path", "Config path", value="./config.yaml"),
-                        ui.input_action_button("btn_save", "Save arguments", class_="btn-primary"),
-                    ),
-                    ui.panel_main(
-                        ui.h4("Config file:"),
-                        ui.output_ui("argument_file"),
-                        ui.h4("Run detection with:"),
-                        ui.output_ui("run_command"),
-                        ui.h4("Visualize results with:"),
-                        ui.output_ui("visualize_command")
+                        )
                     )
-                ))
+                ), ui.nav(
+                    "Export", ui.layout_sidebar(
+                        ui.panel_sidebar(
+                            ui.h5(""), ui.h5("Additional parameters"),
+                            ui.input_text("output_path", "Output path", value="infer"),
+                            ui.input_numeric("exclude_border", "Border exclusion", value=0),
+                            ui.input_switch("split_events", "Split events", value=False),
+                            ui.input_switch("overwrite", "Overwrite Output", value=False),
+                            ui.input_numeric("logging_level", "Logging level", value=20),
+                            ui.input_switch("debug", "Debugging", value=False), ui.h5(""), ui.h5("Export"),
+                            ui.input_text("save_path", "Config path", value="./config.yaml"),
+                            ui.input_action_button("btn_save", "Save arguments", class_="btn-primary"), ),
+                        ui.panel_main(
+                            ui.h4("Config file:"), ui.output_ui("argument_file"), ui.h4("Run detection with:"),
+                            ui.output_ui("run_command"), ui.h4("Visualize results with:"),
+                            ui.output_ui("visualize_command")
+                        )
+                    )
+                )
             )
         )
 
@@ -295,21 +243,23 @@ class Explorer:
 
             data = load_data()
 
-            deltaObj = Delta(input_=data, loc="")
-            result = deltaObj.run(method=input.delta_method(), window=input.delta_window(),
-                                  processing_chunks=(-1, 1, 1),
-                                  overwrite_first_frame=input.delta_overwrite_first_frame())
+            deltaObj = Delta(data=data, loc="")
+            result = deltaObj.run(
+                method=input.delta_method(), window=input.delta_window(), processing_chunks=(-1, 1, 1),
+                overwrite_first_frame=input.delta_overwrite_first_frame()
+            )
 
-            return result#.compute()
+            return result  # .compute()
 
         @reactive.Calc
         def get_delta_trace():
             small_data = get_pixel_traces()
 
-            deltaObj = Delta(input_=small_data, loc="")
-            result = deltaObj.run(method=input.delta_method(), window=input.delta_window(),
-                                  processing_chunks=(-1, 1, 1),
-                                  overwrite_first_frame=input.delta_overwrite_first_frame())
+            deltaObj = Delta(data=small_data, loc="")
+            result = deltaObj.run(
+                method=input.delta_method(), window=input.delta_window(), processing_chunks=(-1, 1, 1),
+                overwrite_first_frame=input.delta_overwrite_first_frame()
+            )
 
             if isinstance(result, da.Array):
                 result = result.compute()
@@ -339,9 +289,9 @@ class Explorer:
                     data = load_data()
 
                 p.set(1, message="Spatial thresholding.", detail="This may take a while ...")
-                spatial = detection.Detector.spatial_threshold(data,
-                                                               min_ratio=input.min_ratio(),
-                                                               threshold_z_depth=input.z_depth())
+                spatial = detection.Detector.spatial_threshold(
+                    data, min_ratio=input.min_ratio(), threshold_z_depth=input.z_depth()
+                )
 
                 p.set(2, message="Done")
 
@@ -359,9 +309,10 @@ class Explorer:
                     data = load_data()
 
                 p.set(1, message="Temporal thresholding.", detail="This may take a while ...")
-                temporal = detection.Detector.temporal_threshold(data,
-                                                                 prominence=input.prominence(), width=input.width(),
-                                                                 rel_height=input.rel_height(), wlen=input.wlen())
+                temporal = detection.Detector.temporal_threshold(
+                    data, prominence=input.prominence(), width=input.width(), rel_height=input.rel_height(),
+                    wlen=input.wlen()
+                )
 
                 p.set(2, message="Done")
 
@@ -417,46 +368,46 @@ class Explorer:
                     if input.comb_options() == "None":
 
                         if input.use_holes():
-                            filled = detection.Detector.fill_holes(dat,
-                                                                   area_threshold=input.area_threshold(),
-                                                                   connectivity=input.connectivity_holes(),
-                                                                   depth=input.holes_depth())
+                            filled = detection.Detector.fill_holes(
+                                dat, area_threshold=input.area_threshold(), connectivity=input.connectivity_holes(),
+                                depth=input.holes_depth()
+                            )
                             res.append(filled)
                             res_lbls.append(lbl + "_fill")
 
                         if input.use_objects():
-                            rem = detection.Detector.remove_objects(dat,
-                                                                    min_size=input.min_size(),
-                                                                    connectivity=input.connectivity_holes(),
-                                                                    depth=input.objects_depth())
+                            rem = detection.Detector.remove_objects(
+                                dat, min_size=input.min_size(), connectivity=input.connectivity_holes(),
+                                depth=input.objects_depth()
+                            )
                             res.append(rem)
                             res_lbls.append(lbl + "_rem")
 
                     elif input.comb_options() == "holes > objects":
 
-                        filled = detection.Detector.fill_holes(dat,
-                                                               area_threshold=input.area_threshold(),
-                                                               connectivity=input.connectivity_holes(),
-                                                               depth=input.objects_depth())
-                        rem = detection.Detector.remove_objects(filled,
-                                                                min_size=input.min_size(),
-                                                                connectivity=input.connectivity_holes(),
-                                                                depth=input.holes_depth())
+                        filled = detection.Detector.fill_holes(
+                            dat, area_threshold=input.area_threshold(), connectivity=input.connectivity_holes(),
+                            depth=input.objects_depth()
+                        )
+                        rem = detection.Detector.remove_objects(
+                            filled, min_size=input.min_size(), connectivity=input.connectivity_holes(),
+                            depth=input.holes_depth()
+                        )
 
                         res.append(rem)
                         res_lbls.append(lbl + "_fill_rem")
 
                     elif input.comb_options() == "objects > holes":
 
-                        rem = detection.Detector.remove_objects(dat,
-                                                                min_size=input.min_size(),
-                                                                connectivity=input.connectivity_holes(),
-                                                                depth=input.objects_depth())
+                        rem = detection.Detector.remove_objects(
+                            dat, min_size=input.min_size(), connectivity=input.connectivity_holes(),
+                            depth=input.objects_depth()
+                        )
 
-                        filled = detection.Detector.fill_holes(rem,
-                                                               area_threshold=input.area_threshold(),
-                                                               connectivity=input.connectivity_holes(),
-                                                               depth=input.holes_depth())
+                        filled = detection.Detector.fill_holes(
+                            rem, area_threshold=input.area_threshold(), connectivity=input.connectivity_holes(),
+                            depth=input.holes_depth()
+                        )
 
                         res.append(filled)
                         res_lbls.append(lbl + "_rem_fill")
@@ -582,15 +533,15 @@ class Explorer:
                 for i, (x, y) in enumerate(pixels):
                     traces[:, i, 0] = data[:, x, y]
 
-                mask = detection.Detector.temporal_threshold(traces,
-                                                             prominence=input.prominence(), width=input.width(),
-                                                             rel_height=input.rel_height(), wlen=input.wlen())
+                mask = detection.Detector.temporal_threshold(
+                    traces, prominence=input.prominence(), width=input.width(), rel_height=input.rel_height(),
+                    wlen=input.wlen()
+                )
 
                 if input.temp_show_separate():
-                    fig, axx = plt.subplots(len(pixels), 1, figsize=(5*len(pixels), 20))
+                    fig, axx = plt.subplots(len(pixels), 1, figsize=(5 * len(pixels), 20))
                     for i in range(len(pixels)):
-
-                        x,y = pixels[i]
+                        x, y = pixels[i]
                         axx[i].plot(data[:, x, y], linestyle="-", color=colors[i])
                         axx[i].set_ylabel(f"{pixels[i]}")
                         axx[i].twinx().plot(mask[:, i, 0], linestyle="--", color=colors[i])
@@ -600,7 +551,6 @@ class Explorer:
                     fig, ax = plt.subplots(1, 1)
                     twin_ax = ax.twinx()
                     for i in range(len(pixels)):
-
                         ax.plot(traces[:, i, 0], linestyle="-", color=colors[i])
                         twin_ax.plot(mask[:, i, 0], linestyle="--", color=colors[i])
 
@@ -655,42 +605,24 @@ class Explorer:
 
             save_path = Path(input.save_path())
 
-            arguments = {"detect-events": {
-                # file params
-                "h5_loc": input.h5_loc(),
-                # smoothing
-                "use_smoothing": input.use_smoothing(),
-                "smooth_sigma": input.sigma(),
-                "smooth_radius": input.radius(),
+            arguments = {"detect-events": {  # file params
+                "h5_loc": input.h5_loc(),  # smoothing
+                "use_smoothing": input.use_smoothing(), "smooth_sigma": input.sigma(), "smooth_radius": input.radius(),
                 # Spatial
-                "use_spatial": input.use_spatial(),
-                "spatial_min_ratio": input.min_ratio(),
-                "spatial_z_depth": input.z_depth(),
-                # Temporal
-                "use_temporal": input.use_temporal(),
-                "temporal_prominence": input.prominence(),
-                "temporal_width": input.width(),
-                "temporal_rel_height": input.rel_height(),
-                "temporal_wlen": input.wlen(),
-                # Morphological operations
-                "fill_holes": input.use_holes(),
-                "area_threshold": input.area_threshold(),
-                "holes_connectivity": input.connectivity_holes(),
-                "holes_depth": input.holes_depth(),
-                "remove_objects": input.use_objects(),
-                "min_size": input.min_size(),
-                "object_connectivity": input.connectivity_objects(),
-                "objects_depth": input.objects_depth(),
-                "fill_holes_first": True if  input.comb_options() == "holes > objects" else False,
-                "comb_type": str(input.comb_type()),
-                # additional
-                "output_path": input.output_path(),
-                "exclude_border": input.exclude_border(),
-                "split_events": input.split_events(),
-                "overwrite": input.overwrite(),
-                "logging_level": input.logging_level(),
-                "debug": input.debug(),
-            }}
+                "use_spatial": input.use_spatial(), "spatial_min_ratio": input.min_ratio(),
+                "spatial_z_depth": input.z_depth(),  # Temporal
+                "use_temporal": input.use_temporal(), "temporal_prominence": input.prominence(),
+                "temporal_width": input.width(), "temporal_rel_height": input.rel_height(),
+                "temporal_wlen": input.wlen(),  # Morphological operations
+                "fill_holes": input.use_holes(), "area_threshold": input.area_threshold(),
+                "holes_connectivity": input.connectivity_holes(), "holes_depth": input.holes_depth(),
+                "remove_objects": input.use_objects(), "min_size": input.min_size(),
+                "object_connectivity": input.connectivity_objects(), "objects_depth": input.objects_depth(),
+                "fill_holes_first": True if input.comb_options() == "holes > objects" else False,
+                "comb_type": str(input.comb_type()),  # additional
+                "output_path": input.output_path(), "exclude_border": input.exclude_border(),
+                "split_events": input.split_events(), "overwrite": input.overwrite(),
+                "logging_level": input.logging_level(), "debug": input.debug(), }}
 
             with open(save_path.as_posix(), 'w') as f:
                 yaml.dump(arguments, f)

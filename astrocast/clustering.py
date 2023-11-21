@@ -6,35 +6,30 @@ import traceback
 from collections import defaultdict
 from pathlib import Path
 
-import awkward
 import fastcluster
 import hdbscan
 import networkx as nx
 import numpy as np
 import pandas as pd
-import sklearn
+import seaborn as sns
 from dask import array as da
 from dtaidistance import dtw_barycenter, dtw
 from matplotlib import pyplot as plt
 from matplotlib.colors import LinearSegmentedColormap
 from networkx.algorithms import community
 from scipy.cluster.hierarchy import fcluster
-import seaborn as sns
+from sklearn import cluster, ensemble, gaussian_process, linear_model, neighbors, neural_network, tree
 from sklearn.cluster import KMeans
-from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
-from sklearn.model_selection import cross_val_score
-from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
-from sklearn import metrics, cluster, ensemble, gaussian_process, linear_model, neighbors, neural_network, tree
+from sklearn.metrics import confusion_matrix
 from tqdm import tqdm
 
 from astrocast.analysis import Events
 from astrocast.helper import wrapper_local_cache, is_ragged, CachedClass, Normalization
 
+
 # from dtaidistance import dtw_visualisation as dtwvis
 # from dtaidistance import clustering
 # from scipy.cluster.hierarchy import single, complete, average, ward, dendrogram
-
-import fastcluster
 
 
 class HdbScan:

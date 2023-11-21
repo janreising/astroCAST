@@ -53,6 +53,7 @@ class Test_Delta:
     def test_methods_run(self, method, lazy):
 
         with tempfile.TemporaryDirectory() as tmpdir:
+
             Z, X, Y = 25, 2, 2
 
             data = np.random.randint(0, 100, (Z, X, Y), dtype=int)
@@ -82,6 +83,7 @@ class Test_Delta:
         arr = np.random.randint(0, 100, dim, dtype=int)
 
         with tempfile.TemporaryDirectory() as tmpdir:
+
             ctrl = Delta.calculate_delta_min_filter(arr.copy(), window, method=method)
             logging.warning(f"sum of ctrl: {np.sum(ctrl)}")
 
@@ -665,7 +667,7 @@ class Test_MotionCorrection:
         input_ = si.get_test_data(extension=extension)
 
         mc = MotionCorrection()
-        mc.run(input_=input_, h5_loc=h5_loc, max_shifts=(6, 6))
+        mc.run(path=input_, h5_loc=h5_loc, max_shifts=(6, 6))
 
         data = mc.save(output=None)
         assert type(data) == np.ndarray
