@@ -1050,7 +1050,7 @@ def export_video(
     data = io.load(input_path, loc=loc_in, z_slice=z_select, lazy=lazy)
 
     if rescale is not None and rescale != 1.0:
-        data = Input.rescale_data(data, rescale=float(rescale))
+        data = Input._rescale_data(data, rescale=float(rescale))
 
     chunks = io.infer_chunks_from_array(arr=data, strategy="balanced", chunks=chunk_size)
     io.save(output_path, data=data, loc=loc_out, chunks=chunks, compression=compression, overwrite=overwrite)
