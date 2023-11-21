@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "astrocast"
-version = "0.3.10"
+version = "0.3.11"
 description = "Package to analyze calcium fluorescence events in astrocytes"
 authors = ["Jan Philipp Reising <jan.reising@ki.se>", "Ana Cristina González"]
 
@@ -56,7 +56,7 @@ llvmlite = "~0.39"
 gdown = "^4.7.1"
 climage = "^0.2.0"
 simple-slurm = "^0.2.6"
-pydantic = { version = "^1", extras = ["video-player"] }
+pydantic = { version = "^1", optional = true }
 jupyterlab = "^4.0.8"
 ipywidgets = "^8.1.1"
 napari = { version = "0.4.14", optional = true }
@@ -74,9 +74,10 @@ sphinx-autodoc-typehints = { version = "^1.25.2", optional = true }
 astrocast = 'astrocast.cli_interfaces:cli'
 
 [tool.poetry.extras]
-video_player = ["napari", "napari-plot", "napari-time-series-plotter"]
+video_player = ["napari", "napari-plot", "napari-time-series-plotter", "pydantic"]
 testing = ["pytest", "pytest-cov", "pytest-xdist"]
 doc = ["sphinx", "sphinx-rtd-theme", "sphinx-autodoc-typehints"]
+all = ["napari", "napari-plot", "napari-time-series-plotter", "pydantic", "pytest", "pytest-cov", "pytest-xdist", "sphinx", "sphinx-rtd-theme", "sphinx-autodoc-typehints"]
 
 [tool.pytest.ini_options]
 markers = [
