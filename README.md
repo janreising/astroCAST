@@ -74,12 +74,12 @@ Note: the explorer window will not be open automatically, you must copy and past
 Singularity (apptainer) now supports direct conversion of docker images into singularity. To pull and run the image use the following commands:
 Pull singularity image directly from dockerhub.
 ```shell
-singularity pull docker://anacgon/astrocast:1.1
+singularity pull docker://anacgon/astrocast:latest
 ```
 Once image has been pulled, a SIF file will be created in the directory where the previous command was executed. To run the singularity image:
 
 ```shell
-singularity run --writable-tmpfs astrocast_1.1.sif
+singularity run --writable-tmpfs astrocast_latest.sif
 ```
 note: singularity automatically mounts the host file system, therefore manual mounting is not required.
 
