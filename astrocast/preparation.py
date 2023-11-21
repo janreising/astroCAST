@@ -1315,99 +1315,69 @@ class MotionCorrection:
 
 
 class Delta:
-    """
-    The Delta class provides methods for calculating the delta signal from input data.
-    The input data can be either a numpy ndarray, a TileDB array, or a file path.
-    The class supports various preprocessing options, such as loading data into memory,
-    creating a Dask array, or using shared memory.
+    """ Provides methods for bleach correction from input data.
 
-    Methods:
-    - run(method="background", window=None, overwrite_first_frame=True, use_dask=True):
-        Runs the delta calculation on the input data and returns the result.
-        The 'method' parameter specifies the delta calculation method.
-        The 'window' parameter sets the size of the minimum filter window.
-        The 'overwrite_first_frame' parameter determines whether to overwrite the first frame of the result.
-        The 'use_dask' parameter determines whether to use Dask for parallel processing.
+    Example:
 
-    - load_to_memory(path, loc=None):
-        Loads data from the specified path into memory and returns it as a numpy ndarray.
-        The 'loc' parameter specifies the location of the data in the HDF5 file.
-
-    - save_to_tdb(arr: np.ndarray) -> str:
-        Saves a numpy ndarray to a TileDB array and returns the path to the TileDB array.
-
-    - prepare_data(input_, in_memory=True, shared=True, use_dask=True):
-        Preprocesses the input data by converting it to a TileDB array and optionally loading it into memory
-        or creating a Dask array.
-
-    - calculate_background_pandas(arr: np.ndarray, window: int, method="background",
-                                  inplace: bool = True) -> np.ndarray:
-        [DEPRECATED] Calculates the background signal using a pandas-based implementation.
-        The 'arr' parameter is the input data.
-        The 'window' parameter sets the size of the rolling minimum window.
-        The 'method' parameter specifies the type of delta calculation.
-        The 'inplace' parameter determines whether to modify the input data in place.
-
-    - calculate_delta_min_filter(arr: np.ndarray, window: int, method="background", inplace=False) -> np.ndarray:
-        Calculates the delta signal using the minimum filter approach.
-        The 'arr' parameter is the input data.
-        The 'window' parameter sets the size of the minimum filter window.
-        The 'method' parameter specifies the type of delta calculation.
-        The 'inplace' parameter determines whether to modify the input data in place.
+        # TODO
 
     """
 
-    def __init__(self, input_, loc=None):
+    def __init__(self, data: Union[str, Path, np.ndarray, da.Array], loc: str = ""):
         """
-        Initializes a Delta object.
 
         Args:
-        - input_: The input data to be processed. It can be a file path (str or Path object),
-          a numpy ndarray, or a TileDB array.
-        - loc: The location of the data in the HDF5 file. This parameter is optional and only
-          applicable when 'input_' has the .h5 extension.
-        - in_memory: A boolean flag indicating whether the data should be loaded into memory
-          or kept on disk. Default is True.
-        - parallel: A boolean flag indicating whether to use parallel processing. Default is False.
+            data: The input data to be processed. It can be a file path (str or Path object), a numpy ndarray, or a dask array.
+            loc: The location of the data in the HDF5 file. This parameter is optional and only applicable when data has the .h5 extension.
 
         """
         # Convert the input to a Path object if it is a string
-        self.input_ = Path(input_) if isinstance(input_, str) else input_
+        self.data = Path(data) if isinstance(data, str) else data
         self.res = None
 
         # Get the dimensions and chunk size of the input data
-        self.dim, self.chunksize = get_data_dimensions(self.input_, loc=loc)
+        self.dim, self.chunksize = get_data_dimensions(self.data, loc=loc)
 
         # The location of the data in the HDF5 file (optional, only applicable for .h5 files)
         self.loc = loc
 
     def run(
-            self, window, method="background", processing_chunks="infer", output_path=None, overwrite_first_frame=True,
-            lazy=True
-    ):
+            self, window: int, method: Literal['background', 'dF', 'dFF'] = "dF", processing_chunks="infer",
+            output_path: Union[str, Path] = None, overwrite_first_frame: bool = True, lazy: bool = True
+    ) -> Union[np.ndarray, da.Array]:
         """
-        Runs the delta calculation on the input data.
+        Runs the bleach correction on the input data using specified methods and parameters.
 
         Args:
-        - method: The method to use for delta calculation. Options are "background", "dF", or "dFF".
-          Default is "background".
-        - window: The size of the window for the minimum filter. If None, the window size will be
-          automatically determined based on the dimensions of the input data. Default is None.
-        - overwrite_first_frame: A boolean flag indicating whether to overwrite the values of the
+        - window: The size of the window for the minimum filter.
+        - method: The method to use for delta calculation.
+
+        - processing_chunks: Chunk size for processing. If "infer", chunk size is automatically determined.
+
+        - output_path: The path to save the output. If None, output is not saved.
+        - overwrite_first_frame: A flag indicating whether to overwrite the values of the
           first frame with the second frame after delta calculation. Default is True.
-        - use_dask: A boolean flag indicating whether to use Dask for lazy loading and computation.
-          Default is True.
+        - lazy: A flag indicating whether to use lazy loading and computation, particularly with Dask.
 
         Returns:
-        - The delta calculation results as a numpy ndarray.
+        - Union[np.ndarray, da.Array]: The bleach correction results as a numpy ndarray or a Dask array,
+          depending on the 'lazy' parameter.
 
         Raises:
-        - NotImplementedError: If the input data type is not recognized.
+        - ValueError: If the input data type is not recognized.
 
+        Notes:
+        - The function supports different types of input data, including numpy ndarrays, file paths (specifically .tdb and .h5 files),
+          and Dask arrays. It also handles parallel execution for large datasets, especially when input is a .tdb file.
+
+        .. warning:
+
+            For .tdb files, this function will overwrite the provided file.
         """
+
         # Prepare the data for processing
         data = self.prepare_data(
-            self.input_, h5_loc=self.loc, chunks=processing_chunks, output_path=output_path, lazy=lazy
+            self.data, h5_loc=self.loc, chunks=processing_chunks, output_path=output_path, lazy=lazy
         )
 
         # Sequential execution
@@ -1423,19 +1393,18 @@ class Delta:
             # Define a wrapper function for parallel execution
             calculate_delta_min_filter = self.calculate_delta_min_filter
 
-            def wrapper(path, ranges):
-                (x0, x1), (y0, y1) = ranges
+            def wrapper(_path, ranges):
+                (_x0, x1), (_y0, y1) = ranges
 
                 # Open the TileDB array and load the specified range
-                with tiledb.open(path, mode="r") as tdb:
-                    data = tdb[:, x0:x1, y0:y1]
-                    res = calculate_delta_min_filter(
-                        data, window, method=method, inplace=False
-                    )  # TODO does this make sense?
+                with tiledb.open(_path, mode="r") as tdb:
+                    _data = tdb[:, _x0:x1, _y0:y1]
+
+                _res = calculate_delta_min_filter(_data, window, method=method, inplace=False)
 
                 # Overwrite the range with the calculated delta values
                 with tiledb.open(path, mode="w") as tdb:
-                    tdb[:, x0:x1, y0:y1] = calculate_delta_min_filter(data, window, method=method, inplace=False)
+                    tdb[:, _x0:x1, _y0:y1] = _res
 
             # Extract the path from the input data
             path = data.as_posix()
@@ -1484,7 +1453,7 @@ class Delta:
         io = IO()
         io.save(output_path, data=self.res, h5_loc=h5_loc, chunks=chunks, compression=compression, overwrite=overwrite)
 
-    def prepare_data(self, input_, chunks="infer", h5_loc=None, output_path=None, lazy=True):
+    def prepare_data(self, input_, chunk_strategy="Z", chunks=None, h5_loc=None, output_path=None, lazy=True):
 
         """
         Preprocesses the input data by converting it to a TileDB array and optionally loading it into memory
@@ -1505,20 +1474,30 @@ class Delta:
         - TypeError: If the input data type is not recognized.
         """
 
+        # TODO this function needs to be overhauled
+
         io = IO()
 
+        # define chunk size
+        shape, chunk_size, dtype = get_data_dimensions(input_, loc=h5_loc, return_dtype=True)
+        new_chunk_size = io.infer_chunks(shape, dtype, strategy=chunk_strategy)
+
         if not lazy:
-            data = io.load(input_, h5_loc=h5_loc, lazy=lazy)
+            data = io.load(input_, h5_loc=h5_loc, lazy=False)
 
             if not isinstance(data, da.Array):
-                data = da.from_array(data, chunks=(self.dim))
-            data = da.rechunk(data, chunks=(-1, "auto", "auto"))
-            data = data.astype(int)
+                data = da.from_array(data, chunks=new_chunk_size)
+
+            elif isinstance(data, da.Array) and data.chunksize != new_chunk_size:
+                data = da.rechunk(data, chunks=new_chunk_size)
+
+            data = data.astype(int)  # TODO this seems dangerous
+
             return data
 
         # convert to .tdb
-        elif isinstance(input_, Path) and input_.suffix == ".tdb":
-            data = io.load(input_, lazy=lazy)
+        if isinstance(input_, Path) and input_.suffix == ".tdb":
+            data = io.load(input_, lazy=lazy, chunks=new_chunk_size)
             data = data.astype(int)
             return data
 
@@ -1536,26 +1515,23 @@ class Delta:
                 logging.warning(f"found previous result. Deleting {new_path}")
                 shutil.rmtree(new_path)
 
-            io.save(new_path, data=data, chunks=chunks)
+            io.save(new_path, data=data, infer_strategy=chunk_strategy, chunks=chunks)
 
             return io.load(new_path, lazy=lazy)
 
         elif isinstance(input_, np.ndarray):
 
-            if chunks == "infer":
-                chunks = (-1, "auto", "auto")
-
-            input_ = da.from_array(input_, chunks=chunks)
+            input_ = da.from_array(input_, chunks=new_chunk_size)
             input_ = input_.astype(int)
             return input_
 
         elif isinstance(input_, da.Array):
 
-            if chunks == "infer":
-                chunks = (-1, "auto", "auto")
+            if input_.chunksize != new_chunk_size:
+                input_ = input_.rechunk(chunks)
 
-            input_ = input_.rechunk(chunks)
             input_ = input_.astype(int)
+
             return input_
 
         else:
