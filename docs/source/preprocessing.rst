@@ -15,8 +15,11 @@ Motion correction
 Denoising
 -----------
 
-Baseline subtraction
---------------------
+Bleach correction
+-----------------
+
+.. autoclass:: astrocast.preparation.Delta
+    :members:
 
 Event detection
 ---------------

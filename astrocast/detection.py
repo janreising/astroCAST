@@ -82,7 +82,7 @@ class Detector:
         self.meta = {}
 
     def run(
-            self, h5_loc: Optional[str] = None, exclude_border=0, threshold: Optional[float] = None, use_smoothing=True,
+            self, loc: str = None, exclude_border=0, threshold: Optional[float] = None, use_smoothing=True,
             smooth_radius=2, smooth_sigma=2, use_spatial=True, spatial_min_ratio=1, spatial_z_depth=1,
             use_temporal=True, temporal_prominence=10, temporal_width=3, temporal_rel_height=0.9, temporal_wlen=60,
             temporal_plateau_size=None, comb_type="&", fill_holes=True, area_threshold=10, holes_connectivity=1,
@@ -95,7 +95,7 @@ class Detector:
         Runs the event detection process on the specified dataset.
 
         Args:
-            h5_loc (Optional[str]): Name or identifier of the dataset in the h5 file.
+            loc (Optional[str]): Name or identifier of the dataset in the h5 file.
             threshold (Optional[float]): Threshold value to discriminate background from events. 
                 If None, automatic thresholding is performed.
             min_size (int): Minimum size of an event region. 
@@ -125,7 +125,7 @@ class Detector:
         # output folder
         self.output_directory = self.output if self.output is not None else self.input_path.with_suffix(
             ".roi"
-        ) if h5_loc is None else self.input_path.with_suffix(".{}.roi".format(h5_loc.split("/")[-1]))
+        ) if loc is None else self.input_path.with_suffix(".{}.roi".format(loc.split("/")[-1]))
 
         if not self.output_directory.is_dir():
             self.output_directory.mkdir()
@@ -137,7 +137,7 @@ class Detector:
 
         # load data
         io = IO()
-        data = io.load(path=self.input_path, h5_loc=h5_loc, z_slice=subset, lazy=lazy)
+        data = io.load(path=self.input_path, loc=loc, z_slice=subset, lazy=lazy)
         self.Z, self.X, self.Y = data.shape
         self.data = data
         logging.info(f"data: {data.shape}") if lazy else logging.info(f"data: {data}")

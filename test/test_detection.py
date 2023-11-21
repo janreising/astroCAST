@@ -22,7 +22,7 @@ class Test_Detector:
             assert tmpdir.is_dir()
 
             det = Detector(input_, output=tmpdir.joinpath("tempData"))
-            det.run(h5_loc="dff/ch0", lazy=False, debug=debug)
+            det.run(loc="dff/ch0", lazy=False, debug=debug)
 
             dir_ = det.output_directory
 
@@ -48,17 +48,17 @@ class Test_Detector:
             assert tmpdir.is_dir()
 
             path = tmpdir.joinpath("sim.h5")
-            h5_loc = "dff/ch0"
+            loc = "dff/ch0"
 
             sim = EventSim()
             video, num_events = sim.simulate(
                 shape=(50, 100, 100), skip_n=5, gap_space=5, gap_time=3, event_intensity=100, background_noise=1
             )
             io = IO()
-            io.save(path=path, data={h5_loc: video})
+            io.save(path=path, data={loc: video})
 
             det = Detector(path.as_posix())
-            dir_ = det.run(h5_loc=h5_loc, lazy=True, debug=False)
+            dir_ = det.run(loc=loc, lazy=True, debug=False)
 
             assert dir_.is_dir(), "Output folder does not exist"
             assert bool(det.meta), "metadata dictionary is empty"

@@ -24,7 +24,7 @@ init_colorama(autoreset=True)
 click_custom_option = partial(click.option, show_default=True)
 
 
-def check_output(output_path, input_path, h5_loc_save, overwrite):
+def check_output(output_path, input_path, loc_in, overwrite):
     if output_path is None:
         logging.warning(f"No output_path provided. Assuming input_path: {input_path}")
         output_path = input_path
@@ -43,21 +43,21 @@ def check_output(output_path, input_path, h5_loc_save, overwrite):
             import h5py
 
             with h5py.File(output_path.as_posix(), "a") as f:
-                if h5_loc_save in f and not overwrite:
+                if loc_in in f and not overwrite:
                     logging.error(
-                        f"{h5_loc_save} already exists in {output_path}. "
+                        f"{loc_in} already exists in {output_path}. "
                         f"Please choose a different output location or use '--overwrite True'"
                     )
                     return 0
 
-                elif h5_loc_save in f:
-                    logging.warning(f"{h5_loc_save} already exists in {output_path}. Deleting previous output.")
-                    del f[h5_loc_save]
+                elif loc_in in f:
+                    logging.warning(f"{loc_in} already exists in {output_path}. Deleting previous output.")
+                    del f[loc_in]
 
         else:
 
             if overwrite:
-                logging.warning(f"{h5_loc_save} already exists in {output_path}. Deleting previous output.")
+                logging.warning(f"{loc_in} already exists in {output_path}. Deleting previous output.")
                 output_path.unlink()
 
             else:
@@ -205,8 +205,8 @@ def cli(ctx, config):
 @click_custom_option('--subtract-func', default="mean", help='Function to use for background subtraction.')
 @click_custom_option('--rescale', type=click.FLOAT, default=1.0, help='Rescale parameter.')
 @click_custom_option('--in-memory', is_flag=True, help='If True, the processed data is loaded into memory.')
-@click_custom_option('--h5-loc-in', default=None, help='Prefix to use when loading the processed data.')
-@click_custom_option('--h5-loc-out', default="data", help='Prefix to use when saving the processed data.')
+@click_custom_option('--loc-in', default=None, help='Prefix to use when loading the processed data.')
+@click_custom_option('--loc-out', default="data", help='Prefix to use when saving the processed data.')
 @click_custom_option('--infer-chunks', is_flag=True, default=False, help='Infer chunks size.')
 @click_custom_option(
     '--chunks', type=(click.INT, click.INT, click.INT), default=None,
@@ -218,7 +218,7 @@ def cli(ctx, config):
 )
 def convert_input(
         input_path, logging_level, output_path, sep, num_channels, channel_names, z_slice, lazy, subtract_background,
-        subtract_func, rescale, in_memory, h5_loc_in, h5_loc_out, chunks, compression, overwrite, infer_chunks
+        subtract_func, rescale, in_memory, loc_in, loc_out, chunks, compression, overwrite, infer_chunks
 ):
     """
     Convert user files to astroCAST compatible format using the Input class.
@@ -228,7 +228,7 @@ def convert_input(
 
     with UserFeedback(params=locals(), logging_level=logging_level):
         # check output
-        output_path = check_output(output_path, input_path, h5_loc_out, overwrite)
+        output_path = check_output(output_path, input_path, loc_out, overwrite)
         if output_path == 0:
             logging.warning("skipping this step because output exists.")
             return 0
@@ -250,7 +250,7 @@ def convert_input(
         input_instance.run(
             input_path=input_path, output_path=output_path, sep=sep, channels=channels, z_slice=z_slice, lazy=lazy,
             subtract_background=subtract_background, subtract_func=subtract_func, rescale=rescale, in_memory=in_memory,
-            h5_loc_in=h5_loc_in, h5_loc_out=h5_loc_out, chunks=chunks, compression=compression
+            loc_in=loc_in, loc_out=loc_out, chunks=chunks, compression=compression
         )
 
 
@@ -262,10 +262,10 @@ def convert_input(
 )
 @click_custom_option('--logging-level', type=click.INT, default=logging.INFO, help='Logging level for messages.')
 @click_custom_option(
-    '--h5-loc', type=click.STRING, default="", help='Dataset name in case of input being an HDF5 file.'
+    '--loc-in', type=click.STRING, default="", help='Dataset name in case of input being an HDF5 file.'
 )
 @click_custom_option(
-    '--h5-loc-save', type=click.STRING, default="mc/ch0", help='Location within the HDF5 file to save the data.'
+    '--loc-out', type=click.STRING, default="mc/ch0", help='Location within the HDF5 file to save the data.'
 )
 @click_custom_option(
     '--max-shifts', type=(click.INT, click.INT), default=(50, 50), help='Maximum allowed rigid shift.'
@@ -328,10 +328,9 @@ def convert_input(
     '--overwrite', type=click.BOOL, default=False, help='Flag for overwriting previous result in output location'
 )
 def motion_correction(
-        input_path, working_directory, logging_level, output_path, h5_loc, max_shifts, niter_rig, splits_rig,
+        input_path, working_directory, logging_level, output_path, loc_in, loc_out, max_shifts, niter_rig, splits_rig,
         num_splits_to_process_rig, strides, overlaps, pw_rigid, splits_els, num_splits_to_process_els,
-        upsample_factor_grid, max_deviation_rigid, nonneg_movie, gsig_filt, h5_loc_save, infer_chunks, chunks,
-        compression, overwrite
+        upsample_factor_grid, max_deviation_rigid, nonneg_movie, gsig_filt, infer_chunks, chunks, compression, overwrite
 ):
     """
     Correct motion artifacts of input data using the MotionCorrection class.
@@ -341,7 +340,7 @@ def motion_correction(
 
     with UserFeedback(params=locals(), logging_level=logging_level):
         # check output
-        output_path = check_output(output_path, input_path, h5_loc_save, overwrite)
+        output_path = check_output(output_path, input_path, loc_out, overwrite)
         if output_path == 0:
             logging.warning("skipping this step because output exists.")
             return 0
@@ -356,7 +355,7 @@ def motion_correction(
         # Call the run method with the necessary parameters
         logging.info("applying motion correction ...")
         mc.run(
-            path=input_path, h5_loc=h5_loc, max_shifts=max_shifts, niter_rig=niter_rig, splits_rig=splits_rig,
+            path=input_path, loc=loc_in, max_shifts=max_shifts, niter_rig=niter_rig, splits_rig=splits_rig,
             num_splits_to_process_rig=num_splits_to_process_rig, strides=strides, overlaps=overlaps, pw_rigid=pw_rigid,
             splits_els=splits_els, num_splits_to_process_els=num_splits_to_process_els,
             upsample_factor_grid=upsample_factor_grid, max_deviation_rigid=max_deviation_rigid,
@@ -365,7 +364,7 @@ def motion_correction(
 
         # Save the results to the specified output path
         logging.info("saving result ...")
-        mc.save(output_path, h5_loc=h5_loc_save, chunks=chunks, compression=compression)
+        mc.save(output_path, loc=loc_out, chunks=chunks, compression=compression)
 
 
 @cli.command()
@@ -373,7 +372,7 @@ def motion_correction(
 @click_custom_option('--window', type=click.INT, default=None, help='Size of the window for the minimum filter.')
 @click_custom_option('--output-path', type=None, help='Path to save the output data.')
 @click_custom_option(
-    '--h5-loc-in', type=click.STRING, default="", help='Location of the data in the HDF5 file (if applicable).'
+    '--loc-in', type=click.STRING, default="", help='Location of the data in the HDF5 file (if applicable).'
 )
 @click_custom_option(
     '--method', type=click.Choice(['background', 'dF', 'dFF']), default='dF',
@@ -390,7 +389,7 @@ def motion_correction(
     help='Whether to overwrite the first frame with the second frame after delta calculation.'
 )
 @click_custom_option(
-    '--h5-loc-out', type=click.STRING, default="dff", help='Location within the HDF5 file to save the data.'
+    '--loc-out', type=click.STRING, default="dff", help='Location within the HDF5 file to save the data.'
 )
 @click_custom_option(
     '--compression', type=click.STRING, default=None, help='Compression algorithm to use when saving to an HDF5 file.'
@@ -400,7 +399,7 @@ def motion_correction(
     '--overwrite', type=click.BOOL, default=False, help='Flag for overwriting previous result in output location'
 )
 def subtract_delta(
-        input_path, output_path, h5_loc_in, method, window, chunk_strategy, chunks, overwrite_first_frame, h5_loc_out,
+        input_path, output_path, loc_in, method, window, chunk_strategy, chunks, overwrite_first_frame, loc_out,
         compression, logging_level, overwrite
 ):
     """
@@ -414,14 +413,14 @@ def subtract_delta(
 
     with UserFeedback(params=locals(), logging_level=logging_level):
         # check output
-        output_path = check_output(output_path, input_path, h5_loc_out, overwrite)
+        output_path = check_output(output_path, input_path, loc_out, overwrite)
         if output_path == 0:
             logging.warning("skipping this step because output exists.")
             return 0
 
         # Initialize the Delta instance
         logging.info("creating delta instance ...")
-        delta_instance = Delta(data=input_path, loc=h5_loc_in)
+        delta_instance = Delta(data=input_path, loc=loc_in)
 
         # Run the delta calculation
         logging.info("subtracting background ...")
@@ -430,8 +429,8 @@ def subtract_delta(
         # Save the results to the specified output path
         logging.info("saving result ...")
         delta_instance.save(
-            output_path=output_path, h5_loc=h5_loc_out, infer_strategy=chunk_strategy, chunks=chunks,
-            compression=compression, overwrite=overwrite
+            output_path=output_path, loc=loc_out, chunk_strategy=chunk_strategy, chunks=chunks, compression=compression,
+            overwrite=overwrite
         )
 
 
@@ -687,7 +686,7 @@ def denoise(
 
 @cli.command()
 @click.argument('input-path', type=click.Path())
-@click_custom_option('--h5-loc', type=click.STRING, default=None, help='Specific dataset to run the process on.')
+@click_custom_option('--loc', type=click.STRING, default=None, help='Specific dataset to run the process on.')
 @click_custom_option(
     '--threshold', type=click.FLOAT, default=None, help='Threshold value to discriminate background from events.'
 )
@@ -758,7 +757,7 @@ def denoise(
     '--overwrite', type=click.BOOL, default=False, help='Flag for overwriting previous result in output location'
 )
 def detect_events(
-        input_path, h5_loc, exclude_border, threshold, use_smoothing, smooth_radius, smooth_sigma, use_spatial,
+        input_path, loc, exclude_border, threshold, use_smoothing, smooth_radius, smooth_sigma, use_spatial,
         spatial_min_ratio, spatial_z_depth, use_temporal, temporal_prominence, temporal_width, temporal_rel_height,
         temporal_wlen, temporal_plateau_size, comb_type, fill_holes, area_threshold, holes_connectivity, holes_depth,
         remove_objects, min_size, object_connectivity, objects_depth, fill_holes_first, lazy, adjust_for_noise, subset,
@@ -795,7 +794,7 @@ def detect_events(
 
         # Running the detection
         detector.run(
-            h5_loc=h5_loc, exclude_border=exclude_border, threshold=threshold, use_smoothing=use_smoothing,
+            loc=loc, exclude_border=exclude_border, threshold=threshold, use_smoothing=use_smoothing,
             smooth_radius=smooth_radius, smooth_sigma=smooth_sigma, use_spatial=use_spatial,
             spatial_min_ratio=spatial_min_ratio, spatial_z_depth=spatial_z_depth, use_temporal=use_temporal,
             temporal_prominence=temporal_prominence, temporal_width=temporal_width,
@@ -893,7 +892,7 @@ def move_h5_dataset(input_path, output_path, loc_in, loc_out, overwrite):
 
 @cli.command()
 @click.argument('input-path', type=click.Path())
-@click.argument('h5-loc', nargs=-1)
+@click.argument('loc', nargs=-1)
 @click_custom_option('--colormap', type=click.STRING, default="gray", help='Color of the video layer.')
 @click_custom_option('--show-trace', type=click.BOOL, default=False, help='Display trace of the video')
 @click_custom_option('--window', type=click.INT, default=160, help='window of trace to be shown')
@@ -903,7 +902,7 @@ def move_h5_dataset(input_path, output_path, loc_in, loc_out, overwrite):
 )
 @click_custom_option('--lazy', type=click.BOOL, default=True, help='Whether to implement lazy loading.')
 @click_custom_option('--testing', type=click.BOOL, default=False, help='Auto closes napari for testing purposes.')
-def view_data(input_path, h5_loc, z_select, lazy, show_trace, window, colormap, testing):
+def view_data(input_path, loc, z_select, lazy, show_trace, window, colormap, testing):
     """
     Displays a video from a data file (.h5, .tiff, .tdb).
 
@@ -913,7 +912,7 @@ def view_data(input_path, h5_loc, z_select, lazy, show_trace, window, colormap, 
 
     Parameters:
     input_path (str): The path to the h5 file.
-    h5_loc (str): The name or identifier of the dataset within the h5 file. Defaults to an empty string, which indicates the root group.
+    loc (str): The name or identifier of the dataset within the h5 file. Defaults to an empty string, which indicates the root group.
     z_select (tuple of int, optional): A tuple specifying the range of frames to select in the Z dimension. The tuple contains two elements: the start and end frame numbers. Defaults to None, which indicates that all frames should be selected.
     lazy (bool): Whether to implement lazy loading, which can improve performance when working with large datasets by only loading data into memory as it is needed. Defaults to True.
 
@@ -921,13 +920,13 @@ def view_data(input_path, h5_loc, z_select, lazy, show_trace, window, colormap, 
     None
 
     Examples:
-    view_data('path/to/your/file.h5', h5_loc='dataset_name', z_select=(10, 20), lazy=True)
+    view_data('path/to/your/file.h5', loc='dataset_name', z_select=(10, 20), lazy=True)
     """
 
     import napari
     from astrocast.analysis import Video
 
-    vid = Video(data=input_path, z_slice=z_select, h5_loc=h5_loc, lazy=lazy)
+    vid = Video(data=input_path, z_slice=z_select, loc=loc, lazy=lazy)
     vid.show(show_trace=show_trace, window=window, colormap=colormap)
 
     if not testing:
@@ -938,7 +937,7 @@ def view_data(input_path, h5_loc, z_select, lazy, show_trace, window, colormap, 
 @click.argument('event_dir', type=click.Path())
 @click_custom_option('--video-path', type=click.STRING, default="infer", help='Path to the data used for detection.')
 @click_custom_option(
-    '--h5-loc', type=click.STRING, default="df/ch0", help='Name or identifier of the dataset used for detection.'
+    '--loc', type=click.STRING, default="df/ch0", help='Name or identifier of the dataset used for detection.'
 )
 @click_custom_option(
     '--z-select', type=(click.INT, click.INT), default=None,
@@ -948,14 +947,14 @@ def view_data(input_path, h5_loc, z_select, lazy, show_trace, window, colormap, 
 @click_custom_option(
     '--testing', type=click.BOOL, default=False, help='Automatically closes viewer for testing purposes.'
 )
-def view_detection_results(event_dir, video_path, h5_loc, z_select, lazy, testing):
+def view_detection_results(event_dir, video_path, loc, z_select, lazy, testing):
     """
     view the detection results; optionally overlayed on the input video.
 
     Parameters:
     event_dir (str): The path to the directory where the event data is stored. This path must exist.
     video_path (str, optional): The path to the data used for detection. If "infer", the path will be inferred. Defaults to "infer".
-    h5_loc (str, optional): The name or identifier of the dataset used for detection within the HDF5 file. Defaults to an empty string.
+    loc (str, optional): The name or identifier of the dataset used for detection within the HDF5 file. Defaults to an empty string.
     z_select (tuple of int, optional): The range of frames to select in the Z dimension, specified as a tuple of start and end frame indices. Defaults to None, indicating that all frames will be selected.
     lazy (bool, optional): Indicates whether to implement lazy loading, which defers data loading until necessary, potentially saving memory. Defaults to True.
 
@@ -971,8 +970,8 @@ def view_detection_results(event_dir, video_path, h5_loc, z_select, lazy, testin
     import napari
     from astrocast.analysis import Events
 
-    event = Events(event_dir=event_dir, data=video_path, h5_loc=h5_loc, z_slice=z_select, lazy=lazy)
-    viewer = event.show_event_map(video=None, h5_loc=None, z_slice=z_select)
+    event = Events(event_dir=event_dir, data=video_path, loc=loc, z_slice=z_select, lazy=lazy)
+    viewer = event.show_event_map(video=None, loc=None, z_slice=z_select)
 
     if not testing:
         viewer.show()
@@ -983,10 +982,10 @@ def view_detection_results(event_dir, video_path, h5_loc, z_select, lazy, testin
 @click.argument('input-path', type=click.Path())
 @click_custom_option('--output-path', type=click.Path(), required=True, help='Path to the output file.')
 @click_custom_option(
-    '--h5-loc-in', type=click.STRING, default="", help='Name or identifier of the dataset in the h5 file.'
+    '--loc-in', type=click.STRING, default="", help='Name or identifier of the dataset in the h5 file.'
 )
 @click_custom_option(
-    '--h5-loc-out', type=click.STRING, default="", help='Name or identifier of the dataset in the h5 file.'
+    '--loc-out', type=click.STRING, default="", help='Name or identifier of the dataset in the h5 file.'
 )
 @click_custom_option(
     '--z-select', type=(click.INT, click.INT), default=None,
@@ -1007,7 +1006,7 @@ def view_detection_results(event_dir, video_path, h5_loc, z_select, lazy, testin
     '--overwrite', type=click.BOOL, default=False, help='Flag for overwriting previous result in output location'
 )
 def export_video(
-        input_path, output_path, h5_loc_in, h5_loc_out, z_select, lazy, chunk_size, compression, rescale, overwrite
+        input_path, output_path, loc_in, loc_out, z_select, lazy, chunk_size, compression, rescale, overwrite
 ):
     """
     Exports a video dataset from the input file to another file with various configurable options.
@@ -1021,8 +1020,8 @@ def export_video(
     Parameters:
     input_path (str): The path to the input h5 file containing the video dataset to export.
     output_path (str): The path where the output file will be saved.
-    h5_loc_in (str, optional): The name or identifier of the dataset within the input h5 file. Defaults to an empty string, which indicates the root group.
-    h5_loc_out (str, optional): The name or identifier of the dataset within the output file. Defaults to an empty string, which indicates the root group.
+    loc_in (str, optional): The name or identifier of the dataset within the input h5 file. Defaults to an empty string, which indicates the root group.
+    loc_out (str, optional): The name or identifier of the dataset within the output file. Defaults to an empty string, which indicates the root group.
     z_select (tuple of int, optional): A tuple specifying the range of frames to select in the Z dimension. The tuple contains two elements: the start and end frame numbers. Defaults to None, which indicates that all frames should be selected.
     lazy (bool, optional): Whether to implement lazy loading, which can improve performance when working with large datasets by only loading data into memory as it is needed. Defaults to True.
     chunk_size (tuple of int, optional): A tuple specifying the chunk size for saving the results in the output file. If not provided, a default chunk size will be used. Defaults to None.
@@ -1034,7 +1033,7 @@ def export_video(
     None
 
     Example:
-    export_video('input.h5', 'output.h5', h5_loc_in='dataset1', h5_loc_out='dataset2', z_select=(10, 20), lazy=True, chunk_size=(100, 100), compression='gzip', overwrite=True)
+    export_video('input.h5', 'output.h5', loc_in='dataset1', loc_out='dataset2', z_select=(10, 20), lazy=True, chunk_size=(100, 100), compression='gzip', overwrite=True)
     """
 
     if Path(output_path).exists() and not overwrite:
@@ -1048,40 +1047,39 @@ def export_video(
     from astrocast.preparation import IO
 
     io = IO()
-    data = io.load(input_path, h5_loc=h5_loc_in, z_slice=z_select, lazy=lazy)
+    data = io.load(input_path, loc=loc_in, z_slice=z_select, lazy=lazy)
 
     if rescale is not None and rescale != 1.0:
         data = Input.rescale_data(data, rescale=float(rescale))
 
     chunks = io.infer_chunks_from_array(arr=data, strategy="balanced", chunks=chunk_size)
-    io.save(output_path, data=data, h5_loc=h5_loc_out, chunks=chunks, compression=compression, overwrite=overwrite)
-
+    io.save(output_path, data=data, loc=loc_out, chunks=chunks, compression=compression, overwrite=overwrite)
 
 
 @cli.command()
 @click_custom_option('--input-path', type=click.Path(), default=None, help='Path to input file.')
 @click_custom_option(
-    '--h5-loc', type=click.STRING, default=None, help='Name or identifier of the dataset in the h5 file.'
+    '--loc', type=click.STRING, default=None, help='Name or identifier of the dataset in the h5 file.'
 )
-def explorer(input_path, h5_loc):
+def explorer(input_path, loc):
     from astrocast.app_preparation import Explorer
 
-    app_instance = Explorer(input_path=input_path, h5_loc=h5_loc)
+    app_instance = Explorer(input_path=input_path, loc=loc)
     app_instance.run()
 
 
 @cli.command()
 @click_custom_option('--input-path', type=click.Path(), default=None, help='Path to event detection output (.roi).')
 @click_custom_option('--video-path', type=click.Path(), default=None, help='Path to video file.')
-@click_custom_option('--h5-loc', type=click.STRING, default="", help='dataset location for .h5 files')
+@click_custom_option('--loc', type=click.STRING, default="", help='dataset location for .h5 files')
 @click_custom_option('--default-settings', type=dict, default={}, help='settings for app.')
-def analysis(input_path, video_path, h5_loc, default_settings):
+def analysis(input_path, video_path, loc, default_settings):
     """Run interactive analysis of events."""
 
     from astrocast.app_analysis import Analysis
 
     app_instance = Analysis(
-        input_path=input_path, video_path=video_path, h5_loc=h5_loc, default_settings=default_settings
+        input_path=input_path, video_path=video_path, loc=loc, default_settings=default_settings
     )
     app_instance.run()
 
@@ -1123,7 +1121,7 @@ def climage(input_path, loc, z, size, equalize, clip_limit):
     z1 = max(z) + 2
 
     io = IO()
-    data = io.load(input_path, h5_loc=loc, lazy=True, z_slice=(z0, z1))
+    data = io.load(input_path, loc=loc, lazy=True, z_slice=(z0, z1))
     print(f"input path: {input_path}")
 
     # enforce even size

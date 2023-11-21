@@ -14,10 +14,10 @@ from astrocast.preparation import IO, Delta
 
 class Explorer:
 
-    def __init__(self, input_path=None, h5_loc=None):
+    def __init__(self, input_path=None, loc=None):
 
         self.path = input_path
-        self.h5_loc = h5_loc
+        self.loc = loc
 
         self.app_ui = self.create_ui()
         self.app = App(self.app_ui, self.server, )
@@ -29,7 +29,7 @@ class Explorer:
                     "File", ui.layout_sidebar(
                         ui.panel_sidebar(
                             ui.h5(""), ui.input_text("path", "Path", value=self.path),
-                            ui.input_text("h5_loc", "dataset", value=self.h5_loc),
+                            ui.input_text("loc", "dataset", value=self.loc),
                             ui.input_switch("lazy", "lazy loading", value=True), ui.output_text("data_shape"),
                             ui.h5(""), ui.panel_conditional(
                                 "input.path !== ''", ui.h5("Select frames"),
@@ -161,7 +161,7 @@ class Explorer:
 
                 try:
 
-                    data = io.load(path, h5_loc=input.h5_loc(), z_slice=input.z_select(), lazy=input.lazy)
+                    data = io.load(path, loc=input.loc(), z_slice=input.z_select(), lazy=input.lazy)
 
                     if not isinstance(data, da.Array):
                         data = da.from_array(data)
@@ -183,7 +183,7 @@ class Explorer:
 
             try:
                 io = IO()
-                data = io.load(path, h5_loc=input.h5_loc(), z_slice=None, lazy=True)
+                data = io.load(path, loc=input.loc(), z_slice=None, lazy=True)
                 return data.shape
 
             except:
@@ -606,7 +606,7 @@ class Explorer:
             save_path = Path(input.save_path())
 
             arguments = {"detect-events": {  # file params
-                "h5_loc": input.h5_loc(),  # smoothing
+                "loc": input.loc(),  # smoothing
                 "use_smoothing": input.use_smoothing(), "smooth_sigma": input.sigma(), "smooth_radius": input.radius(),
                 # Spatial
                 "use_spatial": input.use_spatial(), "spatial_min_ratio": input.min_ratio(),
@@ -653,7 +653,7 @@ class Explorer:
         @reactive.event(input.btn_save)
         async def visualize_command():
             return f"astrocast view-detection-results " \
-                   f"--lazy False --h5-loc {input.h5_loc()} {input.path().replace('.h5', '.roi')}"
+                   f"--lazy False --h5-loc {input.loc()} {input.path().replace('.h5', '.roi')}"
 
     def plot_images(self, arr, frames, pixels=None, lbls=None, figsize=(10, 5), vmin=None, vmax=None):
 

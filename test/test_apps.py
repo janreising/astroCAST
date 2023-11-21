@@ -19,17 +19,17 @@ class Test_AppPreparation:
         assert tmpdir.is_dir()
 
         path = tmpdir.joinpath("sim.h5")
-        h5_loc = "df/ch0"
+        loc = "df/ch0"
 
         sim = EventSim()
         video, num_events = sim.simulate(
             shape=(50, 100, 100), skip_n=5, event_intensity=100, background_noise=1
         )
         io = IO()
-        io.save(path=path, data=video, h5_loc=h5_loc)
+        io.save(path=path, data=video, loc=loc)
 
         # create explorer
-        exp = Explorer(input_path=path.as_posix(), h5_loc=h5_loc)
+        exp = Explorer(input_path=path.as_posix(), loc=loc)
 
         # Define a process for the Shiny app
         self.app_process = multiprocessing.Process(target=exp.run, kwargs=dict(port=8090))
@@ -59,22 +59,22 @@ class Test_AppAnalysis:
         assert tmpdir.is_dir()
 
         path = tmpdir.joinpath("sim.h5")
-        h5_loc = "df/ch0"
+        loc = "df/ch0"
 
         sim = EventSim()
         video, num_events = sim.simulate(
             shape=(50, 100, 100), skip_n=5, event_intensity=100, background_noise=1
         )
         io = IO()
-        io.save(path=path, data=video, h5_loc=h5_loc)
+        io.save(path=path, data=video, loc=loc)
 
         det = Detector(path.as_posix(), output=None)
-        det.run(h5_loc=h5_loc, lazy=True, debug=False)
+        det.run(loc=loc, lazy=True, debug=False)
 
         dir_ = det.output_directory
 
         # create explorer
-        ana = Analysis(input_path=dir_.as_posix(), video_path=path.as_posix(), h5_loc=h5_loc)
+        ana = Analysis(input_path=dir_.as_posix(), video_path=path.as_posix(), loc=loc)
 
         # Define a process for the Shiny app
         self.app_process = multiprocessing.Process(target=ana.run, kwargs=dict(port=8091))

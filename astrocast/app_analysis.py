@@ -33,17 +33,17 @@ with warnings.catch_warnings():
 
 class Analysis:
 
-    def __init__(self, input_path=None, video_path=None, h5_loc=None, default_settings=None):
+    def __init__(self, input_path=None, video_path=None, loc=None, default_settings=None):
 
         self.path = input_path
         self.video_path = video_path
-        self.h5_loc = h5_loc
+        self.loc = loc
 
         settings = {"Events": {"frames": "", "in_switch_dummy_groups": False, "in_textarea_filter": ""},
-                    "Extension": {"in_switch_extend": False, "video_path": "", "h5_loc": "",
-                                  "in_numeric_extend_left": 0, "in_numeric_extend_right": 0,
-                                  "in_numeric_enforce_min": None, "in_numeric_enforce_max": None,
-                                  "in_switch_use_padding": False, "in_switch_use_footprint": True, },
+                    "Extension": {"in_switch_extend": False, "video_path": "", "loc": "", "in_numeric_extend_left": 0,
+                                  "in_numeric_extend_right": 0, "in_numeric_enforce_min": None,
+                                  "in_numeric_enforce_max": None, "in_switch_use_padding": False,
+                                  "in_switch_use_footprint": True, },
                     "Normalization": {"in_switch_norm_default": False, "in_select_norm_mode": "min_max",
                                       "in_select_subtract_order": "", "in_select_subtract_mode": "min",
                                       "in_switch_subtract_pop": False, "in_select_subtract_rows": True,
@@ -189,7 +189,7 @@ class Analysis:
                         xui.card_header("Settings"), ui.input_switch(
                             "in_switch_extend", "use extension", value=self.settings["Extension"]["in_switch_extend"]
                         ), ui.input_text("video_path", "Video", value=self.settings["Extension"]["video_path"]),
-                        ui.input_text("h5_loc", "h5 location", value=self.settings["Extension"]["h5_loc"]), ui.row(
+                        ui.input_text("loc", "h5 location", value=self.settings["Extension"]["loc"]), ui.row(
                             ui.column(
                                 6, ui.input_numeric(
                                     "in_numeric_extend_left", "fixed extension left",
@@ -915,7 +915,7 @@ class Analysis:
             use_extend = input.in_switch_extend()
             use_footprint = input.in_switch_use_footprint()
             video = input.video_path()
-            h5_loc = input.h5_loc()
+            loc = input.loc()
 
             fix_ext_left, fix_ext_right = input.in_numeric_extend_left(), input.in_numeric_extend_right()
             extend = (fix_ext_left, fix_ext_right)
@@ -925,7 +925,7 @@ class Analysis:
             if events is not None and len(events) > 0 and use_extend and video != "" and (
                     fix_ext_left != 0 or fix_ext_right != 0 or enforce_min is not None or enforce_max is not None):
 
-                video = Video(data=video, h5_loc=h5_loc, lazy=True)
+                video = Video(data=video, loc=loc, lazy=True)
                 events.get_extended_events(
                     video=video, in_place=True, use_footprint=use_footprint, extend=extend, ensure_min=enforce_min,
                     ensure_max=enforce_max, pad_borders=use_padding

@@ -5,7 +5,7 @@ import tempfile
 import warnings
 from collections import OrderedDict
 from pathlib import Path
-from typing import Union, Tuple, Literal, Callable
+from typing import Union, Tuple, Literal, Callable, List
 
 import czifile
 import dask
@@ -40,7 +40,7 @@ class Input:
     **Example**::
 
             inp = Input()
-            inp.run('path/to/images/', output_path='path/to/output.h5' channels=1, h5_loc_out='data')
+            inp.run('path/to/images', output_path='path/to/output.h5' channels=1, loc_out='data')
 
     """
 
@@ -48,13 +48,13 @@ class Input:
         logging.basicConfig(level=logging_level)
 
     def run(
-            self, input_path: Union[str, Path], output_path: Union[str, Path] = None, sep: str = "_", channels: int = 1,
-            z_slice: Tuple[int, int] = None, lazy: bool = True, subtract_background: Union[str, np.ndarray] = None,
-            subtract_func: Literal['mean', 'std', 'min', 'max', Callable] = "mean",
+            self, input_path: Union[str, Path], output_path: Union[str, Path] = None, sep: str = "_",
+            channels: Union[int, dict] = 1, z_slice: Tuple[int, int] = None, lazy: bool = True,
+            subtract_background: Union[str, np.ndarray] = None,
+            subtract_func: Union[Literal['mean', 'max', 'min', 'std'], Callable] = "mean",
             rescale: Union[float, Tuple[int, int]] = None, dtype: type = int, in_memory: bool = False,
-            h5_loc_in: str = None, h5_loc_out: str = "data",
-            infer_strategy: Literal['balanced', 'XY', 'Z'] = "balanced", chunks: Tuple[int, int, int] = None,
-            compression: Literal['gzip', 'szip', 'lz4'] = None
+            loc_in: str = None, loc_out: str = "data", infer_strategy: Literal['balanced', 'XY', 'Z'] = "balanced",
+            chunks: Tuple[int, int, int] = None, compression: Literal['gzip', 'szip', 'lz4'] = None
     ) -> Union[np.ndarray, dict]:
 
         """ Loads input data from a specified path, performs data processing, and optionally saves the processed data.
@@ -62,8 +62,8 @@ class Input:
         Args:
             input_path: Path to the input file or directory.
             output_path: Path to save the processed data. If None, the processed data is returned.
-            h5_loc_in: Input dataset in the HDF5 file that is loaded.
-            h5_loc_out: Output dataset in the HDF5 file that is saved.
+            loc_in: Input dataset in the HDF5 file that is loaded.
+            loc_out: Output dataset in the HDF5 file that is saved.
             z_slice: Selection of frames that are processed.
             sep: Separator used for sorting file names, `['file_01.tiff', 'file_02.tiff']`.
             channels: Number of channels or dictionary specifying channel names.
@@ -85,7 +85,7 @@ class Input:
 
         logging.info("loading data ...")
         io = IO()
-        data = io.load(input_path, h5_loc=h5_loc_in, sep=sep, z_slice=z_slice, lazy=lazy, chunks=(1, -1, -1))
+        data = io.load(input_path, loc=loc_in, sep=sep, z_slice=z_slice, lazy=lazy, chunks=(1, -1, -1))
 
         logging.info("preparing data ...")
         if isinstance(rescale, int) or (isinstance(rescale, (tuple, list)) and isinstance(rescale[0], int)):
@@ -95,7 +95,7 @@ class Input:
 
         data = self.prepare_data(
             data, channels=channels, subtract_background=subtract_background, subtract_func=subtract_func,
-            rescale=rescale, absolute_rescale=absolute_rescale, dtype=dtype, in_memory=in_memory
+            rescale=rescale, absolute_rescale=absolute_rescale, dtype=dtype, lazy=in_memory
         )
 
         logging.debug(f"data type: {type(data[list(data.keys())[0]])}")
@@ -106,7 +106,7 @@ class Input:
 
         logging.info("saving data ...")
         io.save(
-            output_path, data, h5_loc=h5_loc_out, infer_strategy=infer_strategy, chunks=chunks, compression=compression
+            output_path, data, loc=loc_out, chunk_strategy=infer_strategy, chunks=chunks, compression=compression
         )
 
     @staticmethod
@@ -189,7 +189,7 @@ class Input:
         return data
 
     @staticmethod
-    def rescale_data(data, rescale, absolute_rescale=False):
+    def rescale_data(data: Union[np.ndarray, da.Array, dict], rescale, absolute_rescale=False):
         """
         Rescale the data arrays to a new size.
 
@@ -226,7 +226,7 @@ class Input:
             raise ValueError("please provide 'rescale' flag as 2D tuple, list or number")
         elif isinstance(rescale, (tuple, list)) and len(rescale) != 2:
             raise ValueError("please provide 'rescale' flag as 2D tuple or list")
-        elif isinstance(rescale, (tuple, list)) and type(rescale[0]) != type(rescale[1]):
+        elif isinstance(rescale, (tuple, list)) and not isinstance(rescale[0], type(rescale[1])):
             raise ValueError(
                 f"mixed rescale type not allowed for 'rescale' flag:"
                 f" {type(rescale[0])} vs {type(rescale[1])}"
@@ -234,7 +234,7 @@ class Input:
 
         # Apply resizing to each channel
         for k in data.keys():
-            # Rescale the data array using the specified scaling factors and anti-aliasing
+            # Rescale the data array using the specified scaling factors and antialiasing
 
             arr = data[k]
 
@@ -284,22 +284,22 @@ class Input:
         return data
 
     def prepare_data(
-            self, data, channels=1, subtract_background=None, subtract_func="mean", rescale=None,
-            absolute_rescale=False, dtype=np.int, in_memory=False
-    ):
+            self, data: Union[np.ndarray, da.Array], channels: Union[int, dict] = 1, subtract_background: str = None,
+            subtract_func: Union[Literal['mean', 'max', 'min', 'std'], Callable] = "mean",
+            rescale: Union[float, Tuple[int, int]] = None, absolute_rescale: bool = False, dtype: type = int,
+            lazy: bool = True
+    ) -> dict:
         """Prepares the input data by applying various processing steps.
 
         Args:
-            data (numpy.ndarray or dask.array.Array): Input data to be prepared. Should be a 3D array.
-            channels (int or dict, optional): Number of channels or dictionary specifying channel names. (default: 1)
-            subtract_background (numpy.ndarray, str, or callable, optional): Background to subtract or channel name to use as background. (default: None)
-            subtract_func (str or callable, optional): Function to use for background subtraction. (default: "mean")
-            rescale (float, int, or tuple, optional): Scale factor or tuple specifying the new dimensions. (default: None)
-            dtype (numpy.dtype, optional): Data type to convert the processed data. (default: np.uint)
-            in_memory (bool, optional): If True, the processed data is loaded into memory. (default: False)
-
-        Returns:
-            dict: A dictionary mapping channel names to the processed data arrays.
+            data: Input data to be prepared. Should be a 3D array.
+            channels: Number of channels or dictionary specifying channel names.
+            subtract_background: Background to subtract or channel name to use as background.
+            subtract_func: Function to use for background subtraction.
+            absolute_rescale: If True, rescale is expected to be the final image size after rescaling.
+            rescale: Scale factor or tuple specifying the new dimensions.
+            dtype: Data type to convert the processed data.
+            lazy: If False, the processed data is loaded into memory.
 
         Raises:
             TypeError: If the input data type is not numpy.ndarray or dask.array.Array.
@@ -328,7 +328,7 @@ class Input:
 
             if stack.shape[0] % num_channels != 0:
                 logging.warning(
-                    f"cannot divide frames into channel number: {stack.shape[0]} % {num_channels} != 0. May lead to unexpacted behavior"
+                    f"cannot divide frames into channel number: {stack.shape[0]} % {num_channels} != 0. May lead to unexpected behavior"
                 )
 
             channels = channels if isinstance(channels, dict) else {i: f"ch{i}" for i in range(num_channels)}
@@ -351,12 +351,13 @@ class Input:
                 prep_data = self.convert_dtype(prep_data, dtype=dtype)
 
             # Load the prep_data into memory if requested
-            prep_data = dask.compute(prep_data)[0] if in_memory else prep_data
+            prep_data = prep_data if lazy else dask.compute(prep_data)[0]
 
             # Rename the channels in the output dictionary
             return {channels[i]: prep_data[i] for i in prep_data.keys()}
 
-    def convert_dtype(self, data, dtype):
+    @staticmethod
+    def convert_dtype(data, dtype):
 
         if dtype == np.uint:
             def func(chunk):
@@ -371,36 +372,49 @@ class Input:
 
         return data
 
-    def save(self, path, data, h5_loc=None, chunks=None, compression=None):
+    @staticmethod
+    def save(
+            path: Union[str, Path], data: Union[np.ndarray, da.Array, dict], loc: str = '',
+            chunk_strategy: Literal['balanced', 'XY', 'Z'] = "balanced", chunks: Tuple[int, int, int] = None,
+            compression: Literal['gzip', 'szip', 'lz4'] = None
+    ):
 
         """Save the processed data to a specified path.
 
         Args:
-            path (str or pathlib.Path): Path to save the processed data.
-            data (numpy.ndarray or dict): Processed data to be saved.
-            prefix (str, optional): Prefix to use when saving the processed data to HDF5. (default: None)
-            chunks (tuple or int, optional): Chunk size to use when saving to HDF5 or TileDB. (default: None)
-            compression (str or int, optional): Compression method to use when saving to HDF5 or TileDB. (default: None)
+            path: Path to save the processed data.
+            data: Processed data to be saved.
+            loc: Location of the dataset in an HDF5 file.
+            chunk_strategy: Strategy used to infer appropriate chunk size.
+            chunks: User-defined chunk size. Ignores chunk_strategy if provided.
+            compression: Compression method to use when saving to HDF5 or TileDB.
         """
 
         io = IO()
-        io.save(path=path, data=data, h5_loc=h5_loc, chunks=chunks, compression=compression)
+        io.save(
+            path=path, data=data, loc=loc, chunk_strategy=chunk_strategy, chunks=chunks, compression=compression
+        )
 
 
 class IO:
 
-    def load(self, path, h5_loc=None, sep="_", z_slice=None, lazy=False, infer_strategy="balanced", chunks=None):
+    def load(
+            self, path: Union[str, Path], loc: str = '', sep: str = "_", z_slice: Tuple[int, int] = None,
+            lazy: True = False, chunk_strategy: Literal['balanced', 'XY', 'Z'] = "balanced",
+            chunks: Tuple[int, int, int] = None
+    ) -> Union[np.ndarray, da.Array]:
 
         """
         Loads data from a specified file or directory.
 
         Args:
-            path (str or pathlib.Path): The path to the file or directory.
-            h5_loc (str): The location of the dataset in an HDF5 file (default: None).
-            sep (str): Separator used for sorting file names (default: "_").
-
-        Returns:
-            numpy.ndarray or dask.array.core.Array: The loaded data.
+            path: The path to the file or directory.
+            loc: The location of the dataset in an HDF5 file.
+            sep: Separator used for sorting file names.
+            z_slice: Range of frames that are selective loaded.
+            lazy: Flag to load the data on demand or to memory (lazy = False).
+            chunk_strategy: Strategy to infer the chunks.
+            chunks: User-defined chunk size. Ignores `chunk_strategy` if provided.
 
         Raises:
             ValueError: If the file format is not recognized.
@@ -417,25 +431,25 @@ class IO:
 
             if path.suffix in [".tdb"]:
                 data = self._load_tdb(
-                    path, lazy=lazy, chunks=chunks, infer_strategy=infer_strategy, z_slice=z_slice
+                    path, lazy=lazy, chunks=chunks, infer_strategy=chunk_strategy, z_slice=z_slice
                 )
 
             elif path.suffix in [".tif", ".tiff", ".TIF", ".TIFF"]:
-                data = self._load_tiff(path, sep, lazy=lazy, infer_strategy=infer_strategy, z_slice=z_slice)
+                data = self._load_tiff(path, sep, lazy=lazy, infer_strategy=chunk_strategy, z_slice=z_slice)
 
             elif path.suffix in [".czi", ".CZI"]:
-                data = self._load_czi(path, lazy=lazy, chunks=chunks, infer_strategy=infer_strategy, z_slice=z_slice)
+                data = self._load_czi(path, lazy=lazy, chunks=chunks, infer_strategy=chunk_strategy, z_slice=z_slice)
 
             elif path.suffix in [".h5", ".hdf5", ".H5", ".HDF5"]:
                 data = self._load_h5(
-                    path, h5_loc=h5_loc, lazy=lazy, infer_strategy=infer_strategy, chunks=chunks, z_slice=z_slice
+                    path, loc=loc, lazy=lazy, infer_strategy=chunk_strategy, chunks=chunks, z_slice=z_slice
                 )
 
             elif path.suffix in [".npy", ".NPY"]:
-                data = self._load_npy(path, lazy=lazy, chunks=chunks, infer_strategy=infer_strategy, z_slice=z_slice)
+                data = self._load_npy(path, lazy=lazy, chunks=chunks, infer_strategy=chunk_strategy, z_slice=z_slice)
 
             elif path.suffix in [".csv", ".CSV"]:
-                data = self._load_csv(path, chunks=chunks, infer_strategy=infer_strategy, z_slice=z_slice)
+                data = self._load_csv(path, chunks=chunks, infer_strategy=chunk_strategy, z_slice=z_slice)
 
             elif path.is_dir():
 
@@ -446,11 +460,11 @@ class IO:
 
                 else:
                     data = self._load_tiff(
-                        path, sep, lazy=lazy, infer_strategy=infer_strategy, chunks=chunks, z_slice=z_slice
+                        path, sep, lazy=lazy, infer_strategy=chunk_strategy, chunks=chunks, z_slice=z_slice
                     )
 
             else:
-                raise ValueError("unrecognized file format! Choose one of [.tiff, .h5, .tdb, .czi]")
+                raise ValueError("Unrecognized file format! Choose one of [.tiff, .h5, .tdb, .czi, .npy, .csv]")
 
         elif isinstance(path, np.ndarray):
 
@@ -459,7 +473,7 @@ class IO:
                 path = path[z0:z1]
 
             if lazy:
-                chunks = self.infer_chunks_from_array(arr=path, strategy=infer_strategy, chunks=chunks)
+                chunks = self.infer_chunks_from_array(arr=path, strategy=chunk_strategy, chunks=chunks)
                 data = da.from_array(path, chunks=chunks)
             else:
                 data = path
@@ -474,10 +488,16 @@ class IO:
             else:
                 data = path
 
+        else:
+            raise ValueError(
+                f"unrecognized file format! Choose a path (str, Path), a numpy/dask array {type(path)}"
+            )
+
         return data
 
     def _load_npy(self, path, lazy=False, chunks=None, infer_strategy="balanced", z_slice=None):
 
+        z0 = z1 = None
         if z_slice is not None:
             z0, z1 = z_slice
 
@@ -520,6 +540,7 @@ class IO:
 
         """
 
+        z0 = z1 = None
         if z_slice is not None:
             z0, z1 = z_slice
 
@@ -542,30 +563,34 @@ class IO:
 
         return data
 
-    def _load_h5(self, path, h5_loc, lazy=False, chunks=None, infer_strategy="balanced", z_slice=None):
+    def _load_h5(self, path, loc, lazy=False, chunks=None, infer_strategy="balanced", z_slice=None):
 
         """
         Loads data from an HDF5 file.
 
         Args:
             path (pathlib.Path): The path to the HDF5 file.
-            h5_loc (str): The location of the dataset in the HDF5 file.
+            loc (str): The location of the dataset in the HDF5 file.
 
         Returns:
             numpy.ndarray: The loaded data.
 
         """
 
+        if loc is None:
+            raise ValueError(f"Please provide the location of the dataset in the HDF5 file")
+
+        z0 = z1 = None
         if z_slice is not None:
             z0, z1 = z_slice
 
         if lazy:
             data = h5py.File(path, "r")
 
-            if h5_loc not in data:
+            if loc not in data:
                 raise ValueError(f"cannot find dataset in file ({path}): {list(data.keys())}")
 
-            data = data[h5_loc]
+            data = data[loc]
 
             if z_slice is not None:
                 data = data[z0:z1]
@@ -576,13 +601,13 @@ class IO:
         else:
             with h5py.File(path, "r") as data:
 
-                if h5_loc not in data:
+                if loc not in data:
                     raise ValueError(f"cannot find dataset in file ({path}): {list(data.keys())}")
 
                 if z_slice is not None:
-                    data = data[h5_loc][z0:z1]
+                    data = data[loc][z0:z1]
                 else:
-                    data = data[h5_loc][:]  # Read all data from HDF5 file
+                    data = data[loc][:]  # Read all data from HDF5 file
 
         return data
 
@@ -637,14 +662,6 @@ class IO:
             chunks = self.infer_chunks_from_array(arr=data, strategy=infer_strategy, chunks=chunks)
             data = da.from_array(data, chunks=chunks)
 
-        # TODO would be useful to be able to drop non-1D axes. Not sure how to implement this though
-        # if ignore_dimensions is not None:
-        #     ignore_dimensions = list(ignore_dimensions) if isinstance(ignore_dimensions, int) else ignore_dimensions
-        #     assert isinstance(ignore_dimensions, (list, tuple)), "please provide 'ignore_dimensions' as int, list or tuple"
-        #
-        #   for d in ignore_dimensions:
-        #       np.delete(data, axis=k) # not tested that this actually works
-
         if len(data.shape) != 3:
             logging.warning(
                 f"the dataset is not 3D but instead: {data.shape}. This will most likely create errors downstream in the pipeline."
@@ -655,7 +672,7 @@ class IO:
     @staticmethod
     def sort_alpha_numerical_names(file_names, sep="_"):
         """
-        Sorts a list of file names in alpha-numeric order based on a given separator.
+        Sorts a list of file names in alphanumeric order based on a given separator.
 
         Args:
             file_names (list): A list of file names to be sorted.
@@ -702,6 +719,7 @@ class IO:
 
         """
 
+        z0 = z1 = None
         if z_slice is not None:
             z0, z1 = z_slice
 
@@ -756,17 +774,22 @@ class IO:
 
         return stack
 
-    def save(self, path, data, h5_loc=None, chunks=None, infer_strategy="balanced", compression=None, overwrite=False):
-
+    def save(
+            self, path: Union[str, Path], data: Union[np.ndarray, da.Array, dict], loc: str = '',
+            chunks: Tuple[int, int, int] = None, chunk_strategy: Literal['balanced', 'XY', 'Z'] = "balanced",
+            compression: Literal['gzip', 'lz4', 'szip'] = None, overwrite: bool = False
+    ) -> Union[str, Path, List[str]]:
         """
         Save data to a specified file format.
 
         Args:
-            path (str or pathlib.Path): The path to the output file.
-            data (dict or np.ndarray or dask.array.Array): A dictionary containing the data to be saved, with keys as channel names and values as arrays.
-            h5_loc (str): Name of the dataset within the file (applicable only for HDF5 format).
-            chunks (tuple or None): The chunk size to be used when saving Dask arrays (applicable only for HDF5 format).
-            compression (str or None): The compression method to be used when saving Dask arrays (applicable only for HDF5 format).
+            path: The path to the output file.
+            data: Data in numpy/dask array format or a dictionary `{'channel name': arr}`.
+            loc: Name of the dataset within the file (applicable only for HDF5 format).
+            chunk_strategy: Strategy utilized to find optimal chunk sizes.
+            chunks: User-defined chunk size. Ignores `chunk_strategy` if provided.
+            compression: The compression method to be used when saving Dask arrays.
+            overwrite: Flag to toggle overwriting of existing files.
 
         Returns:
             list: A list containing the paths of the saved files.
@@ -796,7 +819,7 @@ class IO:
 
             # infer chunks if necessary
             if chunks == "infer":
-                chunks = self.infer_chunks(channel.shape, channel.dtype, strategy=infer_strategy)
+                chunks = self.infer_chunks(channel.shape, channel.dtype, strategy=chunk_strategy)
                 logging.warning(f"inferred chunk size: {chunks}")
 
             # infer compression
@@ -817,20 +840,23 @@ class IO:
 
                 fpath = path
 
-                # create dataset location
-                if isinstance(h5_loc, dict):
-                    loc = h5_loc[k]
+                if loc is None:
+                    raise ValueError(f"Please provide the location of the dataset in the HDF5 file.")
 
-                elif h5_loc is None:
+                # create dataset location
+                if isinstance(loc, dict):
+                    loc = loc[k]
+
+                elif loc is None:
                     loc = k if "/" in str(k) else f"io/{k}"
 
                 elif len(data) == 1:
-                    loc = f"{h5_loc}/{k}" if "/" not in h5_loc[:-1] else h5_loc
+                    loc = f"{loc}/{k}" if "/" not in loc[:-1] else loc
 
                 else:
-                    loc = f"{h5_loc}/{k}"
+                    loc = f"{loc}/{k}"
 
-                self.exists_and_clean(fpath, h5_loc=loc, overwrite=overwrite)
+                self.exists_and_clean(fpath, loc=loc, overwrite=overwrite)
                 logging.info(f"saving channel {k} to '{loc}'")
 
                 if isinstance(channel, da.Array):
@@ -909,7 +935,6 @@ class IO:
                 if isinstance(fpath, Path):
                     fpath = fpath.as_posix()
 
-                # fourcc = cv2.VideoWriter_fourcc(*'XVID')
                 out = cv2.VideoWriter(
                     fpath, fourcc=cv2.VideoWriter_fourcc('M', 'J', 'P', 'G'), fps=16, frameSize=(X, Y), isColor=True
                 )
@@ -936,7 +961,8 @@ class IO:
 
         return saved_paths if len(saved_paths) > 1 else saved_paths[0]  # Return the list of saved file paths
 
-    def exists_and_clean(self, path, h5_loc="", overwrite=False):
+    @staticmethod
+    def exists_and_clean(path, loc="", overwrite=False):
 
         path = Path(path)
 
@@ -948,18 +974,18 @@ class IO:
 
             with h5py.File(path, "a") as f:
 
-                if h5_loc in ("", None):
-                    raise ValueError(f"Please provide a valid h5 dataset location instead of {h5_loc}")
+                if loc in ("", None):
+                    raise ValueError(f"Please provide a valid h5 dataset location instead of {loc}")
 
-                if h5_loc in f:
+                if loc in f:
 
-                    logging.warning(f"deleting previous result: {path} [{h5_loc}]")
+                    logging.warning(f"deleting previous result: {path} [{loc}]")
 
                     if overwrite:
-                        del f[h5_loc]
+                        del f[loc]
                     else:
                         raise FileExistsError(
-                            f"output dataset exists {path} [{h5_loc}]. "
+                            f"output dataset exists {path} [{loc}]. "
                             f"Please choose a different dataset or set 'overwrite=True'"
                         )
 
@@ -1034,25 +1060,31 @@ class IO:
     def infer_chunks_from_array(self, arr, strategy="balanced", chunk_bytes=int(1e6), chunks=None):
         return self.infer_chunks(arr.shape, arr.dtype, strategy=strategy, chunk_bytes=chunk_bytes, chunks=chunks)
 
+
 class MotionCorrection:
     """ Class for performing motion correction based on the Jax-accelerated implementation of NoRMCorre.
 
     .. note::
 
-        For more information see the `accelerated <https://github.com/apasarkar/jnormcorre>`_ (used here) or
-        `original implementation <https://github.com/flatironinstitute/NoRMCorre>`_
+        For more information see the `accelerated <https://github.com/apasarkar/jnormcorre>`_ (used here),
+        `original implementation <https://github.com/flatironinstitute/NoRMCorre>`_ and the associated
+        publication Pnevmatikakis et al. 2017 [#normcorre]_
 
     .. hint::
 
-        Non-rigid motion correction is not always necessary. Sometimes, rigid motion correction will be sufficient
+        Non-rigid motion correction is not always necessary. Sometimes, rigid motion correction will be sufficient,
         and it will lead to significant performance gains in terms of speed. Check your data before and after rigid
         motion correction to decide what is best.
 
-    *Example*::
+    **Example**::
 
         mc = MotionCorrection()
-        mc.run('path/to/file.h5', h5_loc='data/ch0')
-        mc.save(output='path/to/file.h5', h5_loc='mc/ch0')
+        mc.run('path/to/file.h5', loc='data/ch0')
+        mc.save(output='path/to/file.h5', loc='mc/ch0')
+
+    .. rubric:: Footnotes
+
+    .. [#normcorre] Pnevmatikakis EA, Giovannucci A. NoRMCorre: An online algorithm for piecewise rigid motion correction of calcium imaging data. Journal of neuroscience methods. 2017 Nov 1;291:83-94. `https://doi.org/10.1016/j.jneumeth.2017.07.031 <https://doi.org/10.1016/j.jneumeth.2017.07.031>`_.
 
     """
 
@@ -1080,10 +1112,11 @@ class MotionCorrection:
         # output location
         self.mmap_path = None
         self.tiff_path = None
+        self.temp_path = None
         self.frames = self.X = self.Y = None
 
     def run(
-            self, path: Union[str, Path], h5_loc: str = "", max_shifts: Tuple[int, int] = (50, 50), niter_rig: int = 3,
+            self, path: Union[str, Path], loc: str = "", max_shifts: Tuple[int, int] = (50, 50), niter_rig: int = 3,
             splits_rig: int = 14, num_splits_to_process_rig: int = None, strides: Tuple[int, int] = (48, 48),
             overlaps: Tuple[int, int] = (24, 24), pw_rigid: bool = False, splits_els: int = 14,
             num_splits_to_process_els: int = None, upsample_factor_grid: int = 4, max_deviation_rigid: int = 3,
@@ -1093,7 +1126,7 @@ class MotionCorrection:
 
         Args:
             path: The input data to be motion corrected.
-            h5_loc: The dataset name in the .h5 file the data is stored in. Only relevant if
+            loc: The dataset name in the .h5 file the data is stored in. Only relevant if
                 path is an .h5 file.
             max_shifts: A tuple specifying the maximum allowed rigid shift in pixels.
             niter_rig: The maximum number of iterations for rigid motion correction. More iterations can improve
@@ -1118,7 +1151,7 @@ class MotionCorrection:
 
         from jnormcorre import motion_correction
 
-        path = self._validate_input(path, h5_loc=h5_loc)
+        path = self._validate_input(path, loc=loc)
         self.path = path
 
         # validate parameters
@@ -1140,7 +1173,7 @@ class MotionCorrection:
 
         # Create MotionCorrect instance
         mc = motion_correction.MotionCorrect(
-            path, var_name_hdf5=h5_loc, max_shifts=max_shifts, niter_rig=niter_rig, splits_rig=splits_rig,
+            path, var_name_hdf5=loc, max_shifts=max_shifts, niter_rig=niter_rig, splits_rig=splits_rig,
             num_splits_to_process_rig=num_splits_to_process_rig, strides=strides, overlaps=overlaps, pw_rigid=pw_rigid,
             splits_els=splits_els, num_splits_to_process_els=num_splits_to_process_els,
             upsample_factor_grid=upsample_factor_grid, max_deviation_rigid=max_deviation_rigid,
@@ -1161,13 +1194,13 @@ class MotionCorrection:
         self.mmap_path = mc.fname_tot_rig[0]
         self.tiff_path = registered_filename[0]
 
-    def _validate_input(self, path: Union[str, Path], h5_loc: str):
+    def _validate_input(self, path: Union[str, Path], loc: str) -> Path:
         """
         Validate and process the input for motion correction.
 
         Args:
             path (Union[str, Path, np.ndarray]): Input data for motion correction.
-            h5_loc (str): Dataset name in case of input being an HDF5 file.
+            loc (str): Dataset name in case of input being an HDF5 file.
 
         Returns:
             Union[Path, np.ndarray]: Validated and processed input.
@@ -1178,8 +1211,7 @@ class MotionCorrection:
             NotImplementedError: If the input format is not implemented.
 
         Notes:
-            - Motion Correction fails with custom h5_loc names in cases where there is only one folder (default behavior incorrect).
-            - A temporary .tiff file is created if the input is an ndarray, which needs to be deleted later using the 'clean_up()' method.
+            - A temporary .tiff file is created if the input is an array, which needs to be deleted later using the 'clean_up()' method.
         """
 
         if isinstance(path, (str, Path)):
@@ -1193,14 +1225,14 @@ class MotionCorrection:
             if path.suffix in [".h5", ".hdf5"]:
                 # If input is an HDF5 file
 
-                if h5_loc is None:
-                    raise ValueError("Please provide 'h5_loc' argument when providing .h5 file as data input.")
+                if loc is None:
+                    raise ValueError("Please provide 'loc' argument when providing .h5 file as data input.")
 
                 with h5py.File(path.as_posix(), "a") as f:
-                    if h5_loc not in f:
-                        raise ValueError(f"cannot find dataset {h5_loc} in provided in {path}.")
+                    if loc not in f:
+                        raise ValueError(f"cannot find dataset {loc} in provided in {path}.")
 
-                    self.frames, self.X, self.Y = f[h5_loc].shape
+                    self.frames, self.X, self.Y = f[loc].shape
 
                 return path
 
@@ -1231,16 +1263,16 @@ class MotionCorrection:
                 self.working_directory = tempfile.TemporaryDirectory()
 
             if isinstance(self.working_directory, tempfile.TemporaryDirectory):
-                temp_h5_path = Path(self.working_directory.name)
+                temp_dir = Path(self.working_directory.name)
             else:
-                temp_h5_path = Path(self.working_directory)
+                temp_dir = Path(self.working_directory)
 
-            assert temp_h5_path.exists(), f"working directory doesn't exist: {temp_h5_path}"
+            assert temp_dir.exists(), f"working directory doesn't exist: {temp_dir}"
 
-            temp_h5_path = temp_h5_path.joinpath(f"temp.tiff").as_posix()
-            tifffile.imwrite(temp_h5_path, path)
+            self.temp_path = temp_dir.joinpath(f"temp.tiff")
+            tifffile.imwrite(self.temp_path.as_posix(), path)
 
-            return temp_h5_path
+            return self.temp_path
 
         else:
             raise ValueError(f"please provide input_ as one of: np.ndarray, str, Path")
@@ -1257,8 +1289,6 @@ class MotionCorrection:
 
         """
 
-        path = self.path
-
         # Remove mmap result
         if self.mmap_path is not None and Path(self.mmap_path).is_file():
             os.remove(self.mmap_path)
@@ -1266,14 +1296,10 @@ class MotionCorrection:
         if self.tiff_path is not None and Path(self.tiff_path).is_file():
             os.remove(self.tiff_path)
 
-        # Remove temp .h5 if necessary
+        # Remove temp .tiff if necessary
         if self.working_directory is not None:
-            temp_h5_path = Path(self.working_directory.name) if isinstance(
-                self.working_directory, tempfile.TemporaryDirectory
-            ) else Path(self.working_directory)
-            temp_h5_path = temp_h5_path.joinpath(f"{self.dummy_folder_name}.h5").as_posix()
-            if temp_h5_path.is_file():
-                os.remove(temp_h5_path.as_posix())
+            if self.temp_path is not None and self.temp_path.is_file():
+                self.temp_path.unlink()
 
     @staticmethod
     @deprecated("use caiman's built-in file splitting function instead")
@@ -1305,7 +1331,7 @@ class MotionCorrection:
         return frames_per_file
 
     def save(
-            self, output: Union[str, Path] = None, h5_loc: str = "mc/ch0",
+            self, output: Union[str, Path] = None, loc: str = "mc/ch0",
             chunk_strategy: Literal['balanced', 'XY', 'Z'] = "balanced", chunks: Tuple[int, int, int] = None,
             compression: Literal['gzip', 'lzf', 'szip'] = None, remove_intermediate: bool = True
     ) -> Union[np.ndarray, None]:
@@ -1315,7 +1341,7 @@ class MotionCorrection:
 
         Args:
             output: Output file path where the data should be saved.
-            h5_loc: Location within the HDF5 file to save the data (required when output is an HDF5 file).
+            loc: Location within the HDF5 file to save the data (required when output is an HDF5 file).
             chunk_strategy: Chunk strategy to use when saving to an HDF5 file.
             chunks: Chunk shape for creating a dask array when saving to an HDF5 file.
             compression: Compression algorithm to use when saving to an HDF5 file.
@@ -1353,7 +1379,7 @@ class MotionCorrection:
 
             # Save the motion-corrected data to the output file using the I/O module
             self.io.save(
-                output, data=data, h5_loc=h5_loc, infer_strategy=chunk_strategy, chunks=chunks, compression=compression
+                output, data=data, loc=loc, chunk_strategy=chunk_strategy, chunks=chunks, compression=compression
             )
 
         else:
@@ -1365,22 +1391,22 @@ class MotionCorrection:
 
 
 class Delta:
-    """ Provides methods for bleach correction from input data.
+    """ Provides methods for bleach correction of input data.
 
-    Example:
+    Args:
+        data: The input data to be processed.
+        loc: The location of the data in the HDF5 file. This parameter is optional and only applicable when data has the .h5 extension.
 
-        # TODO
+    **Example**::
+
+        delta = Delta('/path/to/input.h5', loc="data/ch0")
+        delta.run(window=10, method="dF")
+        delta.save(output_path='/path/to/input.h5', loc="df/ch0", chunk_strategy="balanced", compression="gzip")
 
     """
 
     def __init__(self, data: Union[str, Path, np.ndarray, da.Array], loc: str = ""):
-        """
 
-        Args:
-            data: The input data to be processed. It can be a file path (str or Path object), a numpy ndarray, or a dask array.
-            loc: The location of the data in the HDF5 file. This parameter is optional and only applicable when data has the .h5 extension.
-
-        """
         # Convert the input to a Path object if it is a string
         self.data = Path(data) if isinstance(data, str) else data
         self.res = None
@@ -1392,53 +1418,46 @@ class Delta:
         self.loc = loc
 
     def run(
-            self, window: int, method: Literal['background', 'dF', 'dFF'] = "dF", infer_chunks: Literal['balanced', 'XY', 'Z']="Z", chunks=None,
-            output_path: Union[str, Path] = None, overwrite_first_frame: bool = True, lazy: bool = True
+            self, window: int, method: Literal['background', 'dF', 'dFF'] = "dF",
+            chunk_strategy: Literal['balanced', 'XY', 'Z'] = "Z", chunks=None, overwrite_first_frame: bool = True
     ) -> Union[np.ndarray, da.Array]:
         """
-        Runs the bleach correction on the input data using specified methods and parameters.
+        Performs bleach correction on the input data using specified methods and parameters.
 
         Args:
-        - window: The size of the window for the minimum filter.
-        - method: The method to use for delta calculation.
-        - infer_chunks: Strategy to infer appropriate chunk size
-        - chunks: User-defined chunk size (ignores inference strategy).
-        - output_path: The path to save the output. If None, output is not saved.
-        - overwrite_first_frame: A flag indicating whether to overwrite the values of the
-          first frame with the second frame after delta calculation. Default is True.
-        - lazy: A flag indicating whether to use lazy loading and computation, particularly with Dask.
-
-        Returns:
-        - Union[np.ndarray, da.Array]: The bleach correction results as a numpy ndarray or a Dask array,
-          depending on the 'lazy' parameter.
+            window: The size of the window for the minimum filter.
+            method: The method to use for delta calculation.
+            chunk_strategy: Strategy to infer appropriate chunk size
+            chunks: User-defined chunk size (ignores inference strategy).
+            overwrite_first_frame: A flag indicating whether to overwrite the values of the first frame with the second frame after delta calculation.
 
         Raises:
-        - ValueError: If the input data type is not recognized.
+            ValueError: If the input data type is not recognized.
 
         Notes:
-        - The function supports different types of input data, including numpy ndarrays, file paths (specifically .tdb and .h5 files),
-          and Dask arrays. It also handles parallel execution for large datasets, especially when input is a .tdb file.
+            The function supports different types of input data, including numpy arrays, file paths (specifically .tdb and .h5 files), and Dask arrays. It also handles parallel execution for large datasets, especially when input is a .tdb file.
 
-        .. warning:
+        .. warning::
 
-            For .tdb files, this function will overwrite the provided file.
+            For .tdb files as input, this function will overwrite the provided file.
+
         """
 
         # Prepare the data for processing
-        data = self.prepare_data(self.data, h5_loc=self.loc, infer_chunks=infer_chunks, chunks=chunks)
+        data = self._prepare_data(self.data, loc=self.loc, chunk_strategy=chunk_strategy, chunks=chunks)
 
         # Sequential execution
         if isinstance(data, np.ndarray):
             # Calculate delta using the minimum filter on the input data
-            res = self.calculate_delta_min_filter(data, window, method=method, inplace=False)
+            res = self._calculate_delta_min_filter(data, window, method=method, inplace=False)
 
         # Parallel from .tdb file
-        elif isinstance(data, (str, Path)) and Path(data).suffix in (".tdb"):
+        elif isinstance(data, (str, Path)) and Path(data).suffix in [".tdb", ".TDB"]:
             # Warning message for overwriting the .tdb file
             logging.warning("This function will overwrite the provided .tdb file!")
 
             # Define a wrapper function for parallel execution
-            calculate_delta_min_filter = self.calculate_delta_min_filter
+            calculate_delta_min_filter = self._calculate_delta_min_filter
 
             def wrapper(_path, ranges):
                 (_x0, x1), (_y0, y1) = ranges
@@ -1468,7 +1487,7 @@ class Delta:
                     for x0 in range(0, X, cx):
                         for y0 in range(0, X, cy):
                             range_ = ((x0, x0 + cx), (y0, y0 + cy))
-                            futures.append(client.submit(wrapper, path, range_))
+                            futures.append(client.submit(wrapper, (path, range_)))
 
                     # Gather the results from parallel executions
                     client.gather(futures)
@@ -1481,7 +1500,7 @@ class Delta:
             # Calculate delta using Dask array for lazy loading and computation
 
             def xy_delta(x):
-                return self.calculate_delta_min_filter(x, window=window, method=method, inplace=False)
+                return self._calculate_delta_min_filter(x, window=window, method=method, inplace=False)
 
             res = data.map_blocks(xy_delta, dtype=float)
 
@@ -1495,61 +1514,87 @@ class Delta:
         self.res = res
         return res
 
-    def save(self, output_path, h5_loc="df", infer_strategy="XY", chunks=None, compression=None, overwrite=False):
+    def save(
+            self, output_path: Union[str, Path], loc: str = "df",
+            chunk_strategy: Literal['balanced', 'XY', 'Z'] = "balanced", chunks: Tuple[int, int, int] = None,
+            compression: Literal['gzip', 'szip', 'lz4'] = None, overwrite: bool = False
+    ):
+        """
+        Saves the result data to a specified file.
 
+        This method wraps the functionality of the `IO` class's `save` method, allowing for saving the data in different
+        chunk strategies and with various compression methods.
+
+        Parameters:
+            output_path: Path to the file where the data will be saved.
+            loc: The dataset name within the HDF5 file to store the data.
+            chunk_strategy: Strategy to infer appropriate chunk size when saving.
+            chunks: User-defined chunk size. Ignores `chunk_strategy`.
+            compression: Compression method to use for storing the data.
+            overwrite: Whether to overwrite the file if it already exists.
+
+        .. note::
+
+            The 'loc' parameter defaults to 'df', and the 'chunk_strategy' defaults to 'balanced'. If 'chunks' is
+            not specified, the method will infer appropriate chunk sizes based on the strategy. The 'overwrite' flag is
+            set to False by default, ensuring that existing files are not overwritten unless explicitly intended.
+        """
         io = IO()
         io.save(
-            output_path, data=self.res, h5_loc=h5_loc, infer_strategy=infer_strategy, chunks=chunks,
-            compression=compression, overwrite=overwrite
+            output_path, data=self.res, loc=loc, chunk_strategy=chunk_strategy, chunks=chunks, compression=compression,
+            overwrite=overwrite
         )
 
-    def prepare_data(self, input_, infer_chunks="Z", chunks=None, h5_loc=None):
+    @staticmethod
+    def _prepare_data(
+            data: Union[str, Path, np.ndarray, da.Array], chunk_strategy: Literal['balanced', 'XY', 'Z'] = 'Z',
+            chunks: Tuple[int, int, int] = None, loc: str = ''
+    ) -> da.Array:
 
-        """
-        Preprocesses the input data by converting it to a TileDB array and optionally loading it into memory
-        or creating a Dask array.
+        """ Preprocesses the input data by converting it to a dask compatible format or TileDB array and optionally
+            loading it into memory or creating a Dask array.
 
         Args:
-        - input_: A Path object or numpy ndarray representing the input data to be preprocessed.
-
-        Returns:
-            da.Array of input data
+            data: A data object or file path to the data to be processed.
+            chunk_strategy: The strategy to use for inferring appropriate chunk size of the input data.
+            chunks: User-defined chunk size for the input data. Ignores `chunk_strategy`
+            loc: Dataset name for the input data if a .h5 file is provided.
 
         Raises:
-        - TypeError: If the input data type is not recognized.
+            TypeError: If the input data type is not recognized.
         """
 
-        # TODO this function needs to be overhauled
-
         io = IO()
-        if isinstance(input_, Path):
+        if isinstance(data, Path):
 
-            data = io.load(input_, h5_loc=h5_loc, infer_strategy=chunk_strategy, chunks=chunks)
+            data = io.load(data, loc=loc, chunk_strategy=chunk_strategy, chunks=chunks)
             data = data.astype(int)
             return data
 
-        elif isinstance(input_, (np.ndarray, da.Array)):
+        elif isinstance(data, (np.ndarray, da.Array)):
 
-            chunks = io.infer_chunks_from_array(arr=input_, strategy=infer_strategy, chunks=chunks)
+            chunks = io.infer_chunks_from_array(arr=data, strategy=chunk_strategy, chunks=chunks)
 
-            if not isinstance(input_, da.Array):
-                input_ = da.from_array(input_, chunks=chunks)
+            if not isinstance(data, da.Array):
+                data = da.from_array(data, chunks=chunks)
 
-            if input_.chunks != chunks:
-                input_ = input_.rechunk(chunks)
+            if data.chunks != chunks:
+                data = data.rechunk(chunks)
 
-            input_ = input_.astype(int)  # TODO this should not be hardcoded
+            data = data.astype(int)  # TODO this should not be hardcoded
 
-            return input_
+            return data
 
         else:
-            raise TypeError(f"do not recognize data type: {type(input_)}")
+            raise TypeError(f"do not recognize data type: {type(data)}")
 
     @staticmethod
     @deprecated(reason="faster implementation but superseded by: calculate_background_even_faster")
     def calculate_background_pandas(
-            arr: np.ndarray, window: int, method="background", inplace: bool = True
+            arr: np.ndarray, window: int, method="dF", inplace: bool = True
     ) -> np.ndarray:
+
+        res = None
 
         if len(np.squeeze(arr)) < 2:
             arr = np.expand_dims(arr, axis=0)
@@ -1559,11 +1604,14 @@ class Delta:
         if not inplace:
             res = np.zeros(arr.shape, arr.dtype)
 
-        methods = {"background": lambda x, background: background, "dF": lambda x, background: x - background,
-                   "dFF": lambda x, background: np.divide(x - background, background)}
-        if method not in methods.keys(): raise ValueError(
-            f"please provide a valid argument for 'method'; one of : {methods.keys()}"
-        )
+        # define the possible methods
+        methods = {"background": lambda _x, _background: _background, "dF": lambda _x, _background: _x - _background,
+                   "dFF": lambda _x, _background: np.divide(_x - _background, _background)}
+
+        if method not in methods.keys():
+            raise ValueError(
+                f"please provide a valid argument for 'method'; one of : {methods.keys()}"
+            )
 
         delta = methods[method]  # choose method
 
@@ -1593,9 +1641,40 @@ class Delta:
         return np.squeeze(arr) if inplace else np.squeeze(res)
 
     @staticmethod
-    def calculate_delta_min_filter(arr: np.ndarray, window: int, method="background", inplace=False) -> np.ndarray:
+    def _calculate_delta_min_filter(
+            arr: np.ndarray, window: int, method: Literal['background', 'dF', 'dFF'] = "dF", inplace: bool = False
+    ) -> np.ndarray:
+        """
+        Calculates a delta value based on a specified method, applied to a 3D numpy array with a minimum filter over a window.
+
+        This method applies a minimum filter across a window of specified size to each pixel in the input array.
+        The delta is then calculated based on the selected method, either as a background value, a difference from the background (dF),
+        or a relative difference from the background (dFF).
+
+        Parameters:
+            arr: A 3D numpy array to which the delta min filter will be applied.
+            window: The size of the window over which the minimum filter is applied.
+            method: Method for calculating delta.
+            inplace: If True, the operation modifies the array in place.
+
+        Returns:
+            np.ndarray: A numpy array of the same shape as the input, containing the calculated delta values.
+
+        Raises:
+            ValueError: If an invalid method is specified.
+
+        .. note::
+            The 'background' method returns the background value itself.
+            The 'dF' method returns the difference from the background.
+            The 'dFF' method returns the relative difference from the background.
+
+        Example:
+            >>> rand_data = np.random.rand(10, 10, 10)
+            >>> result = Delta._calculate_delta_min_filter(rand_data, window=5, method='dF')
+        """
 
         original_dims = arr.shape
+        res = None
 
         # Ensure array is at least 3D
         if len(np.squeeze(arr)) < 2:
@@ -1604,11 +1683,12 @@ class Delta:
         arr = np.atleast_3d(arr)
 
         # choose delta function
-        methods = {"background": lambda x, background: background, "dF": lambda x, background: x - background,
-                   "dFF": lambda x, background: np.divide(x - background, background)}
-        if method not in methods.keys(): raise ValueError(
-            f"please provide a valid argument for 'method'; one of : {methods.keys()}"
-        )
+        methods = {"background": lambda _x, _background: _background, "dF": lambda _x, _background: _x - _background,
+                   "dFF": lambda _x, _background: np.divide(_x - _background, _background)}
+        if method not in methods.keys():
+            raise ValueError(
+                f"please provide a valid argument for 'method'; one of : {methods.keys()}"
+            )
 
         delta_func = methods[method]
 
@@ -1652,10 +1732,6 @@ class Delta:
                 MIN = np.maximum(MIN_even_expanded, MIN_odd_expanded)
 
                 # Shift the minimum signal by window/2 and take the max of the two signals
-                # background = np.zeros((2, len(z)))
-                # background[0, :] = MIN[:-window]
-                # background[1, :] = MIN[window:]
-                # background = np.nanmax(background, axis=0)
                 background = MIN[shift:-shift]
 
                 if inplace:
@@ -1679,16 +1755,6 @@ class XII:
 
     @staticmethod
     def load_xii(file_path, dataset_name, num_channels=1, sampling_rate=None, channel_names=None):
-
-        """
-        :param unit:
-        :param dataset_name:
-        :param file:
-        :param channels:
-        :param unify_timeline:
-        :param sampling_rate: in ms
-        :return:
-        """
 
         # define sampling rate
         if sampling_rate is None:
@@ -1800,7 +1866,7 @@ class XII:
 
     def show(
             self, dataset_name, mapping, viewer=None, viewer1d=None, down_sample=100, colormap=None, window=160,
-            ylabel="XII", xlabel="step"
+            y_label="XII", x_label="step"
     ):
 
         # todo: test with Video
@@ -1809,6 +1875,7 @@ class XII:
         from napari_plot._qt.qt_viewer import QtViewer
         from napari.utils.events import Event
 
+        qt_viewer = None
         xii = self.container[dataset_name][::down_sample]
 
         if viewer1d is None:
@@ -1817,14 +1884,14 @@ class XII:
         else:
             v1d = viewer1d
 
-        v1d.axis.y_label = ylabel
-        v1d.axis.x_label = xlabel
+        v1d.axis.y_label = y_label
+        v1d.axis.x_label = x_label
         v1d.text_overlay.visible = True
         v1d.text_overlay.position = "top_right"
 
-        # create attachable qtviewer
+        # create attachable qt viewer
         X, Y = xii.index, xii.values
-        line = v1d.add_line(np.c_[X, Y], name=ylabel, color=colormap)
+        line = v1d.add_line(np.c_[X, Y], name=y_label, color=colormap)
 
         def update_line(event: Event):
             Z, _, _ = event.value
@@ -1846,6 +1913,6 @@ class XII:
         viewer.dims.events.current_step.connect(update_line)
 
         if viewer1d is None:
-            viewer.window.add_dock_widget(qt_viewer, area="bottom", name=ylabel)
+            viewer.window.add_dock_widget(qt_viewer, area="bottom", name=y_label)
 
         return viewer, v1d
