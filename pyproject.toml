@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "astrocast"
-version = "0.3.6"
+version = "0.3.7"
 description = "Package to analyze calcium fluorescence events in astrocytes"
 authors = ["Jan Philipp Reising <jan.reising@ki.se>", "Ana Cristina González"]
 
@@ -56,7 +56,7 @@ llvmlite = "~0.39"
 gdown = "^4.7.1"
 climage = "^0.2.0"
 simple-slurm = "^0.2.6"
-pydantic = {version = "^1", extras = ["video-player"]}
+pydantic = { version = "^1", extras = ["video-player"] }
 jupyterlab = "^4.0.8"
 ipywidgets = "^8.1.1"
 napari = { version = "0.4.14", optional = true }

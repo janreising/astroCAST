@@ -12,7 +12,7 @@ RUN mkdir /home/data
 RUN cd /home && git clone https://github.com/janreising/astroCAST.git
 
 # Install astroCAST and jupyerlab
-RUN pip3 install astrocast[all] jupyterlab
+RUN pip3 install astrocast[video_player, testing, doc] jupyterlab
 
 # Run command
 CMD [ "/bin/bash" ]
