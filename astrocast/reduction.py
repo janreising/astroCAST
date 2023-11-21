@@ -15,12 +15,12 @@ from scipy import stats
 from scipy.cluster import hierarchy
 
 from astrocast.analysis import Events
-from astrocast.helper import CachedClass, wrapper_local_cache
+from astrocast.helper import CachedClass, wrapper_local_cache, experimental
 
 
 class FeatureExtraction(CachedClass):
 
-    def __init__(self, events:Events, cache_path=None, logging_level=logging.INFO):
+    def __init__(self, events: Events, cache_path=None, logging_level=logging.INFO):
         super().__init__(cache_path=cache_path, logging_level=logging_level)
 
         self.events = events
@@ -32,9 +32,10 @@ class FeatureExtraction(CachedClass):
         """
 
         # Using inspect to get only the functions
-        exclusion = ['__hash__', '__init__', 'all_features', 'get_features',
-                     'print_cache_path', '_get_length_sequences_where']
-        functions_list = [attr for attr, _ in inspect.getmembers(FeatureExtraction, inspect.isfunction) if attr not in exclusion]
+        exclusion = ['__hash__', '__init__', 'all_features', 'get_features', 'print_cache_path',
+                     '_get_length_sequences_where']
+        functions_list = [attr for attr, _ in inspect.getmembers(FeatureExtraction, inspect.isfunction) if
+                          attr not in exclusion]
 
         features = {name: getattr(self, name) for name in functions_list}
 
@@ -101,7 +102,7 @@ class FeatureExtraction(CachedClass):
         if hasattr(stats, 'median_abs_deviation'):
             return stats.median_abs_deviation(X)
         else:
-            return stats.median_absolute_deviation( X)
+            return stats.median_absolute_deviation(X)
 
     def variation(self, X):
         """ coefficient of variation """
@@ -352,8 +353,9 @@ class FeatureExtraction(CachedClass):
     def __hash__(self):
         return hash(self.events)
 
+
 class UMAP:
-    def __init__(self, n_neighbors=30, min_dist=0, n_components=2, metric="euclidean",):
+    def __init__(self, n_neighbors=30, min_dist=0, n_components=2, metric="euclidean", ):
         self.reducer = umap.UMAP(n_neighbors=n_neighbors, min_dist=min_dist, n_components=n_components, metric=metric)
 
     def train(self, data):
@@ -362,6 +364,7 @@ class UMAP:
     def embed(self, data):
         return self.reducer.transform(data)
 
+    @experimental
     def plot(self, data=None, ax=None, labels=None, size=0.1, use_napari=True):
 
         if use_napari:
@@ -378,11 +381,10 @@ class UMAP:
             if labels is None:
                 viewer.add_points(points, size=size)
             else:
-                labels_ = labels/np.max(labels)
-                viewer.add_points(points,
-                                  properties={'labels':labels_},
-                                  face_color='labels', face_colormap='viridis',
-                                  size=size)
+                labels_ = labels / np.max(labels)
+                viewer.add_points(
+                    points, properties={'labels': labels_}, face_color='labels', face_colormap='viridis', size=size
+                )
 
             return viewer
 
@@ -398,9 +400,10 @@ class UMAP:
 
                 if labels is not None:
 
-                    palette = sns.color_palette("husl", len(np.unique(labels)))
-                    ax.scatter(data[:, 0], data[:, 1], alpha=0.1, s=size,
-                               color=[palette[v] for v in labels])
+                    palette = sns.color_palette("husl", len(np.unique(labels)) + 1)
+                    ax.scatter(
+                        data[:, 0], data[:, 1], alpha=0.1, s=size, color=[palette[v] for v in labels]
+                    )
 
                 else:
                     ax.scatter(data[:, 0], data[:, 1], alpha=0.1, s=size)
@@ -431,8 +434,8 @@ class UMAP:
         assert path.is_file(), f"can't find umap: {path}"
         self.reducer = pickle.load(open(path, "rb"))
 
-class ClusterTree():
 
+class ClusterTree():
     """ converts linkage matrix to searchable tree"""
 
     def __init__(self, Z):
@@ -478,3 +481,15 @@ class ClusterTree():
             return right
 
         return None
+
+    def is_leaf(self):
+        """
+        Determines if the given node is a leaf in the tree.
+
+        Args:
+            tree (ClusterNode): The node to check.
+
+        Returns:
+            bool: True if the node is a leaf, False otherwise.
+        """
+        return self.tree.get_left() is None and self.tree.get_right() is None

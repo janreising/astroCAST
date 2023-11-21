@@ -2,9 +2,11 @@ import tempfile
 
 import pytest
 
+from astrocast.analysis import Events
 from astrocast.detection import *
 from astrocast.helper import EventSim, SampleInput
 from astrocast.preparation import IO
+
 
 class Test_Detector:
 
@@ -15,11 +17,11 @@ class Test_Detector:
         si = SampleInput()
         input_ = si.get_test_data(extension=extension)
 
-        with tempfile.TemporaryDirectory() as dir:
-            tmpdir = Path(dir)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmpdir = Path(tmpdir)
             assert tmpdir.is_dir()
 
-            det = Detector(input_,  output=tmpdir.joinpath("tempData"))
+            det = Detector(input_, output=tmpdir.joinpath("tempData"))
             det.run(h5_loc="dff/ch0", lazy=False, debug=debug)
 
             dir_ = det.output_directory
@@ -29,8 +31,8 @@ class Test_Detector:
             assert det.data.size != 0, "data object is empty"
             assert det.data.shape is not None, "data has no dimensions"
 
-            for file_name in ["event_map.tdb", "event_map.tiff", "active_pixels.tiff",
-                              "time_map.npy", "events.npy", "meta.json"]:
+            for file_name in ["event_map.tdb", "event_map.tiff", "active_pixels.tiff", "time_map.npy", "events.npy",
+                              "meta.json"]:
                 is_file = dir_.joinpath(file_name)
                 assert is_file, f"{file_name} file does not exist in output directory"
 
@@ -41,36 +43,32 @@ class Test_Detector:
 
     def test_sim_data(self):
 
-        with tempfile.TemporaryDirectory() as dir:
-            tmpdir = Path(dir)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmpdir = Path(tmpdir)
             assert tmpdir.is_dir()
 
             path = tmpdir.joinpath("sim.h5")
             h5_loc = "dff/ch0"
 
             sim = EventSim()
-            video, num_events = sim.simulate(shape=(50, 100, 100),
-                                             skip_n=5, event_intensity=100, background_noise=1,
-                                             gap_time=3, gap_space=5)
+            video, num_events = sim.simulate(
+                shape=(50, 100, 100), skip_n=5, gap_space=5, gap_time=3, event_intensity=100, background_noise=1
+            )
             io = IO()
-            io.save(path=path, data={h5_loc:video})
+            io.save(path=path, data={h5_loc: video})
 
-            det = Detector(path.as_posix(),  output=None)
-            events = det.run(h5_loc=h5_loc, lazy=True, debug=False)
-
-            dir_ = det.output_directory
+            det = Detector(path.as_posix())
+            dir_ = det.run(h5_loc=h5_loc, lazy=True, debug=False)
 
             assert dir_.is_dir(), "Output folder does not exist"
             assert bool(det.meta), "metadata dictionary is empty"
             assert det.data.size != 0, "data object is empty"
             assert det.data.shape is not None, "data has no dimensions"
 
-            expected_files = ["event_map.tdb", "event_map.tiff", "time_map.npy", "events.npy", "meta.json"]
+            expected_files = ["event_map.tiff", "time_map.npy", "events.npy", "meta.json"]
             for file_name in expected_files:
                 assert dir_.joinpath(file_name).exists(), f"cannot find {file_name}"
 
             # check event detection
+            events = Events(dir_)
             assert np.allclose(len(events), num_events, rtol=0.15), f"Found {len(events)} instead of {num_events}."
-
-
-

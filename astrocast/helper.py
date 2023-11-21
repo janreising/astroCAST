@@ -20,13 +20,6 @@ import yaml
 from skimage.util import img_as_uint
 
 
-def notimplemented(f, msg=""):
-    def raise_not_implemented(msg):
-        raise NotImplementedError(msg)
-
-    return raise_not_implemented
-
-
 def wrapper_local_cache(f):
     """ Wrapper that creates a local save of the function call based on a hash of the arguments
     expects a function from a class with 'lc_path'::pathlib.Path and 'local_cache':bool attribute
@@ -234,6 +227,24 @@ def wrapper_local_cache(f):
 
     return inner_function
 
+def experimental(func):
+    """
+    Decorator to mark functions as experimental and log a warning upon their usage.
+
+    Args:
+        func (Callable): The function to be decorated.
+
+    Returns:
+        Callable: The decorated function with a warning.
+    """
+
+    def wrapper(*args, **kwargs):
+        logger = logging.getLogger(func.__module__)
+        message = f"Warning: {func.__name__} is an experimental function and may be unstable."
+        logger.warning(message)
+        return func(*args, **kwargs)
+
+    return wrapper
 
 def get_data_dimensions(
         data: Union[np.ndarray, da.Array, str, Path], loc: str = None, return_dtype: bool = False
@@ -251,7 +262,17 @@ def get_data_dimensions(
     - TypeError: If the input is not of a recognized type.
     """
 
-    if isinstance(data, (str, Path)):
+    if isinstance(data, np.ndarray):
+        shape = data.shape
+        chunksize = np.array([])
+        dtype = data.dtype
+
+    elif isinstance(data, da.Array):
+        shape = data.shape
+        chunksize = data.chunksize
+        dtype = data.dtype
+        
+    elif isinstance(data, [str, Path]):
         path = Path(data)
 
         # If the input is a Path to an HDF5 file, check if the file has the .h5 extension
@@ -282,16 +303,10 @@ def get_data_dimensions(
                 chunksize = [int(tdb.schema.domain.dim(i).tile) for i in range(tdb.schema.domain.ndim)]
                 dtype = tdb.schema.domain.dtype
 
-    elif isinstance(data, np.ndarray):
-        shape = data.shape
-        chunksize = np.array([])
-        dtype = data.dtype
-
-    elif isinstance(data, da.Array):
-        shape = data.shape
-        chunksize = data.chunksize
-        dtype = data.dtype
-
+        else:
+            raise TypeError(f"data type not recognized: {path.suffix}")
+                
+    # If the input is of an unrecognized format, raise a TypeError
     else:
         raise TypeError(f"data type not recognized: {type(data)}")
 
@@ -1040,7 +1055,8 @@ def download_sample_data(save_path, public_datasets=True, custom_datasets=True):
     if custom_datasets:
         folder_url = "https://drive.google.com/drive/u/0/folders/13I_1q3osfIGlLhjEiAnLBoJSfPux688g"
         gdown.download_folder(
-            folder_url, output=save_path.joinpath("custom_data").as_posix(), quiet=False, use_cookies=False
+            folder_url, output=save_path.joinpath("custom_data").as_posix(), quiet=False, use_cookies=False,
+            remaining_ok=True
         )
 
     logging.info(f"Downloaded sample datasets to: {save_path}")
@@ -1053,7 +1069,7 @@ def download_pretrained_models(save_path):
 
     folder_url = "https://drive.google.com/drive/u/0/folders/1RJU-JjQIpoRJOqxivOVo44Q3irs88YX8"
     gdown.download_folder(
-        folder_url, output=save_path.joinpath("public_data").as_posix(), quiet=False, use_cookies=False
+        folder_url, output=save_path.joinpath("models").as_posix(), quiet=False, use_cookies=False, remaining_ok=True
     )
 
     logging.info(f"Downloaded sample datasets to: {save_path}")

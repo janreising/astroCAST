@@ -380,20 +380,15 @@ def motion_correction(
     help='Method to use for delta calculation.'
 )
 @click_custom_option(
-    '--infer-processing-chunks', is_flag=True, default=False, help='Infer the chunks for data processing.'
+    '--chunk-strategy', type=click.STRING, default="balanced", help='Strategy to infer chunks: ["balanced", "Z", "XY"]'
 )
 @click_custom_option(
-    '--processing-chunks', type=(click.INT, click.INT, click.INT), default=None, help='Chunk size for data processing.'
-)
-@click_custom_option('--infer-save-chunks', is_flag=True, default=False, help='Infer the chunks for the HDF5 file.')
-@click_custom_option(
-    '--save-chunks', type=(click.INT, click.INT, click.INT), default=None, help='Chunk size for saving.'
+    '--chunks', type=(click.INT, click.INT, click.INT), default=None, help='Manual definition of chunk size for saving.'
 )
 @click_custom_option(
     '--overwrite-first-frame', type=click.BOOL, default=True,
     help='Whether to overwrite the first frame with the second frame after delta calculation.'
 )
-@click_custom_option('--lazy', type=click.BOOL, default=True, help='Flag for lazy data loading and computation.')
 @click_custom_option(
     '--h5-loc-out', type=click.STRING, default="dff", help='Location within the HDF5 file to save the data.'
 )
@@ -405,8 +400,8 @@ def motion_correction(
     '--overwrite', type=click.BOOL, default=False, help='Flag for overwriting previous result in output location'
 )
 def subtract_delta(
-        input_path, output_path, h5_loc_in, method, window, infer_processing_chunks, processing_chunks,
-        infer_save_chunks, save_chunks, overwrite_first_frame, lazy, h5_loc_out, compression, logging_level, overwrite
+        input_path, output_path, h5_loc_in, method, window, chunk_strategy, chunks, overwrite_first_frame, h5_loc_out,
+        compression, logging_level, overwrite
 ):
     """
     Subtract baseline of input using the Delta class.
@@ -424,25 +419,19 @@ def subtract_delta(
             logging.warning("skipping this step because output exists.")
             return 0
 
-        # check chunks
-        processing_chunks = parse_chunks(infer_processing_chunks, processing_chunks)
-        save_chunks = parse_chunks(infer_save_chunks, save_chunks)
-
         # Initialize the Delta instance
         logging.info("creating delta instance ...")
         delta_instance = Delta(data=input_path, loc=h5_loc_in)
 
         # Run the delta calculation
         logging.info("subtracting background ...")
-        result = delta_instance.run(
-            method=method, window=window, processing_chunks=processing_chunks, output_path=None,
-            overwrite_first_frame=overwrite_first_frame, lazy=lazy
-        )
+        result = delta_instance.run(method=method, window=window, overwrite_first_frame=overwrite_first_frame)
 
         # Save the results to the specified output path
         logging.info("saving result ...")
         delta_instance.save(
-            output_path=output_path, h5_loc=h5_loc_out, chunks=save_chunks, compression=compression, overwrite=overwrite
+            output_path=output_path, h5_loc=h5_loc_out, infer_strategy=chunk_strategy, chunks=chunks,
+            compression=compression, overwrite=overwrite
         )
 
 
@@ -864,7 +853,7 @@ def visualize_h5(input_path):
     """
 
     file_size = humanize.naturalsize(os.path.getsize(input_path))
-    print(f"\n> {os.path.basename(input_path)} ({file_size})")
+    print(f"> {os.path.basename(input_path)} ({file_size})")
 
     import h5py
 
@@ -1011,8 +1000,8 @@ def view_detection_results(event_dir, video_path, h5_loc, z_select, lazy, testin
 )
 @click_custom_option('--compression', default=None, help='Compression method to use when saving to HDF5 or TileDB.')
 @click_custom_option(
-    '--rescale', default=None, help='(float): The rescaling factor or factors to '
-                                    'apply to the data arrays.'
+    '--rescale', type=click.FLOAT, default=None, help='(float): The rescaling factor to '
+                                                      'apply to the data array.'
 )
 @click_custom_option(
     '--overwrite', type=click.BOOL, default=False, help='Flag for overwriting previous result in output location'
@@ -1038,7 +1027,7 @@ def export_video(
     lazy (bool, optional): Whether to implement lazy loading, which can improve performance when working with large datasets by only loading data into memory as it is needed. Defaults to True.
     chunk_size (tuple of int, optional): A tuple specifying the chunk size for saving the results in the output file. If not provided, a default chunk size will be used. Defaults to None.
     compression (str, optional): The compression method to use when saving data to the output file. If not provided, no compression is applied. Defaults to None.
-    rescale (tuple, list, int, float): The rescaling factor or factors to apply to the data arrays.
+    rescale float: The rescaling factor to apply to the data arrays.
     overwrite (bool, optional): Whether to overwrite previous results in the output location if they exist. Defaults to False.
 
     Returns:
@@ -1061,12 +1050,12 @@ def export_video(
     io = IO()
     data = io.load(input_path, h5_loc=h5_loc_in, z_slice=z_select, lazy=lazy)
 
-    if rescale is not None:
-        data = {"dummy": data}
+    if rescale is not None and rescale != 1.0:
         data = Input.rescale_data(data, rescale=float(rescale))
-        data = data["dummy"]
 
-    io.save(output_path, data=data, h5_loc=h5_loc_out, chunks=chunk_size, compression=compression, overwrite=overwrite)
+    chunks = io.infer_chunks_from_array(arr=data, strategy="balanced", chunks=chunk_size)
+    io.save(output_path, data=data, h5_loc=h5_loc_out, chunks=chunks, compression=compression, overwrite=overwrite)
+
 
 
 @cli.command()

@@ -45,7 +45,6 @@ class Input:
     """
 
     def __init__(self, logging_level: int = logging.INFO):
-
         logging.basicConfig(level=logging_level)
 
     def run(
@@ -89,9 +88,14 @@ class Input:
         data = io.load(input_path, h5_loc=h5_loc_in, sep=sep, z_slice=z_slice, lazy=lazy, chunks=(1, -1, -1))
 
         logging.info("preparing data ...")
+        if isinstance(rescale, int) or (isinstance(rescale, (tuple, list)) and isinstance(rescale[0], int)):
+            absolute_rescale = True
+        else:
+            absolute_rescale = False
+
         data = self.prepare_data(
             data, channels=channels, subtract_background=subtract_background, subtract_func=subtract_func,
-            rescale=rescale, dtype=dtype, in_memory=in_memory
+            rescale=rescale, absolute_rescale=absolute_rescale, dtype=dtype, in_memory=in_memory
         )
 
         logging.debug(f"data type: {type(data[list(data.keys())[0]])}")
@@ -185,7 +189,7 @@ class Input:
         return data
 
     @staticmethod
-    def rescale_data(data, rescale):
+    def rescale_data(data, rescale, absolute_rescale=False):
         """
         Rescale the data arrays to a new size.
 
@@ -196,6 +200,7 @@ class Input:
                 If an int or float, the same scaling factor will be applied to both axes.
                 If given an int, it will assume that this is the requested final size.
                 If given a float, it will multiply the current size by that value.
+            absolute_rescale (bool): If True, rescale is assumed to be in absolute units (e.g., pixels), otherwise it is in relative units (e.g., percent).
 
         Returns:
             dict: A dictionary mapping channel names to the rescaled data arrays.
@@ -204,67 +209,84 @@ class Input:
             ValueError: If the rescale type is mixed (e.g., int and float) or not one of tuple, list, int, or float.
             ValueError: If the length of the rescale tuple or list is not 2.
             TypeError: If the rescale type is not tuple, list, int, or float.
+
         """
 
-        # Get the original size
-        X, Y = list(data.values())[0][0, :, :].shape
+        return_array = False
+        if isinstance(data, (np.ndarray, da.Array)):
+            data = {"dummy": data}
+            return_array = True
 
         # Convert numbers to tuple (same factor for X and Y)
         if isinstance(rescale, (int, float)):
             rescale = (rescale, rescale)
 
-        # validate rescale value
-        if type(rescale[0]) != type(rescale[1]):
-            raise ValueError(
-                f"mixed rescale type not allowed for 'rescale' flag: {type(rescale[0])} vs {type(rescale[1])}"
-            )
-        elif len(rescale) != 2:
+        # validate the rescale type
+        if not isinstance(rescale, (tuple, list, int, float)):
             raise ValueError("please provide 'rescale' flag as 2D tuple, list or number")
-
-        # Calculate the new size
-        if isinstance(rescale[0], int):
-            rX, rY = rescale[0], rescale[1]
-        elif isinstance(rescale[0], float):
-            rX, rY = (int(X * rescale[0]), int(Y * rescale[1]))
-        else:
-            raise TypeError("'rescale' flag should be of type tuple, list, int or float")
+        elif isinstance(rescale, (tuple, list)) and len(rescale) != 2:
+            raise ValueError("please provide 'rescale' flag as 2D tuple or list")
+        elif isinstance(rescale, (tuple, list)) and type(rescale[0]) != type(rescale[1]):
+            raise ValueError(
+                f"mixed rescale type not allowed for 'rescale' flag:"
+                f" {type(rescale[0])} vs {type(rescale[1])}"
+            )
 
         # Apply resizing to each channel
         for k in data.keys():
             # Rescale the data array using the specified scaling factors and anti-aliasing
 
-            data[k] = data[k].astype(float)
+            arr = data[k]
+
+            # Get the original size
+            Z, X, Y = arr.shape
+            dtype_original = arr.dtype
+            chunks_original = arr.chunks
+
+            # convert to relative scale if absolute size was provided
+            if absolute_rescale:
+                rescale = rescale[0] / X, rescale[1] / Y
+
+            # Calculate the requested output dimensions
+            new_shape = (Z, int(X * rescale[0]), int(Y * rescale[1]))
+            new_chunks = (
+                tuple([c for c in chunks_original[0]]), tuple([int(c * rescale[0]) for c in chunks_original[1]]),
+                tuple([int(c * rescale[1]) for c in chunks_original[2]]))
+
+            logging.warning(f"Resizing {k} from {arr.shape} to {new_shape}")
+            logging.warning(f"Rescaling {k} from {chunks_original} to {new_chunks}")
 
             with warnings.catch_warnings():
                 warnings.filterwarnings("ignore", category=UserWarning)
 
-                cz, _, _ = data[k].chunks
-                dtype = data[k].dtype
+                def custom_resize(chunk):
+                    dtype = chunk.dtype
+                    z, x, y = chunk.shape
 
-                if not isinstance(cz, (int, float)):
-                    cz = cz[0]
+                    new_shape_ = (z, int(x * rescale[0]), int(y * rescale[1]))
 
-                def custom_resize(arr, shape):
-                    dtype = arr.dtype
+                    chunk = resize(image=chunk.astype(float), output_shape=new_shape_, anti_aliasing=True)
+                    chunk = chunk.astype(dtype)
 
-                    arr = resize(image=arr, output_shape=shape, anti_aliasing=True)
-                    arr = arr.astype(dtype)
+                    return chunk
 
-                    return arr
-
-                data[k] = data[k].map_blocks(
-                    lambda chunk: custom_resize(chunk, (cz, rX, rY)), chunks=(cz, rX, rY), dtype=dtype
+                arr = arr.map_blocks(
+                    lambda chunk: custom_resize(chunk), chunks=new_chunks,
+                    meta=np.zeros(new_shape, dtype=dtype_original)
                 )
 
-            data[k] = data[k].astype(int)
+            # restore initial chunks and convert to original dtype
+            data[k] = arr.astype(dtype_original)
+
+        if return_array:
+            data = data["dummy"]
 
         return data
 
     def prepare_data(
-            self, data, channels=1, subtract_background=None, subtract_func="mean", rescale=None, dtype=np.uint,
-            in_memory=False
+            self, data, channels=1, subtract_background=None, subtract_func="mean", rescale=None,
+            absolute_rescale=False, dtype=np.int, in_memory=False
     ):
-
         """Prepares the input data by applying various processing steps.
 
         Args:
@@ -322,7 +344,7 @@ class Input:
 
             # Rescale the prep_data if specified
             if (rescale is not None) and rescale != 1 and rescale != 1.0:
-                self.rescale_data(prep_data, rescale)
+                self.rescale_data(prep_data, rescale, absolute_rescale=absolute_rescale)
 
             # Convert the prep_data type if specified
             if dtype is not None:
@@ -367,7 +389,7 @@ class Input:
 
 class IO:
 
-    def load(self, path, h5_loc=None, sep="_", z_slice=None, lazy=False, chunks="auto"):
+    def load(self, path, h5_loc=None, sep="_", z_slice=None, lazy=False, infer_strategy="balanced", chunks=None):
 
         """
         Loads data from a specified file or directory.
@@ -395,25 +417,25 @@ class IO:
 
             if path.suffix in [".tdb"]:
                 data = self._load_tdb(
-                    path, lazy=lazy, chunks=chunks, z_slice=z_slice
-                )  # Call private method to load TDB file
+                    path, lazy=lazy, chunks=chunks, infer_strategy=infer_strategy, z_slice=z_slice
+                )
 
             elif path.suffix in [".tif", ".tiff", ".TIF", ".TIFF"]:
-                data = self._load_tiff(path, sep, lazy=lazy, z_slice=z_slice)  # Call private method to load TIFF file
+                data = self._load_tiff(path, sep, lazy=lazy, infer_strategy=infer_strategy, z_slice=z_slice)
 
             elif path.suffix in [".czi", ".CZI"]:
-                data = self._load_czi(path, lazy=lazy, z_slice=z_slice)  # Call private method to load CZI file
+                data = self._load_czi(path, lazy=lazy, chunks=chunks, infer_strategy=infer_strategy, z_slice=z_slice)
 
             elif path.suffix in [".h5", ".hdf5", ".H5", ".HDF5"]:
                 data = self._load_h5(
-                    path, h5_loc=h5_loc, lazy=lazy, chunks=chunks, z_slice=z_slice
-                )  # Call private method to load HDF5 file
+                    path, h5_loc=h5_loc, lazy=lazy, infer_strategy=infer_strategy, chunks=chunks, z_slice=z_slice
+                )
 
             elif path.suffix in [".npy", ".NPY"]:
-                data = self._load_npy(path, lazy=lazy, chunks=chunks, z_slice=z_slice)
+                data = self._load_npy(path, lazy=lazy, chunks=chunks, infer_strategy=infer_strategy, z_slice=z_slice)
 
             elif path.suffix in [".csv", ".CSV"]:
-                data = self._load_csv(path, chunks=chunks, z_slice=z_slice)
+                data = self._load_csv(path, chunks=chunks, infer_strategy=infer_strategy, z_slice=z_slice)
 
             elif path.is_dir():
 
@@ -424,8 +446,8 @@ class IO:
 
                 else:
                     data = self._load_tiff(
-                        path, sep, lazy=lazy, z_slice=z_slice
-                    )  # Call private method to load TIFF files from directory
+                        path, sep, lazy=lazy, infer_strategy=infer_strategy, chunks=chunks, z_slice=z_slice
+                    )
 
             else:
                 raise ValueError("unrecognized file format! Choose one of [.tiff, .h5, .tdb, .czi]")
@@ -436,15 +458,25 @@ class IO:
                 z0, z1 = z_slice
                 path = path[z0:z1]
 
-            data = da.from_array(path, chunks=chunks)
+            if lazy:
+                chunks = self.infer_chunks_from_array(arr=path, strategy=infer_strategy, chunks=chunks)
+                data = da.from_array(path, chunks=chunks)
+            else:
+                data = path
 
         elif isinstance(path, da.Array):
-            z0, z1 = z_slice
-            data = da.rechunk(path[z0:z1], chunks=chunks)
+            if z_slice is not None:
+                z0, z1 = z_slice
+                path = path[z0:z1]
+
+            if chunks is not None and path.chunks != chunks:
+                data = da.rechunk(path, chunks=chunks)
+            else:
+                data = path
 
         return data
 
-    def _load_npy(self, path, lazy=False, chunks="auto", z_slice=None):
+    def _load_npy(self, path, lazy=False, chunks=None, infer_strategy="balanced", z_slice=None):
 
         if z_slice is not None:
             z0, z1 = z_slice
@@ -464,6 +496,8 @@ class IO:
                 if z_slice is not None:
                     mmap = mmap[z0:z1]
 
+                chunks = self.infer_chunks_from_array(arr=mmap, strategy=infer_strategy, chunks=chunks)
+
                 return da.from_array(mmap, chunks=chunks)
 
         else:
@@ -473,7 +507,7 @@ class IO:
 
             return data
 
-    def _load_tdb(self, path, lazy=False, chunks="auto", z_slice=None):
+    def _load_tdb(self, path, lazy=False, chunks=None, infer_strategy="balanced", z_slice=None):
 
         """
         Loads data from a TileDB file.
@@ -495,6 +529,7 @@ class IO:
             if z_slice is not None:
                 tdb = tdb[z0:z1]
 
+            chunks = self.infer_chunks_from_array(arr=tdb, strategy=infer_strategy, chunks=chunks)
             data = da.from_array(tdb, chunks=chunks)
 
         else:
@@ -507,7 +542,7 @@ class IO:
 
         return data
 
-    def _load_h5(self, path, h5_loc, lazy=False, chunks="auto", z_slice=None):
+    def _load_h5(self, path, h5_loc, lazy=False, chunks=None, infer_strategy="balanced", z_slice=None):
 
         """
         Loads data from an HDF5 file.
@@ -535,6 +570,7 @@ class IO:
             if z_slice is not None:
                 data = data[z0:z1]
 
+            chunks = self.infer_chunks_from_array(arr=data, strategy=infer_strategy, chunks=chunks)
             data = da.from_array(data, chunks=chunks)
 
         else:
@@ -550,18 +586,23 @@ class IO:
 
         return data
 
-    def _load_csv(self, path, chunks="auto"):
+    def _load_csv(self, path, chunks=None, infer_strategy="balanced", z_slice=None):
 
         df = pd.read_csv(path)
 
-        if isinstance(pd.Series):
+        if isinstance(df, pd.Series):
             df = df.values
+
+            if z_slice is not None:
+                z0, z1 = z_slice
+                df = df[z0:z1]
+
+            chunks = self.infer_chunks_from_array(arr=df, strategy=infer_strategy, chunks=chunks)
             return da.from_array(df, chunks=chunks)
 
         return df
 
-    @staticmethod
-    def _load_czi(path, lazy=False, z_slice=None):
+    def _load_czi(self, path, lazy=False, chunks=None, infer_strategy="balanced", z_slice=None):
 
         """
         Loads a CZI file from the specified path and returns the data.
@@ -573,9 +614,6 @@ class IO:
             numpy.ndarray: The loaded data from the CZI file.
 
         """
-
-        if lazy:
-            raise NotImplementedError("currently czi loading is not implemented with lazy loading. Use 'lazy=False'.")
 
         # Convert path to a pathlib.Path object if it's provided as a string
         path = Path(path) if isinstance(path, str) else path
@@ -593,6 +631,11 @@ class IO:
 
         # Remove single-dimensional entries from the shape of the data
         data = np.squeeze(data)
+
+        # convert to dask array
+        if lazy:
+            chunks = self.infer_chunks_from_array(arr=data, strategy=infer_strategy, chunks=chunks)
+            data = da.from_array(data, chunks=chunks)
 
         # TODO would be useful to be able to drop non-1D axes. Not sure how to implement this though
         # if ignore_dimensions is not None:
@@ -640,8 +683,7 @@ class IO:
 
         return file_names
 
-    @staticmethod
-    def _load_tiff(path, sep="_", lazy=False, z_slice=None):
+    def _load_tiff(self, path, sep="_", lazy=False, chunks=None, infer_strategy="balanced", z_slice=None):
 
         """
         Loads TIFF image data from the specified path and returns a Dask array.
@@ -686,6 +728,9 @@ class IO:
             stack = da.stack([dask_image.imread.imread(f.as_posix()) for f in files])
             stack = np.squeeze(stack)
 
+            chunks = self.infer_chunks_from_array(stack, strategy=infer_strategy, chunks=chunks)
+            stack = da.rechunk(stack, chunks=chunks)
+
             if len(stack.shape) != 3:
                 raise NotImplementedError(
                     f"dimensions incorrect: {len(stack.shape)}. Currently not implemented for dim != 3D"
@@ -695,7 +740,11 @@ class IO:
             # If the path is a file, load a single TIFF file
 
             if lazy:
-                stack = dask_image.imread.imread(path)
+                stack = tifffile.imread(path.as_posix())
+
+                chunks = self.infer_chunks_from_array(stack, strategy=infer_strategy, chunks=chunks)
+                stack = da.from_array(stack, chunks=chunks)
+
             else:
                 stack = tifffile.imread(path.as_posix())
 
@@ -932,11 +981,14 @@ class IO:
                 )
 
     @staticmethod
-    def infer_chunks(shape, dtype, strategy="balanced", chunk_bytes=int(1e6)):
+    def infer_chunks(shape, dtype, strategy="balanced", chunk_bytes=int(1e6), chunks=None):
 
         """
         Infer the chunks for the input data.
         """
+
+        if chunks is not None and isinstance(chunks, (tuple, list)):
+            return chunks
 
         Z, X, Y = shape
         item_size = np.dtype(dtype).itemsize
@@ -977,8 +1029,10 @@ class IO:
         else:
             raise ValueError(f"Unknown strategy, please provide one of 'balanced', 'Z' or 'XY'")
 
-        return (cz, cx, cy)
+        return cz, cx, cy
 
+    def infer_chunks_from_array(self, arr, strategy="balanced", chunk_bytes=int(1e6), chunks=None):
+        return self.infer_chunks(arr.shape, arr.dtype, strategy=strategy, chunk_bytes=chunk_bytes, chunks=chunks)
 
 class MotionCorrection:
     """ Class for performing motion correction based on the Jax-accelerated implementation of NoRMCorre.
@@ -1214,14 +1268,10 @@ class MotionCorrection:
 
         # Remove temp .h5 if necessary
         if self.working_directory is not None:
-
-            if isinstance(self.working_directory, tempfile.TemporaryDirectory):
-                temp_h5_path = Path(self.working_directory.name)
-            else:
-                temp_h5_path = Path(self.working_directory)
-
-            temp_h5_path = temp_h5_path.joinpath(f"temp.h5")
-
+            temp_h5_path = Path(self.working_directory.name) if isinstance(
+                self.working_directory, tempfile.TemporaryDirectory
+            ) else Path(self.working_directory)
+            temp_h5_path = temp_h5_path.joinpath(f"{self.dummy_folder_name}.h5").as_posix()
             if temp_h5_path.is_file():
                 os.remove(temp_h5_path.as_posix())
 
@@ -1342,7 +1392,7 @@ class Delta:
         self.loc = loc
 
     def run(
-            self, window: int, method: Literal['background', 'dF', 'dFF'] = "dF", processing_chunks="infer",
+            self, window: int, method: Literal['background', 'dF', 'dFF'] = "dF", infer_chunks: Literal['balanced', 'XY', 'Z']="Z", chunks=None,
             output_path: Union[str, Path] = None, overwrite_first_frame: bool = True, lazy: bool = True
     ) -> Union[np.ndarray, da.Array]:
         """
@@ -1351,9 +1401,8 @@ class Delta:
         Args:
         - window: The size of the window for the minimum filter.
         - method: The method to use for delta calculation.
-
-        - processing_chunks: Chunk size for processing. If "infer", chunk size is automatically determined.
-
+        - infer_chunks: Strategy to infer appropriate chunk size
+        - chunks: User-defined chunk size (ignores inference strategy).
         - output_path: The path to save the output. If None, output is not saved.
         - overwrite_first_frame: A flag indicating whether to overwrite the values of the
           first frame with the second frame after delta calculation. Default is True.
@@ -1376,9 +1425,7 @@ class Delta:
         """
 
         # Prepare the data for processing
-        data = self.prepare_data(
-            self.data, h5_loc=self.loc, chunks=processing_chunks, output_path=output_path, lazy=lazy
-        )
+        data = self.prepare_data(self.data, h5_loc=self.loc, infer_chunks=infer_chunks, chunks=chunks)
 
         # Sequential execution
         if isinstance(data, np.ndarray):
@@ -1448,12 +1495,15 @@ class Delta:
         self.res = res
         return res
 
-    def save(self, output_path, h5_loc="df", chunks=("auto", "auto", "auto"), compression=None, overwrite=False):
+    def save(self, output_path, h5_loc="df", infer_strategy="XY", chunks=None, compression=None, overwrite=False):
 
         io = IO()
-        io.save(output_path, data=self.res, h5_loc=h5_loc, chunks=chunks, compression=compression, overwrite=overwrite)
+        io.save(
+            output_path, data=self.res, h5_loc=h5_loc, infer_strategy=infer_strategy, chunks=chunks,
+            compression=compression, overwrite=overwrite
+        )
 
-    def prepare_data(self, input_, chunk_strategy="Z", chunks=None, h5_loc=None, output_path=None, lazy=True):
+    def prepare_data(self, input_, infer_chunks="Z", chunks=None, h5_loc=None):
 
         """
         Preprocesses the input data by converting it to a TileDB array and optionally loading it into memory
@@ -1461,14 +1511,9 @@ class Delta:
 
         Args:
         - input_: A Path object or numpy ndarray representing the input data to be preprocessed.
-        - in_memory: A boolean flag indicating whether the data should be loaded into memory or kept on disk.
-        - shared: A boolean flag indicating whether to create a shared memory array or a Dask array. This flag
-          is only applicable if 'in_memory' is True.
 
         Returns:
-        - If 'in_memory' is False, returns the path to the TileDB array on disk (created if necessary).
-        - If 'in_memory' is True and 'shared' is False, returns the data as a numpy ndarray.
-        - If 'in_memory' is True and 'shared' is True, returns the data as a Dask array.
+            da.Array of input data
 
         Raises:
         - TypeError: If the input data type is not recognized.
@@ -1477,60 +1522,23 @@ class Delta:
         # TODO this function needs to be overhauled
 
         io = IO()
+        if isinstance(input_, Path):
 
-        # define chunk size
-        shape, chunk_size, dtype = get_data_dimensions(input_, loc=h5_loc, return_dtype=True)
-        new_chunk_size = io.infer_chunks(shape, dtype, strategy=chunk_strategy)
-
-        if not lazy:
-            data = io.load(input_, h5_loc=h5_loc, lazy=False)
-
-            if not isinstance(data, da.Array):
-                data = da.from_array(data, chunks=new_chunk_size)
-
-            elif isinstance(data, da.Array) and data.chunksize != new_chunk_size:
-                data = da.rechunk(data, chunks=new_chunk_size)
-
-            data = data.astype(int)  # TODO this seems dangerous
-
-            return data
-
-        # convert to .tdb
-        if isinstance(input_, Path) and input_.suffix == ".tdb":
-            data = io.load(input_, lazy=lazy, chunks=new_chunk_size)
+            data = io.load(input_, h5_loc=h5_loc, infer_strategy=chunk_strategy, chunks=chunks)
             data = data.astype(int)
             return data
 
-        elif isinstance(input_, Path):
-            # if the input is a file path, load it into memory and convert to TileDB array
+        elif isinstance(input_, (np.ndarray, da.Array)):
 
-            data = io.load(input_, h5_loc=self.loc)
-            data = data.astype(int)
+            chunks = io.infer_chunks_from_array(arr=input_, strategy=infer_strategy, chunks=chunks)
 
-            new_path = input_.with_suffix(".tdb") if output_path is None else Path(output_path)
-            if not new_path.suffix in (".tdb"):
-                raise ValueError(f"Please provide an output_path with '.tdb' ending instead of {new_path.suffix}")
+            if not isinstance(input_, da.Array):
+                input_ = da.from_array(input_, chunks=chunks)
 
-            if new_path.exists():
-                logging.warning(f"found previous result. Deleting {new_path}")
-                shutil.rmtree(new_path)
-
-            io.save(new_path, data=data, infer_strategy=chunk_strategy, chunks=chunks)
-
-            return io.load(new_path, lazy=lazy)
-
-        elif isinstance(input_, np.ndarray):
-
-            input_ = da.from_array(input_, chunks=new_chunk_size)
-            input_ = input_.astype(int)
-            return input_
-
-        elif isinstance(input_, da.Array):
-
-            if input_.chunksize != new_chunk_size:
+            if input_.chunks != chunks:
                 input_ = input_.rechunk(chunks)
 
-            input_ = input_.astype(int)
+            input_ = input_.astype(int)  # TODO this should not be hardcoded
 
             return input_
 
