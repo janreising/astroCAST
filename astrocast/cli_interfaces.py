@@ -430,7 +430,7 @@ def subtract_delta(
 
         # Initialize the Delta instance
         logging.info("creating delta instance ...")
-        delta_instance = Delta(input_=input_path, loc=h5_loc_in)
+        delta_instance = Delta(data=input_path, loc=h5_loc_in)
 
         # Run the delta calculation
         logging.info("subtracting background ...")
