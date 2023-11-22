@@ -269,7 +269,7 @@ class Explorer:
         @reactive.Calc
         def get_smooth():
             data = load_data()
-            smooth = detection.Detector.gaussian_smooth_3d(data, sigma=input.sigma(), radius=input.radius())
+            smooth = detection.Detector._gaussian_smooth_3d(data, sigma=input.sigma(), radius=input.radius())
 
             if not input.lazy():
                 smooth = smooth.compute()
@@ -289,7 +289,7 @@ class Explorer:
                     data = load_data()
 
                 p.set(1, message="Spatial thresholding.", detail="This may take a while ...")
-                spatial = detection.Detector.spatial_threshold(
+                spatial = detection.Detector._spatial_threshold(
                     data, min_ratio=input.min_ratio(), threshold_z_depth=input.z_depth()
                 )
 
@@ -309,7 +309,7 @@ class Explorer:
                     data = load_data()
 
                 p.set(1, message="Temporal thresholding.", detail="This may take a while ...")
-                temporal = detection.Detector.temporal_threshold(
+                temporal = detection.Detector._temporal_threshold(
                     data, prominence=input.prominence(), width=input.width(), rel_height=input.rel_height(),
                     wlen=input.wlen()
                 )
@@ -368,7 +368,7 @@ class Explorer:
                     if input.comb_options() == "None":
 
                         if input.use_holes():
-                            filled = detection.Detector.fill_holes(
+                            filled = detection.Detector._fill_holes(
                                 dat, area_threshold=input.area_threshold(), connectivity=input.connectivity_holes(),
                                 depth=input.holes_depth()
                             )
@@ -376,7 +376,7 @@ class Explorer:
                             res_lbls.append(lbl + "_fill")
 
                         if input.use_objects():
-                            rem = detection.Detector.remove_objects(
+                            rem = detection.Detector._remove_objects(
                                 dat, min_size=input.min_size(), connectivity=input.connectivity_holes(),
                                 depth=input.objects_depth()
                             )
@@ -385,11 +385,11 @@ class Explorer:
 
                     elif input.comb_options() == "holes > objects":
 
-                        filled = detection.Detector.fill_holes(
+                        filled = detection.Detector._fill_holes(
                             dat, area_threshold=input.area_threshold(), connectivity=input.connectivity_holes(),
                             depth=input.objects_depth()
                         )
-                        rem = detection.Detector.remove_objects(
+                        rem = detection.Detector._remove_objects(
                             filled, min_size=input.min_size(), connectivity=input.connectivity_holes(),
                             depth=input.holes_depth()
                         )
@@ -399,12 +399,12 @@ class Explorer:
 
                     elif input.comb_options() == "objects > holes":
 
-                        rem = detection.Detector.remove_objects(
+                        rem = detection.Detector._remove_objects(
                             dat, min_size=input.min_size(), connectivity=input.connectivity_holes(),
                             depth=input.objects_depth()
                         )
 
-                        filled = detection.Detector.fill_holes(
+                        filled = detection.Detector._fill_holes(
                             rem, area_threshold=input.area_threshold(), connectivity=input.connectivity_holes(),
                             depth=input.holes_depth()
                         )
@@ -533,7 +533,7 @@ class Explorer:
                 for i, (x, y) in enumerate(pixels):
                     traces[:, i, 0] = data[:, x, y]
 
-                mask = detection.Detector.temporal_threshold(
+                mask = detection.Detector._temporal_threshold(
                     traces, prominence=input.prominence(), width=input.width(), rel_height=input.rel_height(),
                     wlen=input.wlen()
                 )

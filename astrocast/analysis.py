@@ -443,7 +443,7 @@ class Events(CachedClass):
                 time_map = np.load(time_map_path.as_posix(), allow_pickle=True)[()]
 
             elif event_map is not None:
-                time_map = astrocast.detection.Detector.get_time_map(event_map=event_map, chunk=chunk)
+                time_map = astrocast.detection.Detector._get_time_map(event_map=event_map, chunk=chunk)
                 np.save(time_map_path.as_posix(), time_map)
 
             else:
@@ -454,7 +454,7 @@ class Events(CachedClass):
             if not isinstance(event_map, (np.ndarray, da.Array)):
                 raise ValueError(f"please provide 'event_map' as np.ndarray or da")
 
-            time_map = astrocast.detection.Detector.get_time_map(event_map=event_map, chunk=chunk)
+            time_map = astrocast.detection.Detector._get_time_map(event_map=event_map, chunk=chunk)
 
         else:
             raise ValueError("Please provide either 'event_dir' or 'event_map'.")

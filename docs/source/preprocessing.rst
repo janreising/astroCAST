@@ -24,6 +24,9 @@ Bleach correction
 Event detection
 ---------------
 
+.. autoclass:: astrocast.detection.Detector
+    :members:
+
 The event object
 -----------------
 

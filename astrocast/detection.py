@@ -6,7 +6,7 @@ import shutil
 import traceback
 import warnings
 from pathlib import Path
-from typing import Optional, Union
+from typing import Union, Literal, Tuple
 
 import dask.array as da
 import numpy as np
@@ -30,32 +30,46 @@ from astrocast.preparation import IO
 
 class Detector:
     """
-    The detector class provides a method and dependency functions to detect events, estimate background noise, identify methods based on a threshold (user provided or calculated), characterize events...
+    Detector is a class designed for detecting and analyzing astrocytic events in video datasets,
+    particularly focusing on spatial and temporal characteristics of these events.
 
-    Methods:
-     - run(self, dataset: Optional[str] = None, threshold: Optional[float] = None, min_size: int = 20,
-        lazy: bool = True, adjust_for_noise: bool = False, subset: Optional[str] = None, split_events: bool = True,
-        binary_struct_iterations: int = 1, binary_struct_connectivity: int = 2, save_activepixels: bool = False):
-        the 'dataset' parameter corresponds to the name or identifier of the dataset in the h5 file.
-        the 'threshold' value to discriminate background from events. If None, automatic thresholding is performed.
-         the 'min_size' refers to Minimum size of an event region. Events with size < min_size will be excluded.
-        the 'lazy' parameter, if set to True, lazy loading is implemented.
-        the 'adjust_for_noise', indicates if event detection for background noise adjustment must be carried out.
-        the 'subset' indicates which subset of the dataset to process.
-        the 'split_events' indicates  Whether to split detected events into smaller events
-                if multiple peaks are detected.
-        binary_struct_iterations (int): Number of iterations for binary structuring element.
-        binary_struct_connectivity (int): Connectivity of binary structuring element.
+    The class implements a robust event detection algorithm that leverages both spatial and temporal data to identify
+    astrocytic events. The algorithm can be tuned using various parameters to adapt to different datasets and research needs.
+
+    Key Features:
+        - Gaussian Smoothing: Enhances events while preserving spatial features. Can be adjusted or omitted based on the dataset.
+        - Spatial Thresholding: Utilizes mean fluorescence ratios to differentiate active areas from background, considering the whole frame.
+        - Temporal Thresholding: Treats the video as a series of 1D time series, identifying active pixels by peak prominence and other characteristics.
+        - Morphological Operations: Corrects for potential artifacts in thresholding, like filling holes or removing noise-based objects.
+        - Event Separation: An experimental feature to split closely occurring events for finer analysis.
+
+    .. attention:: Caveats
+
+        - Parameter Sensitivity: The effectiveness of event detection is highly dependent on the choice of parameters, which may need tuning for different datasets.
+        - Smoothing Impact: Temporal thresholding is sensitive to the smoothing applied, requiring careful adjustment of smoothing parameters.
+        - Noise and Artifacts: The algorithm includes provisions for noise adjustment and artifact removal, but these may not cover all types of dataset-specific noise.
+        - Parallel Processing: Default parallel processing can be toggled off for troubleshooting but may affect performance.
+
+    The method `run` executes the event detection process and returns the path to the directory containing the results and metadata.
+    It saves all provided arguments for traceability and reproducibility of the analysis.
+
+    Args:
+        input_path: Path to the input file.
+        output: Path to the output directory. If None, the output directory is created in the input directory.
+        logging_level: Sets the level at which information is logged to the console as an integer value.
+                The built-in levels in the logging module are, in increasing order of severity:
+                debug (10), info (20), warning (30), error (40), critical (50).
+
+    Example::
+
+        detector = astrocast.detection.Detector(input_path=/path/to/preprocessed/video)
+        detector.run(loc='df/ch0')
 
     """
 
-    def __init__(self, input_path: str, output: Union[str, Path] = None, logging_level=logging.INFO):
-        """
-        Args:
-            input_path (str): Path to the input file.
-            output (Optional[str]): Path to the output directory. If None, the output directory is created in the input directory.
-            logging_level (int): Logging level.
-        """
+    def __init__(
+            self, input_path: Union[str, Path], output: Union[str, Path] = None, logging_level: int = logging.INFO
+    ):
 
         # logging
         logging.basicConfig(format="%(asctime)s %(levelname)s: %(message)s", level=logging_level)
@@ -82,45 +96,71 @@ class Detector:
         self.meta = {}
 
     def run(
-            self, loc: str = None, exclude_border=0, threshold: Optional[float] = None, use_smoothing=True,
-            smooth_radius=2, smooth_sigma=2, use_spatial=True, spatial_min_ratio=1, spatial_z_depth=1,
-            use_temporal=True, temporal_prominence=10, temporal_width=3, temporal_rel_height=0.9, temporal_wlen=60,
-            temporal_plateau_size=None, comb_type="&", fill_holes=True, area_threshold=10, holes_connectivity=1,
-            holes_depth=1, remove_objects=True, min_size=20, object_connectivity=1, objects_depth=1,
-            fill_holes_first=True, lazy: bool = True, adjust_for_noise: bool = False, subset: Optional[str] = None,
-            split_events: bool = False, debug: bool = False, event_map_export_format: str = "tiff", parallel=True
+            self, loc: str = None, exclude_border: int = 0, threshold: Union[int, float] = None,
+            use_smoothing: bool = True, smooth_radius: int = 2, smooth_sigma: int = 2, use_spatial: bool = True,
+            spatial_min_ratio: Union[int, float] = 1, spatial_z_depth: int = 1, use_temporal: bool = True,
+            temporal_prominence: Union[int, float] = 10, temporal_width: int = 3,
+            temporal_rel_height: Union[int, float] = 0.9, temporal_wlen: int = 60, temporal_plateau_size: int = None,
+            comb_type: Literal['&', '|'] = "&", fill_holes: bool = True, area_threshold: int = 10,
+            holes_connectivity: int = 1, holes_depth: int = 1, remove_objects: bool = True, min_size: int = 20,
+            object_connectivity: int = 1, objects_depth: int = 1, fill_holes_first: bool = True, lazy: bool = True,
+            adjust_for_noise: bool = False, z_slice: Tuple[int, int] = None, split_events: bool = False,
+            debug: bool = False, event_map_export_format: Literal['.tiff', '.h5', '.tdb'] = ".tiff",
+            parallel: bool = True
     ) -> Path:
 
         """
-        Runs the event detection process on the specified dataset.
+        Executes the AstroCAST event detection algorithm on a specified video dataset.
 
         Args:
-            loc (Optional[str]): Name or identifier of the dataset in the h5 file.
-            threshold (Optional[float]): Threshold value to discriminate background from events. 
-                If None, automatic thresholding is performed.
-            min_size (int): Minimum size of an event region. 
-                Events with size < min_size will be excluded.
-            lazy (bool): Whether to implement lazy loading.
-            adjust_for_noise (bool): Whether to adjust event detection for background noise.
-            subset (Optional[str]): Subset of the dataset to process.
-            split_events (bool): Whether to split detected events into smaller events 
-                if multiple peaks are detected.
-            parallel: parallel execution of event characterization. Recommended to be true.
+            loc: Identifier of the dataset within an HDF5 file.
+            exclude_border: Exclude the border pixels to mitigate motion correction artifacts.
+            threshold: Absolute value for simple thresholding; uses automatic thresholding if None.
+            use_smoothing: Apply Gaussian smoothing to enhance events while preserving spatial features.
+            smooth_radius: Radius for the Gaussian smoothing kernel.
+            smooth_sigma: Sigma value for the Gaussian smoothing kernel.
+            use_spatial: Enable spatial thresholding based on the mean fluorescence ratio.
+            spatial_min_ratio: Minimum ratio of active to inactive pixels for spatial thresholding.
+            spatial_z_depth: Number of frames considered for automatic spatial thresholding.
+            use_temporal: Enable temporal thresholding to identify active pixels in timeseries.
+            temporal_prominence: Minimum prominence of peaks for temporal thresholding.
+            temporal_width: Minimum width of peaks to exclude short-duration noise.
+            temporal_rel_height: Defines boundaries of events relative to peak height.
+            temporal_wlen: Window length for prominence calculation in temporal thresholding.
+            temporal_plateau_size: Minimum size of a plateau to be considered an event.
+            comb_type: Combination type for spatial and temporal thresholding ('&' or '|').
+            fill_holes: Apply morphological operations to fill holes in detected events.
+            area_threshold: Maximum size of holes to be filled.
+            remove_objects: Apply morphological operations to remove small objects.
+            objects_depth: Number of frames considered for automatic object removal.
+            min_size: Minimum size of an event region for inclusion in the results.
+            holes_depth: Number of frames considered for automatic temporal thresholding.
+            holes_connectivity: Modifies shape of the element used to fill holes.
+            object_connectivity: Modifies shape of the element used to remove small objects.
+            fill_holes_first: Determines whether holes are filled before removing small objects.
+            lazy: Implement lazy loading of data for efficient memory usage.
+            adjust_for_noise: Adjust event detection for background noise, used with `threshold`.
+            z_slice: Selection of frames that are processed.
+            split_events: Experimental feature to split incorrectly connected events.
+            event_map_export_format: Suffix of the output file for the event map.
+            debug: Enable debug mode to export intermediary steps for troubleshooting.
+            parallel: Enable parallel execution for event characterization.
 
-        Returns:
-            Path to event directory.
+        .. note::
 
-        Notes:
-            - The output and intermediate results are stored in the output directory.
-            - If the output directory does not exist, it will be created.
-            - The event map and time map are saved as numpy arrays.
-            - The detected events are processed to calculate features.
-            - The metadata is saved in a JSON file.
+            - Smoothing parameters (sigma and radius) enhance events while preserving spatial features.
+            - Spatial and temporal thresholding classify pixels as active, potentially belonging to astrocytic events.
+            - Outputs include the event map, time map, and metadata, saved in specified formats.
+            - Debug mode is useful for troubleshooting unsatisfactory event detection results.
         """
 
-        self.meta.update(
-            {"subset": subset, "threshold": threshold, "min_size": min_size, "adjust_for_noise": adjust_for_noise, }
-        )
+        # save function parameters
+        function_arguments = locals().copy()  # Create a copy of the local variables
+
+        if 'self' in function_arguments:
+            del function_arguments['self']
+
+        self.meta.update(function_arguments)
 
         # output folder
         self.output_directory = self.output if self.output is not None else self.input_path.with_suffix(
@@ -137,20 +177,20 @@ class Detector:
 
         # load data
         io = IO()
-        data = io.load(path=self.input_path, loc=loc, z_slice=subset, lazy=lazy)
+        data = io.load(path=self.input_path, loc=loc, z_slice=z_slice, lazy=lazy)
         self.Z, self.X, self.Y = data.shape
         self.data = data
         logging.info(f"data: {data.shape}") if lazy else logging.info(f"data: {data}")
 
         # calculate event map
-        event_map_path = self.output_directory.joinpath(f"event_map.{event_map_export_format}")
+        event_map_path = self.output_directory.joinpath(f"event_map{event_map_export_format}")
         if not event_map_path.exists():
             logging.info("Estimating noise")
             # TODO maybe should be adjusted since it might already be calculated
-            noise = self.estimate_background(data) if adjust_for_noise else 1
+            noise = self._estimate_background(data) if adjust_for_noise else 1
 
             logging.info("Thresholding events")
-            event_map = self.get_events(
+            event_map = self._get_events(
                 data, exclude_border=exclude_border, roi_threshold=threshold, var_estimate=noise,
                 use_smoothing=use_smoothing, smooth_radius=smooth_radius, smooth_sigma=smooth_sigma,
                 use_spatial=use_spatial, spatial_min_ratio=spatial_min_ratio, spatial_z_depth=spatial_z_depth,
@@ -173,7 +213,7 @@ class Detector:
         logging.info("Calculating time map")
         time_map_path = self.output_directory.joinpath("time_map.npy")
         if not time_map_path.is_file():
-            time_map = self.get_time_map(event_map)
+            time_map = self._get_time_map(event_map)
 
             logging.info(f"Saving event map to: {time_map_path}")
             np.save(time_map_path, time_map)
@@ -183,7 +223,7 @@ class Detector:
 
         # calculate features
         logging.info("Calculating features")
-        _ = self.custom_slim_features(time_map, event_map_path, split_events=split_events, parallel=parallel)
+        _ = self._custom_slim_features(time_map, event_map_path, split_events=split_events, parallel=parallel)
 
         logging.info("Saving meta file")
         with open(self.output_directory.joinpath("meta.json"), 'w') as outfile:
@@ -194,7 +234,7 @@ class Detector:
         return self.output_directory
 
     @staticmethod
-    def estimate_background(data: np.array, mask_xy: np.array = None) -> float:
+    def _estimate_background(data: np.array, mask_xy: np.array = None) -> float:
 
         """ estimates overall noise level
 
@@ -212,7 +252,7 @@ class Detector:
 
         return stdEst
 
-    def get_events(
+    def _get_events(
             self, data: np.array, roi_threshold: float, var_estimate: float, mask_xy: np.array = None, exclude_border=0,
             use_smoothing=True, smooth_radius=2, smooth_sigma=2, use_spatial=True, spatial_min_ratio=1,
             spatial_z_depth=1, use_temporal=True, temporal_prominence=10, temporal_width=3, temporal_rel_height=0.9,
@@ -252,7 +292,7 @@ class Detector:
 
             # 3D smooth
             if use_smoothing:
-                data = self.gaussian_smooth_3d(
+                data = self._gaussian_smooth_3d(
                     data, sigma=smooth_sigma, radius=smooth_radius, mode='nearest', rechunk=True
                 )
 
@@ -261,11 +301,11 @@ class Detector:
 
             # Threshold
             if use_spatial:
-                active_pixels_spatial = self.spatial_threshold(
+                active_pixels_spatial = self._spatial_threshold(
                     data, min_ratio=spatial_min_ratio, threshold_z_depth=spatial_z_depth
                 )
             if use_temporal:
-                active_pixels_temporal = self.temporal_threshold(
+                active_pixels_temporal = self._temporal_threshold(
                     data, prominence=temporal_prominence, width=temporal_width, rel_height=temporal_rel_height,
                     wlen=temporal_wlen, plateau_size=temporal_plateau_size
                 )
@@ -314,11 +354,11 @@ class Detector:
         if fill_holes and remove_objects:
 
             if fill_holes_first:
-                active_pixels = self.fill_holes(
+                active_pixels = self._fill_holes(
                     active_pixels, area_threshold=area_threshold, connectivity=holes_connectivity, depth=holes_depth,
                     dtype=np.bool_
                 )
-                active_pixels = self.remove_objects(
+                active_pixels = self._remove_objects(
                     active_pixels, min_size=min_size, connectivity=object_connectivity, depth=objects_depth,
                     dtype=morph_dtype
                 )
@@ -326,25 +366,25 @@ class Detector:
                 logging.info("Applied morphologic operations")
 
             else:
-                active_pixels = self.remove_objects(
+                active_pixels = self._remove_objects(
                     active_pixels, min_size=min_size, connectivity=object_connectivity, depth=objects_depth,
                     dtype=morph_dtype
                 )
-                active_pixels = self.fill_holes(
+                active_pixels = self._fill_holes(
                     active_pixels, area_threshold=area_threshold, connectivity=holes_connectivity, depth=holes_depth,
                     dtype=morph_dtype
                 )
                 logging.info("Applied morphologic operations")
 
         elif fill_holes:
-            active_pixels = self.fill_holes(
+            active_pixels = self._fill_holes(
                 active_pixels, area_threshold=area_threshold, connectivity=holes_connectivity, depth=holes_depth,
                 dtype=morph_dtype
             )
             logging.info("Applied morphologic operations")
 
         elif remove_objects:
-            active_pixels = self.remove_objects(
+            active_pixels = self._remove_objects(
                 active_pixels, min_size=min_size, connectivity=object_connectivity, depth=objects_depth,
                 dtype=morph_dtype
             )
@@ -366,7 +406,7 @@ class Detector:
         return event_map
 
     @staticmethod
-    def gaussian_smooth_3d(
+    def _gaussian_smooth_3d(
             arr, sigma=3, radius=2, mode='nearest', rechunk=True, chunks=('auto', 'auto', 'auto')
     ):
 
@@ -388,7 +428,7 @@ class Detector:
         return arr
 
     @staticmethod
-    def spatial_threshold(arr, min_ratio=1, threshold_z_depth=1):
+    def _spatial_threshold(arr, min_ratio=1, threshold_z_depth=1):
 
         def threshold(arr, min_ratio=min_ratio, depth=threshold_z_depth):
 
@@ -428,7 +468,7 @@ class Detector:
         return binary_mask
 
     @staticmethod
-    def temporal_threshold(arr, prominence=10, width=3, rel_height=0.9, wlen=60, plateau_size=None):
+    def _temporal_threshold(arr, prominence=10, width=3, rel_height=0.9, wlen=60, plateau_size=None):
 
         """
 
@@ -478,7 +518,7 @@ class Detector:
         return binary_mask
 
     @staticmethod
-    def remove_objects(arr, min_size=10, connectivity=1, depth=0, dtype=np.bool_):
+    def _remove_objects(arr, min_size=10, connectivity=1, depth=0, dtype=np.bool_):
 
         if not isinstance(arr, da.Array):
             arr = da.from_array(arr)
@@ -507,7 +547,7 @@ class Detector:
         return binary_mask
 
     @staticmethod
-    def fill_holes(arr, area_threshold=10, connectivity=1, depth=0, dtype=np.bool_):
+    def _fill_holes(arr, area_threshold=10, connectivity=1, depth=0, dtype=np.bool_):
 
         if not isinstance(arr, da.Array):
             arr = da.from_array(arr)
@@ -535,7 +575,7 @@ class Detector:
         return binary_mask
 
     @staticmethod
-    def get_time_map(event_map, chunk: int = 200):
+    def _get_time_map(event_map, chunk: int = 200):
 
         time_map = np.zeros((event_map.shape[0], np.max(event_map) + 1), dtype=np.bool_)
 
@@ -557,7 +597,7 @@ class Detector:
 
         return time_map
 
-    def custom_slim_features(self, time_map, event_path, split_events: bool = True, parallel=True):
+    def _custom_slim_features(self, time_map, event_path, split_events: bool = True, parallel=True):
 
         io = IO()
 
@@ -618,8 +658,8 @@ class Detector:
                 for e_id in e_ids:
                     futures.append(
                         client.submit(
-                            self.characterize_event, e_id, e_start[e_id], e_stop[e_id], data_info, event_info, out_path,
-                            split_events
+                            self._characterize_event, e_id, e_start[e_id], e_stop[e_id], data_info, event_info,
+                            out_path, split_events
                         )
                     )
                 progress(futures)
@@ -629,7 +669,7 @@ class Detector:
         else:
 
             for event_id in e_ids:
-                npy_path = self.characterize_event(
+                npy_path = self._characterize_event(
                     event_id, t0=e_start[event_id], t1=e_stop[event_id], data_info=data_info, event_info=event_info,
                     out_path=out_path.as_posix(), split_events=split_events
                 )
@@ -655,7 +695,7 @@ class Detector:
 
         return events
 
-    def characterize_event(
+    def _characterize_event(
             self, event_id, t0, t1, data_info, event_info, out_path, split_events=True
     ):
 
@@ -693,7 +733,7 @@ class Detector:
 
         if split_events:
             mask = np.where(event_map == event_id)
-            event_map, _ = self.detect_subevents(data, mask)
+            event_map, _ = self._detect_sub_events(data, mask)
 
         res = {}
         for em_id in np.unique(event_map):
@@ -876,7 +916,7 @@ class Detector:
             print("An error occured during shared memory closing: {}".format(err))
 
     @staticmethod
-    def detect_subevents(
+    def _detect_sub_events(
             img, mask_indices, sigma: int = 2, min_local_max_distance: int = 5, local_max_threshold: float = 0.5,
             min_roi_frame_area: int = 5, reject_if_original: bool = True
     ):

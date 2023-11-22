@@ -803,7 +803,7 @@ def detect_events(
             area_threshold=area_threshold, holes_connectivity=holes_connectivity, holes_depth=holes_depth,
             remove_objects=remove_objects, min_size=min_size, object_connectivity=object_connectivity,
             objects_depth=objects_depth, fill_holes_first=fill_holes_first, lazy=lazy,
-            adjust_for_noise=adjust_for_noise, subset=subset, split_events=split_events, debug=debug, parallel=parallel
+            adjust_for_noise=adjust_for_noise, z_slice=subset, split_events=split_events, debug=debug, parallel=parallel
         )
 
 
