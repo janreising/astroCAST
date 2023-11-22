@@ -24,7 +24,7 @@ class Test_Events:
             event_dir = sim.create_dataset(tmpdir.joinpath("sim.h5"))
 
             events = Events(event_dir)
-            result = events.load_events(event_dir, custom_columns=None)
+            result = events._load_events(event_dir, custom_columns=None)
 
             assert isinstance(result, pd.DataFrame)
 
@@ -41,7 +41,7 @@ class Test_Events:
 
             # Call the function and assert the expected result
             events = Events(event_dir)
-            result = events.load_events(event_dir, custom_columns=custom_columns)
+            result = events._load_events(event_dir, custom_columns=custom_columns)
             assert isinstance(result, pd.DataFrame)
 
             for col in custom_columns:
@@ -62,7 +62,7 @@ class Test_Events:
 
             # Call the function and assert the expected result
             events = Events(event_dir)
-            result = events.load_events(event_dir, z_slice=z_slice)
+            result = events._load_events(event_dir, z_slice=z_slice)
             assert isinstance(result, pd.DataFrame)
 
             assert z_slice[0] <= result.z0.min(), f"slicing unsuccesful; {z_slice[0]} !<= {result.z0.min()} "
@@ -77,7 +77,7 @@ class Test_Events:
 
             # Call the function and assert the expected result
             events = Events(event_dir)
-            result = events.load_events(event_dir, index_prefix=prefix)
+            result = events._load_events(event_dir, index_prefix=prefix)
             assert isinstance(result, pd.DataFrame)
 
             for ind in result.index.tolist():
@@ -142,7 +142,7 @@ class Test_Events:
             if isinstance(event_map, da.Array):
                 event_map = event_map.compute()
 
-            df = events.load_events(event_dir)
+            df = events._load_events(event_dir)
             event_map_recreated = events.create_event_map(df, video_dim=shape)
 
             assert event_map.shape == event_map_recreated.shape
@@ -295,7 +295,7 @@ class Test_Events:
             )
 
             events = Events(event_dir)
-            df = events.load_events(event_dir)
+            df = events._load_events(event_dir)
             arr, shape, dtype = events.get_event_map(event_dir, lazy=True)
 
             arr = arr.astype(np.int32)

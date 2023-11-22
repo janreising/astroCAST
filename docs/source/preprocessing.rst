@@ -30,5 +30,8 @@ Event detection
 The event object
 -----------------
 
+.. autoclass:: astrocast.analysis.Events
+    :members:
+
 .. toctree::
    :maxdepth: 1

@@ -4,8 +4,20 @@ import traceback
 from collections import defaultdict
 from functools import lru_cache
 from pathlib import Path
+from typing import Union, Tuple, Callable, Literal, List
 
 import dask.array as da
+
+try:
+    import napari
+except ImportError:
+    logging.warning(
+        f"napari is not installed, some of functionality regarding visualization will not work."
+        f"Consider reinstalling astrocast with the 'video-player' extras activated or install napari"
+        f"manually."
+    )
+    napari = None
+
 import numpy as np
 import pandas as pd
 import psutil
@@ -23,11 +35,46 @@ from astrocast.preparation import IO
 
 
 class Events(CachedClass):
+    """
+    The Events class manages and processes astrocytic events detected in timeseries calcium recordings. It provides
+    various functionalities such as loading, extending, filtering, and analyzing events.
+
+    Args:
+        event_dir: The directory or list of directories where event data is stored after event detection.
+        lazy: Flag to indicate if data should be loaded lazily.
+        data: The associated video data or path to it. If set to `infer`, attempts to automatically determine the video path.
+        loc: Location specification for loading data, applicable when data is a .h5 file.
+        group: Identifier for the group or condition to which the events belong.
+        subject_id: Identifier for the subject associated with the events.
+        z_slice: The frame range to consider for processing.
+        index_prefix: Prefix for indexing events. Useful in multi-file scenarios.
+        custom_columns: Additional columns to compute and include in the events DataFrame.
+        frame_to_time_mapping: Mapping from frame numbers to absolute time.
+        frame_to_time_function: Function to convert frame numbers to absolute time.
+        cache_path: Path for caching processed data.
+        seed: Seed value for hash generation. Needs to stay consistent between runs of analysis for caching to work.
+
+    Features:
+        - Load and preprocess event data from specified directories.
+        - Supports both single and multiple file loading.
+        - Extend event traces in time by their mean or edge footprint.
+        - Normalize and filter events based on specified criteria.
+        - Generate and visualize summary statistics, frequency distributions, and clustering results.
+
+    Example::
+
+        from astrocast.analysis import Events
+        event_obj = Events('/your/event/dir')
+
+    """
 
     def __init__(
-            self, event_dir, lazy=True, data=None, loc=None, group=None, subject_id=None, z_slice=None,
-            index_prefix=None, custom_columns=("v_area_norm", "cx", "cy"), frame_to_time_mapping=None,
-            frame_to_time_function=None, cache_path=None, seed=1
+            self, event_dir: Union[str, Path], lazy: bool = True, data: Union[np.ndarray, da.Array, str, Path] = None,
+            loc: str = None, group: Union[str, int] = None, subject_id: Union[str, int] = None,
+            z_slice: Tuple[int, int] = None, index_prefix: str = None,
+            custom_columns: Union[list, Tuple, Literal['v_area_norm', 'v_ara_footprint', 'cx', 'cy']] = (
+                    "v_area_norm", "cx", "cy"), frame_to_time_mapping: Union[dict, list] = None,
+            frame_to_time_function: Union[Callable, list] = None, cache_path: Union[str, Path] = None, seed: int = 1
     ):
 
         super().__init__(cache_path=cache_path)
@@ -51,7 +98,7 @@ class Events(CachedClass):
                     raise FileNotFoundError(f"cannot find provided event directory: {event_dir}")
 
                 # load event map
-                event_map, event_map_shape, event_map_dtype = self.get_event_map(event_dir, lazy=lazy)  # todo slicing
+                event_map, event_map_shape, event_map_dtype = self.get_event_map(event_dir, lazy=lazy, z_slice=z_slice)
                 self.event_map = event_map
                 self.num_frames, self.X, self.Y = event_map_shape
 
@@ -59,7 +106,7 @@ class Events(CachedClass):
                 # time_map, events_start_frame, events_end_frame = self.get_time_map(event_dir=event_dir, event_map=event_map)
 
                 # load events
-                self.events = self.load_events(
+                self.events = self._load_events(
                     event_dir, z_slice=z_slice, index_prefix=index_prefix, custom_columns=custom_columns
                 )
 
@@ -74,11 +121,11 @@ class Events(CachedClass):
 
                 # align time
                 if frame_to_time_mapping is not None or frame_to_time_function is not None:
-                    self.events["t0"] = self.convert_frame_to_time(
+                    self.events["t0"] = self._convert_frame_to_time(
                         self.events.z0.tolist(), mapping=frame_to_time_mapping, function=frame_to_time_function
                     )
 
-                    self.events["t1"] = self.convert_frame_to_time(
+                    self.events["t1"] = self._convert_frame_to_time(
                         self.events.z1.tolist(), mapping=frame_to_time_mapping, function=frame_to_time_function
                     )
 
@@ -182,17 +229,45 @@ class Events(CachedClass):
     #     from joblib import load
     #     return load(path)
 
-    def is_multi_subject(self):
+    def _is_multi_subject(self):
         if len(self.events.subject_id.unique()) > 1:
             return True
         else:
             return False
 
-    def is_ragged(self):
+    def _is_ragged(self):
         return is_ragged(self.events.trace.tolist())
 
-    def add_clustering(self, cluster_lookup_table, column_name="cluster"):
+    def add_clustering(self, cluster_lookup_table: dict, column_name: str = "cluster") -> None:
+        """
+        Adds a clustering column to the events DataFrame based on a provided lookup table.
 
+        This method maps each event to a cluster label using the provided cluster_lookup_table and adds
+        these labels as a new column in the events DataFrame. If the specified column name already exists
+        in the DataFrame, it will be overwritten.
+
+        Args:
+            cluster_lookup_table: A dictionary mapping event indices to cluster labels. The keys
+                should correspond to the indices of the events DataFrame, and the values should be the
+                assigned cluster labels.
+            column_name: The name of the column to add to the events DataFrame. This
+                column will contain the cluster labels. If a column with this name already exists, it
+                will be overwritten.
+
+        Raises:
+            Warning: If the specified column_name already exists in the events DataFrame, a warning is
+                raised, and the existing column is overwritten.
+
+        Example::
+
+            import numpy as np
+            from astrocast.analysis import Events
+
+            event_obj = Events('/path/to/events/dir')
+            random_lookup_table = {i: np.random.randint(0, 5) for i in event_obj.events.index.tolist()}
+
+            events.add_clustering(random_lookup_table, column_name="random_labels")
+        """
         events = self.events
 
         if column_name in events.columns:
@@ -204,7 +279,7 @@ class Events(CachedClass):
         events[column_name] = events.index.map(cluster_lookup_table)
 
     @staticmethod
-    def score_clustering(groups, pred_groups):
+    def _score_clustering(groups, pred_groups):
 
         # ensure number as group id
         lut_groups = {g: i for i, g in enumerate(np.unique(groups))}
@@ -217,8 +292,27 @@ class Events(CachedClass):
         results = {f.__name__: np.round(f(groups, pred_groups), 2) for f in selected_metrics}
         return results
 
-    def get_counts_per_cluster(self, cluster_col, group_col=None):
+    def get_counts_per_cluster(self, cluster_col: str, group_col: str = None) -> pd.DataFrame:
+        """
+        Computes the counts of events per cluster, optionally grouped by an additional column.
 
+        This method calculates the frequency of events in each cluster. If a group column is provided, it calculates
+        the frequency of events in each cluster for each group.
+
+        Args:
+            cluster_col: The name of the column in the events DataFrame that contains cluster labels.
+            group_col: The name of the column by which to group counts. If provided, the method
+                returns counts per cluster for each group. If None, the method returns overall counts per cluster.
+
+        Returns:
+            pd.DataFrame: A DataFrame with counts of events. Each row represents a cluster. If group_col is provided,
+                each column represents a group, otherwise there is a single column with total counts.
+
+        .. note::
+
+            This method is particularly useful for analyzing the distribution of events across different clusters and groups.
+
+        """
         if group_col is None:
             counts = self.events[cluster_col].value_counts()
 
@@ -242,9 +336,36 @@ class Events(CachedClass):
         return counts
 
     def plot_cluster_counts(
-            self, counts, normalize_instructions=None, method="average", metric="euclidean", z_score=0, center=0,
-            transpose=False, color_palette="viridis", group_cmap=None, cmap="vlag"
-    ):
+            self, counts: pd.DataFrame, normalize_instructions: dict = None, method: str = "average",
+            metric: str = "euclidean", z_score: Literal[0, 1, None] = 0, center: Union[int, float] = 0,
+            transpose: bool = False, color_palette: str = "viridis",
+            group_cmap: Union[str, dict, Literal['auto']] = None, cmap: str = "vlag"
+    ) -> Tuple[sns.matrix.ClusterGrid, dict]:
+        """
+        Creates and returns a seaborn cluster map for the given counts DataFrame, along with clustering quality scores.
+
+        This method generates a cluster map (heatmap with hierarchical clustering) based on the provided counts
+        DataFrame generated with :func:`~astrocast.analysis.Events.get_counts_per_cluster`. The counts can optionally be normalized.
+        The method also calculates clustering quality scores.
+
+        Args:
+            counts: A DataFrame where rows represent clusters and columns represent groups. Each cell contains
+                the count of events for that cluster-group pair.
+            normalize_instructions: Instructions for normalization of counts. See :func:`~astrocast.analysis.Normalization.run` for more information.
+            method: Linkage method for hierarchical clustering. See `seaborn.clustermap <https://seaborn.pydata.org/generated/seaborn.clustermap.html>`_ for more information.
+            metric: Distance metric for hierarchical clustering. See `seaborn.clustermap <https://seaborn.pydata.org/generated/seaborn.clustermap.html>`_ for more information.
+            z_score: Whether to standardize (z-score normalize) rows (1), columns (0), or neither (None).
+            center: Value at which to center the data during normalization.
+            transpose: Whether to transpose the counts DataFrame before plotting.
+            color_palette: Color palette name for generating group colors if group_cmap is 'auto'. See `seaborn color palettes <https://seaborn.pydata.org/tutorial/color_palettes.html>`_ for a selection of available palettes.
+            group_cmap: Color mapping for groups. If 'auto', colors are assigned
+                based on the color_palette. If None, no group colors are used.
+            cmap: Colormap for the heatmap. See `matplotlib colormaps <https://matplotlib.org/stable/users/explain/colors/colormaps.html>`_ for a selection of available color maps.
+
+        Returns:
+            Tuple[sns.matrix.ClusterGrid, dict]: A tuple containing the seaborn ClusterGrid object and a dictionary of clustering quality scores.
+
+        """
 
         # normalize
         if normalize_instructions is not None:
@@ -272,15 +393,43 @@ class Events(CachedClass):
         n_true_clusters = len(unique_groups)
 
         pred_clusters = fcluster(linkage, n_true_clusters, criterion="maxclust")
-        pred_scores = self.score_clustering(counts.columns, pred_clusters)
+        pred_scores = self._score_clustering(counts.columns, pred_clusters)
 
         return clustermap, pred_scores
 
     def copy(self):
+
+        """ Returns a copy of the Events object. """
+
         return copy.deepcopy(self)
 
-    def filter(self, filters={}, inplace=True):
+    def filter(self, filters: dict, inplace: bool = True) -> Union[None, pd.DataFrame]:
+        """
+        Filters the events DataFrame based on specified criteria.
 
+        This method applies filtering on the events DataFrame based on the criteria provided in the `filters` dictionary.
+        The filtering can be done either in place or on a copy of the DataFrame, depending on the `inplace` parameter.
+
+        Args:
+            filters: A dictionary where keys are column names and values are tuples specifying the
+                filtering criteria. For numeric columns, the tuple should be (min_value, max_value). For
+                string or categorical columns, the tuple should contain the allowed values.
+            inplace (bool): If True, the filtering is applied in place and the method returns None. If False,
+                a new DataFrame with the filtered data is returned.
+
+        Returns:
+            If inplace is False, returns the filtered DataFrame. Otherwise, returns None.
+
+        Raises:
+            ValueError: If an unknown column data type is encountered.
+
+        Example::
+
+            # Assuming `events` is an instance of the Events class
+            # To filter events where the event length is between 5 and 20 frames use:
+            filters = {'dz': (5, 20)}
+            filtered_events = events.filter(filters, inplace=False)
+        """
         events = self.events
         L1 = len(events)
 
@@ -317,17 +466,15 @@ class Events(CachedClass):
         return events
 
     @staticmethod
-    def get_event_map(event_dir: Path, lazy=True):
-
+    def get_event_map(event_dir: Union[str, Path], z_slice: Tuple[int, int] = None, lazy: bool = True) -> Union[
+        Tuple[Union[np.ndarray, da.Array], Union[list, tuple, np.ndarray], type], Tuple[None, None, None]]:
         """
-        Retrieve the event map from the specified directory.
+        Retrieve the event map from the specified directory, as well as its shape and data type.
 
         Args:
-            event_dir (Path): The directory path where the event map is located.
-            in_memory (bool, optional): Specifies whether to load the event map into memory. Defaults to False.
-
-        Returns:
-            tuple: A tuple containing the event map, its shape, and data type.
+            event_dir: The directory path where the event map is located.
+            z_slice: The frame range to consider for loading.
+            lazy: Specifies whether to load the event map lazily.
 
         """
 
@@ -348,28 +495,31 @@ class Events(CachedClass):
                 f"Consider recreating the file with 'create_event_map()', "
                 f"otherwise errors downstream might occur'."
             )
-            shape, chunksize, dtype = (None, None, None), None, None
+            shape, chunksize, dtype = None, None, None
             event_map = None
 
             return event_map, shape, dtype
 
         # Load the event map from the specified path
         io = IO()
-        event_map = io.load(path, lazy=lazy)
+        event_map = io.load(path, z_slice=z_slice, lazy=lazy)
 
         return event_map, shape, dtype
 
     @staticmethod
-    def create_event_map(events, video_dim, dtype=int, show_progress=True, save_path=None):
+    def create_event_map(
+            events: pd.DataFrame, video_dim: Tuple[int, int, int], dtype: type = int, show_progress: bool = True,
+            save_path: Union[str, Path] = None
+    ) -> Union[np.ndarray, da.Array]:
         """
-        Create an event map from the events DataFrame.
+        Recreate the event map from the events DataFrame.
 
         Args:
-            events (DataFrame): The events DataFrame containing the 'mask' column.
-            video_dim (tuple): The dimensions of the video in the format (num_frames, width, height).
-            dtype (type, optional): The data type of the event map. Defaults to int.
-            show_progress (bool, optional): Specifies whether to show a progress bar. Defaults to True.
-            save_path (str, optional): The file path to save the event map. Defaults to None.
+            events: The events DataFrame containing the 'mask' column.
+            video_dim: The dimensions of the video in the format (num_frames, width, height).
+            dtype: The data type of the event map.
+            show_progress: Specifies whether to show a progress bar.
+            save_path: The file path to save the event map.
 
         Returns:
             ndarray: The created event map.
@@ -412,14 +562,16 @@ class Events(CachedClass):
         return event_map
 
     @wrapper_local_cache
-    def get_time_map(self, event_dir=None, event_map=None, chunk=100):
+    def get_time_map(
+            self, event_dir: Union[str, Path] = None, event_map: Union[np.ndarray, da.Array] = None, chunk: int = 100
+    ):
         """
         Creates a binary array representing the duration of events.
 
         Args:
-            event_dir (Path): The directory containing the event data.
-            event_map (ndarray): The event map data.
-            chunk (int): The chunk size for processing events.
+            event_dir: The directory containing the event data.
+            event_map : The event map data.
+            chunk: The chunk size for processing events.
 
         Returns:
             Tuple: A tuple containing the time map, events' start frames, and events' end frames.
@@ -468,7 +620,7 @@ class Events(CachedClass):
         return time_map, events_start_frame, events_end_frame
 
     @staticmethod
-    def load_events(event_dir: Path, z_slice=None, index_prefix=None, custom_columns=("v_area_norm", "cx", "cy")):
+    def _load_events(event_dir: Path, z_slice=None, index_prefix=None, custom_columns=("v_area_norm", "cx", "cy")):
 
         """
         Load events from the specified directory and perform optional preprocessing.
@@ -571,8 +723,28 @@ class Events(CachedClass):
         return arr
 
     @lru_cache
-    def to_tsfresh(self, show_progress=False):
+    def to_tsfresh(self, show_progress: bool = False) -> pd.DataFrame:
+        """
+        Converts the events trace data into a format suitable for tsfresh, a library for time series feature extraction.
 
+        This method reshapes the events trace data into a long-format DataFrame where each row corresponds to a single
+        time point in a trace. The method leverages Python's lru_cache to cache the results and improve performance on subsequent calls
+        with the same inputs.
+
+        Args:
+            show_progress: If True, displays a progress bar during the conversion process.
+
+        Returns:
+            pd.DataFrame: A DataFrame suitable for tsfresh feature extraction. It contains columns 'id', 'time', and 'dim_0',
+                          where 'id' corresponds to the event ID, 'time' is the time point in the trace, and 'dim_0' is the
+                          value of the trace at that time point.
+
+        Example::
+
+            # Assuming `events` is an instance of the Events class
+            tsfresh_data = events.to_tsfresh(show_progress=True)
+
+        """
         iterator = self.events.trace.items()
         iterator = tqdm(iterator, total=len(self.events)) if show_progress else iterator
 
@@ -580,7 +752,7 @@ class Events(CachedClass):
         ids, times, dim_0s = [], [], []
         for id_, trace in iterator:
 
-            if type(trace) != np.ndarray:
+            if not isinstance(trace, np.ndarray):
                 trace = np.array(trace)
 
             # take care of NaN
@@ -595,26 +767,37 @@ class Events(CachedClass):
 
     @wrapper_local_cache
     def get_average_event_trace(
-            self, events: pd.DataFrame = None, empty_as_nan: bool = True, agg_func: callable = np.nanmean,
-            index: list = None, gradient: bool = False, smooth: int = None
+            self, events: pd.DataFrame = None, empty_as_nan: bool = True, agg_func: Callable = np.nanmean,
+            index: List[int] = None, gradient: bool = False, smooth: int = None
     ) -> pd.Series:
         """
-        Calculate the average event trace.
+        Computes the average trace of events, optionally applying smoothing and gradient calculation.
+
+        This method processes a DataFrame of event data to calculate an average trace. It can handle NaN values,
+        apply a custom aggregation function, and optionally compute the gradient or smooth the resulting trace.
+        The method is useful for summarizing event data into a single representative trace. The result will be similar
+        to generating an average fluorescence trace from the time series video, but only considers pixels that are
+        classified as active (i.e. participating in an astrocytic event).
 
         Args:
-            events (pd.DataFrame): The DataFrame containing event data.
-            empty_as_nan (bool): Flag to represent empty values as NaN.
-            agg_func (callable): The function to aggregate the event traces.
-            index (list): The index values for the resulting series.
-            gradient (bool): Flag to calculate the gradient of the average trace.
-            smooth (int): The window size for smoothing the average trace.
+            events: The DataFrame containing event data. If None, uses the class's internal
+                events DataFrame.
+            empty_as_nan: If True, treats empty values in the trace as NaN for the purpose of calculations. Helps to
+                boost the signal-to-noise ratio, especially when dealing with sparse events.
+            agg_func: A function to aggregate the event traces. Defaults to numpy's nanmean, which ignores NaN values.
+            index: The index values for the resulting pd.Series. If None, defaults to a range based on trace length.
+            gradient: If True, calculates the gradient of the average trace.
+            smooth: Specifies the window size for smoothing the average trace. If None, no smoothing is applied.
 
         Returns:
-            pd.Series: The resulting average event trace.
+            pd.Series: A pandas Series representing the average event trace, indexed as specified by the 'index' argument.
 
         Raises:
-            ValueError: If the provided 'agg_func' is not callable.
+            ValueError: If the provided 'agg_func' is not a callable function.
 
+        Example:
+            # Assuming `events` is an instance of the Events class with event data
+            avg_trace = events.get_average_event_trace(smooth=5, gradient=True)
         """
 
         # Convert events DataFrame to a numpy array representation
@@ -644,7 +827,7 @@ class Events(CachedClass):
         return avg_trace
 
     @staticmethod
-    def convert_frame_to_time(z, mapping=None, function=None):
+    def _convert_frame_to_time(z, mapping=None, function=None):
 
         """
         Convert frame numbers to absolute time using a mapping or a function.
@@ -685,7 +868,36 @@ class Events(CachedClass):
         else:
             raise ValueError("Please provide either a mapping or a function.")
 
-    def show_event_map(self, video=None, loc=None, z_slice=None, lazy=True):
+    def show_event_map(
+            self, video: Union[Path, str] = None, loc: str = None, z_slice: Tuple[int, int] = None, lazy: bool = True
+    ) -> napari.Viewer:
+        """
+        Visualizes the event map and associated video data using the napari viewer.
+
+        This method opens a napari viewer and displays the video data alongside various debug files and the event map.
+        It allows for an interactive exploration of the event data in the context of the original video and processed debug data.
+        If the video data is not provided, it attempts to load it from the path specified during the initialization of the class instance.
+
+        Args:
+            video: Path to the video file to be displayed. If None, the method attempts to load the video
+                from the path provided during the class instance initialization.
+            loc: Location parameter for loading the video data. Only relevant if the video data is loaded from a path.
+            z_slice: A tuple specifying the z-slice range of the data to be visualized.
+            lazy: If True, loads the video data lazily (useful for large datasets), but slows down visualization.
+
+        Returns:
+            napari.Viewer: An instance of napari's Viewer class with the loaded event map and video data.
+
+        Note:
+            - Users should ensure that the 'z_slice' parameter matches the slicing used during data initialization if the video
+              is loaded from the initial path.
+
+        Example::
+
+            # Assuming `events` is an instance of the Events class
+            viewer = events.show_event_map(video="path/to/video.tiff", z_slice=(10, 20))
+
+        """
 
         import napari
 
@@ -733,10 +945,43 @@ class Events(CachedClass):
 
     @wrapper_local_cache
     def get_summary_statistics(
-            self, decimals=2, groupby=None, columns_excluded=(
+            self, decimals: int = 2, groupby: str = None, columns_excluded: List[str] = (
                     'file_name', 'subject_id', 'group', 'z0', 'z1', 'x0', 'x1', 'y0', 'y1', 'mask', 'contours',
                     'footprint', 'fp_cx', 'fp_cy', 'trace', 'error', 'cx', 'cy')
     ):
+        """
+        Calculate and return summary statistics (mean ± standard deviation) for event data.
+
+        This function computes the mean and standard deviation for each column in the event data, excluding specified columns.
+        It allows optional grouping of data and can round the results to a specified number of decimal places. The function
+        is designed to provide a quick statistical overview of the data, particularly useful for initial data analysis.
+
+        .. note::
+          - The function defaults to 2 decimal places for rounding.
+          - Grouping is optional and can be specified with the 'groupby' argument.
+
+        .. caution::
+          - If 'groupby' is specified, the function transposes the output for readability.
+          - Certain columns are excluded by default to focus on relevant numerical data.
+
+        Args:
+          decimals: Number of decimal places to round the mean and standard deviation.
+          groupby: Optional, column name to group data by before calculating statistics.
+          columns_excluded: Tuple of column names to exclude from calculations.
+
+        Returns:
+          A Pandas DataFrame or Series with the calculated mean ± standard deviation for each column.
+
+        Example::
+
+          # Example usage without grouping
+          summary_stats = obj.get_summary_statistics()
+          print(summary_stats)
+
+          # Example usage with grouping
+          summary_stats_grouped = obj.get_summary_statistics(groupby='group_column')
+          print(summary_stats_grouped)
+        """
 
         events = self.events
 
@@ -766,7 +1011,40 @@ class Events(CachedClass):
         return val
 
     @wrapper_local_cache
-    def get_trials(self, trial_timings, trial_length=30, multi_timing_behavior="first", format="array"):
+    def get_trials(
+            self, trial_timings: Union[np.ndarray, da.Array], trial_length: int = 30,
+            multi_timing_behavior: Literal['first', 'expand', 'exclude'] = "first",
+            format: ['array', 'dataframe'] = "array"
+    ):
+        """
+        Extracts trials based on given timings and trial length, with options for handling multiple timings and output format.
+
+        The function processes a series of event timings, splitting each into pre-defined trial lengths.
+        It supports handling multiple timings per event and can output the results in either array or DataFrame format.
+        The implementation focuses on flexibility in handling trial data for complex neuroscience experiments.
+
+        .. note::
+          - This function is designed to work with numpy arrays.
+          - The output format can be either an array or a DataFrame, depending on the 'format' argument.
+
+        Raises:
+          - The function raises a ValueError if the 'format' or 'multi_timing_behavior' arguments are not within the expected values.
+
+        Args:
+          trial_timings: A list or numpy array of trial timings.
+          trial_length: The length of each trial. This is split evenly into pre and post intervals around each timing.
+          multi_timing_behavior: Strategy for handling multiple timings ('first', 'expand', 'exclude'). Default is 'first'.
+          format: The output format of the trials ('array' or 'dataframe'). Default is 'array'.
+
+        Returns:
+          A numpy array or DataFrame containing the extracted trial data. The structure depends on the 'format' and 'multi_timing_behavior' arguments.
+
+        Example::
+
+          # Assuming a class instance 'trial_extractor' and timings list 'timings'
+          trials = trial_extractor.get_trials(timings, 30, 'first', 'array')
+          print(trials)
+        """
 
         if format not in ["array", "dataframe"]:
             raise ValueError(f"'format' attribute has to be one of ['array', 'dataframe'] not: {format}")
@@ -799,9 +1077,6 @@ class Events(CachedClass):
         if multi_timing_behavior == "first":
             events = events[events.num_timings > 0]
 
-            # print(f"num_timings:\n{events.num_timings}")
-            # print(f"timings:\n{events.timings}")
-
             events.timings = events.timings.apply(lambda x: [x[0]])
             num_rows = len(events)
 
@@ -812,9 +1087,6 @@ class Events(CachedClass):
         elif multi_timing_behavior == "exclude":
             events = events[events.num_timings == 1]
             num_rows = len(events)
-
-        # print(f"num_timings:\n{events.num_timings}")
-        # print(f"timings:\n{events.timings}")
 
         # create trial matrix
         array = np.empty((num_rows, trial_length))
@@ -832,17 +1104,8 @@ class Events(CachedClass):
                 eve_idx_left = max(0, delta_left)
                 eve_idx_right = delta_right if delta_right < 0 else None
 
-                # arr_idx_left = min(0, delta_right)
-                # arr_idx_right = delta_left if delta_left < 0 else None
-
                 arr_idx_left = max(0, -delta_left)
                 arr_idx_right = -delta_right if -delta_right < 0 else None
-
-                # print(f"\n{ev_idx} (#{len(row.trace)}) - stimulus_t: {t}")
-                # print(f"z: {z0}-{z1}, t:{t0}-{t1}, d:{delta_left}-{delta_right}")
-                # print(f"event_idx: {eve_idx_left}:{eve_idx_right} (#{len(np.array(row.trace)[eve_idx_left:eve_idx_right])})")
-                # print(f"arr_idx: {arr_idx_left}:{arr_idx_right} (#{len(array[i, arr_idx_left:arr_idx_right])})")
-                # print(np.array(row.trace))
 
                 # splice event into array
                 array[i, arr_idx_left:arr_idx_right] = np.array(row.trace)[eve_idx_left:eve_idx_right]
