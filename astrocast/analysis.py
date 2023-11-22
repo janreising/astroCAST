@@ -4,7 +4,7 @@ import traceback
 from collections import defaultdict
 from functools import lru_cache
 from pathlib import Path
-from typing import Union, Tuple, Callable, Literal, List
+from typing import Union, Tuple, Callable, Literal, List, Dict, Any
 
 import dask.array as da
 
@@ -305,8 +305,7 @@ class Events(CachedClass):
                 returns counts per cluster for each group. If None, the method returns overall counts per cluster.
 
         Returns:
-            pd.DataFrame: A DataFrame with counts of events. Each row represents a cluster. If group_col is provided,
-                each column represents a group, otherwise there is a single column with total counts.
+            pd.DataFrame: A DataFrame with counts of events. Each row represents a cluster. If group_col is provided, each column represents a group, otherwise there is a single column with total counts.
 
         .. note::
 
@@ -351,7 +350,7 @@ class Events(CachedClass):
         Args:
             counts: A DataFrame where rows represent clusters and columns represent groups. Each cell contains
                 the count of events for that cluster-group pair.
-            normalize_instructions: Instructions for normalization of counts. See :func:`~astrocast.analysis.Normalization.run` for more information.
+            normalize_instructions: Instructions for normalization of counts. See :func:`~astrocast.helper.Normalization.run` for more information.
             method: Linkage method for hierarchical clustering. See `seaborn.clustermap <https://seaborn.pydata.org/generated/seaborn.clustermap.html>`_ for more information.
             metric: Distance metric for hierarchical clustering. See `seaborn.clustermap <https://seaborn.pydata.org/generated/seaborn.clustermap.html>`_ for more information.
             z_score: Whether to standardize (z-score normalize) rows (1), columns (0), or neither (None).
@@ -691,14 +690,16 @@ class Events(CachedClass):
 
         return events
 
-    def to_numpy(self, events=None, empty_as_nan=True, simple=False):
+    def to_numpy(self, events: pd.DataFrame = None, empty_as_nan: bool = True, ragged: bool = False) -> np.ndarray:
 
         """
         Convert events DataFrame to a numpy array.
 
         Args:
-            events (pd.DataFrame): The DataFrame containing event data with columns 'z0', 'z1', and 'trace'.
-            empty_as_nan (bool): Flag to represent empty values as NaN.
+            events: The DataFrame containing event data with columns 'z0', 'z1', and 'trace'.
+            empty_as_nan: Flag to represent empty values as NaN.
+            ragged: If True, returns a ragged representation of the event traces. Reduces the memory footprint, but
+                might not be compatible with downstream processing
 
         Returns:
             np.ndarray: The resulting numpy array.
@@ -708,7 +709,7 @@ class Events(CachedClass):
         if events is None:
             events = self.events
 
-        if simple:
+        if ragged:
             return np.array(events.trace.tolist())
 
         arr = np.zeros((len(events), self.num_frames))
@@ -735,9 +736,7 @@ class Events(CachedClass):
             show_progress: If True, displays a progress bar during the conversion process.
 
         Returns:
-            pd.DataFrame: A DataFrame suitable for tsfresh feature extraction. It contains columns 'id', 'time', and 'dim_0',
-                          where 'id' corresponds to the event ID, 'time' is the time point in the trace, and 'dim_0' is the
-                          value of the trace at that time point.
+            pd.DataFrame: A DataFrame suitable for tsfresh feature extraction. It contains columns 'id', 'time', and 'dim_0', where 'id' corresponds to the event ID, 'time' is the time point in the trace, and 'dim_0' is the value of the trace at that time point.
 
         Example::
 
@@ -948,7 +947,7 @@ class Events(CachedClass):
             self, decimals: int = 2, groupby: str = None, columns_excluded: List[str] = (
                     'file_name', 'subject_id', 'group', 'z0', 'z1', 'x0', 'x1', 'y0', 'y1', 'mask', 'contours',
                     'footprint', 'fp_cx', 'fp_cy', 'trace', 'error', 'cx', 'cy')
-    ):
+    ) -> Union[pd.DataFrame, pd.Series]:
         """
         Calculate and return summary statistics (mean ± standard deviation) for event data.
 
@@ -967,7 +966,7 @@ class Events(CachedClass):
         Args:
           decimals: Number of decimal places to round the mean and standard deviation.
           groupby: Optional, column name to group data by before calculating statistics.
-          columns_excluded: Tuple of column names to exclude from calculations.
+          columns_excluded: List of column names to exclude from calculations.
 
         Returns:
           A Pandas DataFrame or Series with the calculated mean ± standard deviation for each column.
@@ -975,11 +974,11 @@ class Events(CachedClass):
         Example::
 
           # Example usage without grouping
-          summary_stats = obj.get_summary_statistics()
+          summary_stats = events_obj.get_summary_statistics()
           print(summary_stats)
 
           # Example usage with grouping
-          summary_stats_grouped = obj.get_summary_statistics(groupby='group_column')
+          summary_stats_grouped = events_obj.get_summary_statistics(groupby='group_column')
           print(summary_stats_grouped)
         """
 
@@ -1014,8 +1013,8 @@ class Events(CachedClass):
     def get_trials(
             self, trial_timings: Union[np.ndarray, da.Array], trial_length: int = 30,
             multi_timing_behavior: Literal['first', 'expand', 'exclude'] = "first",
-            format: ['array', 'dataframe'] = "array"
-    ):
+            output_format: Literal['array', 'dataframe'] = "array"
+    ) -> Union[np.ndarray, pd.DataFrame]:
         """
         Extracts trials based on given timings and trial length, with options for handling multiple timings and output format.
 
@@ -1033,21 +1032,21 @@ class Events(CachedClass):
         Args:
           trial_timings: A list or numpy array of trial timings.
           trial_length: The length of each trial. This is split evenly into pre and post intervals around each timing.
-          multi_timing_behavior: Strategy for handling multiple timings ('first', 'expand', 'exclude'). Default is 'first'.
-          format: The output format of the trials ('array' or 'dataframe'). Default is 'array'.
+          multi_timing_behavior: Strategy for handling multiple timings ('first', 'expand', 'exclude').
+          output_format: The output format of the trials ('array' or 'dataframe'). Default is 'array'.
 
         Returns:
           A numpy array or DataFrame containing the extracted trial data. The structure depends on the 'format' and 'multi_timing_behavior' arguments.
 
         Example::
 
-          # Assuming a class instance 'trial_extractor' and timings list 'timings'
-          trials = trial_extractor.get_trials(timings, 30, 'first', 'array')
+          # Assuming a class instance 'events_obj' and timings list 'timings'
+          trials = events_obj.get_trials(timings, 30, 'first', 'array')
           print(trials)
         """
 
-        if format not in ["array", "dataframe"]:
-            raise ValueError(f"'format' attribute has to be one of ['array', 'dataframe'] not: {format}")
+        if output_format not in ["array", "dataframe"]:
+            raise ValueError(f"'format' attribute has to be one of ['array', 'dataframe'] not: {output_format}")
 
         if multi_timing_behavior not in ["first", "expand", "exclude"]:
             raise ValueError("'multi_timing_behavior' has to be one of ['first', 'expand', 'exclude']")
@@ -1063,10 +1062,9 @@ class Events(CachedClass):
         leading += trial_length - (leading + trailing)
 
         # get contained timings per event
-        def find_contained_timings(row):
-            mask = np.logical_and(trial_timings >= row.z0, trial_timings <= row.z1)
+        def find_contained_timings(_row):
+            mask = np.logical_and(trial_timings >= _row.z0, trial_timings <= _row.z1)
 
-            num_timings = np.sum(mask)
             contained_timings = trial_timings[mask]
             return tuple(contained_timings)
 
@@ -1087,6 +1085,9 @@ class Events(CachedClass):
         elif multi_timing_behavior == "exclude":
             events = events[events.num_timings == 1]
             num_rows = len(events)
+
+        else:
+            raise ValueError(f"'multi_timing_behavior' has to be one of ['first', 'expand', 'exclude']")
 
         # create trial matrix
         array = np.empty((num_rows, trial_length))
@@ -1112,7 +1113,7 @@ class Events(CachedClass):
 
                 i += 1
 
-        if format == "dataframe":
+        if output_format == "dataframe":
 
             t_range = list(range(-leading, trailing))
 
@@ -1133,20 +1134,58 @@ class Events(CachedClass):
 
     @wrapper_local_cache
     def get_extended_events(
-            self, events=None, video=None, dtype=float, use_footprint=False, extend=-1, ensure_min=None,
-            ensure_max=None, pad_borders=False, return_array=False, in_place=False, normalization_instructions=None,
-            show_progress=True, memmap_path=None, save_path=None, save_param={}
-    ):
+            self, events: pd.DataFrame = None, video: Union[np.ndarray, Path, str] = None, dtype: type = float,
+            use_footprint: bool = False, extend: Union[int, Tuple[int, int]] = -1, ensure_min: int = None,
+            ensure_max: int = None, pad_borders: bool = False, return_array: bool = False, in_place: bool = False,
+            normalization_instructions: Dict[int, List[Union[str, Dict[str, str]]]] = None, show_progress: bool = True,
+            memmap_path: Union[str, Path] = None, save_path: Union[str, Path] = None, save_param: Dict[str, Any] = None
+    ) -> Union[pd.DataFrame, Tuple[np.ndarray, List[int], List[int]]]:
+        """
+        Extends the footprint of individual events either over the entire z-range or a fixed number of bordering 
+        frames of a time series recording.
 
-        """ takes the footprint of each individual event and extends it over the whole z-range
+        This method extends the event signals by applying the event's footprint or mask over a specified range in the 
+        video. It supports different modes of extension, normalization of the extended signal, and various output 
+        options. The method is useful when capturing the shoulders of the events is beneficial (e.g. in classification 
+        tasks)
 
-        example standardizing:
+        .. note::
+          - Normalization instructions should be provided as a dictionary where each key is an operation index, 
+            and the value is a list of the operation and its parameters. For more information see 
+            :func:`~astrocast.helper.Normalization.run`.
 
-        normalization_instructions =
-            0: ["subtract", {"mode": "mean"}],
-            1: ["divide", {"mode": "std"}]
-        }
+        .. caution::
+          - The method raises ValueError if 'video' is not provided and no data is available in 'self.data'.
+          - The function may generate large arrays, potentially consuming a significant portion of available RAM.
 
+        Args:
+          events: DataFrame containing event data. If None, uses 'self.events'.
+          video: 3D numpy array of video data. If None, uses 'self.data'.
+          dtype: Data type for the output array.
+          use_footprint: Whether to use the event's footprint for extension.
+          extend: Extension length or range. Can be a single int or a tuple (left, right). -1 corresponds to the
+            full range.
+          ensure_min: Minimum length to ensure for each extended event.
+          ensure_max: Maximum length to allow for each extended event.
+          pad_borders: If True, pads the borders of video to ensure requested length.
+          return_array: Whether to return the extended events as a numpy array.
+          in_place: Whether to modify 'events' in place.
+          normalization_instructions: Dictionary with normalization operations and parameters. For more information see 
+            :func:`~astrocast.helper.Normalization.run`.
+          show_progress: Whether to show progress bar during execution.
+          memmap_path: Path to save memmap file, if needed.
+          save_path: Path to save output, if desired.
+          save_param: Additional parameters for saving the file.
+
+        Returns:
+          Depending on 'return_array', returns either a modified DataFrame or a tuple of the numpy array and two lists 
+          containing the extended z-range start and end indices.
+
+        Example::
+
+          # Assuming a class instance 'event_obj' and a np.ndarray of the video data 'my_video_data'.
+          extended_events = event_obj.get_extended_events(event_obj.events, video=my_video_data, dtype=np.float32)
+          print(extended_events)
         """
 
         if events is None:
@@ -1346,6 +1385,10 @@ class Events(CachedClass):
 
             elif save_path is not None:
                 io = IO()
+
+                if save_param is None:
+                    save_param = {}
+
                 io.save(path=save_path, data=arr_ext, **save_param)
 
             return arr_ext, z0_container, z1_container
@@ -1368,8 +1411,36 @@ class Events(CachedClass):
 
             return events
 
-    def enforce_length(self, min_length=None, pad_mode="edge", max_length=None, inplace=False):
+    def enforce_length(
+            self, min_length: Union[int, None] = None, pad_mode: str = "edge", max_length: Union[int, None] = None,
+            inplace: bool = False
+    ) -> pd.DataFrame:
+        """
+        Adjusts the length of each event trace in a DataFrame to meet specified minimum and/or maximum
+        length requirements.
 
+        This method modifies the lengths of event traces by either padding them to meet a minimum length or truncating
+        them to adhere to a maximum length. It's particularly useful in standardizing the size of events for consistent
+        analysis. The method supports different padding modes and can operate in place or return a modified copy.
+
+        .. caution::
+          - 'z0' and 'z1' values in the events DataFrame do not correspond to the adjusted event boundaries after this operation.
+
+        Args:
+          min_length: The minimum length to ensure for each event trace. If None, no minimum length enforcement is done.
+          pad_mode: The padding mode to use if padding is necessary ('constant', 'edge', etc.). Default is 'edge'.
+          max_length: The maximum length to allow for each event trace. If None, no maximum length enforcement is done.
+          inplace: If True, modifies the 'events' attribute of the object in place.
+
+        Returns:
+          A DataFrame with the adjusted event traces. The original DataFrame is modified if 'inplace' is True.
+
+        Example::
+
+          # Assuming a class instance 'event_obj'
+          modified_events = event_obj.enforce_length(min_length=100, max_length=200, pad_mode='constant', inplace=False)
+          print(modified_events)
+        """
         if inplace:
             events = self.events
         else:
@@ -1442,8 +1513,30 @@ class Events(CachedClass):
         return events
 
     @wrapper_local_cache
-    def get_frequency(self, grouping_column, cluster_column, normalization_instructions=None):
+    def get_frequency(
+            self, grouping_column: str, cluster_column: str,
+            normalization_instructions: Union[Dict[int, Any], None] = None
+    ) -> pd.DataFrame:
+        """
+        Computes the frequency of each cluster based on a specified grouping column and returns a pivot table.
 
+        This method groups the events by the specified 'grouping_column' and 'cluster_column', counts the occurrences, and then creates a pivot table. It can optionally normalize the pivot table based on provided normalization instructions. This function is useful for analyzing frequency distributions in clustered data, such as in bioinformatics or data science.
+
+        Args:
+          grouping_column: The column name in the DataFrame to group by.
+          cluster_column: The column name representing the cluster identifiers.
+          normalization_instructions: Instructions for normalizing the pivot table, as a dictionary.
+            See :func:`~astrocast.helper.Normalization.run` for more details.
+
+        Returns:
+          A pandas DataFrame pivot table showing the frequency of each cluster for each group.
+
+        Example::
+
+          # Assuming a class instance 'data_analyzer'
+          frequency_table = data_analyzer.get_frequency(grouping_column='group_id', cluster_column='cluster_id')
+          print(frequency_table)
+        """
         events = self.events
 
         grouped = events[[grouping_column, cluster_column, "dz"]].groupby([grouping_column, cluster_column]).count()
@@ -1459,7 +1552,32 @@ class Events(CachedClass):
 
         return pivot
 
-    def normalize(self, normalize_instructions, inplace=True):
+    def normalize(
+            self, normalize_instructions: dict, inplace: bool = True
+    ) -> Union[None, np.ndarray]:
+        """
+        Normalizes the event traces based on provided normalization instructions.
+
+        This method applies normalization operations to the traces of events. It supports multiple normalization
+        strategies defined in 'normalize_instructions'. The normalization can be done either in place or return the
+        normalized traces without altering the original data. Useful in data preprocessing, especially in signal
+        processing or time-series analysis.
+
+        Args:
+          normalize_instructions: A dictionary containing normalization instructions.
+            See :func:`~astrocast.helper.Normalization.run` for more details.
+          inplace: If True, updates the 'events.trace' in place. Otherwise, returns the normalized traces.
+
+        Returns:
+          None if 'inplace' is True; otherwise, returns a numpy array of normalized traces.
+
+        Example::
+
+          # Assuming a class instance 'event_obj'
+          norm_instr = { 0: ["subtract", {"mode":"min"}], 1: ["divide", {"mode": "max"}]
+          normalized_traces = event_obj.normalize(norm_instr, inplace=False)
+          print(normalized_traces)
+        """
 
         traces = self.events.trace
 
@@ -1478,8 +1596,29 @@ class Events(CachedClass):
         else:
             return norm_traces
 
-    def create_lookup_table(self, labels, default_cluster=-1):
+    def create_lookup_table(
+            self, labels: List[int], default_cluster: int = -1
+    ) -> Dict[int, int]:
+        """
+        Creates a lookup table mapping event indices to cluster labels.
 
+        This function generates a dictionary that serves as a lookup table, mapping each event index to a corresponding
+        cluster label. It utilizes a defaultdict, setting a default cluster label for any index not explicitly
+        provided in 'labels'.
+
+        Args:
+          labels: A list of cluster labels corresponding to each event.
+          default_cluster: The default cluster label for any event not found in 'labels'.
+
+        Returns:
+          A dictionary serving as a lookup table for cluster labels.
+
+        Example::
+
+          # Assuming a class instance 'events_obj' and a list of labels 'event_labels'
+          lookup_table = events_obj.create_lookup_table(event_labels)
+          print(lookup_table)
+        """
         cluster_lookup_table = defaultdict(lambda: default_cluster)
         cluster_lookup_table.update({k: label for k, label in list(zip(self.events.index.tolist(), labels.tolist()))})
 
