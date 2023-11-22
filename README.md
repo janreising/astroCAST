@@ -50,7 +50,7 @@ Currently, we only support astroCAST in MacOS through docker, but other operatin
 ### Docker container<a name="docker-container">
 Once docker has been installed, run the following commands in the terminal:
 ```shell
-docker pull anacgon/astrocast:1.1
+docker pull anacgon/astrocast:latest
 ```
 This may take some minutes as the image is directly pulled from dockerhub. Once the image has been pulled locally, make sure it was correctly fetched by running:
 ```shell
@@ -60,7 +60,7 @@ You should be able to see the docker image listed.
 
 To start a container using the image run:
 ```shell
-docker run -v /path/to/your/data:/home/data -it -p 8888:8888 astrocast:1.1 
+docker run -v /path/to/your/data:/home/data -it -p 8888:8888 astrocast:latest 
 ```
 Note: "/path/to/your/data" must be replaced with your local path to the data you will use for the analysis. -p option allows the container to expose port 8888, necessary to run access jupyterlab from your browser.
 
@@ -74,12 +74,12 @@ Note: the explorer window will not be open automatically, you must copy and past
 Singularity (apptainer) now supports direct conversion of docker images into singularity. To pull and run the image use the following commands:
 Pull singularity image directly from dockerhub.
 ```shell
-singularity pull docker://anacgon/astrocast:1.1
+singularity pull docker://anacgon/astrocast:latest
 ```
 Once image has been pulled, a SIF file will be created in the directory where the previous command was executed. To run the singularity image:
 
 ```shell
-singularity run --writable-tmpfs astrocast_1.1.sif
+singularity run --writable-tmpfs astrocast_latest.sif
 ```
 note: singularity automatically mounts the host file system, therefore manual mounting is not required.
 
