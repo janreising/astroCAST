@@ -18,4 +18,6 @@ sphinx:
 # Add project requirements for building documentation
 python:
   install:
-    - requirements: docs/source/requirements.txt
+    - method: pip
+      path: .
+      requirements: docs/source/requirements.txt
