@@ -18,7 +18,7 @@ Installation via pip
 
     pip install astrocast
     # with optional features
-    pip install astrocast[video-player,testing]
+    pip install astrocast[all]
 
 Installation from source
 -------------------------
@@ -34,7 +34,7 @@ Installation from source
     # install
     poetry install
     ## with optional features
-    poetry install -E video-player -E testing
+    poetry install -E all
 
 .. _installation-with-containers:
 
@@ -54,7 +54,7 @@ After installing Docker, execute the following command to pull the astroCAST ima
 
 .. code-block:: shell
 
-    docker pull anacgon/astrocast:1.1
+    docker pull anacgon/astrocast:latest
     docker image ls
 
 The astroCAST image should appear in the list. To initiate a container from the image, use:
@@ -82,13 +82,13 @@ Singularity (Apptainer) can convert Docker images for use with Singularity. Pull
 
 .. code-block:: shell
 
-   singularity pull docker://anacgon/astrocast:1.1
+   singularity pull docker://anacgon/astrocast:latest
 
 This command creates a SIF file in the current directory. Run the Singularity image with:
 
 .. code-block:: shell
 
-   singularity run --writable-tmpfs astrocast_1.1.sif
+   singularity run --writable-tmpfs astrocast_latest.sif
 
 Singularity automatically mounts the host filesystem; manual mounting is unnecessary.
 

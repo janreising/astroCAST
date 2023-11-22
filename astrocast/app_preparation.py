@@ -14,10 +14,10 @@ from astrocast.preparation import IO, Delta
 
 class Explorer:
 
-    def __init__(self, input_path=None, h5_loc=None):
+    def __init__(self, input_path=None, loc=None):
 
         self.path = input_path
-        self.h5_loc = h5_loc
+        self.loc = loc
 
         self.app_ui = self.create_ui()
         self.app = App(self.app_ui, self.server, )
@@ -29,7 +29,7 @@ class Explorer:
                     "File", ui.layout_sidebar(
                         ui.panel_sidebar(
                             ui.h5(""), ui.input_text("path", "Path", value=self.path),
-                            ui.input_text("h5_loc", "dataset", value=self.h5_loc),
+                            ui.input_text("loc", "dataset", value=self.loc),
                             ui.input_switch("lazy", "lazy loading", value=True), ui.output_text("data_shape"),
                             ui.h5(""), ui.panel_conditional(
                                 "input.path !== ''", ui.h5("Select frames"),
@@ -161,7 +161,7 @@ class Explorer:
 
                 try:
 
-                    data = io.load(path, h5_loc=input.h5_loc(), z_slice=input.z_select(), lazy=input.lazy)
+                    data = io.load(path, loc=input.loc(), z_slice=input.z_select(), lazy=input.lazy)
 
                     if not isinstance(data, da.Array):
                         data = da.from_array(data)
@@ -183,7 +183,7 @@ class Explorer:
 
             try:
                 io = IO()
-                data = io.load(path, h5_loc=input.h5_loc(), z_slice=None, lazy=True)
+                data = io.load(path, loc=input.loc(), z_slice=None, lazy=True)
                 return data.shape
 
             except:
@@ -269,7 +269,7 @@ class Explorer:
         @reactive.Calc
         def get_smooth():
             data = load_data()
-            smooth = detection.Detector.gaussian_smooth_3d(data, sigma=input.sigma(), radius=input.radius())
+            smooth = detection.Detector._gaussian_smooth_3d(data, sigma=input.sigma(), radius=input.radius())
 
             if not input.lazy():
                 smooth = smooth.compute()
@@ -289,7 +289,7 @@ class Explorer:
                     data = load_data()
 
                 p.set(1, message="Spatial thresholding.", detail="This may take a while ...")
-                spatial = detection.Detector.spatial_threshold(
+                spatial = detection.Detector._spatial_threshold(
                     data, min_ratio=input.min_ratio(), threshold_z_depth=input.z_depth()
                 )
 
@@ -309,7 +309,7 @@ class Explorer:
                     data = load_data()
 
                 p.set(1, message="Temporal thresholding.", detail="This may take a while ...")
-                temporal = detection.Detector.temporal_threshold(
+                temporal = detection.Detector._temporal_threshold(
                     data, prominence=input.prominence(), width=input.width(), rel_height=input.rel_height(),
                     wlen=input.wlen()
                 )
@@ -368,7 +368,7 @@ class Explorer:
                     if input.comb_options() == "None":
 
                         if input.use_holes():
-                            filled = detection.Detector.fill_holes(
+                            filled = detection.Detector._fill_holes(
                                 dat, area_threshold=input.area_threshold(), connectivity=input.connectivity_holes(),
                                 depth=input.holes_depth()
                             )
@@ -376,7 +376,7 @@ class Explorer:
                             res_lbls.append(lbl + "_fill")
 
                         if input.use_objects():
-                            rem = detection.Detector.remove_objects(
+                            rem = detection.Detector._remove_objects(
                                 dat, min_size=input.min_size(), connectivity=input.connectivity_holes(),
                                 depth=input.objects_depth()
                             )
@@ -385,11 +385,11 @@ class Explorer:
 
                     elif input.comb_options() == "holes > objects":
 
-                        filled = detection.Detector.fill_holes(
+                        filled = detection.Detector._fill_holes(
                             dat, area_threshold=input.area_threshold(), connectivity=input.connectivity_holes(),
                             depth=input.objects_depth()
                         )
-                        rem = detection.Detector.remove_objects(
+                        rem = detection.Detector._remove_objects(
                             filled, min_size=input.min_size(), connectivity=input.connectivity_holes(),
                             depth=input.holes_depth()
                         )
@@ -399,12 +399,12 @@ class Explorer:
 
                     elif input.comb_options() == "objects > holes":
 
-                        rem = detection.Detector.remove_objects(
+                        rem = detection.Detector._remove_objects(
                             dat, min_size=input.min_size(), connectivity=input.connectivity_holes(),
                             depth=input.objects_depth()
                         )
 
-                        filled = detection.Detector.fill_holes(
+                        filled = detection.Detector._fill_holes(
                             rem, area_threshold=input.area_threshold(), connectivity=input.connectivity_holes(),
                             depth=input.holes_depth()
                         )
@@ -533,7 +533,7 @@ class Explorer:
                 for i, (x, y) in enumerate(pixels):
                     traces[:, i, 0] = data[:, x, y]
 
-                mask = detection.Detector.temporal_threshold(
+                mask = detection.Detector._temporal_threshold(
                     traces, prominence=input.prominence(), width=input.width(), rel_height=input.rel_height(),
                     wlen=input.wlen()
                 )
@@ -606,7 +606,7 @@ class Explorer:
             save_path = Path(input.save_path())
 
             arguments = {"detect-events": {  # file params
-                "h5_loc": input.h5_loc(),  # smoothing
+                "loc": input.loc(),  # smoothing
                 "use_smoothing": input.use_smoothing(), "smooth_sigma": input.sigma(), "smooth_radius": input.radius(),
                 # Spatial
                 "use_spatial": input.use_spatial(), "spatial_min_ratio": input.min_ratio(),
@@ -653,7 +653,7 @@ class Explorer:
         @reactive.event(input.btn_save)
         async def visualize_command():
             return f"astrocast view-detection-results " \
-                   f"--lazy False --h5-loc {input.h5_loc()} {input.path().replace('.h5', '.roi')}"
+                   f"--lazy False --h5-loc {input.loc()} {input.path().replace('.h5', '.roi')}"
 
     def plot_images(self, arr, frames, pixels=None, lbls=None, figsize=(10, 5), vmin=None, vmax=None):
 

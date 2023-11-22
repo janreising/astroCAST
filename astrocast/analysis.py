@@ -25,7 +25,7 @@ from astrocast.preparation import IO
 class Events(CachedClass):
 
     def __init__(
-            self, event_dir, lazy=True, data=None, h5_loc=None, group=None, subject_id=None, z_slice=None,
+            self, event_dir, lazy=True, data=None, loc=None, group=None, subject_id=None, z_slice=None,
             index_prefix=None, custom_columns=("v_area_norm", "cx", "cy"), frame_to_time_mapping=None,
             frame_to_time_function=None, cache_path=None, seed=1
     ):
@@ -107,7 +107,7 @@ class Events(CachedClass):
                         logging.warning(f"unable to infer video path with {root_guess}.tiff/h5/tdb")
 
                 if data is not None:
-                    self.data = Video(data, z_slice=z_slice, h5_loc=h5_loc, lazy=False)
+                    self.data = Video(data, z_slice=z_slice, loc=loc, lazy=False)
 
             elif isinstance(data, (np.ndarray, da.Array)):
                 print("data instance is an np array")
@@ -132,7 +132,7 @@ class Events(CachedClass):
             for i in range(len(event_dir)):
                 event = Events(
                     event_dir[i], data=data if not isinstance(data, list) else data[i],
-                    h5_loc=h5_loc if not isinstance(h5_loc, list) else h5_loc[i],
+                    loc=loc if not isinstance(loc, list) else loc[i],
                     z_slice=z_slice if not isinstance(z_slice, list) else z_slice[i],
                     group=group if not isinstance(group, list) else group[i], lazy=lazy, index_prefix=f"{i}x",
                     subject_id=i, custom_columns=custom_columns,
@@ -443,7 +443,7 @@ class Events(CachedClass):
                 time_map = np.load(time_map_path.as_posix(), allow_pickle=True)[()]
 
             elif event_map is not None:
-                time_map = astrocast.detection.Detector.get_time_map(event_map=event_map, chunk=chunk)
+                time_map = astrocast.detection.Detector._get_time_map(event_map=event_map, chunk=chunk)
                 np.save(time_map_path.as_posix(), time_map)
 
             else:
@@ -454,7 +454,7 @@ class Events(CachedClass):
             if not isinstance(event_map, (np.ndarray, da.Array)):
                 raise ValueError(f"please provide 'event_map' as np.ndarray or da")
 
-            time_map = astrocast.detection.Detector.get_time_map(event_map=event_map, chunk=chunk)
+            time_map = astrocast.detection.Detector._get_time_map(event_map=event_map, chunk=chunk)
 
         else:
             raise ValueError("Please provide either 'event_dir' or 'event_map'.")
@@ -685,7 +685,7 @@ class Events(CachedClass):
         else:
             raise ValueError("Please provide either a mapping or a function.")
 
-    def show_event_map(self, video=None, h5_loc=None, z_slice=None, lazy=True):
+    def show_event_map(self, video=None, loc=None, z_slice=None, lazy=True):
 
         import napari
 
@@ -704,7 +704,7 @@ class Events(CachedClass):
             viewer.add_image(data)
 
         else:
-            data = io.load(path=video, h5_loc=h5_loc, z_slice=z_slice, lazy=lazy)
+            data = io.load(path=video, loc=loc, z_slice=z_slice, lazy=lazy)
 
             viewer.add_image(data, name="data")
 
@@ -713,7 +713,7 @@ class Events(CachedClass):
             dpath = self.event_dir.joinpath(debug_file)
             if dpath.is_file():
 
-                debug = io.load(path=dpath, h5_loc="", z_slice=z_slice, lazy=lazy)
+                debug = io.load(path=dpath, loc="", z_slice=z_slice, lazy=lazy)
 
                 if "active" in debug_file:
                     lbl_layer = viewer.add_labels(debug, name=debug_file.replace(".tiff", "").replace("debug_", ""))
@@ -1225,28 +1225,28 @@ class Events(CachedClass):
 
 class Video:
 
-    def __init__(self, data, z_slice=None, h5_loc=None, lazy=False, name=None):
+    def __init__(self, data, z_slice=None, loc=None, lazy=False, name=None):
 
-        if isinstance(h5_loc, (tuple, list)):
-            if len(h5_loc) == 1:
-                h5_loc = h5_loc[0]
+        if isinstance(loc, (tuple, list)):
+            if len(loc) == 1:
+                loc = loc[0]
 
         if isinstance(data, (Path, str)):
 
             io = IO()
 
-            if isinstance(h5_loc, str):
-                self.data = io.load(data, h5_loc=h5_loc, lazy=lazy, z_slice=z_slice)
+            if isinstance(loc, str):
+                self.data = io.load(data, loc=loc, lazy=lazy, z_slice=z_slice)
                 self.Z, self.X, self.Y = self.data.shape
 
-            elif isinstance(h5_loc, (tuple, list)):
+            elif isinstance(loc, (tuple, list)):
                 self.data = {}
-                for loc in h5_loc:
-                    self.data[loc] = io.load(data, h5_loc=loc, lazy=lazy, z_slice=z_slice)
+                for loc in loc:
+                    self.data[loc] = io.load(data, loc=loc, lazy=lazy, z_slice=z_slice)
 
             else:
                 logging.info("Data already loaded into memory.")
-                self.data = io.load(data, h5_loc="", lazy=lazy, z_slice=z_slice)
+                self.data = io.load(data, loc="", lazy=lazy, z_slice=z_slice)
                 self.Z, self.X, self.Y = self.data.shape
 
         elif isinstance(data, (np.ndarray, da.Array)):

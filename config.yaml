@@ -7,28 +7,28 @@ convert-input:
   subtract_func: "mean"
   rescale: null
   in_memory: false
-  h5_loc: "data"
+  loc: "data"
   chunks: "infer"
   compression: null
   overwrite: false
 
 motion-correction:
   working_directory: null
-  h5_loc: ""
-  max_shifts: [50, 50]
+  loc: ""
+  max_shifts: [ 50, 50 ]
   niter_rig: 3
   splits_rig: 14
   num_splits_to_process_rig: null
-  strides: [48, 48]
-  overlaps: [24, 24]
+  strides: [ 48, 48 ]
+  overlaps: [ 24, 24 ]
   pw_rigid: false
   splits_els: 14
   num_splits_to_process_els: null
   upsample_factor_grid: 4
   max_deviation_rigid: 3
   nonneg_movie: true
-  gsig_filt: [20, 20]
-  h5_loc_save: "mc"
+  gsig_filt: [ 20, 20 ]
+  loc_out: "mc"
   chunks: null
   compression: null
   overwrite: false
@@ -41,9 +41,9 @@ train-denoiser:
   epochs: 10
   patience: 3
   min_delta: 0.001
-  input_size: [256, 256]
-  train_rotation: [1, 2, 3]
-  train_flip: [0, 1]
+  input_size: [ 256, 256 ]
+  train_rotation: [ 1, 2, 3 ]
+  train_flip: [ 0, 1 ]
   pre_post_frames: 5
   gap_frames: 0
   normalize: global
@@ -64,12 +64,12 @@ train-denoiser:
 
 denoise:
   batch_size: 8
-  input_size: [256, 256]
+  input_size: [ 256, 256 ]
   pre_post_frame: 5
   gap_frames: 0
   z_select: null
   overlap: 10
-  padding: edge 
+  padding: edge
   normalize: global
   loc: "mc/ast"
   in_memory: false
@@ -81,13 +81,13 @@ denoise:
 
 subtract-delta:
   output_path: null
-  h5_loc_in: ""
+  loc_in: ""
   method: "background"
   processing_chunks: "infer"
   save_chunks: "infer"
   overwrite_first_frame: true
   lazy: true
-  h5_loc_out: "dff"
+  loc_out: "dff"
   compression: null
   overwrite: false
 
@@ -98,7 +98,7 @@ detect-events:
   exclude_border: 3
   fill_holes: true
   fill_holes_first: true
-  h5_loc: dff/ch0
+  loc: dff/ch0
   holes_connectivity: 1
   holes_depth: 1
   logging_level: 20
@@ -122,7 +122,7 @@ detect-events:
   use_temporal: true
 
 detect-events:
-  h5_loc: null
+  loc: null
   threshold: null
   exclude_border: 0
   use_smoothing: true

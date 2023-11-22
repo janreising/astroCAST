@@ -36,10 +36,10 @@ class Test_LocalCache:
         assert d2 < d1, f"cached result took too long: {d1} <= {d2}"
 
     @pytest.mark.parametrize("position", ["arg", "kwarg"])
-    @pytest.mark.parametrize("data", ["A", 2, 2.9, True, (1, 2), [1, 2], np.zeros(1),
-                                      {"a":1}, {"n":np.zeros(1)}, {"outer":{"inner":3}},
-                                      pd.DataFrame({"A":[1, 2]}), pd.Series([1, 2, 3]),
-                                      np.array_equal])
+    @pytest.mark.parametrize(
+        "data", ["A", 2, 2.9, True, (1, 2), [1, 2], np.zeros(1), {"a": 1}, {"n": np.zeros(1)}, {"outer": {"inner": 3}},
+                 pd.DataFrame({"A": [1, 2]}), pd.Series([1, 2, 3]), np.array_equal]
+    )
     def test_input_type(self, position, data):
 
         if position == "arg":
@@ -95,19 +95,18 @@ class Test_LocalCache:
         assert n1 == n2, f"cached result is incorrect: {n1} != {n2}"
         assert d2 < d1, f"cached result took too long: {d1} <= {d2}"
 
+
 @pytest.mark.parametrize("typ", ["pandas", "list", "numpy", "dask", "events"])
 @pytest.mark.parametrize("ragged", ["equal", "ragged"])
 @pytest.mark.parametrize("num_rows", [1, 10])
 def test_dummy_generator(num_rows, typ, ragged):
+    DG = DummyGenerator(num_rows=num_rows, ragged=ragged)
+    data = DG.get_by_name(typ)
 
-        DG = DummyGenerator(num_rows=num_rows, ragged=ragged)
-        data = DG.get_by_name(typ)
+    assert len(data) == num_rows
 
-        assert len(data) == num_rows
+    # TODO needed?  # if typ in ["numpy", "dask"]:  #     assert data.shape[0] == num_rows
 
-        # TODO needed?
-        # if typ in ["numpy", "dask"]:
-        #     assert data.shape[0] == num_rows
 
 @pytest.mark.parametrize("typ", ["pandas", "list", "numpy", "dask"])
 @pytest.mark.parametrize("ragged", ["equal", "ragged"])
@@ -218,7 +217,6 @@ class Test_normalization:
 
         norm = Normalization(data)
         res = norm.run({0: ["divide", dict(mode=value_mode, population_wide=population_wide)]})
-
 
         for l in [0, -1]:
 
@@ -350,9 +348,9 @@ class Test_normalization:
         norm = Normalization(data)
         assert np.sum(np.isnan(norm.data if isinstance(norm.data, np.ndarray) else ak.ravel(norm.data))) > 0
 
-        imputed = norm.run({
-            0: ["impute_nan", dict(fixed_value=fixed_value)]
-        })
+        imputed = norm.run(
+            {0: ["impute_nan", dict(fixed_value=fixed_value)]}
+        )
 
         if isinstance(imputed, ak.Array):
             imputed = ak.ravel(imputed)
@@ -365,11 +363,11 @@ class Test_normalization:
 
             with pytest.raises(ValueError):
 
-                data = np.array([(np.random.random((np.random.randint(1, 10)))*10).astype(int) for _ in range(3)])
+                data = np.array([(np.random.random((np.random.randint(1, 10))) * 10).astype(int) for _ in range(3)])
 
                 norm = Normalization(data)
 
-                instr = {0: ["divide", {"mode": "max", "rows":False}],}
+                instr = {0: ["divide", {"mode": "max", "rows": False}], }
                 res = norm.run(instr)
 
         else:
@@ -380,7 +378,7 @@ class Test_normalization:
 
             norm = Normalization(data)
 
-            instr = {0: ["divide", {"mode": "max", "rows":False}],}
+            instr = {0: ["divide", {"mode": "max", "rows": False}], }
             res = norm.run(instr)
             assert np.max(res) <= 1
 
@@ -388,7 +386,7 @@ class Test_normalization:
             data[:, 2] -= np.max(data[:, 2])
             norm = Normalization(data)
 
-            instr = {0: ["divide", {"mode": "max", "rows":False}],}
+            instr = {0: ["divide", {"mode": "max", "rows": False}], }
             res = norm.run(instr)
             np.allclose(data[:, 2], res[:, 2])
 
@@ -431,8 +429,9 @@ class Test_EventSim:
         blob_size_fraction = 0.1
         event_probability = 0.5
 
-        event_map, num_events = sim.simulate(shape, z_fraction, xy_fraction, gap_space, gap_time,
-                                             blob_size_fraction, event_probability)
+        event_map, num_events = sim.simulate(
+            shape, z_fraction, xy_fraction, gap_space, gap_time, blob_size_fraction, event_probability
+        )
 
         assert event_map.shape == shape
         assert num_events >= 0
@@ -459,18 +458,16 @@ class Test_SampleInput:
         assert not input_path.exists()
 
     @pytest.mark.parametrize("loc", [None, "dff/ch0"])
-    def test_h5_loc(self, loc, extension=".h5"):
-
+    def test_loc(self, loc, extension=".h5"):
         si = SampleInput()
         input_path = si.get_test_data(extension=extension)
 
-        h5_loc = si.get_h5_loc(ref=loc)
-        assert isinstance(h5_loc, str), f"h5_loc is type: {type(h5_loc)}"
+        loc = si.get_loc(ref=loc)
+        assert isinstance(loc, str), f"loc is type: {type(loc)}"
+
 
 def test_load_yaml():
-
     with tempfile.TemporaryDirectory() as tmp:
-
         tmpdir = Path(tmp)
 
         # Create a temporary YAML file for testing
@@ -489,37 +486,35 @@ def test_load_yaml():
         # Check if the function read the values correctly
         assert result == {"param1": "value1", "param2": "value2"}
 
+
 @pytest.mark.long
 def test_sample_download():
-
     with tempfile.TemporaryDirectory() as tmp:
-
         tmpdir = Path(tmp)
 
         download_sample_data(tmpdir)
 
         assert len(list(tmpdir.glob("*/*"))) > 0
 
+
 @pytest.mark.long
 def test_model_download():
-
     with tempfile.TemporaryDirectory() as tmp:
-
         tmpdir = Path(tmp)
 
         download_pretrained_models(tmpdir)
 
         assert len(list(tmpdir.glob("*/*"))) > 0
 
+
 @pytest.mark.parametrize("data_type", ["np.ndarray", ".h5", ".tiff", ".tdb", ".err"])
 def test_data_dimensions(data_type):
-
     with tempfile.TemporaryDirectory() as tmp:
 
         tmpdir = Path(tmp)
 
         arr = np.random.random((10, 10, 10))
-        h5_loc = "data/ch0"
+        loc = "data/ch0"
 
         if data_type == ".err":
 
@@ -528,7 +523,7 @@ def test_data_dimensions(data_type):
                 w.write("hello")
 
             with pytest.raises(TypeError):
-                _ = get_data_dimensions(input_, loc=h5_loc, return_dtype=True)
+                _ = get_data_dimensions(input_, loc=loc, return_dtype=True)
 
         else:
 
@@ -538,6 +533,6 @@ def test_data_dimensions(data_type):
             else:
                 input_ = tmpdir.joinpath(f"file.{data_type}")
                 io = IO()
-                io.save(input_, data=arr, h5_loc=h5_loc)
+                io.save(input_, data=arr, loc=loc)
 
-            _ = get_data_dimensions(input_, loc=h5_loc, return_dtype=True)
+            _ = get_data_dimensions(input_, loc=loc, return_dtype=True)

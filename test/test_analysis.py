@@ -2,12 +2,12 @@ import tempfile
 import time
 
 import dask.array
+import matplotlib
 import pytest
 
 from astrocast.analysis import *
 from astrocast.helper import EventSim
 
-import matplotlib
 matplotlib.use('Agg')  # Use the Agg backend
 
 
@@ -16,7 +16,6 @@ class Test_Events:
     def test_load_events_minimal(self):
 
         with tempfile.TemporaryDirectory() as tmpdir:
-
             tmpdir = Path(tmpdir)
             assert tmpdir.is_dir()
 
@@ -37,8 +36,7 @@ class Test_Events:
             sim = EventSim()
             event_dir = sim.create_dataset(Path(tmpdir).joinpath("sim.h5"))
 
-            custom_columns = ["v_area_norm", "cx", "cy", "v_area_footprint",
-                              # "pix_num_norm",
+            custom_columns = ["v_area_norm", "cx", "cy", "v_area_footprint",  # "pix_num_norm",
                               {"add_one": lambda events: events.z0 + 1}]
 
             # Call the function and assert the expected result
@@ -58,7 +56,6 @@ class Test_Events:
     def test_load_events_z_slice(self, z_slice=(10, 25)):
 
         with tempfile.TemporaryDirectory() as tmpdir:
-
             # Create dummy data
             sim = EventSim()
             event_dir = sim.create_dataset(Path(tmpdir).joinpath("sim.h5"))
@@ -74,7 +71,6 @@ class Test_Events:
     def test_load_events_prefix(self, prefix="prefix_"):
 
         with tempfile.TemporaryDirectory() as tmpdir:
-
             # Create dummy data
             sim = EventSim()
             event_dir = sim.create_dataset(Path(tmpdir).joinpath("sim.h5"))
@@ -101,7 +97,8 @@ class Test_Events:
 
             if input_type == "dir":
                 time_map, event_start_frame, event_stop_frame = events.get_time_map(event_dir=event_dir)
-                assert time_map.shape[0] == shape[0], f"wrong second dimension: {time_map.shape[0]} instead of {shape[0]}"
+                assert time_map.shape[0] == shape[
+                    0], f"wrong second dimension: {time_map.shape[0]} instead of {shape[0]}"
 
             else:
                 event_map = np.zeros(shape=(4, 3, 3), dtype=int)
@@ -116,7 +113,6 @@ class Test_Events:
 
     def test_get_event_map(self):
         with tempfile.TemporaryDirectory() as tmpdir:
-
             # Create dummy data
             sim = EventSim()
             event_dir = sim.create_dataset(Path(tmpdir).joinpath("sim.h5"))
@@ -133,10 +129,10 @@ class Test_Events:
 
             # Create dummy data
             sim = EventSim()
-            event_dir = sim.create_dataset(Path(tmpdir).joinpath("sim.h5"), shape=shape,
-                                           event_intensity=100, background_noise=1,
-                                           gap_time=3, gap_space=5,
-                                           blob_size_fraction=0.05, event_probability=0.2)
+            event_dir = sim.create_dataset(
+                Path(tmpdir).joinpath("sim.h5"), shape=shape, event_intensity=100, background_noise=1, gap_time=3,
+                gap_space=5, blob_size_fraction=0.05, event_probability=0.2
+            )
 
             # Call the function and assert the expected result
             events = Events(event_dir)
@@ -166,14 +162,19 @@ class Test_Events:
 
                 logging.warning(log_string)
 
-                raise ValueError(f"original and recreated event_map is not equivalend: {np.sum(orig_masked)} vs. {np.sum(recr_masked)}")
-    @pytest.mark.parametrize("param", [
-        dict(memmap_path=False),
-        dict(normalization_instructions={0: ["subtract", {"mode": "mean"}], 1: ["divide", {"mode": "std"}]},
-             memmap_path=False),
-        dict(normalization_instructions={0: ["subtract", {"mode": "mean"}], 1: ["divide", {"mode": "std"}]},
-             memmap_path=True)
-    ])
+                raise ValueError(
+                    f"original and recreated event_map is not equivalend: {np.sum(orig_masked)} vs. {np.sum(recr_masked)}"
+                )
+
+    @pytest.mark.parametrize(
+        "param", [dict(memmap_path=False), dict(
+            normalization_instructions={0: ["subtract", {"mode": "mean"}], 1: ["divide", {"mode": "std"}]},
+            memmap_path=False
+        ), dict(
+            normalization_instructions={0: ["subtract", {"mode": "mean"}], 1: ["divide", {"mode": "std"}]},
+            memmap_path=True
+        )]
+    )
     @pytest.mark.parametrize("extend", [-1, 4, (3, 2), (-1, 2), (2, -1)])
     def test_extension(self, param, extend, shape=(50, 100, 100), num_events=3, event_length=3):
 
@@ -191,18 +192,19 @@ class Test_Events:
             arr = np.random.random(shape) * 1000
             arr = np.abs(arr.astype(int))
 
-            events = {k:[] for k in ["z0", "z1", "x0", "x1", "y0", "y1", "dz", "dx", "dy", "trace", "full_trace", "mask", "fp_mask"]}
+            events = {k: [] for k in
+                      ["z0", "z1", "x0", "x1", "y0", "y1", "dz", "dx", "dy", "trace", "full_trace", "mask", "fp_mask"]}
             for i in range(num_events):
 
-                z0 = np.random.randint(event_length+1+abs(e0), Z-event_length-1-abs(e1))
-                x0 = np.random.randint(event_length+1+abs(e0), X-event_length-1-abs(e1))
-                y0 = np.random.randint(event_length+1+abs(e0), Y-event_length-1-abs(e1))
+                z0 = np.random.randint(event_length + 1 + abs(e0), Z - event_length - 1 - abs(e1))
+                x0 = np.random.randint(event_length + 1 + abs(e0), X - event_length - 1 - abs(e1))
+                y0 = np.random.randint(event_length + 1 + abs(e0), Y - event_length - 1 - abs(e1))
 
                 events["z0"].append(z0)
                 events["x0"].append(x0)
                 events["y0"].append(y0)
 
-                z1, x1, y1 = z0+event_length, x0+event_length, y0+event_length
+                z1, x1, y1 = z0 + event_length, x0 + event_length, y0 + event_length
 
                 events["z1"].append(z1)
                 events["x1"].append(x1)
@@ -219,13 +221,13 @@ class Test_Events:
                     full_trace = np.squeeze(np.mean(arr[:, x0:x1, y0:y1], axis=(1, 2)))
 
                 elif (e0 == -1) and (e1 != -1):
-                    full_trace = np.squeeze(np.mean(arr[0:z1+e1, x0:x1, y0:y1], axis=(1, 2)))
+                    full_trace = np.squeeze(np.mean(arr[0:z1 + e1, x0:x1, y0:y1], axis=(1, 2)))
 
                 elif (e0 != -1) and (e1 == -1):
-                    full_trace = np.squeeze(np.mean(arr[z0-e0:, x0:x1, y0:y1], axis=(1, 2)))
+                    full_trace = np.squeeze(np.mean(arr[z0 - e0:, x0:x1, y0:y1], axis=(1, 2)))
 
                 else:
-                    full_trace = np.squeeze(np.mean(arr[z0-e0:z1+e1, x0:x1, y0:y1], axis=(1, 2)))
+                    full_trace = np.squeeze(np.mean(arr[z0 - e0:z1 + e1, x0:x1, y0:y1], axis=(1, 2)))
 
                 events["trace"].append(trace)
                 events["full_trace"].append(full_trace)
@@ -239,12 +241,13 @@ class Test_Events:
             ev.num_frames, ev.X, ev.Y = shape
 
             # extend events
-            ext_events = ev.get_extended_events(video=Video(arr), return_array=False, extend=extend,
-                            memmap_path=Path(tmpdir).joinpath("arr.mmap") if param["memmap_path"] else None)
+            ext_events = ev.get_extended_events(
+                video=Video(arr), return_array=False, extend=extend,
+                memmap_path=Path(tmpdir).joinpath("arr.mmap") if param["memmap_path"] else None
+            )
 
             # check result
             for i in range(len(ext_events)):
-
                 t = np.squeeze(np.array(ext_events.iloc[i].trace))
                 f = np.squeeze(np.array(ev.events.iloc[i].full_trace))
 
@@ -254,7 +257,6 @@ class Test_Events:
     def test_extension_cache(self, lazy=False, shape=(50, 100, 100)):
 
         with tempfile.TemporaryDirectory() as tmpdir:
-
             tmpdir = Path(tmpdir)
             cache_path = tmpdir.joinpath("cache_dir/")
 
@@ -285,18 +287,19 @@ class Test_Events:
     def test_extension_save(self, shape=(50, 100, 100)):
 
         with tempfile.TemporaryDirectory() as tmpdir:
-
             # Create dummy data
             sim = EventSim()
-            event_dir = sim.create_dataset(Path(tmpdir).joinpath("sim.h5"), shape=shape,
-                                           event_intensity=100, background_noise=1, gap_space=5, gap_time=2)
+            event_dir = sim.create_dataset(
+                Path(tmpdir).joinpath("sim.h5"), shape=shape, event_intensity=100, background_noise=1, gap_space=5,
+                gap_time=2
+            )
 
             events = Events(event_dir)
             df = events.load_events(event_dir)
             arr, shape, dtype = events.get_event_map(event_dir, lazy=True)
 
             arr = arr.astype(np.int32)
-            save_path=Path(tmpdir).joinpath("footprints.npy")
+            save_path = Path(tmpdir).joinpath("footprints.npy")
             trace, _, _ = events.get_extended_events(video=Video(arr), save_path=save_path, return_array=True)
 
             io = IO()
@@ -307,7 +310,6 @@ class Test_Events:
     def test_z_slice(self, z_slice=(10, 40), shape=(50, 100, 100)):
 
         with tempfile.TemporaryDirectory() as tmpdir:
-
             # Create dummy data
             sim = EventSim()
             event_dir = sim.create_dataset(Path(tmpdir).joinpath("sim.h5"), shape=shape)
@@ -318,26 +320,24 @@ class Test_Events:
     def test_frame_to_time_conversion(self, shape=(50, 100, 100)):
 
         with tempfile.TemporaryDirectory() as tmpdir:
-
             # Create dummy data
             sim = EventSim()
             event_dir = sim.create_dataset(Path(tmpdir).joinpath("sim.h5"), shape=shape)
 
             # test dictionary mapping
-            frame_to_time_mapping={i:i*2 for i in range(1000)}
+            frame_to_time_mapping = {i: i * 2 for i in range(1000)}
             events = Events(event_dir, frame_to_time_mapping=frame_to_time_mapping)
             assert "t0" in events.events.columns
             assert "t1" in events.events.columns
 
             # test function mapping
-            frame_to_time_function=lambda x: x*2
+            frame_to_time_function = lambda x: x * 2
             events = Events(event_dir, frame_to_time_function=frame_to_time_function)
             assert "t0" in events.events.columns
             assert "t1" in events.events.columns
 
     def test_load_data(self, shape=(50, 100, 100)):
         with tempfile.TemporaryDirectory() as tmpdir:
-
             # Create dummy data
             sim = EventSim()
             event_dir = sim.create_dataset(Path(tmpdir).joinpath("sim.h5"), shape=shape)
@@ -358,7 +358,6 @@ class Test_Events:
 
         with tempfile.TemporaryDirectory() as tmpdir_1:
             with tempfile.TemporaryDirectory() as tmpdir_2:
-
                 sim = EventSim()
                 event_dir_1 = sim.create_dataset(Path(tmpdir_1).joinpath("sim.h5"), shape=shape)
                 event_dir_2 = sim.create_dataset(Path(tmpdir_2).joinpath("sim.h5"), shape=shape)
@@ -374,7 +373,6 @@ class Test_Events:
     @pytest.mark.skip(reason="legacy")
     def test_get_event_timing(self, shape=(50, 100, 100)):
         with tempfile.TemporaryDirectory() as tmpdir:
-
             # Create dummy data
             sim = EventSim()
             event_dir = sim.create_dataset(Path(tmpdir).joinpath("sim.h5"), shape=shape)
@@ -385,7 +383,6 @@ class Test_Events:
     @pytest.mark.skip(reason="legacy")
     def test_set_timings(self, shape=(50, 100, 100)):
         with tempfile.TemporaryDirectory() as tmpdir:
-
             # Create dummy data
             sim = EventSim()
             event_dir = sim.create_dataset(Path(tmpdir).joinpath("sim.h5"), shape=shape)
@@ -396,7 +393,6 @@ class Test_Events:
     @pytest.mark.skip(reason="Not implemented")
     def test_align(self, shape=(50, 100, 100)):
         with tempfile.TemporaryDirectory() as tmpdir:
-
             # Create dummy data
             sim = EventSim()
             event_dir = sim.create_dataset(Path(tmpdir).joinpath("sim.h5"), shape=shape)
@@ -404,12 +400,11 @@ class Test_Events:
             events = Events(event_dir)
             events.align()
 
-    @pytest.mark.parametrize("param", [
-        dict(index=None), dict(smooth=5), dict(gradient=True)
-    ])
+    @pytest.mark.parametrize(
+        "param", [dict(index=None), dict(smooth=5), dict(gradient=True)]
+    )
     def test_get_average_event_trace(self, param, shape=(50, 100, 100)):
         with tempfile.TemporaryDirectory() as tmpdir:
-
             # Create dummy data
             sim = EventSim()
             event_dir = sim.create_dataset(Path(tmpdir).joinpath("sim.h5"), shape=shape)
@@ -424,13 +419,9 @@ class Test_Events:
         events = Events(event_dir=None)
         events.num_frames = 10
 
-        df = pd.DataFrame({
-            "z0": [0, 2, 5],
-            "z1": [3, 3, 9],
-            "trace": [
-                np.array([1, 1, 1]), np.array([2]), np.array([3, 3, 3, 3]),
-            ]
-        })
+        df = pd.DataFrame(
+            {"z0": [0, 2, 5], "z1": [3, 3, 9], "trace": [np.array([1, 1, 1]), np.array([2]), np.array([3, 3, 3, 3]), ]}
+        )
 
         arr_expected = np.zeros((3, 10))
         arr_expected[0, 0:3] = 1
@@ -451,9 +442,11 @@ class Test_Events:
         assert len(freq.columns) == n_groups
 
         instr = {0: ["subtract", {"mode": "max"}]}
-        freq = events.get_frequency(grouping_column="group", cluster_column="clusters",
-                            normalization_instructions=instr)
+        freq = events.get_frequency(
+            grouping_column="group", cluster_column="clusters", normalization_instructions=instr
+        )
         assert freq.max().max() == 0
+
 
 class Test_Video:
 
@@ -482,12 +475,12 @@ class Test_Video:
             elif input_type == ".h5":
 
                 path = tmp_path.with_suffix(input_type)
-                h5_loc = "data"
+                loc = "data"
 
                 io = IO()
-                io.save(path=path, data=data, h5_loc=h5_loc)
+                io.save(path=path, data=data, loc=loc)
 
-                vid = Video(data=path, h5_loc="data/ch0", lazy=lazy, z_slice=z_slice)
+                vid = Video(data=path, loc="data/ch0", lazy=lazy, z_slice=z_slice)
 
             elif input_type in [".tdb", ".tiff"]:
 
@@ -514,7 +507,9 @@ class Test_Video:
                     proj_org = np.zeros(original_data.shape)
                     for x in range(original_data.shape[1]):
                         for y in range(original_data.shape[2]):
-                            proj_org[:, x, y] = pd.Series(original_data[:, x, y]).rolling(window=window).apply(proj_func).values
+                            proj_org[:, x, y] = pd.Series(original_data[:, x, y]).rolling(window=window).apply(
+                                proj_func
+                            ).values
 
                 proj = vid.get_image_project(agg_func=proj_func, window=window)
                 assert proj_org.shape == proj.shape, f"shape unequal: orig>{proj_org.shape} vs load>{proj.shape}"

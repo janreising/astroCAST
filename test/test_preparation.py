@@ -34,7 +34,7 @@ class Test_Delta:
 
                 si = SampleInput()
                 data = si.get_test_data(extension=input_type)
-                loc = si.get_h5_loc()
+                loc = si.get_loc()
 
             else:
                 raise TypeError
@@ -53,7 +53,6 @@ class Test_Delta:
     def test_methods_run(self, method, lazy):
 
         with tempfile.TemporaryDirectory() as tmpdir:
-
             Z, X, Y = 25, 2, 2
 
             data = np.random.randint(0, 100, (Z, X, Y), dtype=int)
@@ -69,7 +68,7 @@ class Test_Delta:
         arr = np.random.randint(0, 100, dim, dtype=int)
         orig_shape = arr.shape
 
-        res = Delta.calculate_delta_min_filter(arr, window=10)
+        res = Delta._calculate_delta_min_filter(arr, window=10)
 
         assert res.shape == orig_shape, f"dimensions are not the same input: {dim} vs output: {res.shape}"
 
@@ -83,8 +82,7 @@ class Test_Delta:
         arr = np.random.randint(0, 100, dim, dtype=int)
 
         with tempfile.TemporaryDirectory() as tmpdir:
-
-            ctrl = Delta.calculate_delta_min_filter(arr.copy(), window, method=method)
+            ctrl = Delta._calculate_delta_min_filter(arr.copy(), window, method=method)
             logging.warning(f"sum of ctrl: {np.sum(ctrl)}")
 
             delta = Delta(arr, loc=None)
@@ -294,7 +292,7 @@ class Test_Input:
             data = {0: np.random.random((25, 10, 10))}
 
             inp = Input()
-            inp.save(output_path, data, chunks=chunks)
+            inp._save(output_path, data, chunks=chunks)
 
     @pytest.mark.parametrize("output_path", ["out.h5", "out.tdb", "out.tiff"])
     def test_intput_output(self, output_path):
@@ -323,7 +321,7 @@ class Test_Input:
             output_path = tmpdir.joinpath(output_path)
 
             inp.run(
-                input_path=tmpdir, output_path=output_path, dtype=None, in_memory=False, h5_loc_out="data"
+                input_path=tmpdir, output_path=output_path, dtype=None, in_memory=False, loc_in="data"
             )
 
             assert output_path.is_file() or output_path.is_dir(), f"cannot find output file: {output_path}"
@@ -387,9 +385,9 @@ class Test_IO:
             h5loc = None if output_path.suffix != ".h5" else "data/ch0"
             data = {"ch0": arr}
 
-            output_path = io.save(output_path, data, h5_loc=prefix)
+            output_path = io.save(output_path, data, loc=prefix)
 
-            arr_load = io.load(output_path, h5_loc=h5loc)
+            arr_load = io.load(output_path, loc=h5loc)
 
             assert arr.shape == arr_load.shape
             assert np.array_equal(arr, arr_load)
@@ -414,9 +412,9 @@ class Test_IO:
             h5loc = None if output_path.suffix != ".h5" else "data/ch0"
             data = {"ch0": arr}
 
-            output_path = io.save(output_path, data, h5_loc=prefix)
+            output_path = io.save(output_path, data, loc=prefix)
 
-            arr_load = io.load(output_path, h5_loc=h5loc)
+            arr_load = io.load(output_path, loc=h5loc)
 
             assert arr.shape == arr_load.shape
             assert np.array_equal(arr, arr_load)
@@ -441,9 +439,9 @@ class Test_IO:
             h5loc = None if output_path.suffix != ".h5" else "data/ch0"
             data = {"ch0": arr}
 
-            output_path = io.save(output_path, data, h5_loc=prefix, chunks=chunks)
+            output_path = io.save(output_path, data, loc=prefix, chunks=chunks)
 
-            arr_load = io.load(output_path, h5_loc=h5loc)
+            arr_load = io.load(output_path, loc=h5loc)
 
             assert arr.shape == arr_load.shape
             assert np.array_equal(arr, arr_load)
@@ -468,9 +466,9 @@ class Test_IO:
             h5loc = None if output_path.suffix != ".h5" else "data/ch0"
             data = {"ch0": arr}
 
-            output_path = io.save(output_path, data, h5_loc=prefix, chunks=chunks, compression=compression)
+            output_path = io.save(output_path, data, loc=prefix, chunks=chunks, compression=compression)
 
-            arr_load = io.load(output_path, h5_loc=h5loc)
+            arr_load = io.load(output_path, loc=h5loc)
 
             assert arr.shape == arr_load.shape
             assert np.array_equal(arr, arr_load)
@@ -498,9 +496,9 @@ class Test_IO:
             h5loc = None if output_path.suffix != ".h5" else "data/ch0"
             data = {"ch0": arr}
 
-            output_path = io.save(output_path, data, h5_loc=prefix)
+            output_path = io.save(output_path, data, loc=prefix)
 
-            arr_load = io.load(output_path, h5_loc=h5loc, z_slice=z_slice)
+            arr_load = io.load(output_path, loc=h5loc, z_slice=z_slice)
 
             assert original_array.shape == arr_load.shape
             assert np.array_equal(original_array, arr_load)
@@ -524,11 +522,11 @@ class Test_IO:
             h5loc = None if output_path.suffix != ".h5" else "data/ch0"
             data = {"ch0": arr}
 
-            output_path = io.save(output_path, data, h5_loc=prefix)
+            output_path = io.save(output_path, data, loc=prefix)
             logging.warning(output_path)
 
             # Loading
-            arr_load = io.load(output_path, h5_loc=h5loc, lazy=True)
+            arr_load = io.load(output_path, loc=h5loc, lazy=True)
 
             assert isinstance(arr_load, (dask.array.Array, dask.array.core.Array)), f"type: {type(arr_load)}"
             assert arr.shape == arr_load.shape
@@ -565,7 +563,7 @@ class Test_MotionCorrection:
     def test_random(self, input_type, shape=(100, 100, 100)):
 
         data = np.random.random(shape)
-        h5_loc = ""
+        loc = ""
 
         with tempfile.TemporaryDirectory() as dir:
             tmpdir = Path(dir)
@@ -575,9 +573,9 @@ class Test_MotionCorrection:
 
             if input_type == ".h5":
 
-                h5_loc = "mc/ch0"
+                loc = "mc/ch0"
                 temp_path = tmpdir.joinpath("test.h5")
-                io.save(temp_path, data=data, h5_loc=h5_loc)
+                io.save(temp_path, data=data, loc=loc)
 
                 data = temp_path
 
@@ -607,7 +605,7 @@ class Test_MotionCorrection:
                 wd.mkdir()
 
             mc = MotionCorrection(working_directory=wd)
-            mc.run(data, h5_loc=h5_loc, max_shifts=(6, 6))
+            mc.run(data, loc=loc, max_shifts=(6, 6))
 
             data = mc.save(output=None)
             assert type(data) == np.ndarray
@@ -617,7 +615,7 @@ class Test_MotionCorrection:
     def test_random_tdb(self, input_type, shape=(100, 100, 100)):
 
         data = np.random.random(shape)
-        h5_loc = None
+        loc = None
 
         with tempfile.TemporaryDirectory() as dir:
             tmpdir = Path(dir)
@@ -627,9 +625,9 @@ class Test_MotionCorrection:
 
             if input_type == ".h5":
 
-                h5_loc = "mc/ch0"
+                loc = "mc/ch0"
                 temp_path = tmpdir.joinpath("test.h5")
-                io.save(temp_path, data={"test/ch0": data}, h5_loc="mc")
+                io.save(temp_path, data={"test/ch0": data}, loc="mc")
 
                 data = temp_path
 
@@ -643,7 +641,7 @@ class Test_MotionCorrection:
             elif input_type == ".tdb":
 
                 temp_path = tmpdir.joinpath("test.tdb")
-                temp_path = io.save(temp_path, data={"ch0": data}, h5_loc="")
+                temp_path = io.save(temp_path, data={"ch0": data}, loc="")
 
                 assert temp_path.is_file(), f"cannot find {temp_path}"
                 data = temp_path
@@ -655,19 +653,19 @@ class Test_MotionCorrection:
                 raise ValueError
 
             mc = MotionCorrection()
-            mc.run(data, h5_loc=h5_loc, max_shifts=(6, 6))
+            mc.run(data, loc=loc, max_shifts=(6, 6))
 
             data = mc.save(output=None)
             assert type(data) == np.ndarray
 
     @pytest.mark.parametrize("extension", [".h5", ".tiff"])
-    def test_real_input(self, extension, h5_loc="dff/ch0"):
+    def test_real_input(self, extension, loc="dff/ch0"):
 
         si = SampleInput()
         input_ = si.get_test_data(extension=extension)
 
         mc = MotionCorrection()
-        mc.run(path=input_, h5_loc=h5_loc, max_shifts=(6, 6))
+        mc.run(path=input_, loc=loc, max_shifts=(6, 6))
 
         data = mc.save(output=None)
         assert type(data) == np.ndarray

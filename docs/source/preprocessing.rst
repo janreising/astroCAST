@@ -4,22 +4,28 @@ Preprocessing
 Input conversion
 -----------------
 .. autoclass:: astrocast.preparation.Input
-    :members: run
+    :members:
 
 Motion correction
 ------------------
 
 .. autoclass:: astrocast.preparation.MotionCorrection
-    :members: run, save
+    :members:
 
 Denoising
 -----------
 
-Baseline subtraction
---------------------
+Bleach correction
+-----------------
+
+.. autoclass:: astrocast.preparation.Delta
+    :members:
 
 Event detection
 ---------------
+
+.. autoclass:: astrocast.detection.Detector
+    :members:
 
 The event object
 -----------------

@@ -227,6 +227,7 @@ def wrapper_local_cache(f):
 
     return inner_function
 
+
 def experimental(func):
     """
     Decorator to mark functions as experimental and log a warning upon their usage.
@@ -246,6 +247,7 @@ def experimental(func):
 
     return wrapper
 
+
 def get_data_dimensions(
         data: Union[np.ndarray, da.Array, str, Path], loc: str = None, return_dtype: bool = False
 ) -> Union[Tuple[Tuple, Tuple], Tuple[Tuple, Tuple, type]]:
@@ -253,13 +255,12 @@ def get_data_dimensions(
         the chunksize can be returned as well.
 
     Args:
-    - data: An object representing the data whose dimensions are to be calculated.
-    - loc: A string representing the location of the data in the HDF5 file. This parameter is optional
-      and only applicable when data is a Path to an HDF file.
-    - return_dtype: A boolean indicating whether to return the data type of the data.
+        data: An object representing the data whose dimensions are to be calculated.
+        loc: A string representing the location of the data in the HDF5 file. This parameter is optional and only applicable when data is a Path to an HDF file.
+        return_dtype: A boolean indicating whether to return the data type of the data.
 
     Raises:
-    - TypeError: If the input is not of a recognized type.
+        TypeError: If the input is not of a recognized type.
     """
 
     if isinstance(data, np.ndarray):
@@ -271,8 +272,8 @@ def get_data_dimensions(
         shape = data.shape
         chunksize = data.chunksize
         dtype = data.dtype
-        
-    elif isinstance(data, [str, Path]):
+
+    elif isinstance(data, (str, Path)):
         path = Path(data)
 
         # If the input is a Path to an HDF5 file, check if the file has the .h5 extension
@@ -305,7 +306,7 @@ def get_data_dimensions(
 
         else:
             raise TypeError(f"data type not recognized: {path.suffix}")
-                
+
     # If the input is of an unrecognized format, raise a TypeError
     else:
         raise TypeError(f"data type not recognized: {type(data)}")
@@ -652,7 +653,7 @@ class EventSim:
         return event_map, num_events
 
     def create_dataset(
-            self, h5_path, h5_loc="dff/ch0", debug=False, shape=(50, 100, 100), z_fraction=0.2, xy_fraction=0.1,
+            self, h5_path, loc="dff/ch0", debug=False, shape=(50, 100, 100), z_fraction=0.2, xy_fraction=0.1,
             gap_space=5, gap_time=3, event_intensity=100, background_noise=1, blob_size_fraction=0.05,
             event_probability=0.2
     ):
@@ -669,10 +670,10 @@ class EventSim:
         )
 
         io = IO()
-        io.save(path=h5_path, data=data, h5_loc=h5_loc)
+        io.save(path=h5_path, data=data, loc=loc)
 
         det = Detector(h5_path.as_posix(), output=None)
-        det.run(h5_loc=h5_loc, lazy=True, debug=debug)
+        det.run(loc=loc, lazy=True, debug=debug)
 
         return det.output_directory
 
@@ -705,7 +706,7 @@ class SampleInput:
 
         return new_path
 
-    def get_h5_loc(self, ref=None):
+    def get_loc(self, ref=None):
 
         if self.sample_path is None:
             raise FileNotFoundError("please run 'get_test_data()' first")

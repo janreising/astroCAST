@@ -207,7 +207,7 @@ class Test_MotionCorrection:
         assert tmpdir.is_dir()
 
         path = tmpdir.joinpath("sim.h5")
-        h5_loc = "data/ch0"
+        loc = "data/ch0"
 
         sim = EventSim()
         video, num_events = sim.simulate(
@@ -215,13 +215,13 @@ class Test_MotionCorrection:
         )
 
         io = IO()
-        io.save(path=path, data=video, h5_loc=h5_loc)
+        io.save(path=path, data=video, loc=loc)
 
         assert path.exists()
 
         self.temp_dir = temp_dir
         self.video_path = path
-        self.h5_loc = h5_loc
+        self.loc = loc
         self.num_events = num_events
 
         self.runner = CliRunner()
@@ -230,7 +230,7 @@ class Test_MotionCorrection:
         self.temp_dir.cleanup()
 
     def run_with_parameters(self, params):
-        args = [self.video_path.as_posix(), "--h5-loc", self.h5_loc]
+        args = [self.video_path.as_posix(), "--h5-loc", self.loc]
         args += params
 
         result = self.runner.invoke(motion_correction, args)
@@ -346,7 +346,7 @@ class Test_TrainDenoiser_Denoise:
         assert tmpdir.is_dir()
 
         # parameters
-        h5_loc = "data/ch0"
+        loc = "data/ch0"
         X, Y = (250, 250)
 
         sim = EventSim()
@@ -359,14 +359,14 @@ class Test_TrainDenoiser_Denoise:
             video, _ = sim.simulate(
                 shape=(100, X, Y), skip_n=5, event_intensity=100, background_noise=1, gap_space=5, gap_time=3
             )
-            io.save(path=train_dir.joinpath(f"train_{i}.h5"), data=video, h5_loc=h5_loc)
+            io.save(path=train_dir.joinpath(f"train_{i}.h5"), data=video, loc=loc)
 
         # create validation files
         for i in range(2):
             video, _ = sim.simulate(
                 shape=(50, X, Y), skip_n=5, event_intensity=100, background_noise=1, gap_space=5, gap_time=3
             )
-            io.save(path=train_dir.joinpath(f"val_{i}.h5"), data=video, h5_loc=h5_loc)
+            io.save(path=train_dir.joinpath(f"val_{i}.h5"), data=video, loc=loc)
 
         # create inf file
         video, _ = sim.simulate(
@@ -374,7 +374,7 @@ class Test_TrainDenoiser_Denoise:
         )
 
         inf_path = tmpdir.joinpath(f"inf.h5")
-        io.save(path=inf_path, data=video, h5_loc=h5_loc)
+        io.save(path=inf_path, data=video, loc=loc)
 
         # model path
         model_path = tmpdir.joinpath("model.h5")
@@ -386,7 +386,7 @@ class Test_TrainDenoiser_Denoise:
 
         self.temp_dir = temp_dir
         self.runner = CliRunner()
-        self.h5_loc = h5_loc
+        self.loc = loc
         self.train_dir = train_dir
         self.inf_path = inf_path
         self.model_path = model_path
@@ -399,7 +399,7 @@ class Test_TrainDenoiser_Denoise:
         args = ["--training-files", self.train_dir.joinpath("train_*.h5").as_posix()]
         args += ["--validation-files", self.train_dir.joinpath("val_*.h5").as_posix()]
         args += ["--input-size", "128", "128"]
-        args += ["--loc", self.h5_loc]
+        args += ["--loc", self.loc]
         args += ["--epochs", 2]
         args += ["--pre-post-frames", 2]
         args += ["--max-per-file", 2]
@@ -413,7 +413,7 @@ class Test_TrainDenoiser_Denoise:
         args = []
         args += [self.inf_path.as_posix()]
         args += ["--model", self.model_path]
-        args += ["--loc", self.h5_loc]
+        args += ["--loc", self.loc]
         args += ["--out-loc", "inf/ch0"]
         args += ["--input-size", "128", "128"]
         args += ["--pre-post-frames", 2]
@@ -435,7 +435,7 @@ class Test_Detection:
         assert tmpdir.is_dir()
 
         path = tmpdir.joinpath("sim.h5")
-        h5_loc = "df/ch0"
+        loc = "df/ch0"
 
         sim = EventSim()
         video, num_events = sim.simulate(
@@ -443,13 +443,13 @@ class Test_Detection:
         )
 
         io = IO()
-        io.save(path=path, data=video, h5_loc=h5_loc)
+        io.save(path=path, data=video, loc=loc)
 
         assert path.exists()
 
         self.temp_dir = temp_dir
         self.video_path = path
-        self.h5_loc = h5_loc
+        self.loc = loc
         self.num_events = num_events
 
         self.runner = CliRunner()
@@ -460,7 +460,7 @@ class Test_Detection:
     def run_with_parameters(self, params):
 
         out = self.video_path.with_suffix(f".{np.random.randint(1, int(10e6), size=1)}.roi")
-        args = [self.video_path.as_posix(), "--h5-loc", self.h5_loc, "--output-path", out.as_posix()]
+        args = [self.video_path.as_posix(), "--h5-loc", self.loc, "--output-path", out.as_posix()]
         args += params
 
         result = self.runner.invoke(detect_events, args)
@@ -811,15 +811,15 @@ class Test_ViewDetectionResults:
         assert tmpdir.is_dir()
 
         path = tmpdir.joinpath("sim.h5")
-        h5_loc = "df/ch0"
+        loc = "df/ch0"
 
         sim = EventSim()
         video, num_events = sim.simulate(shape=(50, 100, 100), skip_n=5, event_intensity=100, background_noise=1)
         io = IO()
-        io.save(path=path, data=video, h5_loc=h5_loc)
+        io.save(path=path, data=video, loc=loc)
 
         det = Detector(path.as_posix(), output=None)
-        events = det.run(h5_loc=h5_loc, lazy=True, debug=False)
+        events = det.run(loc=loc, lazy=True, debug=False)
 
         dir_ = det.output_directory
 
@@ -832,7 +832,7 @@ class Test_ViewDetectionResults:
         self.temp_dir = temp_dir
         self.video_path = path
         self.event_dir = dir_
-        self.h5_loc = h5_loc
+        self.loc = loc
 
         self.runner = CliRunner()
 
@@ -852,7 +852,7 @@ class Test_ViewDetectionResults:
     def test_view_detection_infer(self):
         result = self.runner.invoke(
             view_detection_results,
-            [self.event_dir.as_posix(), "--video-path", "infer", "--h5-loc", str(self.h5_loc), "--testing", True]
+            [self.event_dir.as_posix(), "--video-path", "infer", "--h5-loc", str(self.loc), "--testing", True]
         )
         assert result.exit_code == 0, f"error: {result.output}"
 
@@ -860,7 +860,7 @@ class Test_ViewDetectionResults:
     def test_view_detection_z(self):
         result = self.runner.invoke(
             view_detection_results,
-            [self.event_dir.as_posix(), "--video-path", self.video_path.as_posix(), "--h5-loc", str(self.h5_loc),
+            [self.event_dir.as_posix(), "--video-path", self.video_path.as_posix(), "--h5-loc", str(self.loc),
              "--z-select", "0", "5", "--testing", True]
         )
         assert result.exit_code == 0, f"error: {result.output}"
@@ -869,8 +869,8 @@ class Test_ViewDetectionResults:
     def test_view_detection_lazy(self):
         result = self.runner.invoke(
             view_detection_results,
-            [self.event_dir.as_posix(), "--video-path", self.video_path.as_posix(), "--h5-loc", str(self.h5_loc),
-             "--lazy", False, "--testing", True]
+            [self.event_dir.as_posix(), "--video-path", self.video_path.as_posix(), "--h5-loc", str(self.loc), "--lazy",
+             False, "--testing", True]
         )
         assert result.exit_code == 0, f"error: {result.output}"
 
