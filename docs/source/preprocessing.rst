@@ -14,6 +14,11 @@ Motion correction
 
 Denoising
 -----------
+.. autoclass:: astrocast.denoising.SubFrameGenerator
+    :members:
+
+.. autoclass:: astrocast.denoising.Network
+    :members:
 
 Bleach correction
 -----------------

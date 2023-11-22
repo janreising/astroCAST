@@ -3,7 +3,7 @@ import os
 import pathlib
 import random
 from pathlib import Path
-from typing import Union
+from typing import Union, List, Tuple, Literal
 
 from tqdm import tqdm
 
@@ -33,20 +33,67 @@ from scipy.stats import bootstrap
 # TODO write plotting for network history
 
 class SubFrameGenerator(tf.keras.utils.Sequence):
-    """ Takes a single or multiple paths to a .h5 file containing video data in (Z, X, Y) format and generates
-        batches of preprocessed data of 'input_size'.
+    """
+    Generates batches of preprocessed data from video files for neural network training.
+
+    This class is designed to work with video data stored in .h5 files in (Z, X, Y) format. It supports various
+    preprocessing options including cropping, rotation, flipping, adding noise, and normalizing data.
+    The class can handle single or multiple data paths, and it is capable of generating batches of a specified input
+    size.
+
+    Args:
+        paths: Path(s) to .h5 file(s) containing video data.
+        batch_size: The size of the data batches.
+        input_size: The size of each input frame.
+        pre_post_frame: Number of frames before and after the central frame to consider.
+        gap_frames: Number of frames to skip before and after each central frame.
+        z_steps: The step size in the z-direction.
+        z_select: Criteria for selecting a subset of frames.
+        allowed_rotation: Allowed rotation angles. Set to [0] to prevent rotation.
+        allowed_flip: Allowed flip operations. Set to [-1] to prevent flipping.
+        random_offset: If True, applies random offset.
+        add_noise: If True, adds noise to the data.
+        drop_frame_probability: Probability of dropping a frame.
+        max_per_file: Maximum data to consider per file.
+        overlap: Overlap between consecutive frames.
+        padding: Type of padding to apply.
+        shuffle: If True, shuffles the data.
+        normalize: Normalization mode.
+        loc: Dataset name in the .h5 file.
+        output_size: The size of the output data.
+        cache_results: If True, caches the results.
+        in_memory: If True, keeps data in memory, which can speed up processing but might lead to memory leaks.
+        save_global_descriptive: If True, saves global descriptive statistics to the .h5 file preventing computation of the same value on subsequent runs.
+        logging_level: The logging level.
+
+    Raises:
+        AssertionError: If input conditions related to rotation, padding, or normalization are not met.
+        ValueError: If 'random_offset' and 'overlap' are set simultaneously.
+
+    Example::
+
+        # Create a SubFrameGenerator instance
+        generator = SubFrameGenerator(paths="path/to/data.h5", loc="data/ch0",
+            batch_size=32, input_size=(128, 128), pre_post_frame=5,
+            shuffle=True, normalize="global"
+        )
     """
 
     def __init__(
-            self, paths, batch_size, input_size=(100, 100), pre_post_frame=5, gap_frames=0, z_steps=0.1, z_select=None,
-            allowed_rotation=[0], allowed_flip=[-1], random_offset=False, add_noise=False, drop_frame_probability=None,
-            max_per_file=None, overlap=0, padding=None, shuffle=True, normalize=None, loc="data/", output_size=None,
-            cache_results=False, in_memory=False, save_global_descriptive=True, logging_level=logging.INFO
+            self, paths: Union[str, List[str]], batch_size: int, input_size: Tuple[int, int] = (100, 100),
+            pre_post_frame: Union[int, Tuple[int, int]] = 5, gap_frames: Union[int, Tuple[int, int]] = 0,
+            z_steps: float = 0.1, z_select: Union[None, int, List[int]] = None, allowed_rotation: List[int] = [0],
+            allowed_flip: List[int] = [-1], random_offset: bool = False, add_noise: bool = False,
+            drop_frame_probability: Union[None, float] = None, max_per_file: Union[None, int] = None, overlap: int = 0,
+            padding: Union[None, Literal["symmetric", "edge"]] = None, shuffle: bool = True,
+            normalize: Union[None, Literal["local", "global"]] = None, loc: str = "data/",
+            output_size: Union[None, Tuple[int, int]] = None, cache_results: bool = False, in_memory: bool = False,
+            save_global_descriptive: bool = True, logging_level: int = logging.INFO
     ):
 
         logging.basicConfig(level=logging_level)
 
-        if type(paths) != list:
+        if not isinstance(paths, list):
             paths = [paths]
         self.paths = paths
         self.loc = loc
@@ -59,11 +106,11 @@ class SubFrameGenerator(tf.keras.utils.Sequence):
         self.output_size = output_size
         self.save_global_descriptive = save_global_descriptive
 
-        if type(pre_post_frame) == int:
+        if isinstance(pre_post_frame, int):
             pre_post_frame = (pre_post_frame, pre_post_frame)
         self.signal_frames = pre_post_frame
 
-        if type(gap_frames) == int:
+        if isinstance(gap_frames, int):
             gap_frames = (gap_frames, gap_frames)
         self.gap_frames = gap_frames
 
@@ -108,7 +155,7 @@ class SubFrameGenerator(tf.keras.utils.Sequence):
 
         # get items
         self.fov_size = None
-        self.items = self.generate_items()
+        self.items = self._generate_items()
 
         # cache
         self.cache_results = cache_results
@@ -119,7 +166,7 @@ class SubFrameGenerator(tf.keras.utils.Sequence):
 
         self.cache = {}
 
-    def generate_items(self):
+    def _generate_items(self):
 
         # define size of each predictive field of view (X, Y)
         dw, dh = self.input_size
@@ -284,7 +331,7 @@ class SubFrameGenerator(tf.keras.utils.Sequence):
             if self.normalize == "global":
                 if len(file_container) > 1:
 
-                    local_save = self.get_local_descriptive(file, loc=self.loc)
+                    local_save = self._get_local_descriptive(file, loc=self.loc)
 
                     if local_save is None and not self.save_global_descriptive:
                         self.descr[file] = self._bootstrap_descriptive(file_container)
@@ -295,7 +342,7 @@ class SubFrameGenerator(tf.keras.utils.Sequence):
                         self.descr[file] = (mean, std)
 
                         if self.save_global_descriptive:
-                            self.set_local_descriptive(file, loc=self.loc, mean=mean, std=std)
+                            self._set_local_descriptive(file, loc=self.loc, mean=mean, std=std)
 
                     else:
                         self.descr[file] = local_save
@@ -326,7 +373,7 @@ class SubFrameGenerator(tf.keras.utils.Sequence):
         # called after each epoch
         if self.shuffle:
             if self.random_offset:
-                self.items = self.generate_items()
+                self.items = self._generate_items()
                 self.cache = {}
             else:
                 self.items = self.items.sample(frac=1).reset_index(drop=True)
@@ -547,8 +594,41 @@ class SubFrameGenerator(tf.keras.utils.Sequence):
             return None
 
     def infer(
-            self, model, output=None, out_loc=None, dtype="same", chunk_size=None, rescale=True
-    ):
+            self, model: Union[Model, str, Path], output: Union[str, Path] = None, out_loc: str = None,
+            dtype: Union[Literal["same"], np.dtype] = "same", chunk_size: Union[str, Tuple[int, int, int]] = None,
+            rescale: bool = True
+    ) -> Union[np.ndarray, Path, None]:
+        """
+        Performs inference on video data using a provided model and generates output in specified format.
+
+        This method applies a deep learning model to the video data to perform tasks such as denoising or segmentation.
+        It supports different input and output formats, including .h5 and .tif files. The method also allows for optional
+        rescaling of the output and handles data chunking for efficient processing.
+
+        Raises:
+            FileNotFoundError: If the model file or directory cannot be found.
+            ValueError: If 'random_offset' and 'overlap' are set simultaneously or incompatible arguments are provided.
+            AssertionError: If provided 'model' is not of the expected type or if data dimensions mismatch.
+
+        Args:
+            model: A Keras model or the path to a model file/directory for inference.
+            output: Path to the file where the output will be saved. If None, the output array is returned.
+            out_loc: Location within the .h5 file to store the output. Required if output is an .h5 file.
+            dtype: Data type of the output. 'same' uses the same dtype as the input data.
+            # TODO chunk_size should probably be updated
+            chunk_size: Size of chunks for .h5 file output. Can be 'infer', an integer, or None.
+            rescale: Whether to rescale the output based on global descriptive statistics.
+
+        Returns:
+            Depending on 'output', either a numpy array of the processed data, a Path object pointing to the saved file, or None.
+
+        Example::
+
+            # Assuming a SubFrameGenerator instance 'generator' and a Keras model 'model'
+            output_data = generator.infer(model, output="output_path.h5",
+                out_loc="inference_results", dtype="float32")
+        """
+        f = None
 
         # load model if not provided
         if isinstance(model, (str, pathlib.Path)):
@@ -686,7 +766,7 @@ class SubFrameGenerator(tf.keras.utils.Sequence):
             return output
 
     @staticmethod
-    def get_local_descriptive(path, loc):
+    def _get_local_descriptive(path, loc):
 
         if path.suffix != ".h5":
             # local save only implemented for hdf5 files
@@ -710,7 +790,7 @@ class SubFrameGenerator(tf.keras.utils.Sequence):
         return mean, std
 
     @staticmethod
-    def set_local_descriptive(path, loc, mean, std):
+    def _set_local_descriptive(path, loc, mean, std):
 
         logging.warning("saving results of descriptive")
 
@@ -737,26 +817,49 @@ class SubFrameGenerator(tf.keras.utils.Sequence):
 
 
 class Network:
-    def __init__(
-            self, train_generator, val_generator=None, learning_rate=0.001, decay_rate=0.99, decay_steps=250,
-            n_stacks=3, kernel=64, batchNormalize=False, loss="annealed_loss", pretrained_weights=None, use_cpu=False
-    ):
-        """
-        Initializes the Network class.
+    """
+        A neural network class designed for image processing tasks, typically utilizing U-Net architecture.
+
+        This class facilitates the creation, training, and evaluation of a U-Net based neural network model.
+        It is equipped to handle training with custom generators, various configurations for the model architecture,
+        and supports multiple loss functions. The class is designed to be flexible and adaptable for a wide range of
+        image processing tasks.
 
         Args:
-            train_generator: The generator for training data.
-            val_generator: The generator for validation data.
-            learning_rate (float): The learning rate for the optimizer.
-            n_stacks (int): The number of stacks in the U-Net model.
-            kernel (int): The number of filters in the first layer of the U-Net model.
-            batchNormalize (bool): Whether to apply batch normalization in the U-Net model.
-            loss: The loss function to use. If None, the annealed_loss function will be used.
-            use_cpu (bool): Whether to use the CPU for training (disable GPU).
+            train_generator: A :class:`~astrocast.denoising.SubFrameGenerator` object for training data.
+            val_generator: A :class:`~astrocast.denoising.SubFrameGenerator` object for validation data, used for evaluating model performance during training.
+            learning_rate: Initial learning rate for the optimizer.
+            decay_rate: Decay rate for learning rate reduction over training epochs.
+            decay_steps: Number of steps after which the learning rate decays.
+            n_stacks: Number of stacks (or depth) in the U-Net model.
+            kernel: The number of filters in the initial convolution layer of the U-Net model.
+            batchNormalize: Flag to enable or disable batch normalization in the model.
+            loss: The loss function used for model training. Supports custom loss functions.
+            pretrained_weights: Path to the pretrained weights for model initialization.
+            use_cpu: Flag to enforce training on CPU, useful in GPU-constrained environments.
 
-        Returns:
-            None
+        Raises:
+            FileNotFoundError: If the provided model path does not exist or is invalid.
+            ValueError: If incompatible arguments are provided.
+            AssertionError: For invalid input conditions related to the model configuration.
+
+        Example::
+
+            from astrocast.denoising import SubFrameGenerator, Network
+
+            # Creating an instance of the Network class
+            train_gen = SubFrameGenerator("/path/to/train/data")
+            val_gen = SubFrameGenerator("/path/to/val/data")
+            net = Network(train_gen, val_gen, learning_rate=0.001, n_stacks=3, kernel=64)
         """
+
+    def __init__(
+            self, train_generator: SubFrameGenerator, val_generator: SubFrameGenerator = None,
+            learning_rate: float = 0.001, decay_rate: float = 0.99, decay_steps: int = 250, n_stacks: int = 3,
+            kernel: int = 64, batchNormalize: bool = False,
+            loss: Union[Literal['annealed_loss', 'mean_squareroot_error'], tf.keras.losses.Loss] = "annealed_loss",
+            pretrained_weights: Union[str, Path] = None, use_cpu: bool = False
+    ):
 
         if use_cpu:
             # Set the visible GPU devices to an empty list to use CPU
@@ -769,7 +872,7 @@ class Network:
         # Create the U-Net model
         self.n_stacks = n_stacks
         self.kernel = kernel
-        self.model = self.create_unet(n_stacks=n_stacks, kernel=kernel, batchNormalize=batchNormalize)
+        self.model = self._create_unet(n_stacks=n_stacks, kernel=kernel, batchNormalize=batchNormalize)
 
         if decay_rate is not None:
             lr_schedule = tf.keras.optimizers.schedules.ExponentialDecay(
@@ -808,24 +911,32 @@ class Network:
         )
 
     def run(
-            self, batch_size=10, num_epochs=25, save_model=None, patience=3, min_delta=0.005, monitor="val_loss",
-            model_prefix="model", verbose=1
-    ):
+            self, batch_size: int = 10, num_epochs: int = 25, save_model: Union[str, Path] = None, patience: int = 3,
+            min_delta: float = 0.005, monitor: str = "val_loss", model_prefix: str = "model", verbose: int = 1
+    ) -> tf.keras.callbacks.History:
         """
-        Trains the model.
+        Trains the neural network model using the provided data generators and specified parameters.
+
+        This method facilitates the training of the model with features like early stopping, model checkpointing, and verbose output control. It is designed to offer flexibility in training configuration, allowing for customization of batch size, number of epochs, and other key training parameters. The method is well-suited for training deep learning models in tasks that require iterative learning and model evaluation.
 
         Args:
-            batch_size (int): Number of samples per gradient update.
-            num_epochs (int): Number of epochs to train the model.
-            patience (int): Number of epochs with no improvement after which training will be stopped.
-            min_delta (float): Minimum change in the monitored quantity to qualify as an improvement.
-            monitor (str): Quantity to be monitored during training.
-            save_model (str or pathlib.Path): Directory to save the model and checkpoints.
-            load_weights (bool): Whether to load the previous weights if available.
-            verbose (int): Verbosity mode (0 - silent, 1 - progress bar, 2 - one line per epoch).
+            batch_size: Number of samples per gradient update.
+            num_epochs: Number of epochs to train the model.
+            patience: Number of epochs with no improvement after which training will be stopped.
+            min_delta: Minimum change in the monitored quantity to qualify as an improvement.
+            monitor: Quantity to be monitored during training.
+            save_model: Directory to save the model and checkpoints.
+            model_prefix: Prefix for naming saved model files.
+            verbose: Verbosity mode (0 - silent, 1 - progress bar, 2 - one line per epoch).
 
         Returns:
-            tf.keras.History: Object containing the training history.
+            A History object containing the training history metrics.
+
+        Example::
+
+            # Assuming an instance 'net' of the Network class
+            history = net.run(batch_size=32, num_epochs=100, save_model='./model_save', verbose=1)
+            print(history.history)
         """
 
         save_model = Path(save_model) if save_model is not None else None
@@ -867,22 +978,32 @@ class Network:
         return history
 
     def retrain_model(
-            self, frozen_epochs=25, unfrozen_epochs=5, batch_size=10, patience=3, min_delta=0.005, monitor="val_loss",
-            save_model=None, model_prefix="retrain", verbose=1
+            self, frozen_epochs: int = 25, unfrozen_epochs: int = 5, batch_size: int = 10, patience: int = 3,
+            min_delta: float = 0.005, monitor: str = "val_loss", save_model: Union[str, Path] = None,
+            model_prefix: str = "retrain", verbose: int = 1
     ):
         """
-        Retrains the model on a new dataset and optionally initializes it with weights from a pretrained model.
+        Retrains the model with a new dataset, employing a two-phase training process with frozen and unfrozen layers.
+
+        In the first phase, the model is trained with its internal layers frozen, allowing only the final layers to
+        adjust. In the second phase, all layers are unfrozen for additional training. This method is particularly
+        useful when adapting a pre-trained model to new data, leveraging transfer learning.
 
         Args:
-            new_train_gen: The generator for the new training data.
-            new_val_gen: The generator for the new validation data.
-            pretrained_model_path (str): Path to the pretrained model.
-            num_epochs (int): Number of epochs to retrain the model.
-            batch_size (int): Number of samples per gradient update.
-            verbose (int): Verbosity mode (0 - silent, 1 - progress bar, 2 - one line per epoch).
+            frozen_epochs: Number of epochs to train with frozen layers.
+            unfrozen_epochs: Number of epochs to train after unfreezing all layers.
+            batch_size: Number of samples per gradient update.
+            patience: Number of epochs with no improvement after which training will be stopped.
+            min_delta: Minimum change in the monitored quantity to qualify as an improvement.
+            monitor: Quantity to be monitored during training.
+            save_model: Directory to save the retrained model and checkpoints.
+            model_prefix: Prefix for naming saved model files.
+            verbose: Verbosity mode (0 - silent, 1 - progress bar, 2 - one line per epoch).
 
-        Returns:
-            tf.keras.History: Object containing the retraining history.
+        Example::
+
+            # Assuming an instance 'net' of the Network class
+            net.retrain_model(frozen_epochs=20, unfrozen_epochs=10, batch_size=32, save_model='./retrain_model_save')
         """
 
         model = self.model
@@ -909,7 +1030,7 @@ class Network:
                 monitor=monitor, save_model=save_model, model_prefix=model_prefix, verbose=verbose
             )
 
-    def create_unet(self, n_stacks=3, kernel=64, batchNormalize=False, verbose=1):
+    def _create_unet(self, n_stacks=3, kernel=64, batchNormalize=False, verbose=1):
         """
         Creates a U-Net model.
 
