@@ -23,6 +23,13 @@ Astrocytic calcium event analysis is challenging due to its complex nature, spat
 
 ## Installation
 
+**Conda:**
+We recommend to first create a fresh conda environment to prevent conflicts with other packages.
+```shell
+conda create -n astrocast python=3.9
+conda activate astrocast
+```
+
 **Via pip:**
 ```shell
 pip install astrocast
@@ -30,16 +37,17 @@ pip install astrocast
 
 **From source:**
 ```shell
-git clone <repository-url>
+git clone git@github.com:janreising/astroCAST.git
+cd astroCAST
 pip install poetry
 poetry install
 ```
 
 **With optional features:**
 ```shell
-pip install astrocast[video-player,testing]
+pip install astrocast[all]
 # or using poetry
-poetry install -E video-player -E testing
+poetry install -E all
 ```
 
 ## Containers<a name="containers">
