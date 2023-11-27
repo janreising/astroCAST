@@ -68,7 +68,7 @@ You should be able to see the docker image listed.
 
 To start a container using the image run:
 ```shell
-docker run -v /path/to/your/data:/home/data -it -p 8888:8888 astrocast:latest 
+docker run -v /path/to/your/data:/home/data -it -p 8888:8888 anacgon/astrocast:latest 
 ```
 Note: "/path/to/your/data" must be replaced with your local path to the data you will use for the analysis. -p option allows the container to expose port 8888, necessary to run access jupyterlab from your browser.
 
