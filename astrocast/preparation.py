@@ -53,7 +53,7 @@ class Input:
             subtract_background: Union[str, np.ndarray] = None,
             subtract_func: Union[Literal['mean', 'max', 'min', 'std'], Callable] = "mean",
             rescale: Union[float, Tuple[int, int]] = None, dtype: type = int, in_memory: bool = False,
-            loc_in: str = None, loc_out: str = "data", infer_strategy: Literal['balanced', 'XY', 'Z'] = "balanced",
+            loc_in: str = None, loc_out: str = "data", chunk_strategy: Literal['balanced', 'XY', 'Z'] = "balanced",
             chunks: Tuple[int, int, int] = None, compression: Literal['gzip', 'szip', 'lz4'] = None
     ) -> Union[np.ndarray, dict]:
 
@@ -72,7 +72,7 @@ class Input:
             rescale: Scale factor or tuple specifying the new dimensions.
             dtype: Data type to convert the processed data.
             in_memory: If True, the processed data is loaded into memory.
-            infer_strategy: Strategy to use when inferring size of chunks.
+            chunk_strategy: Strategy to use when inferring size of chunks.
             chunks: Chunk size to use when saving to HDF5 or TileDB.
             compression: Compression method to use when saving to HDF5 or TileDB.
             lazy: If True, the data is loaded on demand.
@@ -94,8 +94,8 @@ class Input:
             absolute_rescale = False
 
         data = self._prepare_data(
-            data, channels=channels, subtract_background=subtract_background, subtract_func=subtract_func,
-            rescale=rescale, absolute_rescale=absolute_rescale, dtype=dtype, lazy=in_memory
+            data, channels=channels, loc_out=loc_out, subtract_background=subtract_background,
+            subtract_func=subtract_func, rescale=rescale, absolute_rescale=absolute_rescale, dtype=dtype, lazy=in_memory
         )
 
         logging.debug(f"data type: {type(data[list(data.keys())[0]])}")
@@ -106,7 +106,7 @@ class Input:
 
         logging.info("saving data ...")
         io.save(
-            output_path, data, loc=loc_out, chunk_strategy=infer_strategy, chunks=chunks, compression=compression
+            output_path, data, loc=loc_out, chunk_strategy=chunk_strategy, chunks=chunks, compression=compression
         )
 
     @staticmethod
@@ -285,7 +285,7 @@ class Input:
 
     def _prepare_data(
             self, data: Union[np.ndarray, da.Array], channels: Union[int, dict] = 1, subtract_background: str = None,
-            subtract_func: Union[Literal['mean', 'max', 'min', 'std'], Callable] = "mean",
+            subtract_func: Union[Literal['mean', 'max', 'min', 'std'], Callable] = "mean", loc_out: str = None,
             rescale: Union[float, Tuple[int, int]] = None, absolute_rescale: bool = False, dtype: type = int,
             lazy: bool = True
     ) -> dict:
@@ -296,6 +296,7 @@ class Input:
             channels: Number of channels or dictionary specifying channel names.
             subtract_background: Background to subtract or channel name to use as background.
             subtract_func: Function to use for background subtraction.
+            loc_out: Location to save the processed data.
             absolute_rescale: If True, rescale is expected to be the final image size after rescaling.
             rescale: Scale factor or tuple specifying the new dimensions.
             dtype: Data type to convert the processed data.
@@ -320,18 +321,31 @@ class Input:
                     f"dimensions incorrect: {len(stack.shape)}. Currently not implemented for dim != 3D"
                 )
 
-            # Validate the channels input and determine the number of channels
-            if not isinstance(channels, (int, dict)):
-                raise ValueError(f"please provide channels as int or dictionary.")
+            # Create a dictionary of channel names or indices
+            if isinstance(channels, dict):
 
-            num_channels = channels if isinstance(channels, int) else len(channels.keys())
+                num_channels = len(channels.keys())
+
+            elif isinstance(channels, int):
+
+                if loc_out is None:
+                    loc_out = "io"
+                    logging.warning(f"no location specified. data will be saved to {loc_out}")
+
+                if loc_out[-1] != "/":
+                    loc_out += "/"
+
+                num_channels = channels
+                channels = {i: f"{loc_out}ch{i}" for i in range(num_channels)}
+
+            else:
+                raise ValueError(f"please provide channels as int or dictionary instead of {type(channels)}.")
 
             if stack.shape[0] % num_channels != 0:
                 logging.warning(
-                    f"cannot divide frames into channel number: {stack.shape[0]} % {num_channels} != 0. May lead to unexpected behavior"
+                    f"cannot divide frames into channel number: {stack.shape[0]} % {num_channels} != 0. "
+                    f"May lead to unexpected behavior"
                 )
-
-            channels = channels if isinstance(channels, dict) else {i: f"ch{i}" for i in range(num_channels)}
 
             # Split the data into channels based on the given channel indices or names
             prep_data = {}
@@ -775,7 +789,7 @@ class IO:
         return stack
 
     def save(
-            self, path: Union[str, Path], data: Union[np.ndarray, da.Array, dict], loc: str = '',
+            self, path: Union[str, Path], data: Union[np.ndarray, da.Array, dict], loc: str = None,
             chunks: Tuple[int, int, int] = None, chunk_strategy: Literal['balanced', 'XY', 'Z'] = "balanced",
             compression: Literal['gzip', 'lz4', 'szip'] = None, overwrite: bool = False
     ) -> Union[str, Path, List[str]]:
@@ -807,86 +821,86 @@ class IO:
         else:
             raise TypeError(f"please provide 'path' as str or pathlib.Path data type not: {type(path)}")
 
+        # choose default output location if None is provided
+        if loc is None:
+            loc = "io"
+            logging.warning(f"choosing automatic dataset name: {loc}.")
+
         # Check if the data is a dictionary or data array, otherwise raise an error
         if isinstance(data, (np.ndarray, da.Array)):
-            data = {"ch0": data}
+            data = {loc: data}
+
         elif not isinstance(data, dict):
             raise TypeError("please provide data as dict of {channel_name:array} or np.ndarray")
 
         saved_paths = []  # Initialize an empty list to store the paths of the saved files
         for k in data.keys():
-            channel = data[k]
+
+            # Check if the channel is a numpy.ndarray or a dask.array.Array, otherwise raise an error
+            arr = data[k]
+            if not isinstance(arr, (np.ndarray, da.Array)):
+                raise TypeError("please provide data as either 'numpy.ndarray' or 'da.array.Array'")
 
             # infer chunks if necessary
-            if chunks == "infer":
-                chunks = self.infer_chunks(channel.shape, channel.dtype, strategy=chunk_strategy)
-                logging.warning(f"inferred chunk size: {chunks}")
+            if chunks is None and chunk_strategy is not None:
+                chunks = self.infer_chunks(arr.shape, arr.dtype, strategy=chunk_strategy)
+                logging.warning(f"inferred chunk size: {chunks} (chunks > {chunks}, strategy > {chunk_strategy})")
 
             # infer compression
             if compression == "infer":
-                size = channel.size * channel.itemsize
+                size = arr.size * arr.itemsize
                 if size > 10e9 and path.suffix in [".h5", ".hdf5"]:
                     compression = "gzip"
                     logging.warning(f"inferred compression: {compression}")
                 else:
                     compression = None
 
-            # Check if the channel is a numpy.ndarray or a dask.array.Array, otherwise raise an error
-            if not isinstance(channel, (np.ndarray, da.Array)):
-                raise TypeError("please provide data as either 'numpy.ndarray' or 'da.array.Array'")
-
             if path.suffix in [".h5", ".hdf5"]:
                 # Save as HDF5 format
 
                 fpath = path
 
-                if loc is None:
-                    raise ValueError(f"Please provide the location of the dataset in the HDF5 file.")
-
                 # create dataset location
                 if isinstance(loc, dict):
-                    loc = loc[k]
-
-                elif loc is None:
-                    loc = k if "/" in str(k) else f"io/{k}"
-
-                elif len(data) == 1:
-                    loc = f"{loc}/{k}" if "/" not in loc[:-1] else loc
-
+                    loc_out = loc[k]
+                elif isinstance(loc, str):
+                    loc_out = k
                 else:
-                    loc = f"{loc}/{k}"
+                    raise ValueError(f"Please provide 'loc' as None, str, or dict data type not: {type(loc)}")
 
-                self.exists_and_clean(fpath, loc=loc, overwrite=overwrite)
-                logging.info(f"saving channel {k} to '{loc}'")
+                self.exists_and_clean(fpath, loc=loc_out, overwrite=overwrite)
 
-                if isinstance(channel, da.Array):
+                if isinstance(arr, da.Array):
 
                     # Save Dask array
                     with ProgressBar(minimum=10, dt=1):
-                        da.to_hdf5(fpath, loc, channel, chunks=chunks, compression=compression, shuffle=False)
+                        da.to_hdf5(fpath, loc_out, arr, chunks=chunks, compression=compression, shuffle=False)
 
                 else:
                     # Save NumPy array
                     with h5py.File(fpath, "a") as f:
+
+                        if loc_out in f:
+                            raise ValueError(f"dataset already exists in file {fpath}:{loc_out}\n{list(f.keys())}")
+
                         ds = f.create_dataset(
-                            loc, shape=channel.shape, chunks=chunks, compression=compression, shuffle=False,
-                            dtype=channel.dtype
+                            name=loc_out, data=arr, shape=arr.shape, chunks=chunks, compression=compression,
+                            shuffle=False, dtype=arr.dtype
                         )
-                        ds[:] = channel
 
                 saved_paths.append(fpath)
-                logging.info(f"dataset saved to {fpath}::{loc}")
+                logging.info(f"dataset saved to {fpath}::{loc_out}")
 
             elif path.suffix == ".tdb":
                 # Save as TileDB format
 
-                if isinstance(channel, np.ndarray):
-                    channel = da.from_array(channel, chunks=chunks if chunks is not None else "auto")
+                if isinstance(arr, np.ndarray):
+                    arr = da.from_array(arr, chunks=chunks if chunks is not None else "auto")
 
                 fpath = path.with_suffix(f".{k}.tdb") if len(data.keys()) > 1 else path
                 self.exists_and_clean(fpath, overwrite=overwrite)
                 with ProgressBar(minimum=10, dt=1):
-                    da.to_tiledb(channel, fpath.as_posix(), compute=True)
+                    da.to_tiledb(arr, fpath.as_posix(), compute=True)
 
                 saved_paths.append(fpath)
                 logging.info(f"dataset saved to {fpath}")
@@ -897,7 +911,7 @@ class IO:
                 fpath = path.with_suffix(f".{k}.tiff") if len(data.keys()) > 1 else path
                 self.exists_and_clean(fpath, overwrite=overwrite)
 
-                tifffile.imwrite(fpath, data=channel)
+                tifffile.imwrite(fpath, data=arr)
 
                 saved_paths.append(fpath)
                 logging.info(f"saved data to {fpath}")
@@ -910,12 +924,12 @@ class IO:
                 fpath = path.with_suffix(f".{k}.npy") if len(data.keys()) > 1 else path
                 self.exists_and_clean(fpath, overwrite=overwrite)
 
-                if isinstance(channel, np.ndarray):
-                    np.save(file=fpath.as_posix(), arr=channel)
+                if isinstance(arr, np.ndarray):
+                    np.save(file=fpath.as_posix(), arr=arr)
 
                 else:
                     with ProgressBar(minimum=10, dt=1):
-                        da.to_npy_stack(fpath, x=channel, axis=0)
+                        da.to_npy_stack(fpath, x=arr, axis=0)
 
                 saved_paths.append(fpath)
                 logging.info(f"saved data to {fpath}")
@@ -928,7 +942,7 @@ class IO:
                 self.exists_and_clean(fpath, overwrite=overwrite)
 
                 # Get the dimensions of the numpy array
-                frames, X, Y = channel.shape
+                frames, X, Y = arr.shape
 
                 # Define the codec and create a VideoWriter object
 
@@ -941,7 +955,7 @@ class IO:
 
                 for i in tqdm(range(frames)):
                     # Get the current frame
-                    frame = channel[i]
+                    frame = arr[i]
 
                     # Since the array has only one channel, convert it to a 3-channel array (BGR)
                     frame = cv2.normalize(frame, None, 0, 255, cv2.NORM_MINMAX, dtype=cv2.CV_8U)
@@ -1016,7 +1030,22 @@ class IO:
         if chunks is not None and isinstance(chunks, (tuple, list)):
             return chunks
 
-        Z, X, Y = shape
+        if chunks is None and strategy is None:
+            return None
+
+        Z = X = Y = 1
+        if len(shape) > 3:
+            raise ValueError(
+                f"Chunk inference is only implemented for 1D, 2D and 3D arrays, not {len(shape)}D."
+                f"Please provide a user-defined chunk size ('chunks')"
+            )
+        elif len(shape) == 3:
+            Z, X, Y = shape
+        elif len(shape) == 2:
+            Z, X = shape
+        elif len(shape) == 1:
+            Z = shape
+
         item_size = np.dtype(dtype).itemsize
 
         if strategy == "balanced":
@@ -1055,7 +1084,12 @@ class IO:
         else:
             raise ValueError(f"Unknown strategy, please provide one of 'balanced', 'Z' or 'XY'")
 
-        return cz, cx, cy
+        if len(shape) == 3:
+            return cz, cx, cy
+        elif len(shape) == 2:
+            return cz, cx
+        elif len(shape) == 1:
+            return cz
 
     def infer_chunks_from_array(self, arr, strategy="balanced", chunk_bytes=int(1e6), chunks=None):
         return self.infer_chunks(arr.shape, arr.dtype, strategy=strategy, chunk_bytes=chunk_bytes, chunks=chunks)
@@ -1372,6 +1406,7 @@ class MotionCorrection:
             return data
 
         elif isinstance(output, (str, Path)):
+
             output = Path(output) if isinstance(output, Path) else output
 
             # Save the motion-corrected data to the output file using the I/O module
