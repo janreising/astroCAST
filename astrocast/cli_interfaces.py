@@ -198,7 +198,7 @@ def cli(ctx, config):
 )
 @click_custom_option('--sep', default="_", help='Separator used for sorting file names.')
 @click_custom_option('--num-channels', default=1, help='Number of channels.')
-@click_custom_option('--channel-names', default="ch0", help='Channel names as comma separated list.')
+@click_custom_option('--channel-names', default=None, help='Channel names as comma separated list.')
 @click_custom_option('--z-slice', type=(click.INT, click.INT), default=None, help='Z slice index.')
 @click_custom_option('--lazy', is_flag=True, help='Lazy loading flag.')
 @click_custom_option('--subtract-background', default=None, help='Background subtraction parameter.')
@@ -206,8 +206,11 @@ def cli(ctx, config):
 @click_custom_option('--rescale', type=click.FLOAT, default=1.0, help='Rescale parameter.')
 @click_custom_option('--in-memory', is_flag=True, help='If True, the processed data is loaded into memory.')
 @click_custom_option('--loc-in', default=None, help='Prefix to use when loading the processed data.')
-@click_custom_option('--loc-out', default="data", help='Prefix to use when saving the processed data.')
-@click_custom_option('--infer-chunks', is_flag=True, default=False, help='Infer chunks size.')
+@click_custom_option('--loc-out', default=None, help='Prefix to use when saving the processed data.')
+@click_custom_option(
+    '--chunk-strategy', type=click.Choice(["None", 'balanced', 'XY', 'Z']), default="balanced",
+    help='Infer chunks size.'
+)
 @click_custom_option(
     '--chunks', type=(click.INT, click.INT, click.INT), default=None,
     help='Chunk size to use when saving to HDF5 or TileDB.'
@@ -218,7 +221,7 @@ def cli(ctx, config):
 )
 def convert_input(
         input_path, logging_level, output_path, sep, num_channels, channel_names, z_slice, lazy, subtract_background,
-        subtract_func, rescale, in_memory, loc_in, loc_out, chunks, compression, overwrite, infer_chunks
+        subtract_func, rescale, in_memory, loc_in, loc_out, chunks, compression, overwrite, chunk_strategy
 ):
     """
     Convert user files to astroCAST compatible format using the Input class.
@@ -233,24 +236,40 @@ def convert_input(
             logging.warning("skipping this step because output exists.")
             return 0
 
-        # check chunks
-        chunks = parse_chunks(infer_chunks, chunks)
+        # define channel names
+        if channel_names is None:
 
-        channel_names = channel_names.split(",")
+            if loc_out is not None and num_channels == 1:
+                channel_names = [loc_out]
+            elif loc_out is not None:
+                if loc_out[-1] == "/":
+                    channel_names = [f"{loc_out}ch{i}" for i in range(num_channels)]
+                else:
+                    channel_names = [f"{loc_out}/ch{i}" for i in range(num_channels)]
+            else:
+                channel_names = [f"io/ch{i}" for i in range(num_channels)]
+
+        elif isinstance(channel_names, str):
+            channel_names = channel_names.split(",")
+
         if len(channel_names) != num_channels:
             warnings.warn(
                 f"Number of channels {num_channels} does not match channel names {channel_names}. Choosing default."
             )
-            channel_names = [f"ch{i}" for i in range(num_channels)]
+            channel_names = [f"io/ch{i}" for i in range(num_channels)]
 
         channels = {i: n for i, n in enumerate(channel_names)}
+
+        if chunk_strategy == "None":
+            chunk_strategy = None
+        logging.warning(f"chunks > {chunks}, chunk_strategy > {chunk_strategy}")
 
         # convert input
         input_instance = Input(logging_level=logging_level)
         input_instance.run(
             input_path=input_path, output_path=output_path, sep=sep, channels=channels, z_slice=z_slice, lazy=lazy,
             subtract_background=subtract_background, subtract_func=subtract_func, rescale=rescale, in_memory=in_memory,
-            loc_in=loc_in, loc_out=loc_out, chunks=chunks, compression=compression
+            loc_in=loc_in, loc_out=loc_out, chunks=chunks, chunk_strategy=chunk_strategy, compression=compression
         )
 
 
@@ -316,7 +335,9 @@ def convert_input(
 @click_custom_option(
     '--gsig-filt', type=(click.INT, click.INT), default=(20, 20), help='Tuple indicating the size of the filter.'
 )
-@click_custom_option('--infer-chunks', is_flag=True, default=False, help='Infer the chunks for the HDF5 file.')
+@click_custom_option(
+    '--chunk-strategy', type=click.STRING, default="balanced", help='Strategy to infer chunks: ["balanced", "Z", "XY"]'
+)
 @click_custom_option(
     '--chunks', type=(click.INT, click.INT, click.INT), default=None,
     help='Chunk shape for creating a dask array when saving to an HDF5 file.'
@@ -330,7 +351,8 @@ def convert_input(
 def motion_correction(
         input_path, working_directory, logging_level, output_path, loc_in, loc_out, max_shifts, niter_rig, splits_rig,
         num_splits_to_process_rig, strides, overlaps, pw_rigid, splits_els, num_splits_to_process_els,
-        upsample_factor_grid, max_deviation_rigid, nonneg_movie, gsig_filt, infer_chunks, chunks, compression, overwrite
+        upsample_factor_grid, max_deviation_rigid, nonneg_movie, gsig_filt, chunk_strategy, chunks, compression,
+        overwrite
 ):
     """
     Correct motion artifacts of input data using the MotionCorrection class.
@@ -344,9 +366,6 @@ def motion_correction(
         if output_path == 0:
             logging.warning("skipping this step because output exists.")
             return 0
-
-        # check chunks
-        chunks = parse_chunks(infer_chunks, chunks)
 
         # Initialize the MotionCorrection instance
         logging.info("creating motion correction instance ...")
@@ -364,7 +383,7 @@ def motion_correction(
 
         # Save the results to the specified output path
         logging.info("saving result ...")
-        mc.save(output_path, loc=loc_out, chunks=chunks, compression=compression)
+        mc.save(output_path, loc=loc_out, chunk_strategy=chunk_strategy, chunks=chunks, compression=compression)
 
 
 @cli.command()
