@@ -658,8 +658,8 @@ class Detector:
                 for e_id in e_ids:
                     futures.append(
                         client.submit(
-                            self._characterize_event, e_id, e_start[e_id], e_stop[e_id], data_info, event_info,
-                            out_path, split_events
+                            self.characterize_event, e_id, e_start[e_id], e_stop[e_id], data_info, event_info, out_path,
+                            split_events
                         )
                     )
                 progress(futures)
@@ -669,7 +669,7 @@ class Detector:
         else:
 
             for event_id in e_ids:
-                npy_path = self._characterize_event(
+                npy_path = self.characterize_event(
                     event_id, t0=e_start[event_id], t1=e_stop[event_id], data_info=data_info, event_info=event_info,
                     out_path=out_path.as_posix(), split_events=split_events
                 )
@@ -695,10 +695,118 @@ class Detector:
 
         return events
 
-    def _characterize_event(
-            self, event_id, t0, t1, data_info, event_info, out_path, split_events=True
-    ):
+    def characterize_event(
+            self, event_id: int, t0: int, t1: int, data_info: Tuple, event_info: Tuple, out_path: Union[str, Path],
+            split_events: bool = True
+    ) -> Union[int, None]:
+        """
+        Characterizes an event by computing various properties and metrics.
 
+        This function analyzes a specific event in a dataset by calculating properties such as bounding box dimensions, area, shape, and signal traces. It supports handling split events and saves the results to a specified path.
+
+        Args:
+            event_id: The unique identifier of the event to characterize.
+            t0: The starting time index for the event.
+            t1: The ending time index for the event.
+            data_info: Information about the data, including shape and type.
+            event_info: Information about the event, including shape and type.
+            out_path: The path where the results will be saved.
+            split_events: Flag to determine if events should be split.
+
+        .. note::
+
+            .. list-table:: Event Properties Explained
+                :widths: 10 10 10
+                :header-rows: 1
+
+                *   - Property
+                    - Brief Description
+                    - In-Depth Explanation & Formula
+                *   - z0, z1
+                    - Z-index bounds
+                    - Start (z0) and end (z1) indices in the z-dimension.
+                *   - x0, x1, y0, y1
+                    - XY bounding box
+                    - Coordinates defining the bounding box in x (x0, x1) and y (y0, y1) dimensions.
+                *   - dz, dx, dy
+                    - Bounding box size
+                    - Dimensions of the bounding box: depth (dz), width (dx), and height (dy).
+                *   - v_length
+                    - Event length
+                    - Length of the event in the z-dimension. Calculated as :math:`z1 - z0`.
+                *   - v_diameter
+                    - Event diameter
+                    - Diameter of the event. Calculated as :math:`\\sqrt{dx^2 + dy^2}`.
+                *   - v_area
+                    - Event area
+                    - Total area covered by the event. Calculated as the count of z-indices where event_id is present.
+                *   - v_bbox_pix_num
+                    - Bounding box pixel count
+                    - Total number of pixels within the bounding box. Calculated as :math:` dz * dx * dy `.
+                *   - mask
+                    - Event mask
+                    - Binary mask indicating the presence (1) or absence (0) of the event.
+                *   - v_mask_centroid_local
+                    - Local centroid
+                    - The local centroid coordinates of the event mask. Calculated for each dimension and normalized by the size of the bounding box in the respective dimension. Formula: :math:`\\text{centroid}_{local-i} = \\frac{\\text{centroid}_{local-i}}{d_i}` corresponding to z, x, y dimensions.
+                *   - v_mask_axis_major_length
+                    - Major axis length
+                    - The length of the major axis of the ellipse that has the same normalized second central moments as the region. ???
+                *   - v_mask_axis_minor_length
+                    - Minor axis length
+                    - The length of the minor axis of the ellipse that has the same normalized second central moments as the region. ???
+                *   - v_mask_extent
+                    - Extent
+                    - The ratio of pixels in the region to pixels in the total bounding box. Calculated as :math:`\\frac{\\text{area}}{dx \\times dy \\times dz}`.
+                *   - v_mask_solidity
+                    - Solidity
+                    - The proportion of the pixels in the convex hull that are also in the region. Calculated as :math:`\\frac{\\text{area}}{\\text{area of convex hull}}`. ???
+                *   - v_mask_area
+                    - Area
+                    - The number of pixels in the region.
+                *   - v_mask_equivalent_diameter_area
+                    - Equivalent diameter
+                    - The diameter of a circle with the same area as the region. Calculated as :math:`\\sqrt{\\frac{4 \\times \\text{area}}{\\pi}}`.
+                *   - contours
+                    - Event contours
+                    - Contours extracted from each frame of the event. ???
+                *   - footprint
+                    - 2D event footprint
+                    - The 2D representation of the event, capturing its extent in the XY plane.
+                *   - v_fp_<property>
+                    - Footprint properties
+                    - Properties such as centroid, eccentricity, perimeter calculated from the 2D footprint. ???
+                *   - trace
+                    - Signal trace
+                    - The average signal intensity of the event across the z-dimension.
+                *   - v_max_height
+                    - Maximum trace height
+                    - The peak signal intensity in the trace. Calculated as :math:`\\max(\\text{trace}) - \\min(\\text{trace})`.
+                *   - v_max_gradient
+                    - Maximum trace gradient
+                    - The steepest gradient in the trace. Calculated as :math:`\\max(\\Delta \\text{trace})`.
+                *   - noise_mask_trace
+                    - Noise mask trace
+                    - The trace calculated from the noise mask area. ???
+                *   - v_noise_mask_mean
+                    - Noise mean
+                    - The mean value of the noise mask trace. Calculated as :math:`\\mu_{\\text{noise}}`.
+                *   - v_noise_mask_std
+                    - Noise standard deviation
+                    - The standard deviation of the noise mask trace. Calculated as :math:`\\sigma_{\\text{noise}}`.
+                *   - v_signal_to_noise_ratio
+                    - Signal-to-noise ratio
+                    - Ratio of signal intensity to noise. Calculated as :math:`\\frac{v_{\\text{max height}}}{\\mu_{\\text{noise}}}`.
+                *   - v_signal_to_noise_ratio_fold
+                    - Signal-to-noise fold change
+                    - Signal-to-noise ratio adjusted for noise standard deviation. Calculated as :math:`\\frac{(v_{\\text{max height}} - \\mu_{\\text{noise}})}{\\sigma_{\\text{noise}}}`.
+                *   - error
+                    - Error flag
+                    - Indicates any computational errors during property calculation. `0` for no error, `1` for error.
+
+        Returns:
+            An integer indicating the status (e.g., 2 for existing results) or None if the process completes.
+        """
         # check if result already exists
         if not isinstance(out_path, Path):
             out_path = Path(out_path)

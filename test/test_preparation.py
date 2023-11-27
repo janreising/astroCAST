@@ -120,8 +120,8 @@ class Test_Input:
             inp = Input()
 
             tmpdir = list(tmpdir.glob("*"))[0] if num_files == 1 else tmpdir
-            stack = inp.run(input_path=tmpdir, dtype=None, in_memory=in_memory)
-            stack = stack["ch0"]
+            stack = inp.run(input_path=tmpdir, dtype=None, in_memory=in_memory, loc_out="data")
+            stack = stack["data/ch0"]
 
             img_stack = np.squeeze(img_stack)
             stack = np.squeeze(stack)
@@ -138,12 +138,12 @@ class Test_Input:
             assert tmpdir.is_dir()
 
             # Reference
-            images = {f"ch{n}": [] for n in range(num_channels)}
+            images = {f"data/ch{n}": [] for n in range(num_channels)}
             c = 0
-            for n in range(7):
+            for _ in range(7):
                 for n in range(num_channels):
                     img = np.random.random((1, 10, 10))
-                    images[f"ch{n}"].append(img)
+                    images[f"data/ch{n}"].append(img)
 
                     tifffile.imwrite(tmpdir.joinpath(f"ss_single_{c}.tiff"), img)
                     c = c + 1
@@ -153,7 +153,7 @@ class Test_Input:
 
             # Loaded
             inp = Input()
-            stack = inp.run(input_path=tmpdir, channels=num_channels, dtype=None, in_memory=in_memory)
+            stack = inp.run(input_path=tmpdir, channels=num_channels, dtype=None, in_memory=in_memory, loc_out="data")
 
             for ch in images.keys():
                 ref = np.squeeze(images[ch])
@@ -174,12 +174,12 @@ class Test_Input:
             X, Y = 10, 10
 
             # Reference
-            images = {f"ch{n}": [] for n in range(num_channels)}
+            images = {f"data/ch{n}": [] for n in range(num_channels)}
             c = 0
-            for n in range(7):
+            for _ in range(7):
                 for n in range(num_channels):
                     img = np.random.random((1, X, Y))
-                    images[f"ch{n}"].append(img)
+                    images[f"data/ch{n}"].append(img)
 
                     tifffile.imwrite(tmpdir.joinpath(f"ss_single_{c}.tiff"), img)
                     c = c + 1
@@ -191,12 +191,12 @@ class Test_Input:
                 subtract_background = np.random.random((X, Y))
 
             else:
-                subtract_background = "ch0"
+                subtract_background = "data/ch0"
 
             # Loaded
             inp = Input()
             stack = inp.run(
-                input_path=tmpdir, channels=num_channels, subtract_background=subtract_background,
+                input_path=tmpdir, channels=num_channels, subtract_background=subtract_background, loc_out="data",
                 subtract_func=subtract_func, dtype=None, in_memory=in_memory
             )
 
@@ -206,17 +206,17 @@ class Test_Input:
             if num_channels == 1:
 
                 assert np.array_equal(
-                    stack["ch0"], images["ch0"] - subtract_background
+                    stack["data/ch0"], images["data/ch0"] - subtract_background
                 )
 
             else:
 
                 func = func_reduction[subtract_func] if not callable(subtract_func) else subtract_func
-                background = func(images["ch0"], axis=0)
+                background = func(images["data/ch0"], axis=0)
 
                 for ch in stack.keys():
 
-                    if ch == "ch0":
+                    if ch == "data/ch0":
                         pass
 
                     ctrl = images[ch] - background
@@ -238,12 +238,12 @@ class Test_Input:
             logging.warning(f"random video shape: {(Z, X, Y)}")
 
             # Reference
-            images = {f"ch{n}": [] for n in range(num_channels)}
+            images = {f"data/ch{n}": [] for n in range(num_channels)}
             c = 0
             for n in range(Z):
                 for channel_num in range(num_channels):
                     img = np.random.random((1, X, Y))
-                    images[f"ch{channel_num}"].append(img)
+                    images[f"data/ch{channel_num}"].append(img)
 
                     tifffile.imwrite(tmpdir.joinpath(f"ss_single_{c}.tiff"), img)
                     c = c + 1
@@ -253,11 +253,11 @@ class Test_Input:
 
             inp = Input()
             stack = inp.run(
-                input_path=tmpdir, channels=num_channels, rescale=rescale, subtract_background=None, subtract_func=None,
-                dtype=None, in_memory=True
+                input_path=tmpdir, channels=num_channels, rescale=rescale, subtract_background=None, loc_out="data",
+                subtract_func=None, dtype=None, in_memory=True
             )
 
-            res = stack["ch0"]
+            res = stack["data/ch0"]
 
             if rescale == 1:
                 assert res.shape == (Z, X, Y)
@@ -279,22 +279,23 @@ class Test_Input:
                 # relative value
                 assert np.allclose(res.shape, (Z, int(X * r0), int(Y * r1)), atol=1)
 
-    @pytest.mark.parametrize("output_path", ["out.h5", "out.tdb", "out.tiff"])
+    @pytest.mark.parametrize("output_path", ["out_def.h5", "out_def.tdb", "out_def.tiff"])
     @pytest.mark.parametrize("chunks", [None, (5, 5, 5)])
-    def test_output(self, output_path, chunks):
+    def test_output(self, output_path, chunks, size=(25, 10, 10)):
 
-        with tempfile.TemporaryDirectory() as dir:
-            tmpdir = Path(dir)
+        with tempfile.TemporaryDirectory() as _dir:
+            tmpdir = Path(_dir)
             assert tmpdir.is_dir()
 
             output_path = tmpdir.joinpath(output_path)
 
-            data = {0: np.random.random((25, 10, 10))}
-
             inp = Input()
-            inp._save(output_path, data, chunks=chunks)
+            data = np.random.random(size)
+            inp._save(output_path, data=data, chunks=chunks, loc="test/test1")
 
-    @pytest.mark.parametrize("output_path", ["out.h5", "out.tdb", "out.tiff"])
+            assert output_path.exists()
+
+    @pytest.mark.parametrize("output_path", ["out_in_out.h5", "out_in_out.tdb", "out_in_out.tiff"])
     def test_intput_output(self, output_path):
 
         num_files = 25
@@ -321,8 +322,8 @@ class Test_Input:
             output_path = tmpdir.joinpath(output_path)
 
             inp.run(
-                input_path=tmpdir, output_path=output_path, dtype=None, in_memory=False, loc_in="data"
-            )
+                input_path=tmpdir, output_path=output_path, dtype=None, in_memory=False, loc_in="data",
+                loc_out="data", )
 
             assert output_path.is_file() or output_path.is_dir(), f"cannot find output file: {output_path}"
 
@@ -408,20 +409,19 @@ class Test_IO:
             # Loaded
             io = IO()
 
-            prefix = None if output_path.suffix != ".h5" else "data/"
+            data = {"data/ch0": arr}
+            output_path = io.save(output_path, data)
+
             h5loc = None if output_path.suffix != ".h5" else "data/ch0"
-            data = {"ch0": arr}
-
-            output_path = io.save(output_path, data, loc=prefix)
-
             arr_load = io.load(output_path, loc=h5loc)
 
             assert arr.shape == arr_load.shape
             assert np.array_equal(arr, arr_load)
 
     @pytest.mark.parametrize("shape", [(10, 5, 5), (100, 100, 100)])
-    @pytest.mark.parametrize("chunks", [None, (2, 2, 2), "infer"])
-    def test_save_chunks(self, shape, chunks, output_path="out.h5"):
+    @pytest.mark.parametrize("chunk_strategy", ["balanced", "Z", "XY", None])
+    @pytest.mark.parametrize("chunks", [None, (2, 2, 2)])
+    def test_save_chunks(self, shape, chunk_strategy, chunks, output_path="out.h5"):
 
         with tempfile.TemporaryDirectory() as dir:
             tmpdir = Path(dir)
@@ -435,12 +435,10 @@ class Test_IO:
             # Loaded
             io = IO()
 
-            prefix = None if output_path.suffix != ".h5" else "data/"
+            data = {"data/ch0": arr}
+            output_path = io.save(output_path, data, chunks=chunks, chunk_strategy=chunk_strategy)
+
             h5loc = None if output_path.suffix != ".h5" else "data/ch0"
-            data = {"ch0": arr}
-
-            output_path = io.save(output_path, data, loc=prefix, chunks=chunks)
-
             arr_load = io.load(output_path, loc=h5loc)
 
             assert arr.shape == arr_load.shape
@@ -462,12 +460,10 @@ class Test_IO:
             # Loaded
             io = IO()
 
-            prefix = None if output_path.suffix != ".h5" else "data/"
+            data = {"data/ch0": arr}
+            output_path = io.save(output_path, data, chunks=chunks, compression=compression)
+
             h5loc = None if output_path.suffix != ".h5" else "data/ch0"
-            data = {"ch0": arr}
-
-            output_path = io.save(output_path, data, loc=prefix, chunks=chunks, compression=compression)
-
             arr_load = io.load(output_path, loc=h5loc)
 
             assert arr.shape == arr_load.shape
@@ -492,13 +488,8 @@ class Test_IO:
             # Loaded
             io = IO()
 
-            prefix = None if output_path.suffix != ".h5" else "data/"
-            h5loc = None if output_path.suffix != ".h5" else "data/ch0"
-            data = {"ch0": arr}
-
-            output_path = io.save(output_path, data, loc=prefix)
-
-            arr_load = io.load(output_path, loc=h5loc, z_slice=z_slice)
+            output_path = io.save(output_path, arr, loc="data/ch0")
+            arr_load = io.load(output_path, loc="data/ch0", z_slice=z_slice)
 
             assert original_array.shape == arr_load.shape
             assert np.array_equal(original_array, arr_load)
@@ -518,15 +509,11 @@ class Test_IO:
             # Saving
             io = IO()
 
-            prefix = None if output_path.suffix != ".h5" else "data/"
-            h5loc = None if output_path.suffix != ".h5" else "data/ch0"
-            data = {"ch0": arr}
-
-            output_path = io.save(output_path, data, loc=prefix)
+            output_path = io.save(output_path, arr, loc="data/ch0")
             logging.warning(output_path)
 
             # Loading
-            arr_load = io.load(output_path, loc=h5loc, lazy=True)
+            arr_load = io.load(output_path, loc="data/ch0", lazy=True)
 
             assert isinstance(arr_load, (dask.array.Array, dask.array.core.Array)), f"type: {type(arr_load)}"
             assert arr.shape == arr_load.shape
