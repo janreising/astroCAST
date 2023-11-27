@@ -47,12 +47,20 @@ class Test_ConvertInput:
         out_file = self.temp_tiffs.parent.joinpath(f"out_{name_prefix}{num_channels}.h5")
 
         if name_prefix is None:
-            channel_names = [f"ch{i}" for i in range(num_channels)]
+            channel_names = [f"data/ch{i}" for i in range(num_channels)]
         else:
-            channel_names = [f"{name_prefix}{i}" for i in range(num_channels)]
+            channel_names = [f"data/{name_prefix}{i}" for i in range(num_channels)]
 
         args = [self.temp_tiffs.as_posix(), "--output-path", out_file.as_posix(), "--num-channels", str(num_channels)]
-        if name_prefix is not None:
+        if name_prefix is None and num_channels > 1:
+            args.append("--loc-out")
+            args.append("data")
+
+        elif name_prefix is None and num_channels == 1:
+            args.append("--loc-out")
+            args.append("data/ch0")
+
+        else:
             args.append("--channel-names")
             args.append(",".join(channel_names))
 
@@ -62,28 +70,38 @@ class Test_ConvertInput:
         if result.exit_code != 0:
             print(f"error: {result.output}")
             traceback.print_exception(*result.exc_info)
+            raise Exception
         assert out_file.exists()
 
         with h5.File(out_file.as_posix(), "r") as f:
 
             for ch_name in channel_names:
-                assert ch_name in f[
-                    'data'], f"channel name: {ch_name} not found in output file; {list(f['data'].keys())}"
 
-            lengths = [len(f[f'data/{ch_name}']) for ch_name in channel_names]
+                if ch_name not in f:
+                    logging.error(f"name: {ch_name} not in output file: {list(f.keys())}")
+                    if "/" in ch_name:
+                        base_name = ch_name.split("/")[0]
+                        logging.error(f"{base_name}/... > {list(f[base_name].keys())}")
+
+                    raise FileNotFoundError
+
+                assert ch_name in f, f"name: {ch_name} not in output file: {list(f.keys())}"
+
+            lengths = [len(f[ch_name]) for ch_name in channel_names]
             assert len(np.unique(lengths)) == 1, f"lengths: {lengths}"
 
     def test_z_slice(self):
 
         out_file = self.temp_tiffs.parent.joinpath(f"out_z.h5")
         args = [self.temp_tiffs.as_posix(), "--output-path", out_file.as_posix(), "--num-channels", "1", "--z-slice",
-                "0", "50"]
+                "0", "50", "--loc-out", "data/ch0"]
         result = self.runner.invoke(convert_input, args)
 
         # Check that the command ran successfully
         if result.exit_code != 0:
             print(f"error: {result.output}")
             traceback.print_exception(*result.exc_info)
+            raise Exception
         assert out_file.exists()
 
         with h5.File(out_file.as_posix(), "r") as f:
@@ -99,29 +117,33 @@ class Test_ConvertInput:
         if result.exit_code != 0:
             print(f"error: {result.output}")
             traceback.print_exception(*result.exc_info)
+            raise Exception
         assert out_file.exists()
 
     def test_subtract_background(self):
 
         out_file_ref = self.temp_tiffs.parent.joinpath(f"out_ref.h5")
-        args = [self.temp_tiffs.as_posix(), "--output-path", out_file_ref.as_posix(), "--num-channels", "2"]
+        args = [self.temp_tiffs.as_posix(), "--output-path", out_file_ref.as_posix(), "--num-channels", "2",
+                "--loc-out", "data"]
         result = self.runner.invoke(convert_input, args)
 
         # Check that the command ran successfully
         if result.exit_code != 0:
             print(f"error: {result.output}")
             traceback.print_exception(*result.exc_info)
+            raise Exception
         assert out_file_ref.exists()
 
         out_file = self.temp_tiffs.parent.joinpath(f"out_sb.h5")
         args = [self.temp_tiffs.as_posix(), "--output-path", out_file.as_posix(), "--num-channels", "2",
-                "--subtract-background", "ch1"]
+                "--subtract-background", "data/ch1", "--loc-out", "data"]
         result = self.runner.invoke(convert_input, args)
 
         # Check that the command ran successfully
         if result.exit_code != 0:
             print(f"error: {result.output}")
             traceback.print_exception(*result.exc_info)
+            raise Exception
         assert out_file.exists()
 
         with h5.File(out_file.as_posix(), "r") as f_out:
@@ -149,34 +171,42 @@ class Test_ConvertInput:
         if result.exit_code != 0:
             print(f"error: {result.output}")
             traceback.print_exception(*result.exc_info)
+            raise Exception
         assert out_file.exists()
 
     def test_h5(self):
         out_file = self.temp_tiffs.parent.joinpath(f"out_h.h5")
-        args = [self.temp_file.as_posix(), "--output-path", out_file.as_posix(), "--num-channels", "1", "--h5-loc-in",
-                "data/ch0", "--h5-loc-out", "data/ch1", ]
+        args = [self.temp_file.as_posix(), "--output-path", out_file.as_posix(), "--num-channels", "1", "--loc-in",
+                "data/ch0", "--loc-out", "data/ch1", ]
         result = self.runner.invoke(convert_input, args)
 
         # Check that the command ran successfully
         if result.exit_code != 0:
             print(f"error: {result.output}")
             traceback.print_exception(*result.exc_info)
+            raise Exception
         assert out_file.exists()
 
         with h5.File(out_file.as_posix(), "r") as f:
             assert "data/ch1" in f
 
-    @pytest.mark.parametrize("chunks", [None, "infer", ["2", "10", "10"]])
-    def test_chunks(self, chunks):
-        out_file = self.temp_tiffs.parent.joinpath(f"out_inf.h5")
-        args = [self.temp_tiffs.as_posix(), "--output-path", out_file.as_posix(), "--num-channels", "1"]
+    @pytest.mark.parametrize("chunks", [None, ["2", "10", "10"]])
+    @pytest.mark.parametrize("chunk_strategy", [None, "balanced", "XY", "Z"])
+    def test_chunks(self, chunks, chunk_strategy):
 
-        if chunks is None:
-            args += []
-        elif chunks == "infer":
-            args += ["--infer-chunks"]
-        else:
+        out_file = self.temp_tiffs.parent.joinpath(f"out_inf_{str(chunk_strategy)}_{str(chunks)}.h5")
+        args = [self.temp_tiffs.as_posix()]
+        args += ["--output-path", out_file.as_posix()]
+        args += ["--num-channels", "1"]
+        args += ["--loc-out", "data/ch0"]
+
+        if chunks is not None:
             args += ["--chunks"] + chunks
+
+        if chunk_strategy is not None:
+            args += ["--chunk-strategy", chunk_strategy]
+        else:
+            args += ["--chunk-strategy", "None"]
 
         result = self.runner.invoke(convert_input, args)
 
@@ -184,19 +214,40 @@ class Test_ConvertInput:
         if result.exit_code != 0:
             print(f"error: {result.output}")
             traceback.print_exception(*result.exc_info)
+            raise Exception
         assert out_file.exists()
 
         with h5.File(out_file.as_posix(), "r") as f:
             assert "data/ch0" in f
 
-            if chunks is None:
-                assert f["data/ch0"].chunks == None
+            saved_chunks = f["data/ch0"].chunks
+            if saved_chunks is not None:
+                cz, cx, cy = saved_chunks
+            Z, X, Y = f["data/ch0"].shape
 
-            elif chunks == "infer":
-                assert f["data/ch0"].chunks != None
+            if chunks is None and chunk_strategy is None:
+                assert saved_chunks is None or saved_chunks == f["data/ch0"].shape
+
+            elif chunks is not None:
+                assert saved_chunks == tuple(map(int, chunks))
+
+            elif chunk_strategy == "balanced":
+                assert cz > 1
+                assert cx > 1
+                assert cy > 1
+
+            elif chunk_strategy == "XY":
+                assert cz > 1
+                assert cx == X
+                assert cy == Y
+
+            elif chunk_strategy == "Z":
+                assert cz == Z
+                assert cx > 1
+                assert cy > 1
 
             else:
-                assert f["data/ch0"].chunks == tuple(map(int, chunks))
+                raise ValueError(f"unexpected condition: {chunks} & {chunk_strategy}")
 
 
 class Test_MotionCorrection:
@@ -230,7 +281,7 @@ class Test_MotionCorrection:
         self.temp_dir.cleanup()
 
     def run_with_parameters(self, params):
-        args = [self.video_path.as_posix(), "--h5-loc", self.loc]
+        args = [self.video_path.as_posix(), "--loc-in", self.loc]
         args += params
 
         result = self.runner.invoke(motion_correction, args)
@@ -242,10 +293,10 @@ class Test_MotionCorrection:
         self.run_with_parameters(["--output-path", out.as_posix()])
 
     def test_custom_chunks(self):
-        self.run_with_parameters(["--infer-chunks", "--chunks", "2", "10", "10"])
+        self.run_with_parameters(["--chunks", "2", "10", "10"])
 
     def test_non_inference(self):
-        self.run_with_parameters(["--infer-chunks"])
+        self.run_with_parameters(["--chunk-strategy", None])
 
 
 class Test_SubtractDelta:
@@ -269,7 +320,7 @@ class Test_SubtractDelta:
         out_file = self.temp_file.with_suffix(".def.h5")
         result = self.runner.invoke(
             subtract_delta,
-            [self.temp_file.as_posix(), "--output-path", out_file.as_posix(), "--h5-loc-in", "data/ch0", "--h5-loc-out",
+            [self.temp_file.as_posix(), "--output-path", out_file.as_posix(), "--loc-in", "data/ch0", "--loc-out",
              "df/ch0", "--window", 2]
         )
 
@@ -277,6 +328,7 @@ class Test_SubtractDelta:
         if result.exit_code != 0:
             print(f"error: {result.output}")
             traceback.print_exception(*result.exc_info)
+            raise Exception
 
         with h5.File(out_file.as_posix(), "r") as f:
             assert "df/ch0" in f
@@ -286,7 +338,7 @@ class Test_SubtractDelta:
         out_file = self.temp_file.with_suffix(".met.h5")
         result = self.runner.invoke(
             subtract_delta,
-            [self.temp_file.as_posix(), "--output-path", out_file.as_posix(), "--h5-loc-in", "data/ch0", "--h5-loc-out",
+            [self.temp_file.as_posix(), "--output-path", out_file.as_posix(), "--loc-in", "data/ch0", "--loc-out",
              "df/ch0", "--method", method, "--window", 2]
         )
 
@@ -294,6 +346,7 @@ class Test_SubtractDelta:
         if result.exit_code != 0:
             print(f"error: {result.output}")
             traceback.print_exception(*result.exc_info)
+            raise Exception
 
         with h5.File(out_file.as_posix(), "r") as f:
             assert "df/ch0" in f
@@ -302,7 +355,7 @@ class Test_SubtractDelta:
         out_file = self.temp_file.with_suffix(".met.h5")
         result = self.runner.invoke(
             subtract_delta,
-            [self.temp_file.as_posix(), "--output-path", out_file.as_posix(), "--h5-loc-in", "data/ch0", "--h5-loc-out",
+            [self.temp_file.as_posix(), "--output-path", out_file.as_posix(), "--loc-in", "data/ch0", "--loc-out",
              "df/ch0", "--chunks", "1", "10", "10", "--window", 3]
         )
 
@@ -310,6 +363,7 @@ class Test_SubtractDelta:
         if result.exit_code != 0:
             print(f"error: {result.output}")
             traceback.print_exception(*result.exc_info)
+            raise Exception
 
         with h5.File(out_file.as_posix(), "r") as f:
             assert "df/ch0" in f
@@ -320,7 +374,7 @@ class Test_SubtractDelta:
         out_file = self.temp_file.with_suffix(".ov.h5")
         result = self.runner.invoke(
             subtract_delta,
-            [self.temp_file.as_posix(), "--output-path", out_file.as_posix(), "--h5-loc-in", "data/ch0", "--h5-loc-out",
+            [self.temp_file.as_posix(), "--output-path", out_file.as_posix(), "--loc-in", "data/ch0", "--loc-out",
              "df/ch0", "--overwrite-first-frame", overwrite, "--window", 3]
         )
 
@@ -328,6 +382,7 @@ class Test_SubtractDelta:
         if result.exit_code != 0:
             print(f"error: {result.output}")
             traceback.print_exception(*result.exc_info)
+            raise Exception
 
         with h5.File(out_file.as_posix(), "r") as f:
             assert "df/ch0" in f
@@ -460,7 +515,7 @@ class Test_Detection:
     def run_with_parameters(self, params):
 
         out = self.video_path.with_suffix(f".{np.random.randint(1, int(10e6), size=1)}.roi")
-        args = [self.video_path.as_posix(), "--h5-loc", self.loc, "--output-path", out.as_posix()]
+        args = [self.video_path.as_posix(), "--loc", self.loc, "--output-path", out.as_posix()]
         args += params
 
         result = self.runner.invoke(detect_events, args)
@@ -542,13 +597,14 @@ class Test_Export_Video:
     def test_tiff(self):
         out_file = self.temp_file.with_suffix(".tiff")
         result = self.runner.invoke(
-            export_video, [self.temp_file.as_posix(), "--output-path", out_file.as_posix(), "--h5-loc-in", "data/ch0"]
+            export_video, [self.temp_file.as_posix(), "--output-path", out_file.as_posix(), "--loc-in", "data/ch0"]
         )
 
         # Check that the command ran successfully
         if result.exit_code != 0:
             print(f"error: {result.output}")
             traceback.print_exception(*result.exc_info)
+            raise Exception
         assert out_file.exists()
 
         data = tifffile.imread(out_file.as_posix())
@@ -559,7 +615,7 @@ class Test_Export_Video:
 
         result = self.runner.invoke(
             export_video,
-            [self.temp_file.as_posix(), "--output-path", out_file.as_posix(), "--h5-loc-in", "data/ch0", "--h5-loc-out",
+            [self.temp_file.as_posix(), "--output-path", out_file.as_posix(), "--loc-in", "data/ch0", "--loc-out",
              "cop/ch0"]
         )
 
@@ -567,6 +623,7 @@ class Test_Export_Video:
         if result.exit_code != 0:
             print(f"error: {result.output}")
             traceback.print_exception(*result.exc_info)
+            raise Exception
         assert out_file.exists()
 
         with h5.File(out_file.as_posix(), "r") as f:
@@ -583,7 +640,7 @@ class Test_Export_Video:
 
         result = self.runner.invoke(
             export_video,
-            [self.temp_file.as_posix(), "--output-path", out_file.as_posix(), "--h5-loc-in", "data/ch1", "--h5-loc-out",
+            [self.temp_file.as_posix(), "--output-path", out_file.as_posix(), "--loc-in", "data/ch1", "--loc-out",
              "data/ch0", "--overwrite", True]
         )
 
@@ -591,6 +648,7 @@ class Test_Export_Video:
         if result.exit_code != 0:
             print(f"error: {result.output}")
             traceback.print_exception(*result.exc_info)
+            raise Exception
 
         assert out_file.exists()
         with h5.File(out_file.as_posix(), "r") as f:
@@ -606,7 +664,7 @@ class Test_Export_Video:
 
         result = self.runner.invoke(
             export_video,
-            [self.temp_file.as_posix(), "--output-path", out_file.as_posix(), "--h5-loc-in", "data/ch0", "--h5-loc-out",
+            [self.temp_file.as_posix(), "--output-path", out_file.as_posix(), "--loc-in", "data/ch0", "--loc-out",
              "data/ch0", "--rescale", rescale]
         )
 
@@ -631,7 +689,7 @@ class Test_Export_Video:
 
         result = self.runner.invoke(
             export_video,
-            [self.temp_file.as_posix(), "--output-path", out_file.as_posix(), "--h5-loc-in", "data/ch0", "--h5-loc-out",
+            [self.temp_file.as_posix(), "--output-path", out_file.as_posix(), "--loc-in", "data/ch0", "--loc-out",
              "data/ch0", "--compression", "gzip"]
         )
 
@@ -639,6 +697,7 @@ class Test_Export_Video:
         if result.exit_code != 0:
             print(f"error: {result.output}")
             traceback.print_exception(*result.exc_info)
+            raise Exception
         assert out_file.exists()
 
         with h5.File(out_file.as_posix(), "r") as f:
@@ -650,13 +709,14 @@ class Test_Export_Video:
 
         result = self.runner.invoke(
             export_video,
-            [self.temp_file.as_posix(), "--output-path", out_file.as_posix(), "--h5-loc-in", "data/ch0", "--h5-loc-out",
+            [self.temp_file.as_posix(), "--output-path", out_file.as_posix(), "--loc-in", "data/ch0", "--loc-out",
              "data/ch0", "--z-select", "0", "2"]
         )
         # Check that the command ran successfully
         if result.exit_code != 0:
             print(f"error: {result.output}")
             traceback.print_exception(*result.exc_info)
+            raise Exception
         assert out_file.exists()
 
         with h5.File(out_file.as_posix(), "r") as f:
@@ -668,13 +728,14 @@ class Test_Export_Video:
 
         result = self.runner.invoke(
             export_video,
-            [self.temp_file.as_posix(), "--output-path", out_file.as_posix(), "--h5-loc-in", "data/ch0", "--h5-loc-out",
+            [self.temp_file.as_posix(), "--output-path", out_file.as_posix(), "--loc-in", "data/ch0", "--loc-out",
              "data/ch0", "--chunk-size", "1", "5", "5"]
         )
         # Check that the command ran successfully
         if result.exit_code != 0:
             print(f"error: {result.output}")
             traceback.print_exception(*result.exc_info)
+            raise Exception
         assert out_file.exists()
 
         with h5.File(out_file.as_posix(), "r") as f:
@@ -711,6 +772,7 @@ class Test_MoveDataset:
         if result.exit_code != 0:
             print(f"error: {result.output}")
             traceback.print_exception(*result.exc_info)
+            raise Exception
 
         assert temp_file_2.exists()
         with h5.File(temp_file_2.as_posix(), "r") as f:
@@ -730,6 +792,7 @@ class Test_MoveDataset:
         if result.exit_code != 0:
             print(f"error: {result.output}")
             traceback.print_exception(*result.exc_info)
+            raise Exception
 
         assert temp_file_2.exists()
         with h5.File(temp_file_2.as_posix(), "r") as f:
@@ -852,7 +915,7 @@ class Test_ViewDetectionResults:
     def test_view_detection_infer(self):
         result = self.runner.invoke(
             view_detection_results,
-            [self.event_dir.as_posix(), "--video-path", "infer", "--h5-loc", str(self.loc), "--testing", True]
+            [self.event_dir.as_posix(), "--video-path", "infer", "--loc", str(self.loc), "--testing", True]
         )
         assert result.exit_code == 0, f"error: {result.output}"
 
@@ -860,7 +923,7 @@ class Test_ViewDetectionResults:
     def test_view_detection_z(self):
         result = self.runner.invoke(
             view_detection_results,
-            [self.event_dir.as_posix(), "--video-path", self.video_path.as_posix(), "--h5-loc", str(self.loc),
+            [self.event_dir.as_posix(), "--video-path", self.video_path.as_posix(), "--loc", str(self.loc),
              "--z-select", "0", "5", "--testing", True]
         )
         assert result.exit_code == 0, f"error: {result.output}"
@@ -869,7 +932,7 @@ class Test_ViewDetectionResults:
     def test_view_detection_lazy(self):
         result = self.runner.invoke(
             view_detection_results,
-            [self.event_dir.as_posix(), "--video-path", self.video_path.as_posix(), "--h5-loc", str(self.loc), "--lazy",
+            [self.event_dir.as_posix(), "--video-path", self.video_path.as_posix(), "--loc", str(self.loc), "--lazy",
              False, "--testing", True]
         )
         assert result.exit_code == 0, f"error: {result.output}"
@@ -896,6 +959,7 @@ def test_delete_h5_dataset():
         if result.exit_code != 0:
             print(f"error: {result.output}")
             traceback.print_exception(*result.exc_info)
+            raise Exception
 
         # Check that the dataset was deleted
         with h5.File(temp_file.as_posix(), "r") as f:
@@ -952,6 +1016,7 @@ def test_climage(z, size, equalize):
         if result.exit_code != 0:
             print(f"error: {result.output}")
             traceback.print_exception(*result.exc_info)
+            raise Exception
 
 
 @pytest.mark.skip(reason="Not implemented")

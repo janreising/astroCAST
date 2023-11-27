@@ -450,7 +450,8 @@ class Test_Events:
 
 class Test_Video:
 
-    def basic_load(self, input_type, z_slice, lazy, proj_func, window, shape=(50, 25, 25)):
+    @staticmethod
+    def basic_load(input_type, z_slice, lazy, proj_func, window, shape=(50, 25, 25)):
 
         data = np.random.random(size=shape)
 
@@ -475,7 +476,7 @@ class Test_Video:
             elif input_type == ".h5":
 
                 path = tmp_path.with_suffix(input_type)
-                loc = "data"
+                loc = "data/ch0"
 
                 io = IO()
                 io.save(path=path, data=data, loc=loc)
