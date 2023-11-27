@@ -1085,7 +1085,7 @@ class Events(CachedClass):
 
     def show_event_map(
             self, video: Union[Path, str] = None, loc: str = None, z_slice: Tuple[int, int] = None, lazy: bool = True
-    ) -> napari.Viewer:
+    ):
         """
         Visualizes the event map and associated video data using the napari viewer.
 
