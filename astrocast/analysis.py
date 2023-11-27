@@ -34,6 +34,221 @@ from astrocast.helper import get_data_dimensions, is_ragged, CachedClass, Normal
 from astrocast.preparation import IO
 
 
+class Video:
+
+    def __init__(self, data, z_slice=None, loc=None, lazy=False, name=None):
+
+        if isinstance(loc, (tuple, list)):
+            if len(loc) == 1:
+                loc = loc[0]
+
+        if isinstance(data, (Path, str)):
+
+            io = IO()
+
+            if isinstance(loc, str):
+                self.data = io.load(data, loc=loc, lazy=lazy, z_slice=z_slice)
+                self.Z, self.X, self.Y = self.data.shape
+
+            elif isinstance(loc, (tuple, list)):
+                self.data = {}
+                for loc in loc:
+                    self.data[loc] = io.load(data, loc=loc, lazy=lazy, z_slice=z_slice)
+
+            else:
+                logging.info("Data already loaded into memory.")
+                self.data = io.load(data, loc="", lazy=lazy, z_slice=z_slice)
+                self.Z, self.X, self.Y = self.data.shape
+
+        elif isinstance(data, (np.ndarray, da.Array)):
+
+            if z_slice is not None:
+                z0, z1 = z_slice
+                self.data = data[z0:z1, :, :]
+            else:
+                self.data = data
+
+            self.Z, self.X, self.Y = self.data.shape
+
+        else:
+            raise ValueError(f"unknown data type: {type(data)}")
+
+        self.z_slice = z_slice
+
+        self.name = name
+
+    def __hash__(self):
+
+        if isinstance(self.data, da.Array):
+            logging.warning(f"da.Array.name: {self.data.name}")
+            return hash(self.data.name)
+
+        elif isinstance(self.data, np.ndarray):
+            return xxhash.xxh128_intdigest(self.data.data)
+
+        else:
+            raise ValueError(f"please provide data as either np.ndarray or dask.array")
+
+    def get_data(self, in_memory=False):
+
+        if in_memory and isinstance(self.data, da.Array):
+            return self.data.compute()
+
+        else:
+            return self.data
+
+    @lru_cache(maxsize=None)
+    def get_image_project(
+            self, agg_func=np.mean, window=None, window_agg=np.sum, axis=0, show_progress=True
+    ):
+
+        img = self.data
+
+        # calculate projection
+        if window is None:
+            proj = agg_func(img, axis=axis)
+
+        else:
+
+            from numpy.lib.stride_tricks import sliding_window_view
+
+            Z, X, Y = img.shape
+            proj = np.zeros((X, Y))
+
+            z_step = int(window / 2)
+            for x in tqdm(range(X)) if show_progress else range(X):
+                for y in range(Y):
+                    slide_ = sliding_window_view(img[:, x, y], axis=0, window_shape=window)  # sliding trick
+                    slide_ = slide_[::z_step, :]  # skip most steps
+                    agg = agg_func(slide_, axis=1)  # aggregate
+                    proj[x, y] = window_agg(agg)  # window aggregate
+
+        return proj
+
+    def show(
+            self, viewer=None, colormap="gray", show_trace=False, window=160, indices=None, viewer1d=None,
+            xlabel="frames", ylabel="Intensity", reset_y=False
+    ):
+
+        import napari
+        import napari_plot
+        from napari_plot._qt.qt_viewer import QtViewer
+
+        if show_trace and isinstance(self.data, (tuple, list)):
+            raise ValueError(f"'show_trace' is currently not implemented for multiple datasets.")
+
+        if viewer is None:
+            viewer = napari.Viewer()
+
+        if isinstance(self.data, dict):
+
+            for key in self.data.keys():
+                viewer.add_image(self.data[key], name=key, colormap=colormap)
+        else:
+            viewer.add_image(self.data, name=self.name, colormap=colormap)
+
+        if show_trace:
+
+            # get trace
+            Y = self.get_image_project(agg_func=np.mean, axis=(1, 2))
+            X = range(len(Y)) if indices is None else indices
+
+            if viewer1d is None:
+                v1d = napari_plot.ViewerModel1D()
+                qt_viewer = QtViewer(v1d)
+            else:
+                v1d = viewer1d
+
+            v1d.axis.y_label = ylabel
+            v1d.axis.x_label = xlabel
+            v1d.text_overlay.visible = True
+            v1d.text_overlay.position = "top_right"
+
+            v1d.set_y_view(np.min(Y) * 0.9, np.max(Y) * 1.1)
+
+            # create attachable qtviewer
+            line = v1d.add_line(np.c_[X, Y], name=self.name, color=colormap)
+
+            current_frame_line = None
+
+            def update_line(event: Events):
+                nonlocal current_frame_line
+
+                Z, _, _ = event.value
+                z0, z1 = Z - window // 2, Z + window // 2  # Adjusting to center the current frame
+
+                left_padding = 0
+                right_padding = 0
+
+                if z0 < 0:
+                    left_padding = abs(z0)
+                    z0 = 0
+
+                if z1 > len(Y):
+                    right_padding = z1 - len(Y)
+                    z1 = len(Y)
+
+                y_ = Y[z0:z1]
+                x_ = X[z0:z1]
+
+                # Padding with zeros on the left and/or right if necessary
+                y_ = np.pad(y_, (left_padding, right_padding), 'constant', constant_values=0)
+
+                # Adjusting x_ to match the length of y_
+                x_ = np.arange(z0, z0 + len(y_))
+
+                line.data = np.c_[x_, y_]
+
+                # Remove the previous yellow line
+                if current_frame_line:
+                    v1d.layers.remove(current_frame_line)
+
+                # Add a yellow vertical line at the current frame
+                current_frame_line_data = np.array([[Z, np.min(Y)], [Z, np.max(Y)]])
+                current_frame_line = v1d.add_line(current_frame_line_data, color='yellow')
+
+                v1d.reset_x_view()
+
+                if reset_y:
+                    v1d.reset_y_view()
+
+            viewer.dims.events.current_step.connect(update_line)
+
+            if viewer1d is None:
+                viewer.window.add_dock_widget(qt_viewer, area="bottom", name=self.name)
+
+            return viewer, v1d
+
+        return viewer
+
+    def plot_overview(self):
+
+        projection = self.get_image_project()
+
+        data = self.data
+
+        frame0, frame1 = data[0], data[-1]
+        signal = np.mean(data, axis=(1, 2))
+
+        fig, axx = plt.subplot_mosaic("ABC\nDDD", figsize=(12, 6))
+        axx["A"].imshow(projection, cmap="gray")
+        axx["B"].imshow(frame0, cmap="gray")
+        axx["C"].imshow(frame1, cmap="gray")
+        axx["D"].plot(signal, label="mean trace")
+
+        for key in ["A", "B", "C"]:
+            axx[key].axis('off')
+        axx["D"].legend()
+
+        axx["A"].set_title("Projection")
+        axx["B"].set_title("First frame")
+        axx["C"].set_title("Last frame")
+        axx["D"].set_xlabel("Frame number")
+        axx["D"].set_ylabel("Average signal (AU)")
+
+        return fig
+
+
 class Events(CachedClass):
     """
     The Events class manages and processes astrocytic events detected in timeseries calcium recordings. It provides
@@ -168,10 +383,11 @@ class Events(CachedClass):
                 if z_slice is not None:
                     logging.warning("'data'::Video > Slice manually during Video object initialization")
 
-                self.data = data
+                self.data: Video = data
 
             else:
-                self.data = data
+                logging.warning(f"data is not a valid type ({type(data)}). Defaulting to None")
+                self.data = None
 
         else:  # multi file support
 
@@ -1134,7 +1350,7 @@ class Events(CachedClass):
 
     @wrapper_local_cache
     def get_extended_events(
-            self, events: pd.DataFrame = None, video: Union[np.ndarray, Path, str] = None, dtype: type = float,
+            self, events: pd.DataFrame = None, video: Union[np.ndarray, da.Array, Video] = None, dtype: type = float,
             use_footprint: bool = False, extend: Union[int, Tuple[int, int]] = -1, ensure_min: int = None,
             ensure_max: int = None, pad_borders: bool = False, return_array: bool = False, in_place: bool = False,
             normalization_instructions: Dict[int, List[Union[str, Dict[str, str]]]] = None, show_progress: bool = True,
@@ -1198,7 +1414,12 @@ class Events(CachedClass):
 
         # load data
         if video is not None:
-            video = video.get_data()
+
+            if isinstance(video, Video):
+                video = video.get_data()
+            elif not isinstance(video, (da.Array, np.ndarray)):
+                raise ValueError(f"'video' must be a astrocast.Video, numpy or dask array")
+
         elif self.data is not None:
             video = self.data.get_data()
         else:
@@ -1368,7 +1589,6 @@ class Events(CachedClass):
                 norm.run(normalization_instructions)
 
             if return_array:
-                logging.warning(f"full_z0:z1 > {full_z0}:{full_z1}; trace.shape: {trace.shape}")
                 arr_ext[c, full_z0:full_z1] = trace
             else:
                 extended.append(trace)
@@ -1623,221 +1843,6 @@ class Events(CachedClass):
         cluster_lookup_table.update({k: label for k, label in list(zip(self.events.index.tolist(), labels.tolist()))})
 
         return cluster_lookup_table
-
-
-class Video:
-
-    def __init__(self, data, z_slice=None, loc=None, lazy=False, name=None):
-
-        if isinstance(loc, (tuple, list)):
-            if len(loc) == 1:
-                loc = loc[0]
-
-        if isinstance(data, (Path, str)):
-
-            io = IO()
-
-            if isinstance(loc, str):
-                self.data = io.load(data, loc=loc, lazy=lazy, z_slice=z_slice)
-                self.Z, self.X, self.Y = self.data.shape
-
-            elif isinstance(loc, (tuple, list)):
-                self.data = {}
-                for loc in loc:
-                    self.data[loc] = io.load(data, loc=loc, lazy=lazy, z_slice=z_slice)
-
-            else:
-                logging.info("Data already loaded into memory.")
-                self.data = io.load(data, loc="", lazy=lazy, z_slice=z_slice)
-                self.Z, self.X, self.Y = self.data.shape
-
-        elif isinstance(data, (np.ndarray, da.Array)):
-
-            if z_slice is not None:
-                z0, z1 = z_slice
-                self.data = data[z0:z1, :, :]
-            else:
-                self.data = data
-
-            self.Z, self.X, self.Y = self.data.shape
-
-        else:
-            raise ValueError(f"unknown data type: {type(data)}")
-
-        self.z_slice = z_slice
-
-        self.name = name
-
-    def __hash__(self):
-
-        if isinstance(self.data, da.Array):
-            logging.warning(f"da.Array.name: {self.data.name}")
-            return hash(self.data.name)
-
-        elif isinstance(self.data, np.ndarray):
-            return xxhash.xxh128_intdigest(self.data.data)
-
-        else:
-            raise ValueError(f"please provide data as either np.ndarray or dask.array")
-
-    def get_data(self, in_memory=False):
-
-        if in_memory and isinstance(self.data, da.Array):
-            return self.data.compute()
-
-        else:
-            return self.data
-
-    @lru_cache(maxsize=None)
-    def get_image_project(
-            self, agg_func=np.mean, window=None, window_agg=np.sum, axis=0, show_progress=True
-    ):
-
-        img = self.data
-
-        # calculate projection
-        if window is None:
-            proj = agg_func(img, axis=axis)
-
-        else:
-
-            from numpy.lib.stride_tricks import sliding_window_view
-
-            Z, X, Y = img.shape
-            proj = np.zeros((X, Y))
-
-            z_step = int(window / 2)
-            for x in tqdm(range(X)) if show_progress else range(X):
-                for y in range(Y):
-                    slide_ = sliding_window_view(img[:, x, y], axis=0, window_shape=window)  # sliding trick
-                    slide_ = slide_[::z_step, :]  # skip most steps
-                    agg = agg_func(slide_, axis=1)  # aggregate
-                    proj[x, y] = window_agg(agg)  # window aggregate
-
-        return proj
-
-    def show(
-            self, viewer=None, colormap="gray", show_trace=False, window=160, indices=None, viewer1d=None,
-            xlabel="frames", ylabel="Intensity", reset_y=False
-    ):
-
-        import napari
-        import napari_plot
-        from napari_plot._qt.qt_viewer import QtViewer
-
-        if show_trace and isinstance(self.data, (tuple, list)):
-            raise ValueError(f"'show_trace' is currently not implemented for multiple datasets.")
-
-        if viewer is None:
-            viewer = napari.Viewer()
-
-        if isinstance(self.data, dict):
-
-            for key in self.data.keys():
-                viewer.add_image(self.data[key], name=key, colormap=colormap)
-        else:
-            viewer.add_image(self.data, name=self.name, colormap=colormap)
-
-        if show_trace:
-
-            # get trace
-            Y = self.get_image_project(agg_func=np.mean, axis=(1, 2))
-            X = range(len(Y)) if indices is None else indices
-
-            if viewer1d is None:
-                v1d = napari_plot.ViewerModel1D()
-                qt_viewer = QtViewer(v1d)
-            else:
-                v1d = viewer1d
-
-            v1d.axis.y_label = ylabel
-            v1d.axis.x_label = xlabel
-            v1d.text_overlay.visible = True
-            v1d.text_overlay.position = "top_right"
-
-            v1d.set_y_view(np.min(Y) * 0.9, np.max(Y) * 1.1)
-
-            # create attachable qtviewer
-            line = v1d.add_line(np.c_[X, Y], name=self.name, color=colormap)
-
-            current_frame_line = None
-
-            def update_line(event: Events):
-                nonlocal current_frame_line
-
-                Z, _, _ = event.value
-                z0, z1 = Z - window // 2, Z + window // 2  # Adjusting to center the current frame
-
-                left_padding = 0
-                right_padding = 0
-
-                if z0 < 0:
-                    left_padding = abs(z0)
-                    z0 = 0
-
-                if z1 > len(Y):
-                    right_padding = z1 - len(Y)
-                    z1 = len(Y)
-
-                y_ = Y[z0:z1]
-                x_ = X[z0:z1]
-
-                # Padding with zeros on the left and/or right if necessary
-                y_ = np.pad(y_, (left_padding, right_padding), 'constant', constant_values=0)
-
-                # Adjusting x_ to match the length of y_
-                x_ = np.arange(z0, z0 + len(y_))
-
-                line.data = np.c_[x_, y_]
-
-                # Remove the previous yellow line
-                if current_frame_line:
-                    v1d.layers.remove(current_frame_line)
-
-                # Add a yellow vertical line at the current frame
-                current_frame_line_data = np.array([[Z, np.min(Y)], [Z, np.max(Y)]])
-                current_frame_line = v1d.add_line(current_frame_line_data, color='yellow')
-
-                v1d.reset_x_view()
-
-                if reset_y:
-                    v1d.reset_y_view()
-
-            viewer.dims.events.current_step.connect(update_line)
-
-            if viewer1d is None:
-                viewer.window.add_dock_widget(qt_viewer, area="bottom", name=self.name)
-
-            return viewer, v1d
-
-        return viewer
-
-    def plot_overview(self):
-
-        projection = self.get_image_project()
-
-        data = self.data
-
-        frame0, frame1 = data[0], data[-1]
-        signal = np.mean(data, axis=(1, 2))
-
-        fig, axx = plt.subplot_mosaic("ABC\nDDD", figsize=(12, 6))
-        axx["A"].imshow(projection, cmap="gray")
-        axx["B"].imshow(frame0, cmap="gray")
-        axx["C"].imshow(frame1, cmap="gray")
-        axx["D"].plot(signal, label="mean trace")
-
-        for key in ["A", "B", "C"]:
-            axx[key].axis('off')
-        axx["D"].legend()
-
-        axx["A"].set_title("Projection")
-        axx["B"].set_title("First frame")
-        axx["C"].set_title("Last frame")
-        axx["D"].set_xlabel("Frame number")
-        axx["D"].set_ylabel("Average signal (AU)")
-
-        return fig
 
 
 class Plotting:
