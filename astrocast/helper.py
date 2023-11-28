@@ -20,6 +20,14 @@ import yaml
 from skimage.util import img_as_uint
 
 
+def is_docker():
+    path = Path('/proc/self/cgroup')
+    return (
+            path.joinpath('.dockerenv').exists() or
+            path.is_file() and any('docker' in line for line in open(path.as_posix()))
+    )
+
+
 def wrapper_local_cache(f):
     """ Wrapper that creates a local save of the function call based on a hash of the arguments
     expects a function from a class with 'lc_path'::pathlib.Path and 'local_cache':bool attribute

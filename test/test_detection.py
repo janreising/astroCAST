@@ -72,3 +72,34 @@ class Test_Detector:
             # check event detection
             events = Events(dir_)
             assert np.allclose(len(events), num_events, rtol=0.15), f"Found {len(events)} instead of {num_events}."
+
+    def test_on_disk_sharing(self, extension=".h5", debug=False):
+
+        si = SampleInput()
+        input_ = si.get_test_data(extension=extension)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmpdir = Path(tmpdir)
+            assert tmpdir.is_dir()
+
+            det = Detector(input_, output=tmpdir.joinpath("tempData"))
+            det.run(loc="dff/ch0", lazy=False, debug=debug, use_on_disk_sharing=True)
+
+            dir_ = det.output_directory
+
+            assert dir_.is_dir(), "Output folder does not exist"
+            assert bool(det.meta), "metadata dictionary is empty"
+            assert det.data.size != 0, "data object is empty"
+            assert det.data.shape is not None, "data has no dimensions"
+
+            for file_name in ["event_map.tdb", "event_map.tiff", "active_pixels.tiff", "time_map.npy", "events.npy",
+                              "meta.json"]:
+                is_file = dir_.joinpath(file_name)
+                assert is_file, f"{file_name} file does not exist in output directory"
+
+            if debug:
+                assert dir_.joinpath("debug_smoothed_input.tiff").is_file()
+                assert dir_.joinpath("debug_active_pixels.tiff").is_file()
+                assert dir_.joinpath("debug_active_pixels_morphed.tiff").is_file()
+
+            assert len(list(tmpdir.glob("*.mmap"))) < 1, f"mmap files were not removed: {list(tmpdir.glob('*.mmap'))}"

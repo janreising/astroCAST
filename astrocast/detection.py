@@ -6,7 +6,7 @@ import shutil
 import traceback
 import warnings
 from pathlib import Path
-from typing import Union, Literal, Tuple
+from typing import Union, Literal, Tuple, Sequence
 
 import dask.array as da
 import numpy as np
@@ -24,7 +24,7 @@ from skimage.measure import regionprops_table, find_contours
 from skimage.segmentation import watershed
 from tqdm import tqdm
 
-from astrocast.helper import get_data_dimensions
+from astrocast.helper import get_data_dimensions, is_docker
 from astrocast.preparation import IO
 
 
@@ -106,7 +106,7 @@ class Detector:
             object_connectivity: int = 1, objects_depth: int = 1, fill_holes_first: bool = True, lazy: bool = True,
             adjust_for_noise: bool = False, z_slice: Tuple[int, int] = None, split_events: bool = False,
             debug: bool = False, event_map_export_format: Literal['.tiff', '.h5', '.tdb'] = ".tiff",
-            parallel: bool = True
+            parallel: bool = True, use_on_disk_sharing=False
     ) -> Path:
 
         """
@@ -145,6 +145,14 @@ class Detector:
             event_map_export_format: Suffix of the output file for the event map.
             debug: Enable debug mode to export intermediary steps for troubleshooting.
             parallel: Enable parallel execution for event characterization.
+            use_on_disk_sharing: Flag to toggle between on-disk (mmap) and in-RAM (shared memory) methods.
+
+        .. warning::
+
+           The `use_on_disk_sharing` parameter enables the use of on-disk memory mapping (mmap) instead of in-RAM
+           shared memory. While this method ensures compatibility in environments where in-RAM sharing (e.g.,
+           Docker containers) may cause crashes, it is generally slower due to disk I/O operations.
+           Use this method if you encounter issues with shared memory, particularly in containerized environments.
 
         .. note::
 
@@ -223,7 +231,19 @@ class Detector:
 
         # calculate features
         logging.info("Calculating features")
-        _ = self._custom_slim_features(time_map, event_map_path, split_events=split_events, parallel=parallel)
+
+        if not use_on_disk_sharing and is_docker():
+            logging.warning(
+                "Detected execution within a Docker environment. In-Docker shared memory usage can lead to failures. "
+                "Automatically switching to on-disk sharing method. To suppress this message, explicitly set "
+                "'use_on_disk_sharing' to True when running in Docker."
+            )
+            use_on_disk_sharing = True
+
+        if use_on_disk_sharing:
+            _ = self._custom_slim_features_mmap(time_map, event_map_path, split_events=split_events, parallel=parallel)
+        else:
+            _ = self._custom_slim_features(time_map, event_map_path, split_events=split_events, parallel=parallel)
 
         logging.info("Saving meta file")
         with open(self.output_directory.joinpath("meta.json"), 'w') as outfile:
@@ -658,8 +678,13 @@ class Detector:
                 for e_id in e_ids:
                     futures.append(
                         client.submit(
-                            self.characterize_event, e_id, e_start[e_id], e_stop[e_id], data_info, event_info, out_path,
-                            split_events
+                            self.characterize_event,  # function to run
+                            e_id, e_start[e_id], e_stop[e_id],  # event_id, start and stop frame of event
+                            data_info,  # information about data array (shape, dtype, name/path)
+                            event_info,  # information about event_mask (shape, dtype, name/path)
+                            out_path,  # path to save result to
+                            split_events,  # try to decode overlapping events
+                            False  # use mmap `use_on_disk_sharing`
                         )
                     )
                 progress(futures)
@@ -671,7 +696,7 @@ class Detector:
             for event_id in e_ids:
                 npy_path = self.characterize_event(
                     event_id, t0=e_start[event_id], t1=e_stop[event_id], data_info=data_info, event_info=event_info,
-                    out_path=out_path.as_posix(), split_events=split_events
+                    out_path=out_path.as_posix(), split_events=split_events, use_on_disk_sharing=False
                 )
                 futures.append(npy_path)
 
@@ -695,9 +720,145 @@ class Detector:
 
         return events
 
+    def _custom_slim_features_mmap(self, time_map, event_path, split_events: bool = True, parallel=True):
+        """
+        Custom feature extraction using memory-mapped files for data sharing.
+
+        Args:
+            time_map: Time map for the events.
+            event_path: Path to the event data.
+            split_events: Flag to split events.
+            parallel: Flag to run in parallel mode.
+
+        Returns:
+            Extracted events.
+        """
+        io = IO()
+
+        # define event output path
+        combined_path = event_path.parent.joinpath("events.npy")
+        if combined_path.is_file():
+            print("combined event path already exists! moving on ...")
+            return True
+
+        # Get data dimensions and types for both the data and the event map.
+        data_shape, _, data_dtype = get_data_dimensions(self.data, return_dtype=True)
+        event_shape, event_chunksize, event_dtype = get_data_dimensions(event_path, return_dtype=True)
+
+        # Set file paths for memory-mapped files.
+        data_file_path = self.output_directory.joinpath("data_mmap_file.mmap")
+        event_file_path = self.output_directory.joinpath("event_mmap_file.mmap")
+
+        # Create and populate the memory-mapped array for the data.
+        data_ = self._create_mmap_array(data_file_path, data_shape, data_dtype)
+        data_[:] = self.data[:]
+        data_info = [data_shape, data_dtype, data_file_path]
+
+        # Load the event map, create and populate the memory-mapped array for the event map.
+        event_map = io.load(event_path, lazy=False)
+        event_ = self._create_mmap_array(event_file_path, event_shape, event_dtype)
+        event_[:] = event_map[:]
+        del event_map
+        event_info = [event_shape, event_dtype, event_file_path]
+
+        # collecting tasks
+        logging.info("Collecting tasks...")
+
+        e_start = np.argmax(time_map, axis=0)
+        e_stop = time_map.shape[0] - np.argmax(time_map[::-1, :], axis=0)
+
+        out_path = event_path.parent.joinpath("events/")
+        if not out_path.is_dir():
+            os.mkdir(out_path)
+
+        # push tasks to client
+        e_ids = list(range(1, len(e_start)))
+
+        logging.info("#tasks: {}".format(len(e_ids)))
+        random.shuffle(e_ids)
+        futures = []
+
+        if parallel:
+
+            with Client(
+                    memory_limit='auto', processes=False, silence_logs=logging.ERROR
+            ) as client:
+                for e_id in e_ids:
+                    futures.append(
+                        client.submit(
+                            self.characterize_event,  # function to run
+                            e_id, e_start[e_id], e_stop[e_id],  # event_id, start and stop frame of event
+                            data_info,  # information about data array (shape, dtype, name/path)
+                            event_info,  # information about event_mask (shape, dtype, name/path)
+                            out_path,  # path to save result to
+                            split_events,  # try to decode overlapping events
+                            True  # use mmap `use_on_disk_sharing`
+                        )
+                    )
+                progress(futures)
+
+                client.gather(futures)
+
+        else:
+
+            for event_id in e_ids:
+                npy_path = self.characterize_event(
+                    event_id, t0=e_start[event_id], t1=e_stop[event_id], data_info=data_info, event_info=event_info,
+                    out_path=out_path.as_posix(), split_events=split_events, use_on_disk_sharing=True
+                )
+                futures.append(npy_path)
+
+        # Cleanup: Ensure the memory-mapped files are closed and deleted properly.
+        self.cleanup_mmap(data_file_path)
+        self.cleanup_mmap(event_file_path)
+
+        # combine results
+        events = {}
+        for e in os.listdir(out_path):
+            events.update(np.load(out_path.joinpath(e), allow_pickle=True)[()])
+        np.save(combined_path, events)
+        shutil.rmtree(out_path)
+
+        return events
+
+    @staticmethod
+    def _create_mmap_array(file_path: Union[str, Path], shape: Tuple[int, int, int], dtype: np.dtype) -> np.ndarray:
+        """
+        Create a memory-mapped array from the given file.
+
+        Args:
+            file_path: Path to the file used for memory-mapping.
+            shape: Shape of the numpy array.
+            dtype: Data type of the numpy array.
+
+        Returns:
+            A numpy array memory-mapped to the specified file.
+        """
+
+        file_mmap = np.memmap(file_path, dtype=dtype, mode='w+', shape=shape)
+
+        return file_mmap
+
+    @staticmethod
+    def cleanup_mmap(file_path):
+        """
+        Closes the memory-mapped object and deletes the associated file.
+
+        Args:
+            mmap_obj: The memory-mapped object to be closed.
+            file_path: The file path of the memory-mapped file.
+        """
+
+        if isinstance(file_path, str):
+            file_path = Path(file_path)
+
+        if file_path.is_file():
+            file_path.unlink()
+
     def characterize_event(
-            self, event_id: int, t0: int, t1: int, data_info: Tuple, event_info: Tuple, out_path: Union[str, Path],
-            split_events: bool = True
+            self, event_id: int, t0: int, t1: int, data_info: Tuple[Sequence[int], np.dtype, str],
+            event_info: Tuple[Sequence[int], np.dtype, str], out_path: Union[str, Path],
+            split_events: bool = True, use_on_disk_sharing: bool = False
     ) -> Union[int, None]:
         """
         Characterizes an event by computing various properties and metrics.
@@ -712,6 +873,14 @@ class Detector:
             event_info: Information about the event, including shape and type.
             out_path: The path where the results will be saved.
             split_events: Flag to determine if events should be split.
+            use_on_disk_sharing: Flag to toggle between on-disk (mmap) and in-RAM (shared memory) methods.
+
+        .. warning::
+
+           The `use_on_disk_sharing` parameter enables the use of on-disk memory mapping (mmap) instead of in-RAM
+           shared memory. While this method ensures compatibility in environments where in-RAM sharing (e.g.,
+           Docker containers) may cause crashes, it is generally slower due to disk I/O operations.
+           Use this method if you encounter issues with shared memory, particularly in containerized environments.
 
         .. note::
 
@@ -807,6 +976,10 @@ class Detector:
         Returns:
             An integer indicating the status (e.g., 2 for existing results) or None if the process completes.
         """
+
+        data_buffer = None
+        event_buffer = None
+
         # check if result already exists
         if not isinstance(out_path, Path):
             out_path = Path(out_path)
@@ -820,8 +993,19 @@ class Detector:
 
         # get event map
         e_shape, e_dtype, e_name = event_info
-        event_buffer = shared_memory.SharedMemory(name=e_name)
-        event_map = np.ndarray(e_shape, e_dtype, buffer=event_buffer.buf)
+        if use_on_disk_sharing:
+
+            if isinstance(e_name, Path):
+                e_name = e_name.as_posix()
+
+            # Access memory-mapped files
+            event_map = np.memmap(e_name, dtype=e_dtype, mode='r', shape=e_shape)
+
+        else:
+            # Access shared memory
+            event_buffer = shared_memory.SharedMemory(name=e_name)
+            event_map = np.ndarray(e_shape, e_dtype, buffer=event_buffer.buf)
+
         event_map = event_map[t0:t1, :, :]
 
         # select volume with data
@@ -832,8 +1016,19 @@ class Detector:
 
         # index data volume
         d_shape, d_dtype, d_name = data_info
-        data_buffer = shared_memory.SharedMemory(name=d_name)
-        data = np.ndarray(d_shape, d_dtype, buffer=data_buffer.buf)
+        if use_on_disk_sharing:
+
+            if isinstance(d_name, Path):
+                d_name = d_name.as_posix()
+
+            # Access memory-mapped files
+            data = np.memmap(d_name, dtype=d_dtype, mode='r', shape=d_shape)
+
+        else:
+            # Access shared memory
+            data_buffer = shared_memory.SharedMemory(name=d_name)
+            data = np.ndarray(d_shape, d_dtype, buffer=data_buffer.buf)
+
         data = data[t0:t1, gx0:gx1, gy0:gy1]
 
         if data.shape != event_map.shape:
@@ -1016,12 +1211,17 @@ class Detector:
 
         np.save(res_path.as_posix(), res)
 
-        try:
-            data_buffer.close()
-            event_buffer.close()
+        if not use_on_disk_sharing:
+            try:
+                data_buffer.close()
+                event_buffer.close()
 
-        except FileNotFoundError as err:
-            print("An error occured during shared memory closing: {}".format(err))
+            except FileNotFoundError as err:
+                print("An error occured during shared memory closing: {}".format(err))
+
+        else:
+            del data
+            del event_map
 
     @staticmethod
     def _detect_sub_events(
