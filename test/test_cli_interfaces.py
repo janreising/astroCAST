@@ -526,6 +526,7 @@ class Test_Detection:
             logging.warning("Suspecting to be in container, switching to 'on_disk=True'.")
             args += ["--on-disk", True]
 
+
         args += params
 
         result = self.runner.invoke(detect_events, args)
