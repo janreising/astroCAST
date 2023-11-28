@@ -17,6 +17,7 @@ from colorama import Fore
 from colorama import init as init_colorama
 from prettytable import PrettyTable
 
+from astrocast.helper import is_docker
 from astrocast.preparation import Input
 
 init_colorama(autoreset=True)
@@ -772,6 +773,8 @@ def denoise(
 @click_custom_option('--parallel', type=click.BOOL, default=True, help='Enable parallel execution.')
 @click_custom_option('--output-path', type=click.STRING, default="infer", help='Path to the output file.')
 @click_custom_option('--logging-level', type=click.INT, default=logging.INFO, help='Logging level for messages.')
+@click_custom_option("--on-disk", type=click.BOOL, default=False,
+                     help='Flag to toggle between on-disk (mmap) and in-RAM (shared memory) methods.')
 @click_custom_option(
     '--overwrite', type=click.BOOL, default=False, help='Flag for overwriting previous result in output location'
 )
@@ -780,7 +783,7 @@ def detect_events(
         spatial_min_ratio, spatial_z_depth, use_temporal, temporal_prominence, temporal_width, temporal_rel_height,
         temporal_wlen, temporal_plateau_size, comb_type, fill_holes, area_threshold, holes_connectivity, holes_depth,
         remove_objects, min_size, object_connectivity, objects_depth, fill_holes_first, lazy, adjust_for_noise, subset,
-        split_events, debug, parallel, output_path, logging_level, overwrite
+        split_events, debug, parallel, output_path, logging_level, overwrite, on_disk
 ):
     """
     Detect events using the Detector class.
@@ -808,6 +811,11 @@ def detect_events(
 
         logging.warning(f"input: {input_path}")
 
+        # check container
+        if is_docker() and not on_disk:
+            logging.warning("Suspecting to be in container, switching to 'on_disk=True'.")
+            on_disk = True
+
         # Initializing the Detector instance
         detector = Detector(input_path=input_path, output=output_path, logging_level=logging_level)
 
@@ -821,7 +829,7 @@ def detect_events(
             temporal_plateau_size=temporal_plateau_size, comb_type=comb_type, fill_holes=fill_holes,
             area_threshold=area_threshold, holes_connectivity=holes_connectivity, holes_depth=holes_depth,
             remove_objects=remove_objects, min_size=min_size, object_connectivity=object_connectivity,
-            objects_depth=objects_depth, fill_holes_first=fill_holes_first, lazy=lazy,
+            objects_depth=objects_depth, fill_holes_first=fill_holes_first, lazy=lazy, use_on_disk_sharing=on_disk,
             adjust_for_noise=adjust_for_noise, z_slice=subset, split_events=split_events, debug=debug, parallel=parallel
         )
 
