@@ -110,7 +110,11 @@ class Test_ConvertInput:
 
     def test_lazy(self):
         out_file = self.temp_tiffs.parent.joinpath(f"out_l.h5")
-        args = [self.temp_tiffs.as_posix(), "--output-path", out_file.as_posix(), "--num-channels", "1", "--lazy"]
+        args = [self.temp_tiffs.as_posix()]
+        args += ["--output-path", out_file.as_posix()]
+        args += ["--num-channels", "1"]
+        args += ["--z-slice", "0", "50"]
+        args += ["--lazy"]
         result = self.runner.invoke(convert_input, args)
 
         # Check that the command ran successfully

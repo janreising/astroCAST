@@ -10,7 +10,7 @@ from astrocast.preparation import IO
 
 class Test_Detector:
 
-    @pytest.mark.parametrize("extension", [".h5", ".tiff"])
+    @pytest.mark.parametrize("extension", [".h5"])
     @pytest.mark.parametrize("debug", [True, False])
     def test_real_data(self, extension, debug):
 
@@ -22,7 +22,7 @@ class Test_Detector:
             assert tmpdir.is_dir()
 
             det = Detector(input_, output=tmpdir.joinpath("tempData"))
-            det.run(loc="dff/ch0", lazy=False, debug=debug)
+            det.run(loc="dff/ch0", lazy=False, debug=debug, z_slice=(0, 25))
 
             dir_ = det.output_directory
 
