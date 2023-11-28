@@ -7,9 +7,16 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import pyinform.shannon
+import pytest
 import seaborn as sns
-import umap
-import umap.plot
+
+try:
+    import umap
+    import umap.plot
+except ImportError:
+    logging.error(f"Unable to import umap package. Some functionality will not work as expected. "
+                  f"If you are using astroCAST on MacOS this is expected.")
+
 from matplotlib import pyplot as plt
 from scipy import stats
 from scipy.cluster import hierarchy
@@ -355,6 +362,10 @@ class FeatureExtraction(CachedClass):
 
 
 class UMAP:
+
+    def setup_method(self):
+        umap = pytest.importorskip("umap")
+
     def __init__(self, n_neighbors=30, min_dist=0, n_components=2, metric="euclidean", ):
         self.reducer = umap.UMAP(n_neighbors=n_neighbors, min_dist=min_dist, n_components=n_components, metric=metric)
 
@@ -369,7 +380,7 @@ class UMAP:
 
         if use_napari:
 
-            import napari
+            napari = pytest.importorskip("napari")
 
             if data is None:
                 raise ValueError("please provide the data attribute or set 'use_napari' to False")

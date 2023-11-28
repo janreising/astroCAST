@@ -9,7 +9,7 @@ from click.testing import CliRunner
 from astrocast.analysis import Events
 from astrocast.cli_interfaces import *
 from astrocast.detection import Detector
-from astrocast.helper import EventSim
+from astrocast.helper import EventSim, is_docker
 from astrocast.preparation import IO
 
 
@@ -525,7 +525,7 @@ class Test_Detection:
         if is_docker():
             logging.warning("Suspecting to be in container, switching to 'on_disk=True'.")
             args += ["--on-disk", True]
-        
+
         args += params
 
         result = self.runner.invoke(detect_events, args)
@@ -829,6 +829,8 @@ class Test_ViewData:
 
     @pytest.mark.vis
     def test_view_data(self):
+        napari = pytest.importorskip("napari")
+
         result = self.runner.invoke(
             view_data, [self.temp_file.as_posix(), "data/ch0", "--testing", True]
         )
@@ -837,6 +839,8 @@ class Test_ViewData:
 
     @pytest.mark.vis
     def test_view_data_color(self):
+        napari = pytest.importorskip("napari")
+
         result = self.runner.invoke(
             view_data, [self.temp_file.as_posix(), "data/ch0", "--colormap", "plasma", "--testing", True]
         )
@@ -845,6 +849,8 @@ class Test_ViewData:
 
     @pytest.mark.vis
     def test_view_data_z_select(self):
+        napari = pytest.importorskip("napari")
+
         result = self.runner.invoke(
             view_data, [self.temp_file.as_posix(), "data/ch0", "--z-select", "1", "5", "--testing", True]
         )
@@ -853,6 +859,8 @@ class Test_ViewData:
 
     @pytest.mark.vis
     def test_view_data_lazy(self):
+        napari = pytest.importorskip("napari")
+
         result = self.runner.invoke(
             view_data, [self.temp_file.as_posix(), "data/ch0", "--lazy", False, "--testing", True]
         )
@@ -861,6 +869,8 @@ class Test_ViewData:
 
     @pytest.mark.vis
     def test_view_data_trace(self):
+        napari = pytest.importorskip("napari")
+
         result = self.runner.invoke(
             view_data, [self.temp_file.as_posix(), "data/ch0", "--show-trace", True, "--window", "5", "--testing", True]
         )
@@ -869,6 +879,8 @@ class Test_ViewData:
 
     @pytest.mark.vis
     def test_view_data_multi(self):
+        napari = pytest.importorskip("napari")
+
         result = self.runner.invoke(
             view_data, [self.temp_file.as_posix(), "data/ch0", "data/ch1", "--testing", True]
         )
@@ -914,6 +926,8 @@ class Test_ViewDetectionResults:
 
     @pytest.mark.vis
     def test_view_detection_results(self):
+        napari = pytest.importorskip("napari")
+
         event_dir = str(self.event_dir.as_posix())
 
         result = self.runner.invoke(
@@ -923,6 +937,8 @@ class Test_ViewDetectionResults:
 
     @pytest.mark.vis
     def test_view_detection_infer(self):
+        napari = pytest.importorskip("napari")
+
         result = self.runner.invoke(
             view_detection_results,
             [self.event_dir.as_posix(), "--video-path", "infer", "--loc", str(self.loc), "--testing", True]
@@ -931,6 +947,8 @@ class Test_ViewDetectionResults:
 
     @pytest.mark.vis
     def test_view_detection_z(self):
+        napari = pytest.importorskip("napari")
+
         result = self.runner.invoke(
             view_detection_results,
             [self.event_dir.as_posix(), "--video-path", self.video_path.as_posix(), "--loc", str(self.loc),
@@ -940,6 +958,8 @@ class Test_ViewDetectionResults:
 
     @pytest.mark.vis
     def test_view_detection_lazy(self):
+        napari = pytest.importorskip("napari")
+
         result = self.runner.invoke(
             view_detection_results,
             [self.event_dir.as_posix(), "--video-path", self.video_path.as_posix(), "--loc", str(self.loc), "--lazy",
