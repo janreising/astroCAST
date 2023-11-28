@@ -520,6 +520,12 @@ class Test_Detection:
 
         out = self.video_path.with_suffix(f".{np.random.randint(1, int(10e6), size=1)}.roi")
         args = [self.video_path.as_posix(), "--loc", self.loc, "--output-path", out.as_posix()]
+
+        # check container
+        if is_docker():
+            logging.warning("Suspecting to be in container, switching to 'on_disk=True'.")
+            args += ["--on-disk", True]
+        
         args += params
 
         result = self.runner.invoke(detect_events, args)
