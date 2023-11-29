@@ -5,6 +5,7 @@ import tempfile
 import traceback
 from collections import defaultdict
 from pathlib import Path
+from typing import Literal, Union, Tuple
 
 import fastcluster
 import hdbscan
@@ -25,11 +26,6 @@ from tqdm import tqdm
 
 from astrocast.analysis import Events
 from astrocast.helper import wrapper_local_cache, is_ragged, CachedClass, Normalization
-
-
-# from dtaidistance import dtw_visualisation as dtwvis
-# from dtaidistance import clustering
-# from scipy.cluster.hierarchy import single, complete, average, ward, dendrogram
 
 
 class HdbScan:
@@ -447,8 +443,41 @@ class Distance(CachedClass):
         return corr
 
     @wrapper_local_cache
-    def get_dtw_correlation(self, events, use_mmap=False, block=10000, show_progress=True):
+    def get_dtw_correlation(
+            self, events: Events, use_mmap: bool = False, block: int = 10000, show_progress: bool = True
+    ):
+        """
+            Computes the dynamic time warping (DTW) correlation matrix for a set of time series.
 
+            This function calculates the pairwise DTW distances between time series data,
+            represented by the `events` object. It uses a fast DTW computation method and can handle
+            large datasets by optionally utilizing memory mapping (mmap).
+
+            .. error:
+
+                This function will not work on most systems with MacOS. Please use the `dtw_parallel` function instead.
+
+            Args:
+                events:
+                    An instance of the custom `Events` class containing the time series data. Each time series
+                    is represented as a trace within this object.
+                use_mmap:
+                    If set to `True`, the function uses memory-mapped files to store the distance matrix.
+                    This approach is beneficial when dealing with large datasets as it avoids excessive memory usage.
+                    However, it may result in a temporary file being created in the working directory.
+                block:
+                    The size of the block used to split the computation of the DTW distance matrix.
+                    A smaller block size reduces memory usage but may increase computational time.
+                show_progress:
+                    If set to `True`, displays a progress bar indicating the computation progress of the distance matrix.
+
+            Returns:
+                np.ndarray
+                    A 1-D array representing the upper triangular part of the computed DTW distance matrix.
+                    The matrix is compacted into a 1-D array where each entry represents the distance between
+                    a pair of time series.
+
+            """
         traces = [np.array(t) for t in events.events.trace.tolist()]
         N = len(traces)
 
@@ -485,10 +514,238 @@ class Distance(CachedClass):
 
         return distance_matrix
 
-    def get_correlation(self, events, correlation_type="pearson", correlation_param={}):
+    @wrapper_local_cache
+    def get_dtw_parallel_correlation(
+            self, events: Events, local_dissimilarity: Literal[
+                "square_euclidean_distance", "gower", "norm1", "norm2", "braycurtis", "canberra", "chebyshev", "cityblock", "correlation", "cosine", "euclidean", "jensenshannon", "minkowski", "sqeuclidean"] = "norm1",
+            type_dtw: Literal["d", "i"] = "d", constrained_path_search: Literal["itakura", "sakoe_chiba"] = None,
+            itakura_max_slope: float = None, sakoe_chiba_radius: int = None, sigma_kernel: int = 1,
+            dtw_to_kernel: bool = False, multivariate: bool = True, use_mmap: bool = False
+    ) -> Union[np.ndarray, Tuple[np.ndarray, np.ndarray]]:
+
+        """
+        Computes the dynamic time warping (DTW) correlation between time series, with various options to customize the
+        computation. This function is particularly useful for analyzing time series data with options to handle
+        multivariate series, apply constraints, and transform DTW distances into kernel-based similarities. For more
+        information see Escudero-Arnanz et al. 2023 [#escudero_arnanz_2023]_.
+
+
+        Args:
+            events:
+                    An instance of the custom `Events` class from this package. This class encapsulates the time series
+                    and metadata necessary for analysis.
+            sigma_kernel:
+                Sets the width of the exponential kernel used in transforming the DTW distance matrix into a similarity matrix.
+                The parameter sigma controls the rate at which similarity values decrease with increasing DTW distances.
+                A smaller sigma value leads to a rapid decrease in similarity for small increases in distance,
+                creating a sharper distinction in the similarity matrix. Conversely, a larger sigma value results in a more
+                gradual change, which can be useful when smaller DTW distance differences are significant.
+                The choice of sigma should be based on the specific application and the DTW distance scale.
+            dtw_to_kernel:
+                When set to `True`, activates the conversion of the DTW distance matrix into a similarity matrix through
+                an exponential kernel transformation. This transformation applies the exponential kernel function to each
+                entry in the distance matrix, converting distances into similarity values between 0 and 1.
+                Higher similarity (closer to 1) indicates lower distance, and vice versa. This transformation is useful
+                for tasks where similarity measures are more intuitive or beneficial than distance measures, such as in clustering,
+                classification, or visualization. The transformation adds computational overhead and should be considered
+                when dealing with large datasets or when computational efficiency is a priority.
+            type_dtw:
+                Specifies the type of DTW scheme to use for multivariate time series (MTS) based on Shokoohi-Yekta et al. 2017 [#shokoohi_yekta_2017]_.
+                The options are:
+                .. list-table:: Multivariate time series DTW schemes
+                    :widths: 15 15
+                    :header-rows: 1
+                    * - Scheme name
+                      - Description
+                    * - "d" (Dependent DTW)
+                      - In this scheme, DTW is calculated in a way similar to the single-dimensional DTW, but it redefines the distance calculation to consider the cumulative squared Euclidean distances across multiple data points of the MTS, instead of a single data point. This approach treats all dimensions of the MTS collectively, considering their cumulative behavior.
+                    * - "i" (Independent DTW)
+                      - This variant computes the DTW distances for all dimensions independently. Each dimension is treated separately, allowing for individual alignment without considering the interdependence among them. This method is suitable when the dimensions of the MTS are independent, or when analyzing each dimension separately is more meaningful.
+
+            constrained_path_search:
+                Specifies the method for constraining the search path in dynamic time warping calculations.
+                This parameter offers the option to choose between two well-known constraint schemes:
+                the Itakura parallelogram and the Sakoe-Chiba band. Constraining the path search is advantageous
+                for several reasons: it reduces computational overhead by limiting the area of the cost matrix that
+                needs to be explored, prevents non-intuitive and overly flexible warping, and can lead to more
+                meaningful alignments in specific application contexts. For instance, when prior knowledge about
+                the expected warping in the sequences is available, these constraints can significantly enhance
+                the efficiency and relevance of the DTW analysis. The choice between 'itakura' and 'sakoe_chiba'
+                depends on the specific requirements of the analysis and the nature of the data. Please refer to
+                `itakura_max_slope` and `sakoe_chiba_radius` for more information.
+                .. warning:
+
+                    When using `itakura` to constrain ragged arrays an error might occur when `itakaru_max_slope=None`.
+                    Try choosing a large `itakaru_max_slope` to test if this fixes the error.
+            itakura_max_slope
+                The maximum slope for the Itakura parallelogram, used as a constraint in dynamic time warping calculations.
+                This parameter controls the slope of the parallelogram sides, effectively constraining the DTW path
+                within a parallelogram-shaped area. A smaller value results in a more restricted warping path, while a larger
+                value allows for more flexibility in the path. Setting it to `None` removes this constraint, allowing for a full
+                search within the cost matrix. The Itakura parallelogram is beneficial for reducing computational overhead
+                and preventing non-intuitive, extreme warping. It is particularly effective when there is prior knowledge
+                about the maximum expected warping between the sequences being compared. Itakura et al. [#itakura_1975]_.
+            sakoe_chiba_radius:
+                The radius of the Sakoe-Chiba band, used as a constraint in dynamic time warping calculations.
+                This parameter specifies the maximum allowed deviation from the diagonal path in the DTW cost matrix.
+                A smaller value of the radius results in less flexibility for time series to warp, while a larger value
+                allows more warping. Setting it to `None` applies no constraint, allowing the warping path to explore
+                the full matrix. The Sakoe-Chiba band is particularly useful for reducing computational complexity
+                and avoiding overly flexible warping, which can lead to non-intuitive alignments. It's generally set
+                as a percentage of the time series length. As per Keogh and Ratanamahatana (2004), a common setting
+                is 10% of the sequence length, which has been found to be effective across various applications.
+                Sakoe 1978 et al. [#sakoe_1978]_.
+            local_dissimilarity:
+                Specifies the method to compute local dissimilarity between two vectors in dynamic time warping.
+                This parameter allows selecting from a range of distance functions, each of which quantifies the
+                dissimilarity between two data points in a distinct manner. The choice of function can significantly
+                influence the warping path and is typically selected based on the nature of the data and the specific
+                requirements of the analysis. The default setting is 'norm1' (Manhattan distance), but other options
+                provide flexibility for different scenarios, like handling mixed data types, scaling issues, or specific
+                geometric interpretations of distance.
+                .. list-table:: Local dissimilarity options
+                    :widths: 15 15
+                    :header-rows: 1
+                * - Distance measure
+                  - Description
+                * - square_euclidean_distance
+                  - Compute the squared Euclidean distance, useful for performance optimization as it avoids the square root calculation.
+                * - gower
+                  - Compute the Gower distance, typically used for mixed data types or when variables are on different scales.
+                * - norm1 (Manhattan Distance)
+                  - Compute the Manhattan (L1 norm) distance, which sums the absolute differences of their coordinates. Useful in grid-like pathfinding.
+                * - norm2 (Euclidean Distance)
+                  - Compute the Euclidean (L2 norm) distance, representing the shortest distance between points. Common in spatial distance calculations.
+                * - braycurtis
+                  - Compute the Bray-Curtis distance, a measure of dissimilarity based on the sum of absolute differences. Often used in ecological data analysis.
+                * - canberra
+                  - Compute the Canberra distance, a weighted version of Manhattan distance, sensitive to small changes near zero. Useful in numerical analysis.
+                * - chebyshev
+                  - Compute the Chebyshev distance, the maximum absolute difference along any coordinate dimension. Useful in chess-like applications.
+                * - cityblock (Manhattan Distance)
+                  - Compute the City Block (Manhattan) distance, similar to norm1, effective in grid-based pathfinding.
+                * - correlation
+                  - Compute the correlation distance, a measure of similarity between two variables based on their correlation coefficient.
+                * - cosine
+                  - Compute the Cosine distance, measuring the cosine of the angle between vectors. Useful in text analysis and similarity of preferences.
+                * - euclidean
+                  - Computes the Euclidean distance, the straight-line distance between two points in Euclidean space.
+                * - jensenshannon
+                  - Compute the Jensen-Shannon distance, a method of measuring the similarity between two probability distributions.
+                * - minkowski
+                  - Compute the Minkowski distance, a generalized metric that includes others (like Euclidean, Manhattan) as special cases.
+                * - sqeuclidean
+                  - Compute the squared Euclidean distance, similar to square_euclidean_distance, often used in optimization problems.
+            use_mmap: Currently not implemented for this function.
+            multivariate:
+                Indicates whether the DTW algorithm should be applied in a multivariate context.
+                When set to `True`, the algorithm is designed to handle multivariate time series,
+                where each time series consists of multiple parallel sequences or dimensions.
+                .. caution:
+
+                    Caution should be exercised when setting this parameter to `False`, as the algorithm
+                    may not function as expected with univariate data or may lead to unexpected results.
+                    While this parameter is included for completeness, its modification is generally not recommended
+                    without a clear understanding of the specific context and requirements of the analysis. Users are
+                    advised to leave this parameter set to `True` unless there is a compelling reason to alter it,
+                    and thorough testing should be conducted if a change is made.
+
+        Returns:
+            np.ndarray: The DTW distance matrix or a tuple of the distance matrix and the similarity matrix.
+
+        .. rubric:: Footnotes
+
+        .. [#itakura_1975] Itakura, F., 1975. Minimum prediction residual principle applied to speech recognition. IEEE Transactions on acoustics, speech, and signal processing, 23(1), pp.67-72.
+        .. [#sakoe_1978] Sakoe, H. and Chiba, S., 1978. Dynamic programming algorithm optimization for spoken word recognition. IEEE transactions on acoustics, speech, and signal processing, 26(1), pp.43-49.
+        .. [#shokoohi_yekta_2017] Shokoohi-Yekta, M., Hu, B., Jin, H., Wang, J. and Keogh, E., 2017. Generalizing DTW to the multi-dimensional case requires an adaptive approach. Data mining and knowledge discovery, 31, pp.1-31.
+        .. [#escudero_arnanz_2023] Óscar Escudero-Arnanz, Antonio G. Marques, Cristina Soguero-Ruiz, Inmaculada Mora-Jiménez, Gregorio Robles, dtwParallel: A Python package to efficiently compute dynamic time warping between time series, SoftwareX, Volume 22, 2023, 101364, ISSN 2352-7110, https://doi.org/10.1016/j.softx.2023.101364.
+
+        """
+
+        from dtwParallel import dtw_functions
+
+        traces = np.array(events.events.trace.tolist())
+
+        if use_mmap:
+            logging.warning(f"Currently the use of mmap files is not implemented.")
+
+        if local_dissimilarity in ["braycurtis", "canberra", "chebyshev", "cityblock", "correlation", "cosine",
+                                   "euclidean", "jensenshannon", "minkowski", "sqeuclidean"]:
+            from scipy.spatial import distance
+
+            try:
+                # Retrieve the function from the scipy.spatial.distance module
+                local_dissimilarity = getattr(distance, local_dissimilarity)
+
+            except AttributeError:
+                # Handle the case where the function name does not exist in the module
+                raise ValueError(
+                    f"Distance function '{local_dissimilarity}' is not available in scipy.spatial.distance."
+                )
+
+        if not use_mmap:
+
+            class Input:
+                def __init__(self):
+                    self.check_errors = False
+                    self.type_dtw = type_dtw
+                    self.constrained_path_search = constrained_path_search
+                    self.MTS = multivariate
+                    self.regular_flag = False
+                    self.n_threads = -1
+                    self.local_dissimilarity = local_dissimilarity
+                    self.visualization = False
+                    self.output_file = False
+                    self.dtw_to_kernel = dtw_to_kernel
+                    self.sigma_kernel = sigma_kernel
+                    self.itakura_max_slope = itakura_max_slope
+                    self.sakoe_chiba_radius = sakoe_chiba_radius
+
+            input_obj = Input()
+
+            distance_matrix = dtw_functions.dtw_tensor_3d(traces, traces, input_obj)
+
+        else:
+
+            """
+            logging.info("creating mmap of shape ({}, 1)".format(int((N * N - N) / 2)))
+
+            tmp = tempfile.TemporaryFile()  # todo might not be a good idea to drop a temporary file in the working directory
+            distance_matrix = np.memmap(tmp, dtype=float, mode="w+", shape=(int((N * N - N) / 2)))
+
+            iterator = range(0, N, block) if not show_progress else tqdm(range(0, N, block), desc="distance matrix:")
+
+            i = 0
+            for x0 in iterator:
+                x1 = min(x0 + block, N)
+
+                dm_ = dtw.distance_matrix_fast(
+                    traces, block=((x0, x1), (0, N)), use_pruning=False, parallel=True, compact=True, only_triu=True
+                )
+
+                distance_matrix[i:i + len(dm_)] = dm_
+                distance_matrix.flush()
+
+                i = i + len(dm_)
+
+                del dm_
+            """
+
+            raise NotImplementedError
+
+        return distance_matrix
+
+    def get_correlation(
+            self, events, correlation_type: Literal['pearson', 'dtw', 'dtw_parallel'] = "pearson",
+            correlation_param: dict = None
+    ):
+
+        if correlation_param is None:
+            correlation_param = {}
 
         funcs = {"pearson": lambda x: self.get_pearson_correlation(x, **correlation_param),
-                 "dtw": lambda x: self.get_dtw_correlation(x, **correlation_param)}
+                 "dtw": lambda x: self.get_dtw_correlation(x, **correlation_param),
+                 "dtw_parallel": lambda x: self.get_dtw_parallel_correlation(x, **correlation_param)}
 
         if correlation_type not in funcs.keys():
             raise ValueError(f"cannot find correlation type. Choose one of: {funcs.keys()}")
