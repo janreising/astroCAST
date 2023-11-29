@@ -2,7 +2,6 @@ import tempfile
 import time
 
 import matplotlib
-import pytest
 from scipy.cluster.hierarchy import linkage
 
 from astrocast.autoencoders import CNN_Autoencoder
@@ -104,6 +103,9 @@ class Test_CNN:
 
 
 class Test_UMAP:
+
+    def setup_method(self):
+        pytest.importorskip("umap")
 
     def test_training(self):
 
