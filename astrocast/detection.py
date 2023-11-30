@@ -5,11 +5,13 @@ import random
 import shutil
 import traceback
 import warnings
+from distutils.version import LooseVersion
 from pathlib import Path
 from typing import Union, Literal, Tuple, Sequence
 
 import dask.array as da
 import numpy as np
+import scipy
 import scipy.ndimage as ndimage
 from dask.diagnostics import ProgressBar
 from dask.distributed import Client
@@ -438,10 +440,15 @@ class Detector:
 
         depth = {i: radius * 2 + 1 for i in range(3)}
         overlap = da.overlap.overlap(arr, depth=depth, boundary=mode)
+
+        if LooseVersion(scipy.__version__) >= LooseVersion("1.10.0"):
+            parameters = dict(sigma=sigma, radius=radius, mode=mode)
+        else:
+            logging.warning(f"scipy version {scipy.__version__} < 1.10.x. Ignoring radius parameter.")
+            parameters = dict(sigma=sigma, mode=mode)
+
         mapped = overlap.map_blocks(
-            lambda x: ndimage.gaussian_filter(
-                x, sigma=sigma, radius=radius, mode=mode
-            ), dtype=arr.dtype
+            lambda x: ndimage.gaussian_filter(x, **parameters), dtype=arr.dtype
         )
         arr = da.overlap.trim_internal(mapped, depth, boundary=mode)
 
@@ -857,8 +864,8 @@ class Detector:
 
     def characterize_event(
             self, event_id: int, t0: int, t1: int, data_info: Tuple[Sequence[int], np.dtype, str],
-            event_info: Tuple[Sequence[int], np.dtype, str], out_path: Union[str, Path],
-            split_events: bool = True, use_on_disk_sharing: bool = False
+            event_info: Tuple[Sequence[int], np.dtype, str], out_path: Union[str, Path], split_events: bool = True,
+            use_on_disk_sharing: bool = False
     ) -> Union[int, None]:
         """
         Characterizes an event by computing various properties and metrics.
