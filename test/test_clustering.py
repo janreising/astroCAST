@@ -85,6 +85,9 @@ class Test_dtw_linkage:
     @pytest.mark.parametrize("criterion", ["distance", "maxclust"])
     @pytest.mark.parametrize("ragged", [True, False])
     def test_clustering_dtw_parallel(self, criterion, ragged):
+        pytest.importorskip("dtwParallel")
+        pytest.importorskip("dtaidistance")
+
         DG = DummyGenerator(num_rows=11, trace_length=16, ragged=ragged)
         data = DG.get_events()
 
@@ -126,6 +129,8 @@ class Test_dtw_linkage:
         self._test_plotting_helper("dtw", cutoff, min_cluster_size, tmp_path)
 
     def test_plotting_dtw_parallel(self, tmp_path, cutoff=2, min_cluster_size=10):
+        pytest.importorskip("dtwParallel")
+
         self._test_plotting_helper("dtw_parallel", cutoff, min_cluster_size, tmp_path)
 
     def test_local_cache(self):
@@ -160,6 +165,8 @@ class TestDistance:
          "correlation", "cosine", "euclidean", "jensenshannon", "minkowski", "sqeuclidean"]
     )
     def test_dtw_parallel_local_dissimilarity(self, local_dissimilarity, ragged, num_rows=4, trace_length=8):
+        pytest.importorskip("dtwParallel")
+
         params = dict(local_dissimilarity=local_dissimilarity)
 
         DG = DummyGenerator(num_rows=num_rows, trace_length=trace_length, ragged=ragged)
@@ -173,6 +180,8 @@ class TestDistance:
     @pytest.mark.parametrize("ragged", [True, False])
     @pytest.mark.parametrize("itakura_max_slope", [10, 20])
     def test_dtw_parallel_itakura(self, itakura_max_slope, ragged, num_rows=16, trace_length=32):
+        pytest.importorskip("dtwParallel")
+
         params = dict(
             constrained_path_search="itakura", itakura_max_slope=itakura_max_slope,
             local_dissimilarity="square_euclidean_distance"
@@ -189,6 +198,8 @@ class TestDistance:
     @pytest.mark.parametrize("ragged", [True, False])
     @pytest.mark.parametrize("sakoe_chiba_radius", [10, 20])
     def test_dtw_parallel_sakoe_chiba(self, sakoe_chiba_radius, ragged, num_rows=4, trace_length=8):
+        pytest.importorskip("dtwParallel")
+
         params = {"constrained_path_search": "sakoe_chiba", "sakoe_chiba_radius": sakoe_chiba_radius}
 
         DG = DummyGenerator(num_rows=num_rows, trace_length=trace_length, ragged=ragged)
@@ -203,6 +214,8 @@ class TestDistance:
     @pytest.mark.parametrize("sigma_kernel", [1, 2])
     @pytest.mark.parametrize("dtw_to_kernel", [False, True])
     def test_dtw_parallel_kernel(self, sigma_kernel, dtw_to_kernel, ragged, num_rows=4, trace_length=8):
+        pytest.importorskip("dtwParallel")
+
         DG = DummyGenerator(num_rows=num_rows, trace_length=trace_length, ragged=ragged)
         events = DG.get_events()
 
@@ -229,6 +242,8 @@ class TestDistance:
     @pytest.mark.parametrize("ragged", [True, False])
     @pytest.mark.parametrize("type_dtw", ["d"])
     def test_dtw_parallel_type_depended(self, type_dtw, ragged, num_rows=4, trace_length=8):
+        pytest.importorskip("dtwParallel")
+
         DG = DummyGenerator(num_rows=num_rows, trace_length=trace_length, ragged=ragged)
         events = DG.get_events()
 
@@ -244,6 +259,8 @@ class TestDistance:
     @pytest.mark.parametrize("ragged", [True, False])
     @pytest.mark.parametrize("type_dtw", ["i"])
     def test_dtw_parallel_type_independent(self, type_dtw, ragged, num_rows=4, trace_length=8):
+        pytest.importorskip("dtwParallel")
+
         DG = DummyGenerator(num_rows=num_rows, trace_length=trace_length, ragged=ragged)
         events = DG.get_events()
 
