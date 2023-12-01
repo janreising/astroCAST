@@ -1,6 +1,7 @@
 import glob
 import logging
 import pickle
+import platform
 import shutil
 import tempfile
 import time
@@ -18,6 +19,24 @@ import tiledb
 import xxhash
 import yaml
 from skimage.util import img_as_uint
+
+
+def remove_temp_safe(tmp_dir: tempfile.TemporaryDirectory, wait_time: int = 20):
+    # necessary to give Windows time to release files
+    if platform.system() == "Windows":
+
+        files = list(Path(tmp_dir.name).glob("*/*")) + list(Path(tmp_dir.name).glob("*"))
+        for file in files:
+
+            if file.is_file():
+                file.unlink(missing_ok=True)
+            elif file.is_dir():
+                shutil.rmtree(file.as_posix())
+
+        logging.warning(f"Assuming to be on windows. Waiting for files to be released!")
+        time.sleep(wait_time)
+
+    tmp_dir.cleanup()
 
 
 def is_docker():

@@ -1,6 +1,6 @@
 import pytest
 
-from astrocast.helper import SampleInput
+from astrocast.helper import SampleInput, remove_temp_safe
 from astrocast.preparation import *
 
 
@@ -497,27 +497,30 @@ class Test_IO:
     @pytest.mark.parametrize("output_path", ["out.h5", "out.tdb", "out.tiff", "out.npy"])
     def test_lazy_load(self, output_path, shape=(100, 100, 100)):
 
-        with tempfile.TemporaryDirectory() as dir:
-            tmpdir = Path(dir)
-            assert tmpdir.is_dir()
+        temp_dir = tempfile.TemporaryDirectory()
+        tmp_path = Path(temp_dir.name)
 
-            output_path = tmpdir.joinpath(output_path)
+        assert tmp_path.is_dir()
 
-            # Reference
-            arr = np.random.random(shape)
+        output_path = tmp_path.joinpath(output_path)
 
-            # Saving
-            io = IO()
+        # Reference
+        arr = np.random.random(shape)
 
-            output_path = io.save(output_path, arr, loc="data/ch0")
-            logging.warning(output_path)
+        # Saving
+        io = IO()
 
-            # Loading
-            arr_load = io.load(output_path, loc="data/ch0", lazy=True)
+        output_path = io.save(output_path, arr, loc="data/ch0")
+        logging.warning(output_path)
 
-            assert isinstance(arr_load, (dask.array.Array, dask.array.core.Array)), f"type: {type(arr_load)}"
-            assert arr.shape == arr_load.shape
-            assert np.array_equal(arr, arr_load)
+        # Loading
+        arr_load = io.load(output_path, loc="data/ch0", lazy=True)
+
+        assert isinstance(arr_load, (dask.array.Array, dask.array.core.Array)), f"type: {type(arr_load)}"
+        assert arr.shape == arr_load.shape
+        assert np.array_equal(arr, arr_load)
+
+        remove_temp_safe(temp_dir)
 
     @pytest.mark.parametrize("sep", ["_", "x"])
     def test_load_sequential_tiff(self, sep, shape=(100, 100, 100)):

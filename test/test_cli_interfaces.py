@@ -1,4 +1,3 @@
-import platform
 import tempfile
 import traceback
 
@@ -10,7 +9,7 @@ from click.testing import CliRunner
 from astrocast.analysis import Events
 from astrocast.cli_interfaces import *
 from astrocast.detection import Detector
-from astrocast.helper import EventSim, is_docker
+from astrocast.helper import EventSim, is_docker, remove_temp_safe
 from astrocast.preparation import IO
 
 
@@ -515,17 +514,7 @@ class TestDetection:
         self.runner = CliRunner()
 
     def teardown_method(self):
-
-        # necessary to give Windows time to release files
-        if platform.system() == "Windows":
-
-            for file in list(Path(self.temp_dir.name).glob("*/*")):
-                file.unlink(missing_ok=True)
-
-            logging.warning(f"Assuming to be on windows. Waiting for files to be released!")
-            time.sleep(20)
-
-        self.temp_dir.cleanup()
+        remove_temp_safe(self.temp_dir)
 
     def run_with_parameters(self, params):
 
@@ -613,7 +602,7 @@ class TestExportVideo:
         self.temp_file = temp_file
 
     def teardown_method(self):
-        self.temp_dir.cleanup()
+        remove_temp_safe(self.temp_dir)
 
     def test_tiff(self):
         out_file = self.temp_file.with_suffix(".tiff")

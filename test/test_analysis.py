@@ -1,4 +1,3 @@
-import platform
 import tempfile
 import time
 
@@ -7,7 +6,7 @@ import matplotlib
 import pytest
 
 from astrocast.analysis import *
-from astrocast.helper import EventSim
+from astrocast.helper import EventSim, remove_temp_safe
 
 matplotlib.use('Agg')  # Use the Agg backend
 
@@ -20,17 +19,7 @@ class TestEvents:
         self.tmp_path = Path(self.tmpdir.name)
 
     def cleanup_method(self):
-
-        # necessary to give Windows time to release files
-        if platform.system() == "Windows":
-
-            for file in list(self.tmp_path.glob("*/*")):
-                file.unlink(missing_ok=True)
-
-            logging.warning(f"Assuming to be on windows. Waiting for files to be released!")
-            time.sleep(20)
-
-        self.tmpdir.cleanup()
+        remove_temp_safe(self.tmpdir)
 
     def test_load_events_minimal(self):
 
@@ -483,8 +472,15 @@ class TestEvents:
 
 class TestVideo:
 
-    @staticmethod
-    def basic_load(input_type, z_slice, lazy, proj_func, window, shape=(50, 25, 25)):
+    def setup_method(self):
+
+        self.tmp_dir = tempfile.TemporaryDirectory()
+        self.tmp_path = Path(self.tmp_dir.name)
+
+    def cleanup_method(self):
+        remove_temp_safe(self.tmp_dir)
+
+    def basic_load(self, input_type, z_slice, lazy, proj_func, window, shape=(50, 25, 25)):
 
         data = np.random.random(size=shape)
 
@@ -494,60 +490,59 @@ class TestVideo:
         else:
             original_data = data.copy()
 
-        with tempfile.TemporaryDirectory() as tmpdir:
+        # Create dummy data
+        rand_1, rand_2, rand_3 = [np.random.randint(1, int(10e4)) for _ in range(3)]
+        tmp_path = self.tmp_path.joinpath(f"{rand_1}_{rand_2}_{rand_3}_out")
 
-            # Create dummy data
-            tmp_path = Path(tmpdir).joinpath("out")
+        if input_type == "numpy":
+            vid = Video(data=data, lazy=lazy, z_slice=z_slice)
 
-            if input_type == "numpy":
-                vid = Video(data=data, lazy=lazy, z_slice=z_slice)
+        elif input_type == "dask":
+            data = dask.array.from_array(data, chunks="auto")
+            vid = Video(data=data, lazy=lazy, z_slice=z_slice)
 
-            elif input_type == "dask":
-                data = dask.array.from_array(data, chunks="auto")
-                vid = Video(data=data, lazy=lazy, z_slice=z_slice)
+        elif input_type == ".h5":
 
-            elif input_type == ".h5":
+            path = tmp_path.with_suffix(input_type)
+            loc = "data/ch0"
 
-                path = tmp_path.with_suffix(input_type)
-                loc = "data/ch0"
+            io = IO()
+            io.save(path=path, data=data, loc=loc)
 
-                io = IO()
-                io.save(path=path, data=data, loc=loc)
+            vid = Video(data=path, loc="data/ch0", lazy=lazy, z_slice=z_slice)
 
-                vid = Video(data=path, loc="data/ch0", lazy=lazy, z_slice=z_slice)
+        elif input_type in [".tdb", ".tiff"]:
 
-            elif input_type in [".tdb", ".tiff"]:
+            path = tmp_path.with_suffix(input_type)
 
-                path = tmp_path.with_suffix(input_type)
+            io = IO()
+            io.save(path=path, data=data)
 
-                io = IO()
-                io.save(path=path, data=data)
+            vid = Video(data=path, lazy=lazy, z_slice=z_slice)
 
-                vid = Video(data=path, lazy=lazy, z_slice=z_slice)
+        d = vid.get_data(in_memory=True)
 
-            d = vid.get_data(in_memory=True)
+        # test same result
+        assert original_data.shape == d.shape, f"shape unequal: orig>{original_data.shape} vs load>{d.shape}"
+        assert np.allclose(original_data, d)
 
-            # test same result
-            assert original_data.shape == d.shape, f"shape unequal: orig>{original_data.shape} vs load>{d.shape}"
-            assert np.allclose(original_data, d)
+        # test project
+        if proj_func is not None:
 
-            # test project
-            if proj_func is not None:
+            if window is None:
+                proj_org = proj_func(original_data, axis=0)
 
-                if window is None:
-                    proj_org = proj_func(original_data, axis=0)
+            else:
+                proj_org = np.zeros(original_data.shape)
+                for x in range(original_data.shape[1]):
+                    for y in range(original_data.shape[2]):
+                        proj_org[:, x, y] = pd.Series(original_data[:, x, y]).rolling(window=window).apply(
+                            proj_func
+                        ).values
 
-                else:
-                    proj_org = np.zeros(original_data.shape)
-                    for x in range(original_data.shape[1]):
-                        for y in range(original_data.shape[2]):
-                            proj_org[:, x, y] = pd.Series(original_data[:, x, y]).rolling(window=window).apply(
-                                proj_func
-                            ).values
-
-                proj = vid.get_image_project(agg_func=proj_func, window=window)
-                assert proj_org.shape == proj.shape, f"shape unequal: orig>{proj_org.shape} vs load>{proj.shape}"
-                assert np.allclose(proj_org, proj)
+            proj = vid.get_image_project(agg_func=proj_func, window=window)
+            assert proj_org.shape == proj.shape, f"shape unequal: orig>{proj_org.shape} vs load>{proj.shape}"
+            assert np.allclose(proj_org, proj)
 
     @pytest.mark.parametrize("lazy", [True, False])
     @pytest.mark.parametrize("z_slice", [None, (10, 40), (10, -1)])
