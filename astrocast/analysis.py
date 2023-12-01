@@ -284,7 +284,8 @@ class Events(CachedClass):
     """
 
     def __init__(
-            self, event_dir: Union[str, Path], lazy: bool = True, data: Union[np.ndarray, da.Array, str, Path] = None,
+            self, event_dir: Union[str, Path, List[str]], lazy: bool = True,
+            data: Union[np.ndarray, da.Array, str, Path] = None,
             loc: str = None, group: Union[str, int] = None, subject_id: Union[str, int] = None,
             z_slice: Tuple[int, int] = None, index_prefix: str = None,
             custom_columns: Union[list, Tuple, Literal['v_area_norm', 'v_ara_footprint', 'cx', 'cy']] = (
