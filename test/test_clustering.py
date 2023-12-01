@@ -65,6 +65,8 @@ class Test_dtw_linkage:
     @pytest.mark.parametrize("criterion", ["distance", "maxclust"])
     @pytest.mark.parametrize("ragged", [True, False])
     def test_clustering_pearson(self, criterion, ragged):
+        pytest.importorskip("dtwParallel")
+
         DG = DummyGenerator(num_rows=11, trace_length=16, ragged=ragged)
         data = DG.get_events()
 
@@ -76,6 +78,8 @@ class Test_dtw_linkage:
     @pytest.mark.skipif(platform.system() == 'Darwin', reason="Skip DTW test on MacOS")
     @pytest.mark.parametrize("criterion", ["distance", "maxclust"])
     def test_clustering_dtw(self, criterion):
+        pytest.importorskip("dtwParallel")
+
         DG = DummyGenerator(num_rows=11, trace_length=16, ragged=False)
         data = DG.get_events()
 
@@ -134,6 +138,8 @@ class Test_dtw_linkage:
         self._test_plotting_helper("dtw_parallel", cutoff, min_cluster_size, tmp_path)
 
     def test_local_cache(self):
+        pytest.importorskip("dtwParallel")
+
         with tempfile.TemporaryDirectory() as dir:
             tmp_path = Path(dir)
             assert tmp_path.is_dir()

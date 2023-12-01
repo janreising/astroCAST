@@ -28,7 +28,11 @@ from astrocast.reduction import FeatureExtraction
 
 with warnings.catch_warnings():
     warnings.simplefilter(action='ignore', category=NumbaDeprecationWarning)
-    import umap
+    try:
+        import umap
+    except ImportError:
+        logging.error(f"Unable to import umap package. Some functionality will not work as expected. "
+                      f"If you are using astroCAST on MacOS this is expected.")
 
 
 class Analysis:
