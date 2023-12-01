@@ -23,7 +23,8 @@ class TestEvents:
 
         # necessary to give Windows time to release files
         if platform.system() == "win32":
-            time.sleep(5)
+            logging.warning(f"Assuming to be on windows. Waiting for files to be released!")
+            time.sleep(20)
 
         self.tmpdir.cleanup()
 
@@ -300,7 +301,7 @@ class TestEvents:
 
     def test_extension_save(self, shape=(50, 100, 100)):
 
-        path = self.tmp_path.joinpath("ext_save_sim.h5"),
+        path = self.tmp_path.joinpath("ext_save_sim_2.h5")
         save_path = self.tmp_path.joinpath("ext_save_footprints.npy")
 
         # Create dummy data
@@ -376,7 +377,7 @@ class TestEvents:
     def test_multi_file_support(self, shape=(50, 100, 100)):
 
         path_1 = self.tmp_path.joinpath("multi_file_support_1.h5")
-        path_2 = self.tmp_path.joinpath("multi_file_support_1.h5")
+        path_2 = self.tmp_path.joinpath("multi_file_support_2.h5")
 
         sim = EventSim()
         event_dir_1 = sim.create_dataset(path_1, shape=shape)

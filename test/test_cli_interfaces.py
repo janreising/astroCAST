@@ -1,3 +1,4 @@
+import platform
 import tempfile
 import traceback
 
@@ -13,7 +14,7 @@ from astrocast.helper import EventSim, is_docker
 from astrocast.preparation import IO
 
 
-class Test_ConvertInput:
+class TestConvertInput:
 
     def setup_method(self):
 
@@ -254,7 +255,7 @@ class Test_ConvertInput:
                 raise ValueError(f"unexpected condition: {chunks} & {chunk_strategy}")
 
 
-class Test_MotionCorrection:
+class TestMotionCorrection:
 
     def setup_method(self):
         temp_dir = tempfile.TemporaryDirectory()
@@ -303,7 +304,7 @@ class Test_MotionCorrection:
         self.run_with_parameters(["--chunk-strategy", None])
 
 
-class Test_SubtractDelta:
+class TestSubtractDelta:
 
     def setup_method(self):
         temp_dir = tempfile.TemporaryDirectory()
@@ -397,7 +398,7 @@ class Test_SubtractDelta:
                 assert not np.allclose(f["df/ch0"][0], f["df/ch0"][1])
 
 
-class Test_TrainDenoiser_Denoise:
+class TestTrainDenoiserDenoise:
 
     def setup_method(self):
         temp_dir = tempfile.TemporaryDirectory()
@@ -485,7 +486,7 @@ class Test_TrainDenoiser_Denoise:
             assert f["data/ch0"].shape == f["inf/ch0"].shape
 
 
-class Test_Detection:
+class TestDetection:
 
     def setup_method(self):
 
@@ -514,6 +515,12 @@ class Test_Detection:
         self.runner = CliRunner()
 
     def teardown_method(self):
+
+        # necessary to give Windows time to release files
+        if platform.system() == "win32":
+            logging.warning(f"Assuming to be on windows. Waiting for files to be released!")
+            time.sleep(20)
+
         self.temp_dir.cleanup()
 
     def run_with_parameters(self, params):
@@ -525,7 +532,6 @@ class Test_Detection:
         if is_docker():
             logging.warning("Suspecting to be in container, switching to 'on_disk=True'.")
             args += ["--on-disk", True]
-
 
         args += params
 
@@ -580,7 +586,7 @@ class Test_Detection:
         self.run_with_parameters(["--holes-depth", "2", "--objects-depth", "2"])
 
 
-class Test_Export_Video:
+class TestExportVideo:
 
     def setup_method(self):
         size = (10, 100, 100)
@@ -754,7 +760,7 @@ class Test_Export_Video:
             assert f["data/ch0"].chunks == (1, 5, 5)
 
 
-class Test_MoveDataset:
+class TestMoveDataset:
 
     def setup_method(self):
         self.temp_dir = tempfile.TemporaryDirectory()
@@ -811,7 +817,7 @@ class Test_MoveDataset:
             assert np.allclose(self.B, f["data/ch0"])
 
 
-class Test_ViewData:
+class TestViewData:
 
     def setup_method(self):
         self.temp_dir = tempfile.TemporaryDirectory()
@@ -889,7 +895,7 @@ class Test_ViewData:
         assert result.exit_code == 0, f"error: {result.output}"
 
 
-class Test_ViewDetectionResults:
+class TestViewDetectionResults:
 
     def setup_method(self):
         temp_dir = tempfile.TemporaryDirectory()
