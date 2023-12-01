@@ -1003,7 +1003,7 @@ def test_delete_h5_dataset():
 def test_visualize_h5():
     temp_dir = tempfile.TemporaryDirectory()
 
-    temp_file = Path(temp_dir).joinpath("temp.h5")
+    temp_file = Path(temp_dir.name).joinpath("temp.h5")
     A = np.random.randint(0, 100, size=(10, 100, 100))
     B = np.random.randint(0, 100, size=(10, 100, 100))
 
@@ -1029,7 +1029,7 @@ def test_climage(z, size, equalize):
     # Create a temporary directory
     temp_dir = tempfile.TemporaryDirectory()
 
-    temp_file = Path(temp_dir).joinpath("temp.h5")
+    temp_file = Path(temp_dir.name).joinpath("temp.h5")
 
     # Create a temporary file to store the datasets
     with h5.File(temp_file.as_posix(), "a") as f:
