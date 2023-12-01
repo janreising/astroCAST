@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "astrocast"
-version = "0.3.25"
+version = "0.3.26"
 description = "Package to analyze calcium fluorescence events in astrocytes"
 authors = ["Jan Philipp Reising <jan.reising@ki.se>", "Ana Cristina González"]
 
@@ -52,7 +52,7 @@ umap-learn = { version = "*", markers = "sys_platform == 'win32' or sys_platform
 tensorflow-io-gcs-filesystem = { version = "^0.31.0", markers = "sys_platform == 'win32'" }
 tensorflow = [
     { version = "^2.13.0", markers = "sys_platform == 'linux' or sys_platform == 'darwin'" },
-    { version = "*", markers = "sys_platform == 'win32'" }
+    { version = "^2.10.0", markers = "sys_platform == 'win32'" }
 ]
 keras = "*"
 datashader = "^0.15.2"
