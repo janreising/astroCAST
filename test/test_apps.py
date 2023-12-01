@@ -1,7 +1,9 @@
 import multiprocessing
+import platform
 import tempfile
 import time
 
+import pytest
 import requests
 
 from astrocast.app_analysis import *
@@ -10,7 +12,9 @@ from astrocast.detection import Detector
 from astrocast.helper import EventSim
 
 
-class Test_AppPreparation:
+@pytest.mark.skipif(platform.system() in ['Darwin', 'Windows'],
+                    reason="Testing the app utilizes multiprocessing which does not properly work on MacOS.")
+class TestAppPreparation:
 
     def setup_method(self):
         # create dummy
@@ -50,7 +54,9 @@ class Test_AppPreparation:
         assert response.status_code == 200
 
 
-class Test_AppAnalysis:
+@pytest.mark.skipif(platform.system() in ['Darwin', 'Windows'],
+                    reason="Testing the app utilizes multiprocessing which does not properly work on MacOS.")
+class TestAppAnalysis:
 
     def setup_method(self):
         # create dummy
