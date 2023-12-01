@@ -36,7 +36,13 @@ def remove_temp_safe(tmp_dir: tempfile.TemporaryDirectory, wait_time: int = 20):
         logging.warning(f"Assuming to be on windows. Waiting for files to be released!")
         time.sleep(wait_time)
 
+        if len(list(Path(tmp_dir.name).glob("*"))) != 0:
+            logging.error(f"temp dir not empty after cleanup: {tmp_dir.name}")
+
     tmp_dir.cleanup()
+
+    if Path(tmp_dir.name).exists():
+        logging.error(f"temp dir still exists after cleanup! {tmp_dir.name}")
 
 
 def is_docker():
