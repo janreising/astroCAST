@@ -12,7 +12,7 @@ from astrocast.detection import Detector
 from astrocast.helper import EventSim
 
 
-@pytest.mark.skipif(platform.system() == 'Darwin' or platform.system() == 'win32',
+@pytest.mark.skipif(platform.system() in ['Darwin', 'Windows'],
                     reason="Testing the app utilizes multiprocessing which does not properly work on MacOS.")
 class TestAppPreparation:
 
@@ -54,7 +54,7 @@ class TestAppPreparation:
         assert response.status_code == 200
 
 
-@pytest.mark.skipif(platform.system() == 'Darwin' or platform.system() == 'win32',
+@pytest.mark.skipif(platform.system() in ['Darwin', 'Windows'],
                     reason="Testing the app utilizes multiprocessing which does not properly work on MacOS.")
 class TestAppAnalysis:
 

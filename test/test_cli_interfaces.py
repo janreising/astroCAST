@@ -517,7 +517,7 @@ class TestDetection:
     def teardown_method(self):
 
         # necessary to give Windows time to release files
-        if platform.system() == "win32":
+        if platform.system() == "Windows":
             logging.warning(f"Assuming to be on windows. Waiting for files to be released!")
             time.sleep(20)
 
