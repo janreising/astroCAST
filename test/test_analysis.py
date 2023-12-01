@@ -23,6 +23,10 @@ class TestEvents:
 
         # necessary to give Windows time to release files
         if platform.system() == "Windows":
+
+            for file in list(self.tmp_path.glob("*/*")):
+                file.unlink(missing_ok=True)
+
             logging.warning(f"Assuming to be on windows. Waiting for files to be released!")
             time.sleep(20)
 
