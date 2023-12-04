@@ -2,12 +2,12 @@ from astrocast.autoencoders import CNN_Autoencoder, TimeSeriesRnnAE, PaddedDataL
 from astrocast.helper import DummyGenerator
 
 
-class Test_Auto_Encoders:
+class TestAutoEncoders:
 
-    def setup_method(self):
+    def setup_class(self):
         pass
 
-    def teardown_method(self):
+    def teardown_class(self):
         pass
 
     def test_cnn(self, trace_length=16, num_rows=128):

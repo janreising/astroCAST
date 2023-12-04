@@ -1,10 +1,20 @@
+import logging
+import platform
+import tempfile
+from pathlib import Path
+
+import h5py
+import numpy as np
 import pytest
+import dask.array as da
+import tiledb
+from tifffile import tifffile
 
 from astrocast.helper import SampleInput, remove_temp_safe
-from astrocast.preparation import *
+from astrocast.preparation import Delta, Input, IO, MotionCorrection
 
 
-class Test_Delta:
+class TestDelta:
 
     @pytest.mark.parametrize("input_type", [np.ndarray, ".tiff", ".h5", "tiledb"])
     def test_load_save(self, input_type, shape=(50, 10, 10)):
@@ -95,7 +105,7 @@ class Test_Delta:
         raise NotImplementedError
 
 
-class Test_Input:
+class TestInput:
 
     @pytest.mark.parametrize("num_files", [1, 12])
     @pytest.mark.parametrize("in_memory", [True, False])
@@ -348,7 +358,7 @@ class Test_Input:
             assert np.array_equal(img_stack, res)
 
 
-class Test_IO:
+class TestIO:
 
     @pytest.mark.parametrize("prefix", ["", "00000"])
     @pytest.mark.parametrize("sep", ["_", "x", "-"])
@@ -395,28 +405,30 @@ class Test_IO:
 
     @pytest.mark.parametrize("output_path", ["out.h5", "out.tdb", "out.tiff", "out.npy"])
     @pytest.mark.parametrize("shape", [(10, 5, 5), (100, 100, 100)])
-    def test_save_load(self, output_path, shape):
+    def test_save_load(self, tmpdir, output_path, shape):
 
-        with tempfile.TemporaryDirectory() as dir:
-            tmpdir = Path(dir)
-            assert tmpdir.is_dir()
+        if ".npy" in output_path and platform.system() in ["Windows", "win32"]:
+            pytest.skip("Windows throws permission error for .npy output.")
 
-            output_path = tmpdir.joinpath(output_path)
+        tmpdir = Path(tmpdir.strpath)
+        assert tmpdir.is_dir()
 
-            # Reference
-            arr = np.random.random(shape)
+        output_path = tmpdir.joinpath(output_path)
 
-            # Loaded
-            io = IO()
+        # Reference
+        arr = np.random.random(shape)
 
-            data = {"data/ch0": arr}
-            output_path = io.save(output_path, data)
+        # Loaded
+        io = IO()
 
-            h5loc = None if output_path.suffix != ".h5" else "data/ch0"
-            arr_load = io.load(output_path, loc=h5loc)
+        data = {"data/ch0": arr}
+        output_path = io.save(output_path, data)
 
-            assert arr.shape == arr_load.shape
-            assert np.array_equal(arr, arr_load)
+        h5loc = None if output_path.suffix != ".h5" else "data/ch0"
+        arr_load = io.load(output_path, loc=h5loc)
+
+        assert arr.shape == arr_load.shape
+        assert np.array_equal(arr, arr_load)
 
     @pytest.mark.parametrize("shape", [(10, 5, 5), (100, 100, 100)])
     @pytest.mark.parametrize("chunk_strategy", ["balanced", "Z", "XY", None])
@@ -471,35 +483,36 @@ class Test_IO:
 
     @pytest.mark.parametrize("output_path", ["out.h5", "out.tdb", "out.tiff", "out.npy"])
     @pytest.mark.parametrize("shape", [(10, 5, 5), (100, 100, 100)])
-    def test_z_slice(self, output_path, shape, z_slice=(2, 8)):
+    def test_z_slice(self, tmpdir, output_path, shape, z_slice=(2, 8)):
 
-        with tempfile.TemporaryDirectory() as dir:
-            tmpdir = Path(dir)
-            assert tmpdir.is_dir()
+        if ".npy" in output_path and platform.system() in ["Windows", "win32"]:
+            pytest.skip("Windows throws permission error for .npy output.")
 
-            output_path = tmpdir.joinpath(output_path)
+        tmpdir = Path(tmpdir.strpath)
+        assert tmpdir.is_dir()
 
-            # Reference
-            arr = np.random.random(shape)
+        output_path = tmpdir.joinpath(output_path)
 
-            z0, z1 = z_slice
-            original_array = arr[z0:z1, :, :]
+        # Reference
+        arr = np.random.random(shape)
 
-            # Loaded
-            io = IO()
+        z0, z1 = z_slice
+        original_array = arr[z0:z1, :, :]
 
-            output_path = io.save(output_path, arr, loc="data/ch0")
-            arr_load = io.load(output_path, loc="data/ch0", z_slice=z_slice)
+        # Loaded
+        io = IO()
 
-            assert original_array.shape == arr_load.shape
-            assert np.array_equal(original_array, arr_load)
+        output_path = io.save(output_path, arr, loc="data/ch0")
+        arr_load = io.load(output_path, loc="data/ch0", z_slice=z_slice)
+
+        assert original_array.shape == arr_load.shape
+        assert np.array_equal(original_array, arr_load)
 
     @pytest.mark.parametrize("output_path", ["out.h5", "out.tdb", "out.tiff", "out.npy"])
-    def test_lazy_load(self, output_path, shape=(100, 100, 100)):
+    def test_lazy_load(self, tmpdir, output_path, shape=(100, 100, 100)):
 
-        temp_dir = tempfile.TemporaryDirectory()
-        tmp_path = Path(temp_dir.name)
-
+        tmp_path = Path(tmpdir.strpath).joinpath(f"test_{output_path.replace('.', '_')}")
+        tmp_path.mkdir()
         assert tmp_path.is_dir()
 
         output_path = tmp_path.joinpath(output_path)
@@ -516,38 +529,38 @@ class Test_IO:
         # Loading
         arr_load = io.load(output_path, loc="data/ch0", lazy=True)
 
-        assert isinstance(arr_load, (dask.array.Array, dask.array.core.Array)), f"type: {type(arr_load)}"
+        assert isinstance(arr_load, (da.Array, da.core.Array)), f"type: {type(arr_load)}"
         assert arr.shape == arr_load.shape
         assert np.array_equal(arr, arr_load)
 
-        remove_temp_safe(temp_dir)
+        del io
+        del arr_load
 
     @pytest.mark.parametrize("sep", ["_", "x"])
-    def test_load_sequential_tiff(self, sep, shape=(100, 100, 100)):
+    def test_load_sequential_tiff(self, tmpdir, sep, shape=(100, 100, 100)):
 
-        with tempfile.TemporaryDirectory() as dir:
-            tmpdir = Path(dir)
-            assert tmpdir.is_dir()
+        tmpdir = Path(tmpdir.strpath)
+        assert tmpdir.is_dir()
 
-            input_dir = tmpdir.joinpath("seq_tiff")
-            input_dir.mkdir()
+        input_dir = tmpdir.joinpath("seq_tiff")
+        input_dir.mkdir()
 
-            # create tiff files
-            arr = np.random.random(shape)
+        # create tiff files
+        arr = np.random.random(shape)
 
-            for z in range(len(arr)):
-                img = arr[z, :, :]
-                tifffile.imwrite(input_dir.joinpath(f"img{sep}{z}.tiff"), data=img)
+        for z in range(len(arr)):
+            img = arr[z, :, :]
+            tifffile.imwrite(input_dir.joinpath(f"img{sep}{z}.tiff"), data=img)
 
-            # load data
-            io = IO()
-            arr_load = io.load(input_dir, sep=sep)
+        # load data
+        io = IO()
+        arr_load = io.load(input_dir, sep=sep)
 
-            assert arr.shape == arr_load.shape
-            assert np.array_equal(arr, arr_load)
+        assert arr.shape == arr_load.shape
+        assert np.array_equal(arr, arr_load)
 
 
-class Test_MotionCorrection:
+class TestMotionCorrection:
 
     @pytest.mark.parametrize("input_type", ["array", ".h5", ".tiff"])
     def test_random(self, input_type, shape=(100, 100, 100)):
@@ -683,7 +696,7 @@ class Test_MotionCorrection:
         mc.run(data, max_shifts=(int(X / 2) - 1, int(Y / 2) - 1))
 
         data = mc.save(output=None)
-        assert type(data) == np.ndarray
+        assert isinstance(data, np.ndarray)
 
         # get average shift per frame
         mcs = np.array(mc.shifts)[:, 0]

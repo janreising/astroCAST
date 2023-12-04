@@ -1,30 +1,21 @@
-import tempfile
-
 import pytest
 
 from astrocast.analysis import Events
 from astrocast.detection import *
-from astrocast.helper import EventSim, SampleInput, remove_temp_safe
+from astrocast.helper import EventSim, SampleInput
 from astrocast.preparation import IO
 
 
-class Test_Detector:
-
-    def setup_method(self):
-        self.temp_dir = tempfile.TemporaryDirectory()
-        self.temp_path = Path(self.temp_dir.name)
-
-    def teardown_method(self):
-        remove_temp_safe(self.temp_dir)
+class TestDetector:
 
     @pytest.mark.parametrize("extension", [".h5"])
     @pytest.mark.parametrize("debug", [True, False])
-    def test_real_data(self, extension, debug):
+    def test_real_data(self, tmpdir, extension, debug):
 
         si = SampleInput()
         input_ = si.get_test_data(extension=extension)
 
-        path = self.temp_path.joinpath(f"{np.random.randint(10000)}_tempData")
+        path = tmpdir.join(f"{np.random.randint(10000)}_tempData")
         det = Detector(input_, output=path)
         det.run(loc="dff/ch0", lazy=False, debug=debug, z_slice=(0, 25))
 
@@ -45,20 +36,38 @@ class Test_Detector:
             assert dir_.joinpath("debug_active_pixels.tiff").is_file()
             assert dir_.joinpath("debug_active_pixels_morphed.tiff").is_file()
 
-    def test_sim_data(self):
-        path = self.temp_path.joinpath(f"{np.random.randint(10000)}_sim.h5")
+        del input_
+        del det
+
+    @pytest.mark.skipif(platform.system() in ["Windows", "win32"],
+                        reason="Deletion of temporary directory is unsuccessful on windows")
+    @pytest.mark.parametrize("parallel", [True, False])
+    def test_sim_data(self, tmpdir, parallel):
+
+        sim_dir = tmpdir.join("sim/")
+        sim_dir.mkdir()
+
+        path = sim_dir.joinpath(f"{np.random.randint(1000)}_{np.random.randint(1000)}_sim.h5")
 
         loc = "dff/ch0"
 
+        # simulate events
         sim = EventSim()
         video, num_events = sim.simulate(
-            shape=(50, 100, 100), skip_n=5, gap_space=5, gap_time=3, event_intensity=100, background_noise=1
+            shape=(100, 250, 250), skip_n=5, gap_space=10, gap_time=5,
+            event_intensity=100, background_noise=1
         )
+        del sim
+
+        # save output
         io = IO()
         io.save(path=path, data={loc: video})
+        del io
+        del video
 
+        # detect artificial events
         det = Detector(path.as_posix())
-        dir_ = det.run(loc=loc, lazy=True, debug=False)
+        dir_ = det.run(loc=loc, lazy=True, debug=False, parallel=parallel)
 
         assert dir_.is_dir(), "Output folder does not exist"
         assert bool(det.meta), "metadata dictionary is empty"
@@ -73,12 +82,16 @@ class Test_Detector:
         events = Events(dir_)
         assert np.allclose(len(events), num_events, rtol=0.15), f"Found {len(events)} instead of {num_events}."
 
-    def test_on_disk_sharing(self, extension=".h5", debug=False):
+        del det
+        del events
+        del dir_
+
+    def test_on_disk_sharing(self, tmpdir, extension=".h5", debug=False):
 
         si = SampleInput()
         input_ = si.get_test_data(extension=extension)
 
-        path = self.temp_path.joinpath(f"{np.random.randint(10000)}_tempData")
+        path = Path(tmpdir.strpath).joinpath(f"{np.random.randint(10000)}_tempData")
 
         det = Detector(input_, output=path)
         det.run(loc="dff/ch0", lazy=False, debug=debug, use_on_disk_sharing=True)
@@ -101,3 +114,6 @@ class Test_Detector:
             assert dir_.joinpath("debug_active_pixels_morphed.tiff").is_file()
 
         assert len(list(path.glob("*.mmap"))) < 1, f"mmap files were not removed: {list(path.glob('*.mmap'))}"
+
+        del si
+        del det

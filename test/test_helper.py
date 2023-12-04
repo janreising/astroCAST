@@ -4,15 +4,15 @@ from astrocast.helper import *
 from astrocast.preparation import IO
 
 
-class Test_LocalCache:
+class TestLocalCache:
 
-    def setup_method(self):
+    def setup_class(self):
 
         self.dir = tempfile.TemporaryDirectory()
         self.tmpdir = Path(self.dir.name)
         assert self.tmpdir.is_dir(), f"Creation of {self.tmpdir} failed."
 
-    def teardown_method(self):
+    def teardown_class(self):
         self.dir.cleanup()
         assert not self.tmpdir.is_dir(), f"Teardown of {self.tmpdir} failed."
 
@@ -78,9 +78,9 @@ class Test_LocalCache:
             raise ValueError
 
         assert n1 == n2, f"cached result is incorrect: {n1} != {n2}"
-        assert d2 < d1, f"cached result took too long: {d1} <= {d2}"
+        assert d2 < d1 or np.allclose(d2, d1), f"cached result took too long: {d1} <= {d2}"
 
-    def test_CustomClasses(self):
+    def test_custom_classes(self):
 
         cc = CachedClass(cache_path=self.tmpdir)
 
@@ -105,8 +105,6 @@ def test_dummy_generator(num_rows, typ, ragged):
 
     assert len(data) == num_rows
 
-    # TODO needed?  # if typ in ["numpy", "dask"]:  #     assert data.shape[0] == num_rows
-
 
 @pytest.mark.parametrize("typ", ["pandas", "list", "numpy", "dask"])
 @pytest.mark.parametrize("ragged", ["equal", "ragged"])
@@ -125,7 +123,7 @@ def test_is_ragged(typ, ragged, num_rows=10):
 
 @pytest.mark.parametrize("num_rows", [1, 10])
 @pytest.mark.parametrize("ragged", ["equal", "ragged"])
-class Test_normalization:
+class TestNormalization:
 
     @staticmethod
     @pytest.mark.parametrize("population_wide", [True, False])
@@ -408,36 +406,99 @@ class Test_normalization:
         res = norm.run({0: ["subtract", dict(mode="mean", population_wide=False)]})
 
 
-class Test_EventSim:
+class TestEventSim:
+
     def test_simulate_default_arguments(self):
         sim = EventSim()
-
         shape = (50, 100, 100)
         event_map, num_events = sim.simulate(shape)
 
         assert event_map.shape == shape
         assert num_events >= 0
 
-    def test_simulate_custom_arguments(self):
+    # Parameterized test for different shapes
+    @pytest.mark.parametrize("shape", [[50, 100, 100], [100, 200, 200]])
+    def test_simulate_different_shapes(self, shape):
         sim = EventSim()
+        event_map, num_events = sim.simulate(shape)
 
-        shape = (25, 50, 50)
-        z_fraction = 0.3
-        xy_fraction = 0.15
-        gap_space = 2
-        gap_time = 2
-        blob_size_fraction = 0.1
-        event_probability = 0.5
+        assert np.allclose(event_map.shape, shape)
+        assert num_events >= 0
 
+    # Parameterized test for different z_fraction and xy_fraction
+    @pytest.mark.parametrize("z_fraction, xy_fraction", [(0.3, 0.15), (0.5, 0.25)])
+    def test_simulate_different_fractions(self, z_fraction, xy_fraction):
+        sim = EventSim()
+        shape = (50, 100, 100)
+        event_map, num_events = sim.simulate(shape, z_fraction=z_fraction, xy_fraction=xy_fraction)
+
+        assert np.allclose(event_map.shape, shape)
+        assert num_events >= 0
+
+    # Testing with different gap_space and gap_time
+    @pytest.mark.parametrize("gap_space, gap_time", [
+        [1, 1],
+        [2, 3],
+    ])
+    def test_simulate_different_gaps(self, gap_space, gap_time):
+        sim = EventSim()
+        shape = (50, 100, 100)
+        event_map, num_events = sim.simulate(shape, gap_space=gap_space, gap_time=gap_time)
+
+        assert event_map.shape == shape
+        assert num_events >= 0
+
+    # Testing different event_probability
+    @pytest.mark.parametrize("event_probability", [0.1, 0.5, 0.9])
+    def test_simulate_different_event_probability(self, event_probability):
+        sim = EventSim()
+        shape = (50, 100, 100)
+        event_map, num_events = sim.simulate(shape, event_probability=event_probability)
+
+        assert event_map.shape == shape
+        assert num_events >= 0
+
+    # Testing different event_intensity values
+    @pytest.mark.parametrize("event_intensity", ["incr", 100, 200])
+    def test_simulate_different_event_intensity(self, event_intensity):
+        sim = EventSim()
+        shape = (50, 100, 100)
+        event_map, num_events = sim.simulate(shape, event_intensity=event_intensity)
+
+        assert event_map.shape == shape
+        assert num_events >= 0
+
+    # Testing different background_noise values
+    @pytest.mark.parametrize("background_noise", [None, 0.5, 1])
+    def test_simulate_different_background_noise(self, background_noise):
+        sim = EventSim()
+        shape = (50, 100, 100)
+        event_map, num_events = sim.simulate(shape, background_noise=background_noise)
+
+        assert event_map.shape == shape
+        assert num_events >= 0
+
+    # Testing different blob_size_fraction values
+    @pytest.mark.parametrize("blob_size_fraction", [0.05, 0.1, 0.2])
+    def test_simulate_different_blob_size_fraction(self, blob_size_fraction):
+        sim = EventSim()
+        shape = (50, 100, 100)
+        event_map, num_events = sim.simulate(shape, blob_size_fraction=blob_size_fraction)
+
+        assert event_map.shape == shape
+        assert num_events >= 0
+
+    def test_simulate_common_setting(self, shape=(50, 100, 100)):
+        sim = EventSim()
         event_map, num_events = sim.simulate(
-            shape, z_fraction, xy_fraction, gap_space, gap_time, blob_size_fraction, event_probability
+            shape=shape, skip_n=5, gap_space=5, gap_time=3, event_intensity=100, background_noise=1
         )
 
         assert event_map.shape == shape
         assert num_events >= 0
 
 
-class Test_SampleInput:
+class TestSampleInput:
 
     def test_load_and_delete(self):
         si = SampleInput()

@@ -1,4 +1,4 @@
-import tempfile
+import platform
 import time
 
 import dask.array
@@ -6,24 +6,16 @@ import matplotlib
 import pytest
 
 from astrocast.analysis import *
-from astrocast.helper import EventSim, remove_temp_safe
+from astrocast.helper import EventSim
 
 matplotlib.use('Agg')  # Use the Agg backend
 
 
 class TestEvents:
 
-    def setup_method(self):
+    def test_load_events_minimal(self, tmpdir):
 
-        self.tmpdir = tempfile.TemporaryDirectory()
-        self.tmp_path = Path(self.tmpdir.name)
-
-    def cleanup_method(self):
-        remove_temp_safe(self.tmpdir)
-
-    def test_load_events_minimal(self):
-
-        path = self.tmp_path.joinpath("sim_ev_min.h5")
+        path = Path(tmpdir.strpath).joinpath("sim_ev_min.h5")
 
         # Create dummy data
         sim = EventSim()
@@ -34,9 +26,12 @@ class TestEvents:
 
         assert isinstance(result, pd.DataFrame)
 
-    def test_load_events_custom_columns(self):
+        del events
+        del result
 
-        path = self.tmp_path.joinpath("sim_ev_cust_col.h5")
+    def test_load_events_custom_columns(self, tmpdir):
+
+        path = Path(tmpdir.strpath).joinpath("sim_ev_cust_col.h5")
 
         # Create dummy data
         sim = EventSim()
@@ -59,9 +54,13 @@ class TestEvents:
             else:
                 raise ValueError(f"please provide valid custom_colum instead of: {col}")
 
-    def test_load_events_z_slice(self, z_slice=(10, 25)):
+        del events
+        del result
+        del sim
 
-        path = self.tmp_path.joinpath("sim_ev_z_slice.h5")
+    def test_load_events_z_slice(self, tmpdir, z_slice=(10, 25)):
+
+        path = Path(tmpdir.strpath).joinpath("sim_ev_z_slice.h5")
 
         # Create dummy data
         sim = EventSim()
@@ -75,9 +74,13 @@ class TestEvents:
         assert z_slice[0] <= result.z0.min(), f"slicing unsuccessful; {z_slice[0]} !<= {result.z0.min()} "
         assert z_slice[1] >= result.z1.max(), f"slicing unsuccessful; {z_slice[1]} !>= {result.z1.max()} "
 
-    def test_load_events_prefix(self, prefix="prefix_"):
+        del events
+        del result
+        del sim
 
-        path = self.tmp_path.joinpath("sim_ev_prefix.h5")
+    def test_load_events_prefix(self, tmpdir, prefix="prefix_"):
+
+        path = Path(tmpdir.strpath).joinpath("sim_ev_prefix.h5")
 
         # Create dummy data
         sim = EventSim()
@@ -91,10 +94,14 @@ class TestEvents:
         for ind in result.index.tolist():
             assert ind.startswith(prefix)
 
-    @pytest.mark.parametrize("input_type", ["dir", "event_map"])
-    def test_get_time_map(self, input_type, shape=(50, 100, 100)):
+        del events
+        del result
+        del sim
 
-        path = self.tmp_path.joinpath("sim_ev_time_map.h5")
+    @pytest.mark.parametrize("input_type", ["dir", "event_map"])
+    def test_get_time_map(self, tmpdir, input_type, shape=(50, 100, 100)):
+
+        path = Path(tmpdir.strpath).joinpath("sim_ev_time_map.h5")
 
         # Create dummy data
         sim = EventSim()
@@ -119,9 +126,15 @@ class TestEvents:
             assert np.allclose(event_start_frame, np.array((0, 3, 0, 2)))
             assert np.allclose(event_stop_frame, np.array((4, 4, 2, 3)))
 
-    def test_get_event_map(self):
+            del event_map
 
-        path = self.tmp_path.joinpath("sim_ev_map.h5")
+        del sim
+        del events
+        del time_map
+
+    def test_get_event_map(self, tmpdir):
+
+        path = Path(tmpdir.strpath).joinpath("sim_ev_map.h5")
 
         # Create dummy data
         sim = EventSim()
@@ -133,9 +146,13 @@ class TestEvents:
         # get event map
         event_map, shape, dtype = events.get_event_map(event_dir)
 
-    def test_create_event_map(self, shape=(50, 100, 100)):
+        del sim
+        del events
+        del event_map
 
-        path = self.tmp_path.joinpath("sim_ev_create_ev_map.h5")
+    def test_create_event_map(self, tmpdir, shape=(50, 100, 100)):
+
+        path = Path(tmpdir.strpath).joinpath("sim_ev_create_ev_map.h5")
 
         # Create dummy data
         sim = EventSim()
@@ -176,6 +193,11 @@ class TestEvents:
                 f"original and recreated event_map is not equivalend: {np.sum(orig_masked)} vs. {np.sum(recr_masked)}"
             )
 
+        del sim
+        del events
+        del event_map
+        del event_map_recreated
+
     @pytest.mark.parametrize(
         "param", [dict(memmap_path=False), dict(
             normalization_instructions={0: ["subtract", {"mode": "mean"}], 1: ["divide", {"mode": "std"}]},
@@ -186,7 +208,7 @@ class TestEvents:
         )]
     )
     @pytest.mark.parametrize("extend", [-1, 4, (3, 2), (-1, 2), (2, -1)])
-    def test_extension(self, param, extend, shape=(50, 100, 100), num_events=3, event_length=3):
+    def test_extension(self, tmpdir, param, extend, shape=(50, 100, 100), num_events=3, event_length=3):
 
         if extend == -1:
             e0, e1 = 0, 0
@@ -249,7 +271,7 @@ class TestEvents:
         ev.num_frames, ev.X, ev.Y = shape
 
         # extend events
-        path = self.tmp_path.joinpath("ext_arr.mmap")
+        path = Path(tmpdir.strpath).joinpath("ext_arr.mmap")
         ext_events = ev.get_extended_events(
             video=Video(arr), return_array=False, extend=extend,
             memmap_path=path if param["memmap_path"] else None
@@ -263,10 +285,13 @@ class TestEvents:
             assert t.shape == f.shape
             assert np.allclose(t, f)
 
-    def test_extension_cache(self, lazy=False, shape=(50, 100, 100)):
+        del ev
+        del ext_events
 
-        sim_path = self.tmp_path.joinpath("ev_ext_cache.h5")
-        cache_path = self.tmp_path.joinpath("ev_ext_cache_dir/")
+    def test_extension_cache(self, tmpdir, lazy=False, shape=(50, 100, 100)):
+
+        sim_path = Path(tmpdir.strpath).joinpath("ev_ext_cache.h5")
+        cache_path = Path(tmpdir.strpath).joinpath("ev_ext_cache_dir/")
 
         # Create dummy data
         sim = EventSim()
@@ -292,10 +317,19 @@ class TestEvents:
         assert d2 < d1, f"caching is taking too long: {d2:.2f}s >= {d1:.2f}s"
         assert hash(events_1) == hash(events_2)
 
-    def test_extension_save(self, shape=(50, 100, 100)):
+        del sim
+        del events_1
+        del events_2
+        del trace
+        del trace_2
+        del video
 
-        path = self.tmp_path.joinpath("ext_save_sim_2.h5")
-        save_path = self.tmp_path.joinpath("ext_save_footprints.npy")
+    @pytest.mark.skipif(platform.system() in ["Windows", "win32"],
+                        reason="Windows throws permission error when loading .npy files")
+    def test_extension_save(self, tmpdir, shape=(50, 100, 100)):
+
+        path = Path(tmpdir.strpath).joinpath(f"ext_save_sim_{np.random.randint(10000)}.h5")
+        save_path = Path(tmpdir.strpath).joinpath(f"ext_save_footprints_{np.random.randint(10000)}.npy")
 
         # Create dummy data
         sim = EventSim()
@@ -303,32 +337,44 @@ class TestEvents:
                                        shape=shape, event_intensity=100, background_noise=1, gap_space=5,
                                        gap_time=2
                                        )
+        del sim
 
+        # load event map
         events = Events(event_dir)
-        df = events._load_events(event_dir)
-        arr, shape, dtype = events.get_event_map(event_dir, lazy=True)
+        _ = events._load_events(event_dir)
+        arr, _, _ = events.get_event_map(event_dir, lazy=False)
 
+        # extent events
         arr = arr.astype(np.int32)
         trace, _, _ = events.get_extended_events(video=Video(arr), save_path=save_path, return_array=True)
+        del events
+        del arr
 
+        # load from disk
         io = IO()
-        trace_loaded = io.load(save_path)
+        trace_loaded = io.load(save_path, lazy=False)
+        del io
 
         assert np.allclose(trace, trace_loaded)
+        del trace
+        del trace_loaded
 
-    def test_z_slice(self, z_slice=(10, 40), shape=(50, 100, 100)):
+    def test_z_slice(self, tmpdir, z_slice=(10, 40), shape=(50, 100, 100)):
 
-        with tempfile.TemporaryDirectory() as tmpdir:
-            # Create dummy data
-            sim = EventSim()
-            event_dir = sim.create_dataset(Path(tmpdir).joinpath("sim.h5"), shape=shape)
-            events = Events(event_dir, z_slice=z_slice)
+        # Create dummy data
+        sim = EventSim()
+        event_path = Path(tmpdir.strpath).joinpath("sim.h5")
+        event_dir = sim.create_dataset(event_path, shape=shape)
+        events = Events(event_dir, z_slice=z_slice)
 
-            # TODO there should be some kind of assert here, no?
+        # TODO there should be some kind of assert here, no?
 
-    def test_frame_to_time_conversion(self, shape=(50, 100, 100)):
+        del sim
+        del events
 
-        path = self.tmp_path.joinpath("frame_to_time_conv.h5")
+    def test_frame_to_time_conversion(self, tmpdir, shape=(50, 100, 100)):
+
+        path = Path(tmpdir.strpath).joinpath("frame_to_time_conv.h5")
 
         # Create dummy data
         sim = EventSim()
@@ -347,9 +393,12 @@ class TestEvents:
         assert "t0" in events.events.columns
         assert "t1" in events.events.columns
 
-    def test_load_data(self, shape=(50, 100, 100)):
+        del sim
+        del events
 
-        path = self.tmp_path.joinpath("test_load_data_sim.h5")
+    def test_load_data(self, tmpdir, shape=(50, 100, 100)):
+
+        path = Path(tmpdir.strpath).joinpath("test_load_data_sim.h5")
 
         # Create dummy data
         sim = EventSim()
@@ -364,13 +413,13 @@ class TestEvents:
         # test array
         events = Events(event_dir, data=np.zeros((5, 5, 5)))
 
-        # test object
-        events = Events(event_dir, data=bool)
+        del sim
+        del events
 
-    def test_multi_file_support(self, shape=(50, 100, 100)):
+    def test_multi_file_support(self, tmpdir, shape=(50, 100, 100)):
 
-        path_1 = self.tmp_path.joinpath("multi_file_support_1.h5")
-        path_2 = self.tmp_path.joinpath("multi_file_support_2.h5")
+        path_1 = Path(tmpdir.strpath).joinpath("multi_file_support_1.h5")
+        path_2 = Path(tmpdir.strpath).joinpath("multi_file_support_2.h5")
 
         sim = EventSim()
         event_dir_1 = sim.create_dataset(path_1, shape=shape)
@@ -384,10 +433,15 @@ class TestEvents:
         num_events = len(comb_events.events)
         assert total_num_events == num_events
 
-    @pytest.mark.skip(reason="legacy")
-    def test_get_event_timing(self, shape=(50, 100, 100)):
+        del sim
+        del event_1
+        del event_2
+        del comb_events
 
-        path = self.tmp_path.joinpath("test_get_event_timing_sim.h5")
+    @pytest.mark.skip(reason="legacy")
+    def test_get_event_timing(self, tmpdir, shape=(50, 100, 100)):
+
+        path = Path(tmpdir.strpath).joinpath("test_get_event_timing_sim.h5")
 
         # Create dummy data
         sim = EventSim()
@@ -396,10 +450,13 @@ class TestEvents:
         events = Events(event_dir)
         events.get_event_timing()
 
-    @pytest.mark.skip(reason="legacy")
-    def test_set_timings(self, shape=(50, 100, 100)):
+        del sim
+        del events
 
-        path = self.tmp_path.joinpath("test_set_timings_sim.h5")
+    @pytest.mark.skip(reason="legacy")
+    def test_set_timings(self, tmpdir, shape=(50, 100, 100)):
+
+        path = Path(tmpdir.strpath).joinpath("test_set_timings_sim.h5")
 
         # Create dummy data
         sim = EventSim()
@@ -408,10 +465,13 @@ class TestEvents:
         events = Events(event_dir)
         events.set_timings()
 
-    @pytest.mark.skip(reason="Not implemented")
-    def test_align(self, shape=(50, 100, 100)):
+        del sim
+        del events
 
-        path = self.tmp_path.joinpath("test_align.h5")
+    @pytest.mark.skip(reason="Not implemented")
+    def test_align(self, tmpdir, shape=(50, 100, 100)):
+
+        path = Path(tmpdir.strpath).joinpath("test_align.h5")
 
         # Create dummy data
         sim = EventSim()
@@ -420,12 +480,15 @@ class TestEvents:
         events = Events(event_dir)
         events.align()
 
+        del sim
+        del events
+
     @pytest.mark.parametrize(
         "param", [dict(index=None), dict(smooth=5), dict(gradient=True)]
     )
-    def test_get_average_event_trace(self, param, shape=(50, 100, 100)):
+    def test_get_average_event_trace(self, tmpdir, param, shape=(50, 100, 100)):
 
-        path = self.tmp_path.joinpath("test_get_average_event_trace.h5")
+        path = Path(tmpdir.strpath).joinpath("test_get_average_event_trace.h5")
 
         # Create dummy data
         sim = EventSim()
@@ -435,6 +498,10 @@ class TestEvents:
         avg = events.get_average_event_trace(**param)
 
         assert np.squeeze(avg.shape) == np.squeeze(np.zeros(shape=(shape[0])).shape)
+
+        del sim
+        del events
+        del avg
 
     def test_to_numpy(self):
 
@@ -454,6 +521,8 @@ class TestEvents:
 
         np.allclose(arr_expected, arr_out)
 
+        del events
+
     def test_frequency(self, n_groups=3, n_clusters=10):
 
         dg = helper.DummyGenerator(n_groups=n_groups, n_clusters=n_clusters, num_rows=200, trace_length=2)
@@ -469,18 +538,15 @@ class TestEvents:
         )
         assert freq.max().max() == 0
 
+        del dg
+        del events
+        del freq
+
 
 class TestVideo:
 
-    def setup_method(self):
-
-        self.tmp_dir = tempfile.TemporaryDirectory()
-        self.tmp_path = Path(self.tmp_dir.name)
-
-    def cleanup_method(self):
-        remove_temp_safe(self.tmp_dir)
-
-    def basic_load(self, input_type, z_slice, lazy, proj_func, window, shape=(50, 25, 25)):
+    @staticmethod
+    def basic_load(tmpdir, input_type, z_slice, lazy, proj_func, window, shape=(50, 25, 25)):
 
         data = np.random.random(size=shape)
 
@@ -492,8 +558,11 @@ class TestVideo:
 
         # Create dummy data
         rand_1, rand_2, rand_3 = [np.random.randint(1, int(10e4)) for _ in range(3)]
-        tmp_path = self.tmp_path.joinpath(f"{rand_1}_{rand_2}_{rand_3}_out")
+        tmp_path = Path(tmpdir.strpath).joinpath(f"{rand_1}_{rand_2}_{rand_3}_out")
 
+        io = IO()
+
+        vid = None
         if input_type == "numpy":
             vid = Video(data=data, lazy=lazy, z_slice=z_slice)
 
@@ -506,7 +575,6 @@ class TestVideo:
             path = tmp_path.with_suffix(input_type)
             loc = "data/ch0"
 
-            io = IO()
             io.save(path=path, data=data, loc=loc)
 
             vid = Video(data=path, loc="data/ch0", lazy=lazy, z_slice=z_slice)
@@ -515,9 +583,7 @@ class TestVideo:
 
             path = tmp_path.with_suffix(input_type)
 
-            io = IO()
             io.save(path=path, data=data)
-
             vid = Video(data=path, lazy=lazy, z_slice=z_slice)
 
         d = vid.get_data(in_memory=True)
@@ -544,28 +610,34 @@ class TestVideo:
             assert proj_org.shape == proj.shape, f"shape unequal: orig>{proj_org.shape} vs load>{proj.shape}"
             assert np.allclose(proj_org, proj)
 
+            del proj_org
+            del proj
+
+        del vid
+        del d
+
     @pytest.mark.parametrize("lazy", [True, False])
     @pytest.mark.parametrize("z_slice", [None, (10, 40), (10, -1)])
     @pytest.mark.parametrize("input_type", ["numpy", "dask", ".h5", ".tdb", ".tiff"])
-    def test_basic_loading(self, input_type, z_slice, lazy, proj_func=None, window=None):
-        self.basic_load(input_type, z_slice, lazy, proj_func, window=window)
+    def test_basic_loading(self, tmpdir, input_type, z_slice, lazy, proj_func=None, window=None):
+        self.basic_load(tmpdir, input_type, z_slice, lazy, proj_func, window=window)
 
     @pytest.mark.parametrize("lazy", [True, False])
     @pytest.mark.parametrize("z_slice", [None, (10, 40), (10, -1)])
     @pytest.mark.parametrize("input_type", ["numpy", "dask"])
     @pytest.mark.parametrize("proj_func", [np.mean, np.min, None])
-    def test_proj(self, input_type, z_slice, lazy, proj_func, window=None):
-        self.basic_load(input_type, z_slice, lazy, proj_func, window=window)
+    def test_proj(self, tmpdir, input_type, z_slice, lazy, proj_func, window=None):
+        self.basic_load(tmpdir, input_type, z_slice, lazy, proj_func, window=window)
 
     @pytest.mark.parametrize("lazy", [True, False])
     @pytest.mark.parametrize("z_slice", [None, (10, 40), (10, -1)])
     @pytest.mark.parametrize("input_type", ["numpy", "dask"])
     @pytest.mark.parametrize("proj_func", [np.mean, None])
     @pytest.mark.parametrize("window", [None, 3])
-    def test_windowed_loading(self, input_type, z_slice, lazy, proj_func, window):
+    def test_windowed_loading(self, tmpdir, input_type, z_slice, lazy, proj_func, window):
 
         try:
-            self.basic_load(input_type, z_slice, lazy, proj_func, window=window)
+            self.basic_load(tmpdir, input_type, z_slice, lazy, proj_func, window=window)
 
         except AssertionError:
             # TODO don't really know how to test for windowing here!?

@@ -363,9 +363,6 @@ class FeatureExtraction(CachedClass):
 
 class UMAP:
 
-    def setup_method(self):
-        umap = pytest.importorskip("umap")
-
     def __init__(self, n_neighbors=30, min_dist=0, n_components=2, metric="euclidean", ):
         self.reducer = umap.UMAP(n_neighbors=n_neighbors, min_dist=min_dist, n_components=n_components, metric=metric)
 

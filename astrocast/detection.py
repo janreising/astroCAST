@@ -1,8 +1,10 @@
 import json
 import logging
 import os
+import platform
 import random
 import shutil
+import time
 import traceback
 import warnings
 from distutils.version import LooseVersion
@@ -624,7 +626,8 @@ class Detector:
 
         return time_map
 
-    def _custom_slim_features(self, time_map, event_path, split_events: bool = True, parallel=True):
+    def _custom_slim_features(self, time_map, event_path, split_events: bool = True, parallel=True,
+                              dashboard_address=None):
 
         io = IO()
 
@@ -680,7 +683,8 @@ class Detector:
         if parallel:
 
             with Client(
-                    memory_limit='auto', processes=False, silence_logs=logging.ERROR
+                    memory_limit='auto', processes=False, silence_logs=logging.WARN,
+                    dashboard_address=dashboard_address,
             ) as client:
                 for e_id in e_ids:
                     futures.append(
@@ -697,6 +701,7 @@ class Detector:
                 progress(futures)
 
                 client.gather(futures)
+                # client.close()
 
         else:
 
@@ -787,9 +792,8 @@ class Detector:
 
         if parallel:
 
-            with Client(
-                    memory_limit='auto', processes=False, silence_logs=logging.ERROR
-            ) as client:
+            # with Client(memory_limit='auto', processes=False, silence_logs=logging.ERROR) as client:
+            with Client(memory_limit='auto', processes=False) as client:
                 for e_id in e_ids:
                     futures.append(
                         client.submit(
@@ -816,6 +820,8 @@ class Detector:
                 futures.append(npy_path)
 
         # Cleanup: Ensure the memory-mapped files are closed and deleted properly.
+        del data_
+        del event_
         self.cleanup_mmap(data_file_path)
         self.cleanup_mmap(event_file_path)
 
@@ -860,7 +866,13 @@ class Detector:
             file_path = Path(file_path)
 
         if file_path.is_file():
-            file_path.unlink()
+            try:
+                if platform.system() in ["Windows", "win32"]:
+                    time.sleep(5)
+
+                file_path.unlink()
+            except PermissionError as err:
+                logging.error(f"Unable to delete mmap file due to permissions: {err.strerror}")
 
     def characterize_event(
             self, event_id: int, t0: int, t1: int, data_info: Tuple[Sequence[int], np.dtype, str],

@@ -16,7 +16,7 @@ from astrocast.helper import EventSim
                     reason="Testing the app utilizes multiprocessing which does not properly work on MacOS.")
 class TestAppPreparation:
 
-    def setup_method(self):
+    def setup_class(self):
         # create dummy
         temp_dir = tempfile.TemporaryDirectory()
         tmpdir = Path(temp_dir.name)
@@ -42,7 +42,7 @@ class TestAppPreparation:
         # Give the server some time to start properly
         time.sleep(3)
 
-    def teardown_method(self):
+    def teardown_class(self):
         # Terminate the app process
         self.app_process.terminate()
         # Wait for the process to shut down
@@ -58,7 +58,7 @@ class TestAppPreparation:
                     reason="Testing the app utilizes multiprocessing which does not properly work on MacOS.")
 class TestAppAnalysis:
 
-    def setup_method(self):
+    def setup_class(self):
         # create dummy
         temp_dir = tempfile.TemporaryDirectory()
         tmpdir = Path(temp_dir.name)
@@ -89,7 +89,7 @@ class TestAppAnalysis:
         # Give the server some time to start properly
         time.sleep(3)
 
-    def teardown_method(self):
+    def teardown_class(self):
         # Terminate the app process
         self.app_process.terminate()
         # Wait for the process to shut down
