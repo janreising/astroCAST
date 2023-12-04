@@ -38,7 +38,7 @@ class TestConvertInput:
         self.temp_tiffs = temp_tiffs
 
     def teardown_method(self):
-        self.temp_dir.cleanup()
+        remove_temp_safe(self.temp_dir)
 
     @pytest.mark.parametrize("num_channels", [1, 2, 3])
     @pytest.mark.parametrize("name_prefix", [None, "channel_"])
@@ -282,7 +282,7 @@ class TestMotionCorrection:
         self.runner = CliRunner()
 
     def teardown_method(self):
-        self.temp_dir.cleanup()
+        remove_temp_safe(self.temp_dir)
 
     def run_with_parameters(self, params):
         args = [self.video_path.as_posix(), "--loc-in", self.loc]
@@ -318,7 +318,7 @@ class TestSubtractDelta:
         self.temp_file = temp_file
 
     def teardown_method(self):
-        self.temp_dir.cleanup()
+        remove_temp_safe(self.temp_dir)
 
     def test_default(self):
         out_file = self.temp_file.with_suffix(".def.h5")
@@ -451,7 +451,7 @@ class TestTrainDenoiserDenoise:
         self.model_path = model_path
 
     def teardown_method(self):
-        self.temp_dir.cleanup()
+        remove_temp_safe(self.temp_dir)
 
     def test_train_inf(self):
 
@@ -769,7 +769,7 @@ class TestMoveDataset:
         self.runner = CliRunner()
 
     def teardown_method(self):
-        self.temp_dir.cleanup()
+        remove_temp_safe(self.temp_dir)
 
     def test_move_dataset(self):
         temp_file_2 = self.temp_file.with_suffix(".2.h5")
@@ -825,7 +825,7 @@ class TestViewData:
         self.runner = CliRunner()
 
     def teardown_method(self):
-        self.temp_dir.cleanup()
+        remove_temp_safe(self.temp_dir)
 
     @pytest.mark.vis
     def test_view_data(self):
@@ -922,7 +922,7 @@ class TestViewDetectionResults:
         self.runner = CliRunner()
 
     def teardown_method(self):
-        self.temp_dir.cleanup()
+        remove_temp_safe(self.temp_dir)
 
     @pytest.mark.vis
     def test_view_detection_results(self):
@@ -969,49 +969,55 @@ class TestViewDetectionResults:
 
 
 def test_delete_h5_dataset():
-    with tempfile.TemporaryDirectory() as temp_dir:
-        temp_file = Path(temp_dir).joinpath("temp.h5")
+    temp_dir = tempfile.TemporaryDirectory()
 
-        # Create a temporary file to store the datasets
-        with h5.File(temp_file.as_posix(), "a") as f:
-            f.create_dataset("test", data=[1, 2, 3])
-            f.create_dataset("test2", data=[4, 5, 6])
+    temp_file = Path(temp_dir.name).joinpath("temp.h5")
 
-        assert temp_file.exists()
+    # Create a temporary file to store the datasets
+    with h5.File(temp_file.as_posix(), "a") as f:
+        f.create_dataset("test", data=[1, 2, 3])
+        f.create_dataset("test2", data=[4, 5, 6])
 
-        # Create a CliRunner to invoke the command
-        runner = CliRunner()
+    assert temp_file.exists()
 
-        # Use the CliRunner to invoke the command with the input file as argument
-        result = runner.invoke(delete_h5_dataset, [temp_file.as_posix(), "--loc", "test"])
+    # Create a CliRunner to invoke the command
+    runner = CliRunner()
 
-        # Check that the command ran successfully
-        if result.exit_code != 0:
-            print(f"error: {result.output}")
-            traceback.print_exception(*result.exc_info)
-            raise Exception
+    # Use the CliRunner to invoke the command with the input file as argument
+    result = runner.invoke(delete_h5_dataset, [temp_file.as_posix(), "--loc", "test"])
 
-        # Check that the dataset was deleted
-        with h5.File(temp_file.as_posix(), "r") as f:
-            assert "test2" in f
-            assert "test" not in f
+    # Check that the command ran successfully
+    if result.exit_code != 0:
+        print(f"error: {result.output}")
+        traceback.print_exception(*result.exc_info)
+        raise Exception
+
+    # Check that the dataset was deleted
+    with h5.File(temp_file.as_posix(), "r") as f:
+        assert "test2" in f
+        assert "test" not in f
+
+    remove_temp_safe(temp_dir)
 
 
 def test_visualize_h5():
-    with tempfile.TemporaryDirectory() as temp_dir:
-        temp_file = Path(temp_dir).joinpath("temp.h5")
-        A = np.random.randint(0, 100, size=(10, 100, 100))
-        B = np.random.randint(0, 100, size=(10, 100, 100))
+    temp_dir = tempfile.TemporaryDirectory()
 
-        with h5.File(temp_file.as_posix(), "a") as f:
-            f.create_dataset("data/ch0", data=A)
-            f.create_dataset("data/ch1", data=B)
-            f.create_dataset("mc/ch0", data=B)
-            f.create_dataset("mc/ch1", data=A)
-            f.create_group("dummy")
+    temp_file = Path(temp_dir.name).joinpath("temp.h5")
+    A = np.random.randint(0, 100, size=(10, 100, 100))
+    B = np.random.randint(0, 100, size=(10, 100, 100))
 
-        result = CliRunner().invoke(visualize_h5, [temp_file.as_posix()])
-        assert result.exit_code == 0, f"error: {result.output}"
+    with h5.File(temp_file.as_posix(), "a") as f:
+        f.create_dataset("data/ch0", data=A)
+        f.create_dataset("data/ch1", data=B)
+        f.create_dataset("mc/ch0", data=B)
+        f.create_dataset("mc/ch1", data=A)
+        f.create_group("dummy")
+
+    result = CliRunner().invoke(visualize_h5, [temp_file.as_posix()])
+    assert result.exit_code == 0, f"error: {result.output}"
+
+    remove_temp_safe(temp_dir)
 
 
 @pytest.mark.parametrize("z", ["0", "1,2"])
@@ -1021,32 +1027,35 @@ def test_climage(z, size, equalize):
     data = np.random.randint(0, 100, (4, 100, 100))
 
     # Create a temporary directory
-    with tempfile.TemporaryDirectory() as temp_dir:
-        temp_file = Path(temp_dir).joinpath("temp.h5")
+    temp_dir = tempfile.TemporaryDirectory()
 
-        # Create a temporary file to store the datasets
-        with h5.File(temp_file.as_posix(), "a") as f:
-            f.create_dataset("data/ch0", data=data)
+    temp_file = Path(temp_dir.name).joinpath("temp.h5")
 
-        # Create a CliRunner to invoke the command
-        runner = CliRunner()
+    # Create a temporary file to store the datasets
+    with h5.File(temp_file.as_posix(), "a") as f:
+        f.create_dataset("data/ch0", data=data)
 
-        # collect argumnts
-        args = [temp_file.as_posix()]
+    # Create a CliRunner to invoke the command
+    runner = CliRunner()
 
-        for z_ in z.split(","):
-            args.append(z_)
+    # collect argumnts
+    args = [temp_file.as_posix()]
 
-        args += ["--size", size[0], size[1], "--equalize", str(equalize)]
+    for z_ in z.split(","):
+        args.append(z_)
 
-        # Use the CliRunner to invoke the command with the input file as argument
-        result = runner.invoke(climage, args=args)
+    args += ["--size", size[0], size[1], "--equalize", str(equalize)]
 
-        # Check that the command ran successfully
-        if result.exit_code != 0:
-            print(f"error: {result.output}")
-            traceback.print_exception(*result.exc_info)
-            raise Exception
+    # Use the CliRunner to invoke the command with the input file as argument
+    result = runner.invoke(climage, args=args)
+
+    remove_temp_safe(temp_dir)
+
+    # Check that the command ran successfully
+    if result.exit_code != 0:
+        print(f"error: {result.output}")
+        traceback.print_exception(*result.exc_info)
+        raise Exception
 
 
 @pytest.mark.skip(reason="Not implemented")
