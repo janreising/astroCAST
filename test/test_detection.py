@@ -8,23 +8,16 @@ from astrocast.helper import EventSim, SampleInput, remove_temp_safe
 from astrocast.preparation import IO
 
 
-class Test_Detector:
-
-    def setup_method(self):
-        self.temp_dir = tempfile.TemporaryDirectory()
-        self.temp_path = Path(self.temp_dir.name)
-
-    def teardown_method(self):
-        remove_temp_safe(self.temp_dir)
+class TestDetector:
 
     @pytest.mark.parametrize("extension", [".h5"])
     @pytest.mark.parametrize("debug", [True, False])
-    def test_real_data(self, extension, debug):
+    def test_real_data(self, tmpdir, extension, debug):
 
         si = SampleInput()
         input_ = si.get_test_data(extension=extension)
 
-        path = self.temp_path.joinpath(f"{np.random.randint(10000)}_tempData")
+        path = Path(tmpdir.strpath).joinpath(f"{np.random.randint(10000)}_tempData")
         det = Detector(input_, output=path)
         det.run(loc="dff/ch0", lazy=False, debug=debug, z_slice=(0, 25))
 
@@ -45,8 +38,8 @@ class Test_Detector:
             assert dir_.joinpath("debug_active_pixels.tiff").is_file()
             assert dir_.joinpath("debug_active_pixels_morphed.tiff").is_file()
 
-    def test_sim_data(self):
-        path = self.temp_path.joinpath(f"{np.random.randint(10000)}_sim.h5")
+    def test_sim_data(self, tmpdir):
+        path = Path(tmpdir.strpath).joinpath(f"{np.random.randint(10000)}_sim.h5")
 
         loc = "dff/ch0"
 
@@ -73,12 +66,12 @@ class Test_Detector:
         events = Events(dir_)
         assert np.allclose(len(events), num_events, rtol=0.15), f"Found {len(events)} instead of {num_events}."
 
-    def test_on_disk_sharing(self, extension=".h5", debug=False):
+    def test_on_disk_sharing(self, tmpdir, extension=".h5", debug=False):
 
         si = SampleInput()
         input_ = si.get_test_data(extension=extension)
 
-        path = self.temp_path.joinpath(f"{np.random.randint(10000)}_tempData")
+        path = Path(tmpdir.strpath).joinpath(f"{np.random.randint(10000)}_tempData")
 
         det = Detector(input_, output=path)
         det.run(loc="dff/ch0", lazy=False, debug=debug, use_on_disk_sharing=True)
