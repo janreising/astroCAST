@@ -1248,7 +1248,7 @@ class Analysis:
 
                     else:
 
-                        id_vars = ["index", hue] if hue != None else "index"
+                        id_vars = ["index", hue] if hue is not None else "index"
 
                         events = events.reset_index()
                         events = events.melt(id_vars=id_vars, value_vars=col)
@@ -1290,7 +1290,7 @@ class Analysis:
             frames = get_frames()
 
             if len(frames) > 0:
-                return self.plot_images([data], frames, lbls=["event map"], pixels=[])
+                return self.plot_images([data], frames, lbls=["event map"])
             else:
                 return None
 

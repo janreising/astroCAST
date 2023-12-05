@@ -192,7 +192,7 @@ class Linkage(CachedClass):
             event_group.events = event_group.events[event_group.events[step_one_column] == step_one_group]
 
             barycenter, lookup_table = self.get_barycenters(
-                event_group, z_threshold=step_one_threshold, default_cluster=default_cluster, **step_one_param
+                event_group, cutoff=step_one_threshold, default_cluster=default_cluster, **step_one_param
             )
 
             combined_barycenters.append(barycenter)

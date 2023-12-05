@@ -858,7 +858,6 @@ class Detector:
         Closes the memory-mapped object and deletes the associated file.
 
         Args:
-            mmap_obj: The memory-mapped object to be closed.
             file_path: The file path of the memory-mapped file.
         """
 

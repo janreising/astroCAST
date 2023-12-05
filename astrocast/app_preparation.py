@@ -245,7 +245,7 @@ class Explorer:
 
             deltaObj = Delta(data=data, loc="")
             result = deltaObj.run(
-                method=input.delta_method(), window=input.delta_window(), processing_chunks=(-1, 1, 1),
+                method=input.delta_method(), window=input.delta_window(), chunks=(-1, 1, 1),
                 overwrite_first_frame=input.delta_overwrite_first_frame()
             )
 
@@ -257,7 +257,7 @@ class Explorer:
 
             deltaObj = Delta(data=small_data, loc="")
             result = deltaObj.run(
-                method=input.delta_method(), window=input.delta_window(), processing_chunks=(-1, 1, 1),
+                method=input.delta_method(), window=input.delta_window(), chunks=(-1, 1, 1),
                 overwrite_first_frame=input.delta_overwrite_first_frame()
             )
 
@@ -452,6 +452,7 @@ class Explorer:
         @output
         @render.plot
         def original():
+            """ Get raw data prior to analysis """
 
             data = load_data()
             frames = get_frames()
