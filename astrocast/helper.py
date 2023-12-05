@@ -93,7 +93,7 @@ def wrapper_local_cache(f):
         elif isinstance(arg, (bool, int, tuple)):
             return str(arg)
 
-        elif isinstance(arg, (str)):
+        elif isinstance(arg, str):
 
             if len(arg) < 10:
                 return arg
@@ -846,7 +846,6 @@ def is_ragged(data):
 
             for i in range(1, data.shape[0]):
 
-                item = data[i]
                 item = data[i] if isinstance(data[i], np.ndarray) else data[i].compute()
 
                 cur_len = len(item)

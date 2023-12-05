@@ -10,7 +10,7 @@ import dask.array as da
 import tiledb
 from tifffile import tifffile
 
-from astrocast.helper import SampleInput, remove_temp_safe
+from astrocast.helper import SampleInput
 from astrocast.preparation import Delta, Input, IO, MotionCorrection
 
 

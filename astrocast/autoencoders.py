@@ -263,7 +263,7 @@ class CNN_Autoencoder(nn.Module):
             pbar.set_description(
                 f"train_Loss:{train_loss / len(train_loader):.4f}, val_loss:{val_loss / len(val_loader):.4f}"
             )
-            pbar.update(1)
+            pbar.update()
         pbar.close()
 
         # Evaluation
@@ -365,7 +365,7 @@ class CNN_Autoencoder(nn.Module):
 
         fig = None
         for nr in range(num_rounds):
-            fig, axx = plt.subplots(3, num_samples, figsize=figsize, sharey=False)
+            fig, axx = plt.subplots(3, num_samples, figsize=figsize)
 
             for i, idx in enumerate(np.random.randint(0, len(X_test) - 1, size=num_samples)):
                 inp = X_test[idx, :]
@@ -700,7 +700,7 @@ class TimeSeriesRnnAE:
                 descr += f"P{patience_counter}"
 
                 iterator.set_description(descr)
-                iterator.update(1)
+                iterator.update()
 
             elif show_mode == "notebook":
 
@@ -902,7 +902,7 @@ class TimeSeriesRnnAE:
         x_val, y_val, latent, losses = self.embedd(dataloader)
 
         n_samples = min(len(x_val), n_samples)
-        fig, axx = plt.subplots(n_samples, 2, figsize=figsize, sharey=False, sharex=sharex)
+        fig, axx = plt.subplots(n_samples, 2, figsize=figsize, sharex=sharex)
 
         for i, idx in enumerate(np.random.randint(0, len(x_val), size=n_samples)):
             x = np.squeeze(x_val[idx])

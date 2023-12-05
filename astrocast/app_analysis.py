@@ -140,7 +140,7 @@ class Analysis:
         )
 
         summary_nav = ui.nav(
-            "Summary statstics", ui.layout_sidebar(
+            "Summary statistics", ui.layout_sidebar(
                 ui.panel_sidebar(
                     ui.row(
                         ui.column(3, ui.input_switch("in_switch_correlation", "correlation")),
@@ -153,7 +153,7 @@ class Analysis:
                             ui.column(3, ui.input_switch("in_switch_fliers", "show outliers", value=True)), ),
                         ui.panel_conditional(
                             "input.in_select_type == 'violinplot'",
-                            ui.column(3, ui.input_switch("in_switch_cut", "cut", value=False)), ), ),  # ui.br(),
+                            ui.column(3, ui.input_switch("in_switch_cut", "cut")), ), ),  # ui.br(),
                     ui.h5("Statistics"), ui.output_data_frame("out_table_summary"), ), ui.panel_main(
                     ui.output_plot("out_plot_boxplot")
                 )
@@ -163,7 +163,7 @@ class Analysis:
         outliers = ui.nav(
             "Outliers", ui.layout_sidebar(
                 ui.panel_sidebar(
-                    ui.input_switch("in_switch_calc_outliers", "calculate outliers", value=False),
+                    ui.input_switch("in_switch_calc_outliers", "calculate outliers"),
                     ui.h5("NaN settings"),
                     ui.input_select("in_select_nan_settings", "", choices=["column", "rows", "fill"]), ui.h5(""),
                     ui.h5("UMAP settings"), ui.row(
@@ -178,8 +178,8 @@ class Analysis:
                         ui.column(4, ui.input_numeric("in_numeric_size", "size", value=8)),
                         ui.column(4, ui.input_numeric("in_numeric_alpha", "alpha", value=1, min=0.001, max=1)),
                         ui.column(4, ui.input_numeric("in_numeric_plot_max_cluster", "max traces", value=5)), ), ui.row(
-                        ui.column(4, ui.input_switch("in_switch_separate_plots", "Separate", value=False)),
-                        ui.column(4, ui.input_switch("in_switch_share_y", "share y", value=False)), ui.column(4, ), ),
+                        ui.column(4, ui.input_switch("in_switch_separate_plots", "Separate")),
+                        ui.column(4, ui.input_switch("in_switch_share_y", "share y")), ui.column(4, ), ),
                     ui.br(), ui.h5("Clusters"), ui.output_data_frame("out_data_frame_clusters"), width=3
                 ), ui.panel_main(
                     ui.output_plot("out_plot_umap"), ui.output_plot("out_plot_traces", height="600px", width="600px"), )
@@ -230,11 +230,11 @@ class Analysis:
                         ui.input_switch("in_switch_ext_original", "show original", value=True), ui.panel_conditional(
                             "input.in_switch_ext_random",
                             ui.input_numeric("in_numeric_ext_num", "num_traces", value=3), ),
-                        ui.input_text("in_text_ext_ids", "events ids", value=""),
+                        ui.input_text("in_text_ext_ids", "events ids"),
                         ui.input_numeric("in_numeric_panel_height_ext", "panel height", value=100),
                         ui.input_numeric("in_numeric_plot_columns_ext", "plot columns", value=1), ui.row(
-                            ui.column(6, ui.input_switch("in_switch_ext_sharex", "share x", value=False)),
-                            ui.column(6, ui.input_switch("in_switch_ext_sharey", "share y", value=False)), )
+                            ui.column(6, ui.input_switch("in_switch_ext_sharex", "share x")),
+                            ui.column(6, ui.input_switch("in_switch_ext_sharey", "share y")), )
                     )
                 ), ui.panel_main(
                     ui.output_ui("out_ext_dyn_plot")
@@ -316,11 +316,11 @@ class Analysis:
                         ui.input_switch("in_switch_norm_original", "show original", value=True), ui.panel_conditional(
                             "input.in_switch_norm_random",
                             ui.input_numeric("in_numeric_norm_num", "num_traces", value=3), ),
-                        ui.input_text("in_text_norm_ids", "events ids", value=""),
+                        ui.input_text("in_text_norm_ids", "events ids"),
                         ui.input_numeric("in_numeric_panel_height", "panel height", value=100),
                         ui.input_numeric("in_numeric_plot_columns", "plot columns", value=1), ui.row(
-                            ui.column(6, ui.input_switch("in_switch_norm_sharex", "share x", value=False)),
-                            ui.column(6, ui.input_switch("in_switch_norm_sharey", "share y", value=False)), )
+                            ui.column(6, ui.input_switch("in_switch_norm_sharex", "share x")),
+                            ui.column(6, ui.input_switch("in_switch_norm_sharey", "share y")), )
                     )
                 ), ui.panel_main(
                     ui.output_ui("out_dyn_plot")
@@ -404,7 +404,7 @@ class Analysis:
                                         ), ), ), ), xui.card(
                                 xui.card_header("Plotting"), ui.input_numeric(
                                     "in_numeric_cnn_num_samples", "num_samples", value=9
-                                ), ui.input_switch("in_switch_cnn_show_diff", "show latent diff", value=False)
+                                ), ui.input_switch("in_switch_cnn_show_diff", "show latent diff")
                             )
                         ), ), ui.panel_conditional(
                         "input.in_select_encoding_options == 'Recurrent Neural Network (RNN)'", xui.card(
@@ -635,9 +635,7 @@ class Analysis:
                                                 value=True
                                             )
                                         ), ui.column(
-                                            4, ui.input_switch(
-                                                "in_switch_contrast_balance_test", "balance test set", value=False
-                                            )
+                                            4, ui.input_switch("in_switch_contrast_balance_test", "balance test set")
                                         ), ), ui.input_select(
                                         "in_select_contrast_classifier", "Classifier",
                                         choices=[m for m in Discriminator.get_available_models() if "Classifier" in m],
@@ -649,13 +647,10 @@ class Analysis:
                                     "input.in_switch_contrast_use_classifier == false",
                                     ui.h5("Hierarchical Clustering"), ui.row(
                                         ui.column(
-                                            6, ui.input_switch(
-                                                "in_switch_contrast_use_embedding", "use_embedding", value=False
-                                            ), ), ui.column(
+                                            6, ui.input_switch("in_switch_contrast_use_embedding", "use_embedding"), ),
+                                        ui.column(
                                             6, ui.column(
-                                                4, ui.input_switch(
-                                                    "in_select_contrasts_cl_transpose", "transpose", value=False
-                                                )
+                                                4, ui.input_switch("in_select_contrasts_cl_transpose", "transpose")
                                             ), ), ), ui.row(
                                         ui.column(
                                             6, ui.input_numeric(
@@ -704,9 +699,8 @@ class Analysis:
                                                 choices=["viridis"]
                                             )
                                         ), ui.column(
-                                            4, ui.input_text(
-                                                "in_text_contrasts_cl_group_color_col", "group color column", value=""
-                                            )
+                                            4, ui.input_text("in_text_contrasts_cl_group_color_col",
+                                                             "group color column")
                                         )
                                     ), )
                             )
@@ -728,7 +722,7 @@ class Analysis:
                         ui.panel_sidebar(
                             xui.card(
                                 xui.card_header("Incidences"),
-                                ui.input_switch("in_switch_inc_create_dummy", "create dummy incidences", value=False),
+                                ui.input_switch("in_switch_inc_create_dummy", "create dummy incidences"),
                                 ui.panel_conditional(
                                     "input.in_switch_inc_create_dummy != true",
                                     ui.input_file("in_file_inc_file", label="incidence file path"), ),
@@ -757,9 +751,7 @@ class Analysis:
                                             "in_switch_inc_balance_training", "balance training set", value=True
                                         )
                                     ), ui.column(
-                                        4, ui.input_switch(
-                                            "in_switch_inc_balance_test", "balance test set", value=False
-                                        )
+                                        4, ui.input_switch("in_switch_inc_balance_test", "balance test set")
                                     ), ), ui.panel_conditional(
                                     "input.in_switch_inc_predict_coincidence", ui.h5("Coincidence Classification"),
                                     ui.input_select(
@@ -898,10 +890,10 @@ class Analysis:
                                 value = [float(v) for v in value]
 
                             else:
-                                ui.notification_show(f"unknown datatype ({i}) type: {typ}", type="error", duration=5)
+                                ui.notification_show(f"unknown datatype ({i}) type: {typ}", type="error")
 
                         else:
-                            ui.notification_show(f"unknown filter ({i}) type: {type(value)}", type="error", duration=5)
+                            ui.notification_show(f"unknown filter ({i}) type: {type(value)}", type="error")
 
                         filters[key] = value
 
@@ -952,7 +944,7 @@ class Analysis:
                     events.events = df
 
             elif use_extend:
-                ui.notification_show("cannot extend videos", type="error", duration=5)
+                ui.notification_show("cannot extend videos", type="error")
 
             return events
 
@@ -974,7 +966,8 @@ class Analysis:
                             instructions["default"] = mode
 
                         except Exception as err:
-                            ui.notification_show(f"No valid mode: {mode}", duration=5, type="error")
+                            ui.notification_show(f"No valid mode: {mode}", type="error")
+                            logging.warning(f"Error: {err}")
 
                 else:
 
@@ -1095,9 +1088,7 @@ class Analysis:
                 # events = self.get_table_excl(events)
                 events = self.get_table_rounded(events)
 
-                events = render.DataTable(
-                    events, height="500px", summary=True, filters=False, row_selection_mode="single"
-                )
+                events = render.DataTable(events, row_selection_mode="single")
 
                 return events
 
@@ -1248,7 +1239,7 @@ class Analysis:
 
                     else:
 
-                        id_vars = ["index", hue] if hue != None else "index"
+                        id_vars = ["index", hue] if hue is not None else "index"
 
                         events = events.reset_index()
                         events = events.melt(id_vars=id_vars, value_vars=col)
@@ -1279,7 +1270,7 @@ class Analysis:
                     return fig
 
             else:
-                fig, ax = plt.subplots(1, 1, figsize=(10, 10))
+                fig, ax = plt.subplots(figsize=(10, 10))
                 return fig
 
         @output
@@ -1290,7 +1281,7 @@ class Analysis:
             frames = get_frames()
 
             if len(frames) > 0:
-                return self.plot_images([data], frames, lbls=["event map"], pixels=[])
+                return self.plot_images([data], frames, lbls=["event map"])
             else:
                 return None
 
@@ -1308,9 +1299,7 @@ class Analysis:
                 events = events[[col for col in events.columns if col.startswith("v")]]
 
                 if events.isnull().values.any():
-                    ui.notification_show(
-                        "None values present. Trying to fix automatically.", type="error", duration=5
-                    )
+                    ui.notification_show("None values present. Trying to fix automatically.", type="error")
 
                     ui.input_select("in_select_nan_settings", "", choices=["column", "rows", "fill"]),
 
@@ -1337,10 +1326,8 @@ class Analysis:
                 events = events.events
 
                 # embed
-                reducer = umap.UMAP(
-                    n_neighbors=input.in_numeric_neighbors(), min_dist=input.in_numeric_min_dist(), n_components=2,
-                    metric=input.in_text_metric()
-                )
+                reducer = umap.UMAP(n_neighbors=input.in_numeric_neighbors(), min_dist=input.in_numeric_min_dist(),
+                                    metric=input.in_text_metric())
 
                 embedding = reducer.fit_transform(events.values)
 
@@ -1350,7 +1337,7 @@ class Analysis:
                     prediction_data=True
                 )
 
-                hdb_labels = hdb.fit_predict(embedding, y=None)
+                hdb_labels = hdb.fit_predict(embedding)
 
                 return embedding, hdb_labels
             return None, None
@@ -1362,7 +1349,7 @@ class Analysis:
             embedding, hdb_labels = get_embedding()
 
             if embedding is not None:
-                fig, ax = plt.subplots(1, 1)
+                fig, ax = plt.subplots()
 
                 palette = sns.color_palette("husl", len(np.unique(hdb_labels)))
 
@@ -1409,11 +1396,9 @@ class Analysis:
                 events = events.sample(input.in_numeric_plot_max_cluster())
 
             if input.in_switch_separate_plots():
-                fig, axx = plt.subplots(
-                    len(events), 1, figsize=(20, 5 * len(events)), sharey=input.in_switch_share_y()
-                )
+                fig, axx = plt.subplots(len(events), figsize=(20, 5 * len(events)), sharey=input.in_switch_share_y())
             else:
-                fig, axx = plt.subplots(1, 1, figsize=(20, 5))
+                fig, axx = plt.subplots(figsize=(20, 5))
                 axx = [axx for _ in range(len(events))]
 
             for i, (idx, row) in enumerate(events.iterrows()):
@@ -1455,7 +1440,7 @@ class Analysis:
         def out_ext_dyn_plot():
 
             dyn_height = f"{200 + input.in_numeric_panel_height_ext() * input.in_numeric_norm_num()}px"
-            return xui.output_plot("out_plot_ext", width="100%", height=dyn_height)
+            return xui.output_plot("out_plot_ext", height=dyn_height)
 
         @output
         @render.plot()
@@ -1552,7 +1537,7 @@ class Analysis:
         def out_dyn_plot():
 
             dyn_height = f"{200 + input.in_numeric_panel_height() * input.in_numeric_norm_num()}px"
-            return xui.output_plot("out_plot_norm", width="100%", height=dyn_height)
+            return xui.output_plot("out_plot_norm", height=dyn_height)
 
         @output
         @render.plot()
@@ -1660,9 +1645,7 @@ class Analysis:
 
                         nan_settings = input.in_select_encoder_fe_nan_settings()
                         if nan_settings == "" or nan_settings is None:
-                            ui.notification_show(
-                                "NaN values present. Please choose a NaN behavior.", type="error", duration=5
-                            )
+                            ui.notification_show("NaN values present. Please choose a NaN behavior.", type="error")
                             return None
 
                         elif nan_settings == "fill":
@@ -1735,11 +1718,10 @@ class Analysis:
                     return pd.DataFrame(X_embedded)
 
                 elif input.in_select_dimensionality_reduction_options() == "tSNE":
-                    X_embedded = TSNE(
-                        n_components=input.in_numeric_encoding_tsne_n_components(), learning_rate='auto', init='random',
-                        perplexity=input.in_numeric_encoding_tsne_early_exaggeration(),
-                        n_iter=input.in_numeric_encoding_tsne_n_iter(),
-                        early_exaggeration=input.in_numeric_encoding_tsne_early_exaggeration(), ).fit_transform(
+                    X_embedded = TSNE(n_components=input.in_numeric_encoding_tsne_n_components(), init='random',
+                                      perplexity=input.in_numeric_encoding_tsne_early_exaggeration(),
+                                      n_iter=input.in_numeric_encoding_tsne_n_iter(),
+                                      early_exaggeration=input.in_numeric_encoding_tsne_early_exaggeration()).fit_transform(
                         embedding_data
                     )
                     return pd.DataFrame(X_embedded)
@@ -1771,7 +1753,7 @@ class Analysis:
                 elif isinstance(embedding, np.ndarray):
                     embedding = pd.DataFrame({"trace": embedding.tolist()})
 
-                return render.DataTable(embedding, height="500px", summary=True, row_selection_mode="none")
+                return render.DataTable(embedding)
             return None
 
         @reactive.Effect
@@ -1794,7 +1776,7 @@ class Analysis:
                 reduction.columns = [f"dim{i}" for i in range(len(reduction.columns))]
                 reduction = reduction.round(3)
 
-                return render.DataTable(reduction, height="500px", summary=True, row_selection_mode="none")
+                return render.DataTable(reduction)
             return None
 
         ####
@@ -1808,7 +1790,7 @@ class Analysis:
                 dim1 = input.out_select_reduction_dim1()
                 dim2 = input.out_select_reduction_dim2()
 
-                fig, ax = plt.subplots(1, 1)
+                fig, ax = plt.subplots()
                 ax.scatter(reduction[dim1], reduction[dim2])
                 ax.set_xlabel(dim1)
                 ax.set_ylabel(dim2)
@@ -1842,10 +1824,9 @@ class Analysis:
                     data = event_obj.events.trace.tolist()
                     target_length = len(data[0])
 
-                    cnn = CNN_Autoencoder(
-                        target_length, dropout=input.in_numeric_cnn_dropout(), l1_reg=input.in_numeric_cnn_regularize(),
-                        latent_size=input.in_numeric_cnn_latent_size(), add_noise=None
-                    )
+                    cnn = CNN_Autoencoder(target_length, dropout=input.in_numeric_cnn_dropout(),
+                                          l1_reg=input.in_numeric_cnn_regularize(),
+                                          latent_size=input.in_numeric_cnn_latent_size())
 
                     with reactive.isolate():
                         train_split = input.in_slider_cnn_split()
@@ -1888,7 +1869,7 @@ class Analysis:
                 cnn, _ = get_CNN()
 
                 if cnn is not None:
-                    fig, ax = plt.subplots(1, 1, figsize=(9, 4))
+                    fig, ax = plt.subplots(figsize=(9, 4))
                     losses = np.array(cnn.losses)
 
                     ax.plot(losses[:, 0], color="black", label="training")
@@ -1955,7 +1936,7 @@ class Analysis:
 
             if input.in_switch_encoding_use_rnn():
 
-                rnnAE, (X_train, X_val, X_test) = get_RNN()
+                rnnAE, _ = get_RNN()
                 event_obj = get_events_obj_normalized()
 
                 if rnnAE is not None and event_obj is not None:
@@ -2124,9 +2105,7 @@ class Analysis:
                 clf = discr.train_classifier(classifier=input.in_select_contrast_classifier(), **extra_arguments)
 
                 norm_conf_matrix = input.in_select_contrast_norm_confusion_matrix()
-                evaluation = discr.evaluate(
-                    regression=False, cutoff=None, normalize=norm_conf_matrix if norm_conf_matrix != "" else None
-                )
+                evaluation = discr.evaluate(cutoff=None, normalize=norm_conf_matrix if norm_conf_matrix != "" else None)
 
                 predictions = clf.predict(embedding)
 
@@ -2167,7 +2146,7 @@ class Analysis:
 
                 # plot UMAP
                 if embedding.shape[1] > 2:
-                    umap_ = umap.UMAP(n_components=2)
+                    umap_ = umap.UMAP()
                     two_dim_embedding = umap_.fit_transform(embedding)
                 else:
                     two_dim_embedding = embedding
@@ -2250,9 +2229,9 @@ class Analysis:
                 else:
                     truncate_mode = "level"
 
-                dendo_plot = dendrogram(
+                _ = dendrogram(
                     Z, p=p, truncate_mode=truncate_mode, color_threshold=7, orientation="left", leaf_font_size=12,
-                    above_threshold_color="black", ax=ax1, no_plot=False, get_leaves=True, show_leaf_counts=True
+                    above_threshold_color="black", ax=ax1,
                 )
 
                 # Barplot
@@ -2411,7 +2390,7 @@ class Analysis:
                 labels = ["train", "test"]
 
                 if isinstance(evaluation[0], float):
-                    fig, ax = plt.subplots(1, 1)
+                    fig, ax = plt.subplots()
                     for i in range(len(evaluation)):
                         ax.scatter(i, evaluation[i], label=labels[i])
 

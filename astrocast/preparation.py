@@ -509,37 +509,43 @@ class IO:
 
         return data
 
-    def _load_npy(self, path, lazy=False, chunks=None, infer_strategy="balanced", z_slice=None):
+    def _load_npy(self, path: Union[Path, str], lazy=False, chunks=None, infer_strategy="balanced", z_slice=None):
 
-        z0 = z1 = None
+        if isinstance(path, str):
+            path = Path(path)
+
+        # load data
+        if path.is_dir():
+            data = da.from_npy_stack(path.as_posix(), mmap_mode='r')
+
+        elif path.is_file():
+            data = np.load(path.as_posix(), mmap_mode='r')
+        else:
+            raise FileNotFoundError(f"{path} is neither directory nor file")
+
+        # select frames
         if z_slice is not None:
             z0, z1 = z_slice
+            data = data[z0:z1]
 
+        # convert to lazy/not-lazy
         if lazy:
-            try:
+            chunks = self.infer_chunks_from_array(arr=data, strategy=infer_strategy, chunks=chunks)
 
-                data = da.from_npy_stack(path)
-                if z_slice is not None:
-                    data = data[z0:z1]
+            # re-chunk if necessary
+            if isinstance(data, da.Array) and data.chunksize != chunks:
+                data = data.rechunk(chunks=chunks)
 
-                return data
-
-            except NotADirectoryError:
-                mmap = np.load(path, mmap_mode="r")
-
-                if z_slice is not None:
-                    mmap = mmap[z0:z1]
-
-                chunks = self.infer_chunks_from_array(arr=mmap, strategy=infer_strategy, chunks=chunks)
-
-                return da.from_array(mmap, chunks=chunks)
+            # convert to da.Array
+            else:
+                data = da.from_array(x=data, chunks=chunks)
 
         else:
-            data = np.load(path.as_posix(), allow_pickle=True)
-            if z_slice is not None:
-                data = data[z0:z1]
 
-            return data
+            if isinstance(data, da.Array):
+                data = data.compute()
+
+        return data
 
     def _load_tdb(self, path, lazy=False, chunks=None, infer_strategy="balanced", z_slice=None):
 
@@ -883,7 +889,7 @@ class IO:
                         if loc_out in f:
                             raise ValueError(f"dataset already exists in file {fpath}:{loc_out}\n{list(f.keys())}")
 
-                        ds = f.create_dataset(
+                        _ = f.create_dataset(
                             name=loc_out, data=arr, shape=arr.shape, chunks=chunks, compression=compression,
                             shuffle=False, dtype=arr.dtype
                         )
@@ -1095,38 +1101,39 @@ class IO:
 
 
 class MotionCorrection:
+    # noinspection GrazieInspection
     """ Class for performing motion correction based on the Jax-accelerated implementation of NoRMCorre.
 
-    Args:
-        working_directory: Working directory for temporary files.
-            If not provided, the temporary directory is created.
-        logging_level: Sets the level at which information is logged to the console as an
-            integer value. The built-in levels in the logging module are, in increasing order of severity:
-            debug (10), info (20), warning (30), error (40), critical (50).
+        Args:
+            working_directory: Working directory for temporary files.
+                If not provided, the temporary directory is created.
+            logging_level: Sets the level at which information is logged to the console as an
+                integer value. The built-in levels in the logging module are, in increasing order of severity:
+                debug (10), info (20), warning (30), error (40), critical (50).
 
-    .. note::
+        .. note::
 
-        For more information see the `accelerated <https://github.com/apasarkar/jnormcorre>`_ (used here),
-        `original implementation <https://github.com/flatironinstitute/NoRMCorre>`_ and the associated
-        publication Pnevmatikakis et al. 2017 [#normcorre]_
+            For more information see the `accelerated <https://github.com/apasarkar/jnormcorre>`_ (used here),
+            `original implementation <https://github.com/flatironinstitute/NoRMCorre>`_ and the associated
+            publication Pnevmatikakis et al. 2017 [#normcorre]_
 
-    .. caution::
+        .. caution::
 
-        Non-rigid motion correction is not always necessary. Sometimes, rigid motion correction will be sufficient,
-        and it will lead to significant performance gains in terms of speed. Check your data before and after rigid
-        motion correction to decide what is best (pw_rigid flag; see below).
+            Non-rigid motion correction is not always necessary. Sometimes, rigid motion correction will be sufficient,
+            and it will lead to significant performance gains in terms of speed. Check your data before and after rigid
+            motion correction to decide what is best (pw_rigid flag; see below).
 
-    **Example**::
+        **Example**::
 
-        mc = MotionCorrection()
-        mc.run('path/to/file.h5', loc='data/ch0')
-        mc.save(output='path/to/file.h5', loc='mc/ch0')
+            mc = MotionCorrection()
+            mc.run('path/to/file.h5', loc='data/ch0')
+            mc.save(output='path/to/file.h5', loc='mc/ch0')
 
-    .. rubric:: Footnotes
+        .. rubric:: Footnotes
 
-    .. [#normcorre] Pnevmatikakis EA, Giovannucci A. NoRMCorre: An online algorithm for piecewise rigid motion correction of calcium imaging data. Journal of neuroscience methods. 2017 Nov 1;291:83-94. `https://doi.org/10.1016/j.jneumeth.2017.07.031 <https://doi.org/10.1016/j.jneumeth.2017.07.031>`_.
+        .. [#normcorre] Pnevmatikakis EA, Giovannucci A. NoRMCorre: An online algorithm for piecewise rigid motion correction of calcium imaging data. Journal of neuroscience methods. 2017 Nov 1;291:83-94. `https://doi.org/10.1016/j.jneumeth.2017.07.031 <https://doi.org/10.1016/j.jneumeth.2017.07.031>`_.
 
-    """
+        """
 
     def __init__(self, working_directory: Union[str, Path] = None, logging_level: int = logging.INFO):
 
@@ -1452,27 +1459,28 @@ class Delta:
             self, window: int, method: Literal['background', 'dF', 'dFF'] = "dF",
             chunk_strategy: Literal['balanced', 'XY', 'Z'] = "Z", chunks=None, overwrite_first_frame: bool = True
     ) -> Union[np.ndarray, da.Array]:
+        # noinspection GrazieInspection
         """
-        Performs bleach correction on the input data using specified methods and parameters.
+                Performs bleach correction on the input data using specified methods and parameters.
 
-        Args:
-            window: The size of the window for the minimum filter.
-            method: The method to use for delta calculation.
-            chunk_strategy: Strategy to infer appropriate chunk size
-            chunks: User-defined chunk size (ignores inference strategy).
-            overwrite_first_frame: A flag indicating whether to overwrite the values of the first frame with the second frame after delta calculation.
+                Args:
+                    window: The size of the window for the minimum filter.
+                    method: The method to use for delta calculation.
+                    chunk_strategy: Strategy to infer appropriate chunk size
+                    chunks: User-defined chunk size (ignores inference strategy).
+                    overwrite_first_frame: A flag indicating whether to overwrite the values of the first frame with the second frame after delta calculation.
 
-        Raises:
-            ValueError: If the input data type is not recognized.
+                Raises:
+                    ValueError: If the input data type is not recognized.
 
-        Notes:
-            The function supports different types of input data, including numpy arrays, file paths (specifically .tdb and .h5 files), and Dask arrays. It also handles parallel execution for large datasets, especially when input is a .tdb file.
+                Notes:
+                    The function supports different types of input data, including numpy arrays, file paths (specifically .tdb and .h5 files), and Dask arrays. It also handles parallel execution for large datasets, especially when input is a .tdb file.
 
-        .. warning::
+                .. warning::
 
-            For .tdb files as input, this function will overwrite the provided file.
+                    For .tdb files as input, this function will overwrite the provided file.
 
-        """
+                """
 
         # Prepare the data for processing
         data = self._prepare_data(self.data, loc=self.loc, chunk_strategy=chunk_strategy, chunks=chunks)
@@ -1550,26 +1558,27 @@ class Delta:
             chunk_strategy: Literal['balanced', 'XY', 'Z'] = "balanced", chunks: Tuple[int, int, int] = None,
             compression: Literal['gzip', 'szip', 'lz4'] = None, overwrite: bool = False
     ):
+        # noinspection GrazieInspection
         """
-        Saves the result data to a specified file.
+                Saves the result data to a specified file.
 
-        This method wraps the functionality of the `IO` class's `save` method, allowing for saving the data in different
-        chunk strategies and with various compression methods.
+                This method wraps the functionality of the `IO` class's `save` method, allowing for saving the data in different
+                chunk strategies and with various compression methods.
 
-        Parameters:
-            output_path: Path to the file where the data will be saved.
-            loc: The dataset name within the HDF5 file to store the data.
-            chunk_strategy: Strategy to infer appropriate chunk size when saving.
-            chunks: User-defined chunk size. Ignores `chunk_strategy`.
-            compression: Compression method to use for storing the data.
-            overwrite: Whether to overwrite the file if it already exists.
+                Parameters:
+                    output_path: Path to the file where the data will be saved.
+                    loc: The dataset name within the HDF5 file to store the data.
+                    chunk_strategy: Strategy to infer appropriate chunk size when saving.
+                    chunks: User-defined chunk size. Ignores `chunk_strategy`.
+                    compression: Compression method to use for storing the data.
+                    overwrite: Whether to overwrite the file if it already exists.
 
-        .. note::
+                .. note::
 
-            The 'loc' parameter defaults to 'df', and the 'chunk_strategy' defaults to 'balanced'. If 'chunks' is
-            not specified, the method will infer appropriate chunk sizes based on the strategy. The 'overwrite' flag is
-            set to False by default, ensuring that existing files are not overwritten unless explicitly intended.
-        """
+                    The 'loc' parameter defaults to 'df', and the 'chunk_strategy' defaults to 'balanced'. If 'chunks' is
+                    not specified, the method will infer appropriate chunk sizes based on the strategy. The 'overwrite' flag is
+                    set to False by default, ensuring that existing files are not overwritten unless explicitly intended.
+                """
         io = IO()
         io.save(
             output_path, data=self.res, loc=loc, chunk_strategy=chunk_strategy, chunks=chunks, compression=compression,
@@ -1675,34 +1684,35 @@ class Delta:
     def _calculate_delta_min_filter(
             arr: np.ndarray, window: int, method: Literal['background', 'dF', 'dFF'] = "dF", inplace: bool = False
     ) -> np.ndarray:
+        # noinspection GrazieInspection
         """
-        Calculates a delta value based on a specified method, applied to a 3D numpy array with a minimum filter over a window.
+                Calculates a delta value based on a specified method, applied to a 3D numpy array with a minimum filter over a window.
 
-        This method applies a minimum filter across a window of specified size to each pixel in the input array.
-        The delta is then calculated based on the selected method, either as a background value, a difference from the background (dF),
-        or a relative difference from the background (dFF).
+                This method applies a minimum filter across a window of specified size to each pixel in the input array.
+                The delta is then calculated based on the selected method, either as a background value, a difference from the background (dF),
+                or a relative difference from the background (dFF).
 
-        Parameters:
-            arr: A 3D numpy array to which the delta min filter will be applied.
-            window: The size of the window over which the minimum filter is applied.
-            method: Method for calculating delta.
-            inplace: If True, the operation modifies the array in place.
+                Parameters:
+                    arr: A 3D numpy array to which the delta min filter will be applied.
+                    window: The size of the window over which the minimum filter is applied.
+                    method: Method for calculating delta.
+                    inplace: If True, the operation modifies the array in place.
 
-        Returns:
-            np.ndarray: A numpy array of the same shape as the input, containing the calculated delta values.
+                Returns:
+                    np.ndarray: A numpy array of the same shape as the input, containing the calculated delta values.
 
-        Raises:
-            ValueError: If an invalid method is specified.
+                Raises:
+                    ValueError: If an invalid method is specified.
 
-        .. note::
-            The 'background' method returns the background value itself.
-            The 'dF' method returns the difference from the background.
-            The 'dFF' method returns the relative difference from the background.
+                .. note::
+                    The 'background' method returns the background value itself.
+                    The 'dF' method returns the difference from the background.
+                    The 'dFF' method returns the relative difference from the background.
 
-        Example:
-            >>> rand_data = np.random.rand(10, 10, 10)
-            >>> result = Delta._calculate_delta_min_filter(rand_data, window=5, method='dF')
-        """
+                Example:
+                    >>> rand_data = np.random.rand(10, 10, 10)
+                    >>> result = Delta._calculate_delta_min_filter(rand_data, window=5, method='dF')
+                """
 
         original_dims = arr.shape
         res = None

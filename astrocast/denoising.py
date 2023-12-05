@@ -576,7 +576,7 @@ class SubFrameGenerator(tf.keras.utils.Sequence):
         if self.cache_results:
             self.cache[index] = (X, y)
 
-        return (X, y)
+        return X, y
 
     def __len__(self):
         # return self.n // self.batch_size
@@ -1014,7 +1014,7 @@ class Network:
 
         logging.info(model.summary(line_length=100))
 
-        history_frozen = self.run(
+        _ = self.run(
             num_epochs=frozen_epochs, batch_size=batch_size, patience=patience, min_delta=min_delta, monitor=monitor,
             save_model=save_model, model_prefix=model_prefix, verbose=verbose
         )

@@ -33,43 +33,44 @@ from astrocast.preparation import IO
 
 
 class Detector:
+    # noinspection GrazieInspection
     """
-    Detector is a class designed for detecting and analyzing astrocytic events in video datasets,
-    particularly focusing on spatial and temporal characteristics of these events.
+        Detector is a class designed for detecting and analyzing astrocytic events in video datasets,
+        particularly focusing on spatial and temporal characteristics of these events.
 
-    The class implements a robust event detection algorithm that leverages both spatial and temporal data to identify
-    astrocytic events. The algorithm can be tuned using various parameters to adapt to different datasets and research needs.
+        The class implements a robust event detection algorithm that leverages both spatial and temporal data to identify
+        astrocytic events. The algorithm can be tuned using various parameters to adapt to different datasets and research needs.
 
-    Key Features:
-        - Gaussian Smoothing: Enhances events while preserving spatial features. Can be adjusted or omitted based on the dataset.
-        - Spatial Thresholding: Utilizes mean fluorescence ratios to differentiate active areas from background, considering the whole frame.
-        - Temporal Thresholding: Treats the video as a series of 1D time series, identifying active pixels by peak prominence and other characteristics.
-        - Morphological Operations: Corrects for potential artifacts in thresholding, like filling holes or removing noise-based objects.
-        - Event Separation: An experimental feature to split closely occurring events for finer analysis.
+        Key Features:
+            - Gaussian Smoothing: Enhances events while preserving spatial features. Can be adjusted or omitted based on the dataset.
+            - Spatial Thresholding: Utilizes mean fluorescence ratios to differentiate active areas from background, considering the whole frame.
+            - Temporal Thresholding: Treats the video as a series of 1D time series, identifying active pixels by peak prominence and other characteristics.
+            - Morphological Operations: Corrects for potential artifacts in thresholding, like filling holes or removing noise-based objects.
+            - Event Separation: An experimental feature to split closely occurring events for finer analysis.
 
-    .. attention:: Caveats
+        .. attention:: Caveats
 
-        - Parameter Sensitivity: The effectiveness of event detection is highly dependent on the choice of parameters, which may need tuning for different datasets.
-        - Smoothing Impact: Temporal thresholding is sensitive to the smoothing applied, requiring careful adjustment of smoothing parameters.
-        - Noise and Artifacts: The algorithm includes provisions for noise adjustment and artifact removal, but these may not cover all types of dataset-specific noise.
-        - Parallel Processing: Default parallel processing can be toggled off for troubleshooting but may affect performance.
+            - Parameter Sensitivity: The effectiveness of event detection is highly dependent on the choice of parameters, which may need tuning for different datasets.
+            - Smoothing Impact: Temporal thresholding is sensitive to the smoothing applied, requiring careful adjustment of smoothing parameters.
+            - Noise and Artifacts: The algorithm includes provisions for noise adjustment and artifact removal, but these may not cover all types of dataset-specific noise.
+            - Parallel Processing: Default parallel processing can be toggled off for troubleshooting but may affect performance.
 
-    The method `run` executes the event detection process and returns the path to the directory containing the results and metadata.
-    It saves all provided arguments for traceability and reproducibility of the analysis.
+        The method `run` executes the event detection process and returns the path to the directory containing the results and metadata.
+        It saves all provided arguments for traceability and reproducibility of the analysis.
 
-    Args:
-        input_path: Path to the input file.
-        output: Path to the output directory. If None, the output directory is created in the input directory.
-        logging_level: Sets the level at which information is logged to the console as an integer value.
-                The built-in levels in the logging module are, in increasing order of severity:
-                debug (10), info (20), warning (30), error (40), critical (50).
+        Args:
+            input_path: Path to the input file.
+            output: Path to the output directory. If None, the output directory is created in the input directory.
+            logging_level: Sets the level at which information is logged to the console as an integer value.
+                    The built-in levels in the logging module are, in increasing order of severity:
+                    debug (10), info (20), warning (30), error (40), critical (50).
 
-    Example::
+        Example::
 
-        detector = astrocast.detection.Detector(input_path=/path/to/preprocessed/video)
-        detector.run(loc='df/ch0')
+            detector = astrocast.detection.Detector(input_path=/path/to/preprocessed/video)
+            detector.run(loc='df/ch0')
 
-    """
+        """
 
     def __init__(
             self, input_path: Union[str, Path], output: Union[str, Path] = None, logging_level: int = logging.INFO
@@ -113,58 +114,59 @@ class Detector:
             parallel: bool = True, use_on_disk_sharing=False
     ) -> Path:
 
+        # noinspection GrazieInspection
         """
-        Executes the AstroCAST event detection algorithm on a specified video dataset.
+                Executes the AstroCAST event detection algorithm on a specified video dataset.
 
-        Args:
-            loc: Identifier of the dataset within an HDF5 file.
-            exclude_border: Exclude the border pixels to mitigate motion correction artifacts.
-            threshold: Absolute value for simple thresholding; uses automatic thresholding if None.
-            use_smoothing: Apply Gaussian smoothing to enhance events while preserving spatial features.
-            smooth_radius: Radius for the Gaussian smoothing kernel.
-            smooth_sigma: Sigma value for the Gaussian smoothing kernel.
-            use_spatial: Enable spatial thresholding based on the mean fluorescence ratio.
-            spatial_min_ratio: Minimum ratio of active to inactive pixels for spatial thresholding.
-            spatial_z_depth: Number of frames considered for automatic spatial thresholding.
-            use_temporal: Enable temporal thresholding to identify active pixels in timeseries.
-            temporal_prominence: Minimum prominence of peaks for temporal thresholding.
-            temporal_width: Minimum width of peaks to exclude short-duration noise.
-            temporal_rel_height: Defines boundaries of events relative to peak height.
-            temporal_wlen: Window length for prominence calculation in temporal thresholding.
-            temporal_plateau_size: Minimum size of a plateau to be considered an event.
-            comb_type: Combination type for spatial and temporal thresholding ('&' or '|').
-            fill_holes: Apply morphological operations to fill holes in detected events.
-            area_threshold: Maximum size of holes to be filled.
-            remove_objects: Apply morphological operations to remove small objects.
-            objects_depth: Number of frames considered for automatic object removal.
-            min_size: Minimum size of an event region for inclusion in the results.
-            holes_depth: Number of frames considered for automatic temporal thresholding.
-            holes_connectivity: Modifies shape of the element used to fill holes.
-            object_connectivity: Modifies shape of the element used to remove small objects.
-            fill_holes_first: Determines whether holes are filled before removing small objects.
-            lazy: Implement lazy loading of data for efficient memory usage.
-            adjust_for_noise: Adjust event detection for background noise, used with `threshold`.
-            z_slice: Selection of frames that are processed.
-            split_events: Experimental feature to split incorrectly connected events.
-            event_map_export_format: Suffix of the output file for the event map.
-            debug: Enable debug mode to export intermediary steps for troubleshooting.
-            parallel: Enable parallel execution for event characterization.
-            use_on_disk_sharing: Flag to toggle between on-disk (mmap) and in-RAM (shared memory) methods.
+                Args:
+                    loc: Identifier of the dataset within an HDF5 file.
+                    exclude_border: Exclude the border pixels to mitigate motion correction artifacts.
+                    threshold: Absolute value for simple thresholding; uses automatic thresholding if None.
+                    use_smoothing: Apply Gaussian smoothing to enhance events while preserving spatial features.
+                    smooth_radius: Radius for the Gaussian smoothing kernel.
+                    smooth_sigma: Sigma value for the Gaussian smoothing kernel.
+                    use_spatial: Enable spatial thresholding based on the mean fluorescence ratio.
+                    spatial_min_ratio: Minimum ratio of active to inactive pixels for spatial thresholding.
+                    spatial_z_depth: Number of frames considered for automatic spatial thresholding.
+                    use_temporal: Enable temporal thresholding to identify active pixels in timeseries.
+                    temporal_prominence: Minimum prominence of peaks for temporal thresholding.
+                    temporal_width: Minimum width of peaks to exclude short-duration noise.
+                    temporal_rel_height: Defines boundaries of events relative to peak height.
+                    temporal_wlen: Window length for prominence calculation in temporal thresholding.
+                    temporal_plateau_size: Minimum size of a plateau to be considered an event.
+                    comb_type: Combination type for spatial and temporal thresholding ('&' or '|').
+                    fill_holes: Apply morphological operations to fill holes in detected events.
+                    area_threshold: Maximum size of holes to be filled.
+                    remove_objects: Apply morphological operations to remove small objects.
+                    objects_depth: Number of frames considered for automatic object removal.
+                    min_size: Minimum size of an event region for inclusion in the results.
+                    holes_depth: Number of frames considered for automatic temporal thresholding.
+                    holes_connectivity: Modifies shape of the element used to fill holes.
+                    object_connectivity: Modifies shape of the element used to remove small objects.
+                    fill_holes_first: Determines whether holes are filled before removing small objects.
+                    lazy: Implement lazy loading of data for efficient memory usage.
+                    adjust_for_noise: Adjust event detection for background noise, used with `threshold`.
+                    z_slice: Selection of frames that are processed.
+                    split_events: Experimental feature to split incorrectly connected events.
+                    event_map_export_format: Suffix of the output file for the event map.
+                    debug: Enable debug mode to export intermediary steps for troubleshooting.
+                    parallel: Enable parallel execution for event characterization.
+                    use_on_disk_sharing: Flag to toggle between on-disk (mmap) and in-RAM (shared memory) methods.
 
-        .. warning::
+                .. warning::
 
-           The `use_on_disk_sharing` parameter enables the use of on-disk memory mapping (mmap) instead of in-RAM
-           shared memory. While this method ensures compatibility in environments where in-RAM sharing (e.g.,
-           Docker containers) may cause crashes, it is generally slower due to disk I/O operations.
-           Use this method if you encounter issues with shared memory, particularly in containerized environments.
+                   The `use_on_disk_sharing` parameter enables the use of on-disk memory mapping (mmap) instead of in-RAM
+                   shared memory. While this method ensures compatibility in environments where in-RAM sharing (e.g.,
+                   Docker containers) may cause crashes, it is generally slower due to disk I/O operations.
+                   Use this method if you encounter issues with shared memory, particularly in containerized environments.
 
-        .. note::
+                .. note::
 
-            - Smoothing parameters (sigma and radius) enhance events while preserving spatial features.
-            - Spatial and temporal thresholding classify pixels as active, potentially belonging to astrocytic events.
-            - Outputs include the event map, time map, and metadata, saved in specified formats.
-            - Debug mode is useful for troubleshooting unsatisfactory event detection results.
-        """
+                    - Smoothing parameters (sigma and radius) enhance events while preserving spatial features.
+                    - Spatial and temporal thresholding classify pixels as active, potentially belonging to astrocytic events.
+                    - Outputs include the event map, time map, and metadata, saved in specified formats.
+                    - Debug mode is useful for troubleshooting unsatisfactory event detection results.
+                """
 
         # save function parameters
         function_arguments = locals().copy()  # Create a copy of the local variables
@@ -858,7 +860,6 @@ class Detector:
         Closes the memory-mapped object and deletes the associated file.
 
         Args:
-            mmap_obj: The memory-mapped object to be closed.
             file_path: The file path of the memory-mapped file.
         """
 
@@ -879,122 +880,123 @@ class Detector:
             event_info: Tuple[Sequence[int], np.dtype, str], out_path: Union[str, Path], split_events: bool = True,
             use_on_disk_sharing: bool = False
     ) -> Union[int, None]:
+        # noinspection GrazieInspection
         """
-        Characterizes an event by computing various properties and metrics.
+                Characterizes an event by computing various properties and metrics.
 
-        This function analyzes a specific event in a dataset by calculating properties such as bounding box dimensions, area, shape, and signal traces. It supports handling split events and saves the results to a specified path.
+                This function analyzes a specific event in a dataset by calculating properties such as bounding box dimensions, area, shape, and signal traces. It supports handling split events and saves the results to a specified path.
 
-        Args:
-            event_id: The unique identifier of the event to characterize.
-            t0: The starting time index for the event.
-            t1: The ending time index for the event.
-            data_info: Information about the data, including shape and type.
-            event_info: Information about the event, including shape and type.
-            out_path: The path where the results will be saved.
-            split_events: Flag to determine if events should be split.
-            use_on_disk_sharing: Flag to toggle between on-disk (mmap) and in-RAM (shared memory) methods.
+                Args:
+                    event_id: The unique identifier of the event to characterize.
+                    t0: The starting time index for the event.
+                    t1: The ending time index for the event.
+                    data_info: Information about the data, including shape and type.
+                    event_info: Information about the event, including shape and type.
+                    out_path: The path where the results will be saved.
+                    split_events: Flag to determine if events should be split.
+                    use_on_disk_sharing: Flag to toggle between on-disk (mmap) and in-RAM (shared memory) methods.
 
-        .. warning::
+                .. warning::
 
-           The `use_on_disk_sharing` parameter enables the use of on-disk memory mapping (mmap) instead of in-RAM
-           shared memory. While this method ensures compatibility in environments where in-RAM sharing (e.g.,
-           Docker containers) may cause crashes, it is generally slower due to disk I/O operations.
-           Use this method if you encounter issues with shared memory, particularly in containerized environments.
+                   The `use_on_disk_sharing` parameter enables the use of on-disk memory mapping (mmap) instead of in-RAM
+                   shared memory. While this method ensures compatibility in environments where in-RAM sharing (e.g.,
+                   Docker containers) may cause crashes, it is generally slower due to disk I/O operations.
+                   Use this method if you encounter issues with shared memory, particularly in containerized environments.
 
-        .. note::
+                .. note::
 
-            .. list-table:: Event Properties Explained
-                :widths: 10 10 10
-                :header-rows: 1
+                    .. list-table:: Event Properties Explained
+                        :widths: 10 10 10
+                        :header-rows: 1
 
-                *   - Property
-                    - Brief Description
-                    - In-Depth Explanation & Formula
-                *   - z0, z1
-                    - Z-index bounds
-                    - Start (z0) and end (z1) indices in the z-dimension.
-                *   - x0, x1, y0, y1
-                    - XY bounding box
-                    - Coordinates defining the bounding box in x (x0, x1) and y (y0, y1) dimensions.
-                *   - dz, dx, dy
-                    - Bounding box size
-                    - Dimensions of the bounding box: depth (dz), width (dx), and height (dy).
-                *   - v_length
-                    - Event length
-                    - Length of the event in the z-dimension. Calculated as :math:`z1 - z0`.
-                *   - v_diameter
-                    - Event diameter
-                    - Diameter of the event. Calculated as :math:`\\sqrt{dx^2 + dy^2}`.
-                *   - v_area
-                    - Event area
-                    - Total area covered by the event. Calculated as the count of z-indices where event_id is present.
-                *   - v_bbox_pix_num
-                    - Bounding box pixel count
-                    - Total number of pixels within the bounding box. Calculated as :math:` dz * dx * dy `.
-                *   - mask
-                    - Event mask
-                    - Binary mask indicating the presence (1) or absence (0) of the event.
-                *   - v_mask_centroid_local
-                    - Local centroid
-                    - The local centroid coordinates of the event mask. Calculated for each dimension and normalized by the size of the bounding box in the respective dimension. Formula: :math:`\\text{centroid}_{local-i} = \\frac{\\text{centroid}_{local-i}}{d_i}` corresponding to z, x, y dimensions.
-                *   - v_mask_axis_major_length
-                    - Major axis length
-                    - The length of the major axis of the ellipse that has the same normalized second central moments as the region. ???
-                *   - v_mask_axis_minor_length
-                    - Minor axis length
-                    - The length of the minor axis of the ellipse that has the same normalized second central moments as the region. ???
-                *   - v_mask_extent
-                    - Extent
-                    - The ratio of pixels in the region to pixels in the total bounding box. Calculated as :math:`\\frac{\\text{area}}{dx \\times dy \\times dz}`.
-                *   - v_mask_solidity
-                    - Solidity
-                    - The proportion of the pixels in the convex hull that are also in the region. Calculated as :math:`\\frac{\\text{area}}{\\text{area of convex hull}}`. ???
-                *   - v_mask_area
-                    - Area
-                    - The number of pixels in the region.
-                *   - v_mask_equivalent_diameter_area
-                    - Equivalent diameter
-                    - The diameter of a circle with the same area as the region. Calculated as :math:`\\sqrt{\\frac{4 \\times \\text{area}}{\\pi}}`.
-                *   - contours
-                    - Event contours
-                    - Contours extracted from each frame of the event. ???
-                *   - footprint
-                    - 2D event footprint
-                    - The 2D representation of the event, capturing its extent in the XY plane.
-                *   - v_fp_<property>
-                    - Footprint properties
-                    - Properties such as centroid, eccentricity, perimeter calculated from the 2D footprint. ???
-                *   - trace
-                    - Signal trace
-                    - The average signal intensity of the event across the z-dimension.
-                *   - v_max_height
-                    - Maximum trace height
-                    - The peak signal intensity in the trace. Calculated as :math:`\\max(\\text{trace}) - \\min(\\text{trace})`.
-                *   - v_max_gradient
-                    - Maximum trace gradient
-                    - The steepest gradient in the trace. Calculated as :math:`\\max(\\Delta \\text{trace})`.
-                *   - noise_mask_trace
-                    - Noise mask trace
-                    - The trace calculated from the noise mask area. ???
-                *   - v_noise_mask_mean
-                    - Noise mean
-                    - The mean value of the noise mask trace. Calculated as :math:`\\mu_{\\text{noise}}`.
-                *   - v_noise_mask_std
-                    - Noise standard deviation
-                    - The standard deviation of the noise mask trace. Calculated as :math:`\\sigma_{\\text{noise}}`.
-                *   - v_signal_to_noise_ratio
-                    - Signal-to-noise ratio
-                    - Ratio of signal intensity to noise. Calculated as :math:`\\frac{v_{\\text{max height}}}{\\mu_{\\text{noise}}}`.
-                *   - v_signal_to_noise_ratio_fold
-                    - Signal-to-noise fold change
-                    - Signal-to-noise ratio adjusted for noise standard deviation. Calculated as :math:`\\frac{(v_{\\text{max height}} - \\mu_{\\text{noise}})}{\\sigma_{\\text{noise}}}`.
-                *   - error
-                    - Error flag
-                    - Indicates any computational errors during property calculation. `0` for no error, `1` for error.
+                        *   - Property
+                            - Brief Description
+                            - In-Depth Explanation & Formula
+                        *   - z0, z1
+                            - Z-index bounds
+                            - Start (z0) and end (z1) indices in the z-dimension.
+                        *   - x0, x1, y0, y1
+                            - XY bounding box
+                            - Coordinates defining the bounding box in x (x0, x1) and y (y0, y1) dimensions.
+                        *   - dz, dx, dy
+                            - Bounding box size
+                            - Dimensions of the bounding box: depth (dz), width (dx), and height (dy).
+                        *   - v_length
+                            - Event length
+                            - Length of the event in the z-dimension. Calculated as :math:`z1 - z0`.
+                        *   - v_diameter
+                            - Event diameter
+                            - Diameter of the event. Calculated as :math:`\\sqrt{dx^2 + dy^2}`.
+                        *   - v_area
+                            - Event area
+                            - Total area covered by the event. Calculated as the count of z-indices where event_id is present.
+                        *   - v_bbox_pix_num
+                            - Bounding box pixel count
+                            - Total number of pixels within the bounding box. Calculated as :math:` dz * dx * dy `.
+                        *   - mask
+                            - Event mask
+                            - Binary mask indicating the presence (1) or absence (0) of the event.
+                        *   - v_mask_centroid_local
+                            - Local centroid
+                            - The local centroid coordinates of the event mask. Calculated for each dimension and normalized by the size of the bounding box in the respective dimension. Formula: :math:`\\text{centroid}_{local-i} = \\frac{\\text{centroid}_{local-i}}{d_i}` corresponding to z, x, y dimensions.
+                        *   - v_mask_axis_major_length
+                            - Major axis length
+                            - The length of the major axis of the ellipse that has the same normalized second central moments as the region. ???
+                        *   - v_mask_axis_minor_length
+                            - Minor axis length
+                            - The length of the minor axis of the ellipse that has the same normalized second central moments as the region. ???
+                        *   - v_mask_extent
+                            - Extent
+                            - The ratio of pixels in the region to pixels in the total bounding box. Calculated as :math:`\\frac{\\text{area}}{dx \\times dy \\times dz}`.
+                        *   - v_mask_solidity
+                            - Solidity
+                            - The proportion of the pixels in the convex hull that are also in the region. Calculated as :math:`\\frac{\\text{area}}{\\text{area of convex hull}}`. ???
+                        *   - v_mask_area
+                            - Area
+                            - The number of pixels in the region.
+                        *   - v_mask_equivalent_diameter_area
+                            - Equivalent diameter
+                            - The diameter of a circle with the same area as the region. Calculated as :math:`\\sqrt{\\frac{4 \\times \\text{area}}{\\pi}}`.
+                        *   - contours
+                            - Event contours
+                            - Contours extracted from each frame of the event. ???
+                        *   - footprint
+                            - 2D event footprint
+                            - The 2D representation of the event, capturing its extent in the XY plane.
+                        *   - v_fp_<property>
+                            - Footprint properties
+                            - Properties such as centroid, eccentricity, perimeter calculated from the 2D footprint. ???
+                        *   - trace
+                            - Signal trace
+                            - The average signal intensity of the event across the z-dimension.
+                        *   - v_max_height
+                            - Maximum trace height
+                            - The peak signal intensity in the trace. Calculated as :math:`\\max(\\text{trace}) - \\min(\\text{trace})`.
+                        *   - v_max_gradient
+                            - Maximum trace gradient
+                            - The steepest gradient in the trace. Calculated as :math:`\\max(\\Delta \\text{trace})`.
+                        *   - noise_mask_trace
+                            - Noise mask trace
+                            - The trace calculated from the noise mask area. ???
+                        *   - v_noise_mask_mean
+                            - Noise mean
+                            - The mean value of the noise mask trace. Calculated as :math:`\\mu_{\\text{noise}}`.
+                        *   - v_noise_mask_std
+                            - Noise standard deviation
+                            - The standard deviation of the noise mask trace. Calculated as :math:`\\sigma_{\\text{noise}}`.
+                        *   - v_signal_to_noise_ratio
+                            - Signal-to-noise ratio
+                            - Ratio of signal intensity to noise. Calculated as :math:`\\frac{v_{\\text{max height}}}{\\mu_{\\text{noise}}}`.
+                        *   - v_signal_to_noise_ratio_fold
+                            - Signal-to-noise fold change
+                            - Signal-to-noise ratio adjusted for noise standard deviation. Calculated as :math:`\\frac{(v_{\\text{max height}} - \\mu_{\\text{noise}})}{\\sigma_{\\text{noise}}}`.
+                        *   - error
+                            - Error flag
+                            - Indicates any computational errors during property calculation. `0` for no error, `1` for error.
 
-        Returns:
-            An integer indicating the status (e.g., 2 for existing results) or None if the process completes.
-        """
+                Returns:
+                    An integer indicating the status (e.g., 2 for existing results) or None if the process completes.
+                """
 
         data_buffer = None
         event_buffer = None
@@ -1123,6 +1125,7 @@ class Detector:
 
                         except ValueError as err:
                             error = 1
+                            logging.warning(f"Error encountered: {err}")
 
                 # contour
                 mask_padded = np.pad(

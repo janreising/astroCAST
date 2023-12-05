@@ -1,7 +1,11 @@
+import platform
+from pathlib import Path
+
+import numpy as np
 import pytest
 
 from astrocast.analysis import Events
-from astrocast.detection import *
+from astrocast.detection import Detector
 from astrocast.helper import EventSim, SampleInput
 from astrocast.preparation import IO
 
@@ -15,7 +19,7 @@ class TestDetector:
         si = SampleInput()
         input_ = si.get_test_data(extension=extension)
 
-        path = tmpdir.join(f"{np.random.randint(10000)}_tempData")
+        path = Path(tmpdir.strpath).joinpath(f"{np.random.randint(10000)}_tempData")
         det = Detector(input_, output=path)
         det.run(loc="dff/ch0", lazy=False, debug=debug, z_slice=(0, 25))
 
@@ -44,7 +48,7 @@ class TestDetector:
     @pytest.mark.parametrize("parallel", [True, False])
     def test_sim_data(self, tmpdir, parallel):
 
-        sim_dir = tmpdir.join("sim/")
+        sim_dir = Path(tmpdir.strpath).joinpath("sim/")
         sim_dir.mkdir()
 
         path = sim_dir.joinpath(f"{np.random.randint(1000)}_{np.random.randint(1000)}_sim.h5")
