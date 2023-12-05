@@ -44,9 +44,9 @@ class TestDetector:
     @pytest.mark.parametrize("parallel", [True, False])
     def test_sim_data(self, tmpdir, parallel):
 
-        sim_dir = Path(tmpdir.strpath).join("sim/")
+        sim_dir = Path(tmpdir.strpath).joinpath("sim/")
         sim_dir.mkdir()
-    
+
         path = sim_dir.joinpath(f"{np.random.randint(1000)}_{np.random.randint(1000)}_sim.h5")
 
         loc = "dff/ch0"
