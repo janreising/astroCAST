@@ -1,12 +1,16 @@
 import tempfile
 import time
+from pathlib import Path
 
 import matplotlib
+import numpy as np
+import pytest
+from matplotlib import pyplot as plt
 from scipy.cluster.hierarchy import linkage
 
 from astrocast.autoencoders import CNN_Autoencoder
 from astrocast.helper import DummyGenerator
-from astrocast.reduction import *
+from astrocast.reduction import FeatureExtraction, UMAP, ClusterTree
 
 matplotlib.use('Agg')  # Use the Agg backend
 
@@ -14,7 +18,7 @@ DG_equal = DummyGenerator()
 DG_ragged = DummyGenerator(ragged=True)
 
 
-class Test_FeatureExtraction:
+class TestFeatureExtraction:
 
     @pytest.mark.parametrize("ragged", [True, False])
     def test_extraction(self, ragged):
@@ -48,7 +52,7 @@ class Test_FeatureExtraction:
             assert features_1.equals(features_2)
 
 
-class Test_CNN:
+class TestCNN:
 
     @pytest.mark.tensorflow
     def test_training(self):
@@ -102,9 +106,10 @@ class Test_CNN:
             loaded_model = CNN_Autoencoder.load(save_path, target_length=target_length)
 
 
-class Test_UMAP:
+class TestUMAP:
 
-    def setup_method(self):
+    @classmethod
+    def setup_class(cls):
         pytest.importorskip("umap")
 
     def test_training(self):
@@ -163,7 +168,7 @@ class Test_UMAP:
         assert np.allclose(embedded_1, embedded_2)
 
 
-class Test_ClusterTree:
+class TestClusterTree:
 
     def test_creation(self):
         X = [[i] for i in [2, 8, 0, 4, 1, 9, 9, 0]]
@@ -171,7 +176,7 @@ class Test_ClusterTree:
 
         Z = linkage(X, 'ward')
 
-        ct = ClusterTree(Z)
+        _ = ClusterTree(Z)
 
     def test_functions(self):
         X = [[i] for i in [2, 8, 0, 4, 1, 9, 9, 0]]
@@ -182,7 +187,7 @@ class Test_ClusterTree:
         ct = ClusterTree(Z)
         root = ct.tree
 
-        n0 = ct.get_node(0)
-        leaves = ct.get_leaves(root)
-        count = ct.get_count(root)
-        found = ct.search(root, 0)
+        _ = ct.get_node(0)
+        _ = ct.get_leaves(root)
+        _ = ct.get_count(root)
+        _ = ct.search(root, 0)
