@@ -509,37 +509,43 @@ class IO:
 
         return data
 
-    def _load_npy(self, path, lazy=False, chunks=None, infer_strategy="balanced", z_slice=None):
+    def _load_npy(self, path: Union[Path, str], lazy=False, chunks=None, infer_strategy="balanced", z_slice=None):
 
-        z0 = z1 = None
+        if isinstance(path, str):
+            path = Path(path)
+
+        # load data
+        if path.is_dir():
+            data = da.from_npy_stack(path.as_posix(), mmap_mode='r')
+
+        elif path.is_file():
+            data = np.load(path.as_posix(), mmap_mode='r')
+        else:
+            raise FileNotFoundError(f"{path} is neither directory nor file")
+
+        # select frames
         if z_slice is not None:
             z0, z1 = z_slice
+            data = data[z0:z1]
 
+        # convert to lazy/not-lazy
         if lazy:
-            try:
+            chunks = self.infer_chunks_from_array(arr=data, strategy=infer_strategy, chunks=chunks)
 
-                data = da.from_npy_stack(path)
-                if z_slice is not None:
-                    data = data[z0:z1]
+            # re-chunk if necessary
+            if isinstance(data, da.Array) and data.chunksize != chunks:
+                data = data.rechunk(chunks=chunks)
 
-                return data
-
-            except NotADirectoryError:
-                mmap = np.load(path, mmap_mode="r")
-
-                if z_slice is not None:
-                    mmap = mmap[z0:z1]
-
-                chunks = self.infer_chunks_from_array(arr=mmap, strategy=infer_strategy, chunks=chunks)
-
-                return da.from_array(mmap, chunks=chunks)
+            # convert to da.Array
+            else:
+                data = da.from_array(x=data, chunks=chunks)
 
         else:
-            data = np.load(path.as_posix(), allow_pickle=True)
-            if z_slice is not None:
-                data = data[z0:z1]
 
-            return data
+            if isinstance(data, da.Array):
+                data = data.compute()
+
+        return data
 
     def _load_tdb(self, path, lazy=False, chunks=None, infer_strategy="balanced", z_slice=None):
 

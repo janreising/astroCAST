@@ -43,7 +43,7 @@ def remove_temp_safe(tmp_dir: tempfile.TemporaryDirectory, wait_time: int = 20):
 
     if Path(tmp_dir.name).exists():
         logging.error(f"temp dir still exists after cleanup! {tmp_dir.name}")
-        
+
 
 def is_docker():
     path = Path('/proc/self/cgroup')
@@ -819,7 +819,6 @@ def is_ragged(data):
 
             for i in range(1, data.shape[0]):
 
-                item = data[i]
                 item = data[i] if isinstance(data[i], np.ndarray) else data[i].compute()
 
                 cur_len = len(item)
