@@ -34,9 +34,8 @@ class Explorer:
                             ui.h5(""), ui.panel_conditional(
                                 "input.path !== ''", ui.h5("Select frames"),
                                 ui.input_slider("z_select", "", value=(0, 1), min=0, max=100), ),
-                            ui.h5("Points of Interest"), ui.input_text("frames", "frames", value=""), ui.input_text(
-                                "pixel", "pixels", value=''
-                            )
+                            ui.h5("Points of Interest"), ui.input_text("frames", "frames"), ui.input_text("pixel",
+                                                                                                          "pixels")
                         ), ui.panel_main(
                             ui.panel_conditional(
                                 "input.path !== ''", ui.output_plot("original")
@@ -46,14 +45,14 @@ class Explorer:
                 ), ui.nav(
                     "Delta", ui.layout_sidebar(
                         ui.panel_sidebar(
-                            ui.h5(""), ui.input_switch("use_delta", "calculate", value=False),
+                            ui.h5(""), ui.input_switch("use_delta", "calculate"),
                             ui.input_select("delta_method", "method", choices=["background", "dF", "dFF"]),
                             ui.input_numeric("delta_window", "window", 10),
-                            ui.input_switch("delta_overwrite_first_frame", "Overwrite 1st frame", False),
+                            ui.input_switch("delta_overwrite_first_frame", "Overwrite 1st frame"),
                             ui.h5("Plotting options"),
                             ui.input_switch("delta_plot_original", "Plot original", value=True),
                             ui.input_switch("delta_show_separate", "separate panels"),
-                            ui.input_switch("delta_twinx", "Twin axis", value=False),
+                            ui.input_switch("delta_twinx", "Twin axis"),
                             ui.input_numeric("delta_alpha", "Original: alpha", value=0.7), ui.row(
                                 ui.h6("Figsize"), ui.column(5, ui.input_numeric("delta_figsize_x", "", 20)),
                                 ui.column(2, ui.h6(" x ")), ui.column(5, ui.input_numeric("delta_figsize_y", "", 5))
@@ -133,10 +132,10 @@ class Explorer:
                             ui.h5(""), ui.h5("Additional parameters"),
                             ui.input_text("output_path", "Output path", value="infer"),
                             ui.input_numeric("exclude_border", "Border exclusion", value=0),
-                            ui.input_switch("split_events", "Split events", value=False),
-                            ui.input_switch("overwrite", "Overwrite Output", value=False),
+                            ui.input_switch("split_events", "Split events"),
+                            ui.input_switch("overwrite", "Overwrite Output"),
                             ui.input_numeric("logging_level", "Logging level", value=20),
-                            ui.input_switch("debug", "Debugging", value=False), ui.h5(""), ui.h5("Export"),
+                            ui.input_switch("debug", "Debugging"), ui.h5(""), ui.h5("Export"),
                             ui.input_text("save_path", "Config path", value="./config.yaml"),
                             ui.input_action_button("btn_save", "Save arguments", class_="btn-primary"), ),
                         ui.panel_main(
@@ -183,7 +182,7 @@ class Explorer:
 
             try:
                 io = IO()
-                data = io.load(path, loc=input.loc(), z_slice=None, lazy=True)
+                data = io.load(path, loc=input.loc(), lazy=True)
                 return data.shape
 
             except:
@@ -269,18 +268,18 @@ class Explorer:
         @reactive.Calc
         def get_smooth():
             data = load_data()
-            smooth = detection.Detector._gaussian_smooth_3d(data, sigma=input.sigma(), radius=input.radius())
+            smooth_ = detection.Detector._gaussian_smooth_3d(data, sigma=input.sigma(), radius=input.radius())
 
             if not input.lazy():
-                smooth = smooth.compute()
-                smooth = da.from_array(smooth, chunks=("auto", "auto", "auto"))
+                smooth_ = smooth_.compute()
+                smooth_ = da.from_array(smooth_, chunks=("auto", "auto", "auto"))
 
-            return smooth
+            return smooth_
 
         @reactive.Calc
         def get_spatial():
 
-            with ui.Progress(min=0, max=2) as p:
+            with ui.Progress(max=2) as p:
                 p.set(0, message="Loading data", detail="")
 
                 if input.use_smoothing():
@@ -300,7 +299,7 @@ class Explorer:
         @reactive.Calc
         def get_temporal():
 
-            with ui.Progress(min=0, max=2) as p:
+            with ui.Progress(max=2) as p:
                 p.set(0, message="Loading data", detail="")
 
                 if input.use_smoothing():
@@ -324,7 +323,7 @@ class Explorer:
             if not (input.use_spatial and input.use_temporal):
                 return None
 
-            with ui.Progress(min=0, max=12) as p:
+            with ui.Progress(max=12) as p:
                 i = 0
                 p.set(i, message="Loading data", detail="")
 
@@ -341,7 +340,7 @@ class Explorer:
         @reactive.Calc
         def get_morph():
 
-            with ui.Progress(min=0, max=3) as p:
+            with ui.Progress(max=3) as p:
                 i = 0
                 p.set(i, message="Loading data", detail="")
 
@@ -476,12 +475,12 @@ class Explorer:
                 original = None
 
             if input.delta_show_separate():
-                fig, axx = plt.subplots(len(pixels), 1, figsize=(input.delta_figsize_x(), input.delta_figsize_y()))
+                fig, axx = plt.subplots(len(pixels), figsize=(input.delta_figsize_x(), input.delta_figsize_y()))
                 axx = list(axx.flatten())
                 twin_axx = [ax.twinx() for ax in axx]
 
             else:
-                fig, ax = plt.subplots(1, 1, figsize=(input.delta_figsize_x(), input.delta_figsize_y()))
+                fig, ax = plt.subplots(figsize=(input.delta_figsize_x(), input.delta_figsize_y()))
                 axx = [ax for _ in range(len(pixels))]
 
                 twinx = ax.twinx()
@@ -540,7 +539,7 @@ class Explorer:
                 )
 
                 if input.temp_show_separate():
-                    fig, axx = plt.subplots(len(pixels), 1, figsize=(5 * len(pixels), 20))
+                    fig, axx = plt.subplots(len(pixels), figsize=(5 * len(pixels), 20))
                     for i in range(len(pixels)):
                         x, y = pixels[i]
                         axx[i].plot(data[:, x, y], linestyle="-", color=colors[i])
@@ -549,7 +548,7 @@ class Explorer:
 
                 else:
 
-                    fig, ax = plt.subplots(1, 1)
+                    fig, ax = plt.subplots()
                     twin_ax = ax.twinx()
                     for i in range(len(pixels)):
                         ax.plot(traces[:, i, 0], linestyle="-", color=colors[i])
@@ -631,7 +630,7 @@ class Explorer:
             ui.notification_show(f"Saved to: {save_path}")
 
             # load
-            with open(save_path.as_posix(), 'r') as file:
+            with open(save_path.as_posix()) as file:
                 config = yaml.safe_load(file)
 
             # create string
@@ -656,7 +655,8 @@ class Explorer:
             return f"astrocast view-detection-results " \
                    f"--lazy False --h5-loc {input.loc()} {input.path().replace('.h5', '.roi')}"
 
-    def plot_images(self, arr, frames, pixels=None, lbls=None, figsize=(10, 5), vmin=None, vmax=None):
+    @staticmethod
+    def plot_images(arr, frames, pixels=None, lbls=None, figsize=(10, 5), vmin=None, vmax=None):
 
         if not isinstance(arr, list):
             arr = [arr]

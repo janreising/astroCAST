@@ -1,9 +1,14 @@
+import logging
 import platform
+import tempfile
 import time
+from pathlib import Path
 
+import numpy as np
 import pytest
+from matplotlib import pyplot as plt
 
-from astrocast.clustering import *
+from astrocast.clustering import HdbScan, Linkage, Distance
 from astrocast.helper import DummyGenerator
 
 

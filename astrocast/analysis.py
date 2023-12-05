@@ -57,7 +57,7 @@ class Video:
 
             else:
                 logging.info("Data already loaded into memory.")
-                self.data = io.load(data, loc="", lazy=lazy, z_slice=z_slice)
+                self.data = io.load(data, lazy=lazy, z_slice=z_slice)
                 self.Z, self.X, self.Y = self.data.shape
 
         elif isinstance(data, (np.ndarray, da.Array)):
@@ -150,9 +150,10 @@ class Video:
         if show_trace:
 
             # get trace
-            Y = self.get_image_project(agg_func=np.mean, axis=(1, 2))
+            Y = self.get_image_project(axis=(1, 2))
             X = range(len(Y)) if indices is None else indices
 
+            qt_viewer = None
             if viewer1d is None:
                 v1d = napari_plot.ViewerModel1D()
                 qt_viewer = QtViewer(v1d)
@@ -189,10 +190,11 @@ class Video:
                     z1 = len(Y)
 
                 y_ = Y[z0:z1]
-                x_ = X[z0:z1]
+                # TODO is this code downstream actually working? why the mixing of z, x and y
+                # x_ = X[z0:z1]
 
                 # Padding with zeros on the left and/or right if necessary
-                y_ = np.pad(y_, (left_padding, right_padding), 'constant', constant_values=0)
+                y_ = np.pad(y_, (left_padding, right_padding), constant_values=0)
 
                 # Adjusting x_ to match the length of y_
                 x_ = np.arange(z0, z0 + len(y_))
@@ -249,39 +251,41 @@ class Video:
         return fig
 
 
+# noinspection GrazieInspection
 class Events(CachedClass):
+    # noinspection GrazieInspection
     """
-    The Events class manages and processes astrocytic events detected in timeseries calcium recordings. It provides
-    various functionalities such as loading, extending, filtering, and analyzing events.
+        The Events class manages and processes astrocytic events detected in timeseries calcium recordings. It provides
+        various functionalities such as loading, extending, filtering, and analyzing events.
 
-    Args:
-        event_dir: The directory or list of directories where event data is stored after event detection.
-        lazy: Flag to indicate if data should be loaded lazily.
-        data: The associated video data or path to it. If set to `infer`, attempts to automatically determine the video path.
-        loc: Location specification for loading data, applicable when data is a .h5 file.
-        group: Identifier for the group or condition to which the events belong.
-        subject_id: Identifier for the subject associated with the events.
-        z_slice: The frame range to consider for processing.
-        index_prefix: Prefix for indexing events. Useful in multi-file scenarios.
-        custom_columns: Additional columns to compute and include in the events DataFrame.
-        frame_to_time_mapping: Mapping from frame numbers to absolute time.
-        frame_to_time_function: Function to convert frame numbers to absolute time.
-        cache_path: Path for caching processed data.
-        seed: Seed value for hash generation. Needs to stay consistent between runs of analysis for caching to work.
+        Args:
+            event_dir: The directory or list of directories where event data is stored after event detection.
+            lazy: Flag to indicate if data should be loaded lazily.
+            data: The associated video data or path to it. If set to `infer`, attempts to automatically determine the video path.
+            loc: Location specification for loading data, applicable when data is a .h5 file.
+            group: Identifier for the group or condition to which the events belong.
+            subject_id: Identifier for the subject associated with the events.
+            z_slice: The frame range to consider for processing.
+            index_prefix: Prefix for indexing events. Useful in multi-file scenarios.
+            custom_columns: Additional columns to compute and include in the events DataFrame.
+            frame_to_time_mapping: Mapping from frame numbers to absolute time.
+            frame_to_time_function: Function to convert frame numbers to absolute time.
+            cache_path: Path for caching processed data.
+            seed: Seed value for hash generation. Needs to stay consistent between runs of analysis for caching to work.
 
-    Features:
-        - Load and preprocess event data from specified directories.
-        - Supports both single and multiple file loading.
-        - Extend event traces in time by their mean or edge footprint.
-        - Normalize and filter events based on specified criteria.
-        - Generate and visualize summary statistics, frequency distributions, and clustering results.
+        Features:
+            - Load and preprocess event data from specified directories.
+            - Supports both single and multiple file loading.
+            - Extend event traces in time by their mean or edge footprint.
+            - Normalize and filter events based on specified criteria.
+            - Generate and visualize summary statistics, frequency distributions, and clustering results.
 
-    Example::
+        Example::
 
-        from astrocast.analysis import Events
-        event_obj = Events('/your/event/dir')
+            from astrocast.analysis import Events
+            event_obj = Events('/your/event/dir')
 
-    """
+        """
 
     def __init__(
             self, event_dir: Union[str, Path, List[str]] = None, lazy: bool = True,
@@ -370,14 +374,14 @@ class Events(CachedClass):
                         logging.warning(f"unable to infer video path with {root_guess}.tiff/h5/tdb")
 
                 if data is not None:
-                    self.data = Video(data, z_slice=z_slice, loc=loc, lazy=False)
+                    self.data = Video(data, z_slice=z_slice, loc=loc)
 
             elif isinstance(data, (np.ndarray, da.Array)):
                 print("data instance is an np array")
                 if z_slice is not None:
                     logging.warning("'data'::array > Please ensure array was not sliced before providing data flag")
 
-                self.data = Video(data, z_slice=z_slice, lazy=False)
+                self.data = Video(data, z_slice=z_slice)
 
             elif isinstance(data, Video):
 
@@ -459,35 +463,36 @@ class Events(CachedClass):
         return is_ragged(self.events.trace.tolist())
 
     def add_clustering(self, cluster_lookup_table: dict, column_name: str = "cluster") -> None:
+        # noinspection GrazieInspection
         """
-        Adds a clustering column to the events DataFrame based on a provided lookup table.
+                Adds a clustering column to the events DataFrame based on a provided lookup table.
 
-        This method maps each event to a cluster label using the provided cluster_lookup_table and adds
-        these labels as a new column in the events DataFrame. If the specified column name already exists
-        in the DataFrame, it will be overwritten.
+                This method maps each event to a cluster label using the provided cluster_lookup_table and adds
+                these labels as a new column in the events DataFrame. If the specified column name already exists
+                in the DataFrame, it will be overwritten.
 
-        Args:
-            cluster_lookup_table: A dictionary mapping event indices to cluster labels. The keys
-                should correspond to the indices of the events DataFrame, and the values should be the
-                assigned cluster labels.
-            column_name: The name of the column to add to the events DataFrame. This
-                column will contain the cluster labels. If a column with this name already exists, it
-                will be overwritten.
+                Args:
+                    cluster_lookup_table: A dictionary mapping event indices to cluster labels. The keys
+                        should correspond to the indices of the events DataFrame, and the values should be the
+                        assigned cluster labels.
+                    column_name: The name of the column to add to the events DataFrame. This
+                        column will contain the cluster labels. If a column with this name already exists, it
+                        will be overwritten.
 
-        Raises:
-            Warning: If the specified column_name already exists in the events DataFrame, a warning is
-                raised, and the existing column is overwritten.
+                Raises:
+                    Warning: If the specified column_name already exists in the events DataFrame, a warning is
+                        raised, and the existing column is overwritten.
 
-        Example::
+                Example::
 
-            import numpy as np
-            from astrocast.analysis import Events
+                    import numpy as np
+                    from astrocast.analysis import Events
 
-            event_obj = Events('/path/to/events/dir')
-            random_lookup_table = {i: np.random.randint(0, 5) for i in event_obj.events.index.tolist()}
+                    event_obj = Events('/path/to/events/dir')
+                    random_lookup_table = {i: np.random.randint(0, 5) for i in event_obj.events.index.tolist()}
 
-            events.add_clustering(random_lookup_table, column_name="random_labels")
-        """
+                    events.add_clustering(random_lookup_table, column_name="random_labels")
+                """
         events = self.events
 
         if column_name in events.columns:
@@ -513,25 +518,26 @@ class Events(CachedClass):
         return results
 
     def get_counts_per_cluster(self, cluster_col: str, group_col: str = None) -> pd.DataFrame:
+        # noinspection GrazieInspection
         """
-        Computes the counts of events per cluster, optionally grouped by an additional column.
+                Computes the counts of events per cluster, optionally grouped by an additional column.
 
-        This method calculates the frequency of events in each cluster. If a group column is provided, it calculates
-        the frequency of events in each cluster for each group.
+                This method calculates the frequency of events in each cluster. If a group column is provided, it calculates
+                the frequency of events in each cluster for each group.
 
-        Args:
-            cluster_col: The name of the column in the events DataFrame that contains cluster labels.
-            group_col: The name of the column by which to group counts. If provided, the method
-                returns counts per cluster for each group. If None, the method returns overall counts per cluster.
+                Args:
+                    cluster_col: The name of the column in the events DataFrame that contains cluster labels.
+                    group_col: The name of the column by which to group counts. If provided, the method
+                        returns counts per cluster for each group. If None, the method returns overall counts per cluster.
 
-        Returns:
-            pd.DataFrame: A DataFrame with counts of events. Each row represents a cluster. If group_col is provided, each column represents a group, otherwise there is a single column with total counts.
+                Returns:
+                    pd.DataFrame: A DataFrame with counts of events. Each row represents a cluster. If group_col is provided, each column represents a group, otherwise there is a single column with total counts.
 
-        .. note::
+                .. note::
 
-            This method is particularly useful for analyzing the distribution of events across different clusters and groups.
+                    This method is particularly useful for analyzing the distribution of events across different clusters and groups.
 
-        """
+                """
         if group_col is None:
             counts = self.events[cluster_col].value_counts()
 
@@ -601,11 +607,10 @@ class Events(CachedClass):
             counts = counts.transpose()
 
         # plot
-        clustermap = sns.clustermap(
-            data=counts, col_colors=[group_cmap[g] for g in counts.columns] if group_cmap is not None else None,
-            row_cluster=True, col_cluster=True, method=method, metric=metric, z_score=z_score, center=center, cmap=cmap,
-            cbar_pos=None
-        )
+        clustermap = sns.clustermap(data=counts, col_colors=[group_cmap[g] for g in
+                                                             counts.columns] if group_cmap is not None else None,
+                                    method=method, metric=metric, z_score=z_score, center=center, cmap=cmap,
+                                    cbar_pos=None)
 
         # quality of clustering
         linkage = clustermap.dendrogram_col.linkage
@@ -870,10 +875,10 @@ class Events(CachedClass):
         events.sort_index(inplace=True)
 
         # Dictionary of custom column functions
-        custom_column_functions = {"v_area_norm": lambda events: events.v_area / events.dz,
-                                   "v_area_footprint": lambda events: events.footprint.apply(sum),
-                                   "cx": lambda events: events.x0 + events.dx * events["v_fp_centroid_local-0"],
-                                   "cy": lambda events: events.y0 + events.dy * events["v_fp_centroid_local-1"]}
+        custom_column_functions = {"v_area_norm": lambda events_: events_.v_area / events_.dz,
+                                   "v_area_footprint": lambda events_: events_.footprint.apply(sum),
+                                   "cx": lambda events_: events_.x0 + events_.dx * events_["v_fp_centroid_local-0"],
+                                   "cy": lambda events_: events_.y0 + events_.dy * events_["v_fp_centroid_local-1"]}
 
         if custom_columns is not None:
 
@@ -1144,7 +1149,7 @@ class Events(CachedClass):
             dpath = self.event_dir.joinpath(debug_file)
             if dpath.is_file():
 
-                debug = io.load(path=dpath, loc="", z_slice=z_slice, lazy=lazy)
+                debug = io.load(path=dpath, z_slice=z_slice, lazy=lazy)
 
                 if "active" in debug_file:
                     lbl_layer = viewer.add_labels(debug, name=debug_file.replace(".tiff", "").replace("debug_", ""))
@@ -1168,39 +1173,40 @@ class Events(CachedClass):
                     'file_name', 'subject_id', 'group', 'z0', 'z1', 'x0', 'x1', 'y0', 'y1', 'mask', 'contours',
                     'footprint', 'fp_cx', 'fp_cy', 'trace', 'error', 'cx', 'cy')
     ) -> Union[pd.DataFrame, pd.Series]:
+        # noinspection GrazieInspection
         """
-        Calculate and return summary statistics (mean ± standard deviation) for event data.
+                Calculate and return summary statistics (mean ± standard deviation) for event data.
 
-        This function computes the mean and standard deviation for each column in the event data, excluding specified columns.
-        It allows optional grouping of data and can round the results to a specified number of decimal places. The function
-        is designed to provide a quick statistical overview of the data, particularly useful for initial data analysis.
+                This function computes the mean and standard deviation for each column in the event data, excluding specified columns.
+                It allows optional grouping of data and can round the results to a specified number of decimal places. The function
+                is designed to provide a quick statistical overview of the data, particularly useful for initial data analysis.
 
-        .. note::
-          - The function defaults to 2 decimal places for rounding.
-          - Grouping is optional and can be specified with the 'groupby' argument.
+                .. note::
+                  - The function defaults to 2 decimal places for rounding.
+                  - Grouping is optional and can be specified with the 'groupby' argument.
 
-        .. caution::
-          - If 'groupby' is specified, the function transposes the output for readability.
-          - Certain columns are excluded by default to focus on relevant numerical data.
+                .. caution::
+                  - If 'groupby' is specified, the function transposes the output for readability.
+                  - Certain columns are excluded by default to focus on relevant numerical data.
 
-        Args:
-          decimals: Number of decimal places to round the mean and standard deviation.
-          groupby: Optional, column name to group data by before calculating statistics.
-          columns_excluded: List of column names to exclude from calculations.
+                Args:
+                  decimals: Number of decimal places to round the mean and standard deviation.
+                  groupby: Optional, column name to group data by before calculating statistics.
+                  columns_excluded: List of column names to exclude from calculations.
 
-        Returns:
-          A Pandas DataFrame or Series with the calculated mean ± standard deviation for each column.
+                Returns:
+                  A Pandas DataFrame or Series with the calculated mean ± standard deviation for each column.
 
-        Example::
+                Example::
 
-          # Example usage without grouping
-          summary_stats = events_obj.get_summary_statistics()
-          print(summary_stats)
+                  # Example usage without grouping
+                  summary_stats = events_obj.get_summary_statistics()
+                  print(summary_stats)
 
-          # Example usage with grouping
-          summary_stats_grouped = events_obj.get_summary_statistics(groupby='group_column')
-          print(summary_stats_grouped)
-        """
+                  # Example usage with grouping
+                  summary_stats_grouped = events_obj.get_summary_statistics(groupby='group_column')
+                  print(summary_stats_grouped)
+                """
 
         events = self.events
 
@@ -1235,35 +1241,36 @@ class Events(CachedClass):
             multi_timing_behavior: Literal['first', 'expand', 'exclude'] = "first",
             output_format: Literal['array', 'dataframe'] = "array"
     ) -> Union[np.ndarray, pd.DataFrame]:
+        # noinspection GrazieInspection
         """
-        Extracts trials based on given timings and trial length, with options for handling multiple timings and output format.
+                Extracts trials based on given timings and trial length, with options for handling multiple timings and output format.
 
-        The function processes a series of event timings, splitting each into pre-defined trial lengths.
-        It supports handling multiple timings per event and can output the results in either array or DataFrame format.
-        The implementation focuses on flexibility in handling trial data for complex neuroscience experiments.
+                The function processes a series of event timings, splitting each into pre-defined trial lengths.
+                It supports handling multiple timings per event and can output the results in either array or DataFrame format.
+                The implementation focuses on flexibility in handling trial data for complex neuroscience experiments.
 
-        .. note::
-          - This function is designed to work with numpy arrays.
-          - The output format can be either an array or a DataFrame, depending on the 'format' argument.
+                .. note::
+                  - This function is designed to work with numpy arrays.
+                  - The output format can be either an array or a DataFrame, depending on the 'format' argument.
 
-        Raises:
-          - The function raises a ValueError if the 'format' or 'multi_timing_behavior' arguments are not within the expected values.
+                Raises:
+                  - The function raises a ValueError if the 'format' or 'multi_timing_behavior' arguments are not within the expected values.
 
-        Args:
-          trial_timings: A list or numpy array of trial timings.
-          trial_length: The length of each trial. This is split evenly into pre and post intervals around each timing.
-          multi_timing_behavior: Strategy for handling multiple timings ('first', 'expand', 'exclude').
-          output_format: The output format of the trials ('array' or 'dataframe'). Default is 'array'.
+                Args:
+                  trial_timings: A list or numpy array of trial timings.
+                  trial_length: The length of each trial. This is split evenly into pre and post intervals around each timing.
+                  multi_timing_behavior: Strategy for handling multiple timings ('first', 'expand', 'exclude').
+                  output_format: The output format of the trials ('array' or 'dataframe'). Default is 'array'.
 
-        Returns:
-          A numpy array or DataFrame containing the extracted trial data. The structure depends on the 'format' and 'multi_timing_behavior' arguments.
+                Returns:
+                  A numpy array or DataFrame containing the extracted trial data. The structure depends on the 'format' and 'multi_timing_behavior' arguments.
 
-        Example::
+                Example::
 
-          # Assuming a class instance 'events_obj' and timings list 'timings'
-          trials = events_obj.get_trials(timings, 30, 'first', 'array')
-          print(trials)
-        """
+                  # Assuming a class instance 'events_obj' and timings list 'timings'
+                  trials = events_obj.get_trials(timings, 30, 'first', 'array')
+                  print(trials)
+                """
 
         if output_format not in ["array", "dataframe"]:
             raise ValueError(f"'format' attribute has to be one of ['array', 'dataframe'] not: {output_format}")
@@ -1360,53 +1367,54 @@ class Events(CachedClass):
             normalization_instructions: Dict[int, List[Union[str, Dict[str, str]]]] = None, show_progress: bool = True,
             memmap_path: Union[str, Path] = None, save_path: Union[str, Path] = None, save_param: Dict[str, Any] = None
     ) -> Union[pd.DataFrame, Tuple[np.ndarray, List[int], List[int]]]:
+        # noinspection GrazieInspection
         """
-        Extends the footprint of individual events either over the entire z-range or a fixed number of bordering 
-        frames of a time series recording.
+                Extends the footprint of individual events either over the entire z-range or a fixed number of bordering
+                frames of a time series recording.
 
-        This method extends the event signals by applying the event's footprint or mask over a specified range in the 
-        video. It supports different modes of extension, normalization of the extended signal, and various output 
-        options. The method is useful when capturing the shoulders of the events is beneficial (e.g. in classification 
-        tasks)
+                This method extends the event signals by applying the event's footprint or mask over a specified range in the
+                video. It supports different modes of extension, normalization of the extended signal, and various output
+                options. The method is useful when capturing the shoulders of the events is beneficial (e.g. in classification
+                tasks)
 
-        .. note::
-          - Normalization instructions should be provided as a dictionary where each key is an operation index, 
-            and the value is a list of the operation and its parameters. For more information see 
-            :func:`~astrocast.helper.Normalization.run`.
+                .. note::
+                  - Normalization instructions should be provided as a dictionary where each key is an operation index,
+                    and the value is a list of the operation and its parameters. For more information see
+                    :func:`~astrocast.helper.Normalization.run`.
 
-        .. caution::
-          - The method raises ValueError if 'video' is not provided and no data is available in 'self.data'.
-          - The function may generate large arrays, potentially consuming a significant portion of available RAM.
+                .. caution::
+                  - The method raises ValueError if 'video' is not provided and no data is available in 'self.data'.
+                  - The function may generate large arrays, potentially consuming a significant portion of available RAM.
 
-        Args:
-          events: DataFrame containing event data. If None, uses 'self.events'.
-          video: 3D numpy array of video data. If None, uses 'self.data'.
-          dtype: Data type for the output array.
-          use_footprint: Whether to use the event's footprint for extension.
-          extend: Extension length or range. Can be a single int or a tuple (left, right). -1 corresponds to the
-            full range.
-          ensure_min: Minimum length to ensure for each extended event.
-          ensure_max: Maximum length to allow for each extended event.
-          pad_borders: If True, pads the borders of video to ensure requested length.
-          return_array: Whether to return the extended events as a numpy array.
-          in_place: Whether to modify 'events' in place.
-          normalization_instructions: Dictionary with normalization operations and parameters. For more information see 
-            :func:`~astrocast.helper.Normalization.run`.
-          show_progress: Whether to show progress bar during execution.
-          memmap_path: Path to save memmap file, if needed.
-          save_path: Path to save output, if desired.
-          save_param: Additional parameters for saving the file.
+                Args:
+                  events: DataFrame containing event data. If None, uses 'self.events'.
+                  video: 3D numpy array of video data. If None, uses 'self.data'.
+                  dtype: Data type for the output array.
+                  use_footprint: Whether to use the event's footprint for extension.
+                  extend: Extension length or range. Can be a single int or a tuple (left, right). -1 corresponds to the
+                    full range.
+                  ensure_min: Minimum length to ensure for each extended event.
+                  ensure_max: Maximum length to allow for each extended event.
+                  pad_borders: If True, pads the borders of video to ensure requested length.
+                  return_array: Whether to return the extended events as a numpy array.
+                  in_place: Whether to modify 'events' in place.
+                  normalization_instructions: Dictionary with normalization operations and parameters. For more information see
+                    :func:`~astrocast.helper.Normalization.run`.
+                  show_progress: Whether to show progress bar during execution.
+                  memmap_path: Path to save memmap file, if needed.
+                  save_path: Path to save output, if desired.
+                  save_param: Additional parameters for saving the file.
 
-        Returns:
-          Depending on 'return_array', returns either a modified DataFrame or a tuple of the numpy array and two lists 
-          containing the extended z-range start and end indices.
+                Returns:
+                  Depending on 'return_array', returns either a modified DataFrame or a tuple of the numpy array and two lists
+                  containing the extended z-range start and end indices.
 
-        Example::
+                Example::
 
-          # Assuming a class instance 'event_obj' and a np.ndarray of the video data 'my_video_data'.
-          extended_events = event_obj.get_extended_events(event_obj.events, video=my_video_data, dtype=np.float32)
-          print(extended_events)
-        """
+                  # Assuming a class instance 'event_obj' and a np.ndarray of the video data 'my_video_data'.
+                  extended_events = event_obj.get_extended_events(event_obj.events, video=my_video_data, dtype=np.float32)
+                  print(extended_events)
+                """
 
         if events is None:
             events = self.events
@@ -1589,7 +1597,7 @@ class Events(CachedClass):
 
             # normalize
             if normalization_instructions is not None:
-                norm = helper.Normalization(data=trace, inplace=True)
+                norm = helper.Normalization(data=trace)
                 norm.run(normalization_instructions)
 
             if return_array:
@@ -1639,32 +1647,33 @@ class Events(CachedClass):
             self, min_length: Union[int, None] = None, pad_mode: str = "edge", max_length: Union[int, None] = None,
             inplace: bool = False
     ) -> pd.DataFrame:
+        # noinspection GrazieInspection
         """
-        Adjusts the length of each event trace in a DataFrame to meet specified minimum and/or maximum
-        length requirements.
+                Adjusts the length of each event trace in a DataFrame to meet specified minimum and/or maximum
+                length requirements.
 
-        This method modifies the lengths of event traces by either padding them to meet a minimum length or truncating
-        them to adhere to a maximum length. It's particularly useful in standardizing the size of events for consistent
-        analysis. The method supports different padding modes and can operate in place or return a modified copy.
+                This method modifies the lengths of event traces by either padding them to meet a minimum length or truncating
+                them to adhere to a maximum length. It's particularly useful in standardizing the size of events for consistent
+                analysis. The method supports different padding modes and can operate in place or return a modified copy.
 
-        .. caution::
-          - 'z0' and 'z1' values in the events DataFrame do not correspond to the adjusted event boundaries after this operation.
+                .. caution::
+                  - 'z0' and 'z1' values in the events DataFrame do not correspond to the adjusted event boundaries after this operation.
 
-        Args:
-          min_length: The minimum length to ensure for each event trace. If None, no minimum length enforcement is done.
-          pad_mode: The padding mode to use if padding is necessary ('constant', 'edge', etc.). Default is 'edge'.
-          max_length: The maximum length to allow for each event trace. If None, no maximum length enforcement is done.
-          inplace: If True, modifies the 'events' attribute of the object in place.
+                Args:
+                  min_length: The minimum length to ensure for each event trace. If None, no minimum length enforcement is done.
+                  pad_mode: The padding mode to use if padding is necessary ('constant', 'edge', etc.). Default is 'edge'.
+                  max_length: The maximum length to allow for each event trace. If None, no maximum length enforcement is done.
+                  inplace: If True, modifies the 'events' attribute of the object in place.
 
-        Returns:
-          A DataFrame with the adjusted event traces. The original DataFrame is modified if 'inplace' is True.
+                Returns:
+                  A DataFrame with the adjusted event traces. The original DataFrame is modified if 'inplace' is True.
 
-        Example::
+                Example::
 
-          # Assuming a class instance 'event_obj'
-          modified_events = event_obj.enforce_length(min_length=100, max_length=200, pad_mode='constant', inplace=False)
-          print(modified_events)
-        """
+                  # Assuming a class instance 'event_obj'
+                  modified_events = event_obj.enforce_length(min_length=100, max_length=200, pad_mode='constant', inplace=False)
+                  print(modified_events)
+                """
         if inplace:
             events = self.events
         else:
@@ -1770,7 +1779,7 @@ class Events(CachedClass):
         pivot = pivot.fillna(0)
 
         if normalization_instructions is not None:
-            norm = Normalization(pivot.values, inplace=True)
+            norm = Normalization(pivot.values)
             norm_arr = norm.run(normalization_instructions)
             pivot = pd.DataFrame(norm_arr, index=pivot.index, columns=pivot.columns)
 
@@ -1849,6 +1858,7 @@ class Events(CachedClass):
         return cluster_lookup_table
 
 
+# noinspection GrazieInspection
 class Plotting:
 
     def __init__(self, events):
@@ -1905,6 +1915,7 @@ class Plotting:
 
         elif len(f) == 1:
 
+            # noinspection GrazieInspection
             if f[0] > max_n:
                 # If only one factor and it exceeds max_n, set grid dimensions to ceil(sqrt(N))
                 nx = ny = int(np.ceil(np.sqrt(N)))
@@ -2009,7 +2020,7 @@ class Plotting:
         traces = self._get_random_sample(num_samples=num_samples)
 
         if ax is None:
-            fig, ax = plt.subplots(1, 1, figsize=figsize)
+            fig, ax = plt.subplots(figsize=figsize)
         else:
             fig = ax.get_figure()
 

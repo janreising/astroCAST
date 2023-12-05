@@ -185,7 +185,7 @@ def cli(ctx, config):
     """Command Line Interface for the astroCAST package."""
 
     if config is not None:
-        with open(config, 'r') as file:
+        with open(config) as file:
             config = yaml.safe_load(file)
 
         ctx.default_map = config
@@ -575,11 +575,11 @@ def train_denoiser(
                 f"{train_str.name}"
             )
 
-        train_gen = denoising.SubFrameGenerator(
-            paths=train_paths, max_per_file=max_per_file, loc=loc, input_size=input_size,
-            pre_post_frame=pre_post_frames, gap_frames=gap_frames, allowed_rotation=train_rotation, padding=padding,
-            batch_size=batch_size, normalize=normalize, in_memory=in_memory, allowed_flip=train_flip, shuffle=True
-        )
+        train_gen = denoising.SubFrameGenerator(paths=train_paths, max_per_file=max_per_file, loc=loc,
+                                                input_size=input_size, pre_post_frame=pre_post_frames,
+                                                gap_frames=gap_frames, allowed_rotation=train_rotation, padding=padding,
+                                                batch_size=batch_size, normalize=normalize, in_memory=in_memory,
+                                                allowed_flip=train_flip)
 
         # Validator
         if validation_files is not None:
@@ -596,12 +596,11 @@ def train_denoiser(
                     f"{val_str.name}"
                 )
 
-            val_gen = denoising.SubFrameGenerator(
-                paths=val_paths, max_per_file=max_per_val_file, batch_size=batch_size_val, loc=loc,
-                input_size=input_size, pre_post_frame=pre_post_frames, gap_frames=gap_frames, allowed_rotation=[0],
-                padding=padding, normalize=normalize, in_memory=in_memory, cache_results=False, allowed_flip=[-1],
-                shuffle=False
-            )
+            val_gen = denoising.SubFrameGenerator(paths=val_paths, max_per_file=max_per_val_file,
+                                                  batch_size=batch_size_val, loc=loc, input_size=input_size,
+                                                  pre_post_frame=pre_post_frames, gap_frames=gap_frames,
+                                                  allowed_rotation=[0], padding=padding, normalize=normalize,
+                                                  in_memory=in_memory, allowed_flip=[-1], shuffle=False)
         else:
             val_gen = None
 
@@ -687,14 +686,12 @@ def denoise(
 
     with UserFeedback(params=locals(), logging_level=logging_level):
         # Initializing the SubFrameGenerator instance
-        sub_frame_generator = SubFrameGenerator(
-            paths=input_path, batch_size=batch_size, input_size=input_size, pre_post_frame=pre_post_frames,
-            gap_frames=gap_frames,  # z_steps=None,
-            z_select=z_select, allowed_rotation=[0], allowed_flip=[-1], random_offset=False, add_noise=False,
-            drop_frame_probability=None, max_per_file=None, overlap=overlap, padding=padding, shuffle=False,
-            normalize=normalize, loc=loc, output_size=None, cache_results=False, in_memory=in_memory,
-            save_global_descriptive=False, logging_level=logging_level
-        )
+        sub_frame_generator = SubFrameGenerator(paths=input_path, batch_size=batch_size, input_size=input_size,
+                                                pre_post_frame=pre_post_frames, gap_frames=gap_frames,
+                                                z_select=z_select, allowed_rotation=[0], allowed_flip=[-1],
+                                                overlap=overlap, padding=padding, shuffle=False, normalize=normalize,
+                                                loc=loc, in_memory=in_memory, save_global_descriptive=False,
+                                                logging_level=logging_level)
 
         # Running the infer method
         result = sub_frame_generator.infer(
@@ -883,7 +880,7 @@ def visualize_h5(input_path):
 
     import h5py
 
-    with h5py.File(input_path, 'r') as f:
+    with h5py.File(input_path) as f:
         visualize_h5_recursive(f['/'])
 
 
@@ -896,7 +893,7 @@ def visualize_h5(input_path):
 def move_h5_dataset(input_path, output_path, loc_in, loc_out, overwrite):
     import h5py as h5
 
-    with h5.File(input_path, "r") as in_:
+    with h5.File(input_path) as in_:
         with h5.File(output_path, "a") as out_:
 
             if loc_in not in in_:
@@ -998,7 +995,7 @@ def view_detection_results(event_dir, video_path, loc, z_select, lazy, testing):
     from astrocast.analysis import Events
 
     event = Events(event_dir=event_dir, data=video_path, loc=loc, z_slice=z_select, lazy=lazy)
-    viewer = event.show_event_map(video=None, loc=None, z_slice=z_select)
+    viewer = event.show_event_map(z_slice=z_select)
 
     if not testing:
         viewer.show()
@@ -1079,7 +1076,7 @@ def export_video(
     if rescale is not None and rescale != 1.0:
         data = Input._rescale_data(data, rescale=float(rescale))
 
-    chunks = io.infer_chunks_from_array(arr=data, strategy="balanced", chunks=chunk_size)
+    chunks = io.infer_chunks_from_array(arr=data, chunks=chunk_size)
     io.save(output_path, data=data, loc=loc_out, chunks=chunks, compression=compression, overwrite=overwrite)
 
 
@@ -1231,7 +1228,7 @@ def push_slurm_tasks(log_path, cfg_path, data_path, tasks, base_command, account
     for f in files:
 
         last_jobid = None
-        with h5.File(f, "r") as file:
+        with h5.File(f) as file:
             print(f"{f}:")
 
             for i in task_ids:

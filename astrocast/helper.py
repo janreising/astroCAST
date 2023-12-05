@@ -93,7 +93,7 @@ def wrapper_local_cache(f):
         elif isinstance(arg, (bool, int, tuple)):
             return str(arg)
 
-        elif isinstance(arg, (str)):
+        elif isinstance(arg, str):
 
             if len(arg) < 10:
                 return arg

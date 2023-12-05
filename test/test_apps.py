@@ -2,14 +2,16 @@ import multiprocessing
 import platform
 import tempfile
 import time
+from pathlib import Path
 
 import pytest
 import requests
 
-from astrocast.app_analysis import *
-from astrocast.app_preparation import *
+from astrocast.app_analysis import Analysis
+from astrocast.app_preparation import Explorer
 from astrocast.detection import Detector
 from astrocast.helper import EventSim
+from astrocast.preparation import IO
 
 
 @pytest.mark.skipif(platform.system() in ['Darwin', 'Windows'],

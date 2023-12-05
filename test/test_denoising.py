@@ -1,13 +1,11 @@
 import logging
-import shutil
-import tempfile
 from pathlib import Path
 
 import pytest
 
 from astrocast.denoising import Network
 from astrocast.denoising import SubFrameGenerator
-from astrocast.helper import SampleInput, remove_temp_safe
+from astrocast.helper import SampleInput
 from astrocast.preparation import IO
 
 

@@ -1,7 +1,11 @@
+import platform
+from pathlib import Path
+
+import numpy as np
 import pytest
 
 from astrocast.analysis import Events
-from astrocast.detection import *
+from astrocast.detection import Detector
 from astrocast.helper import EventSim, SampleInput
 from astrocast.preparation import IO
 

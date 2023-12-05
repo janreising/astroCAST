@@ -68,82 +68,101 @@ class FeatureExtraction(CachedClass):
 
         return summary
 
-    def mean(self, X):
+    @staticmethod
+    def mean(X):
         """ statistical mean for each variable in a segmented time series """
         return np.mean(X)
 
-    def median(self, X):
+    @staticmethod
+    def median(X):
         """ statistical median for each variable in a segmented time series """
         return np.median(X)
 
-    def gmean(self, X):
+    @staticmethod
+    def gmean(X):
         """ geometric mean for each variable """
         return stats.gmean(X)
 
-    def hmean(self, X):
+    @staticmethod
+    def hmean(X):
         """ harmonic mean for each variable """
         return stats.hmean(X)
 
-    def vec_sum(self, X):
+    @staticmethod
+    def vec_sum(X):
         """ vector sum of each variable """
         return np.sum(X)
 
-    def abs_sum(self, X):
+    @staticmethod
+    def abs_sum(X):
         """ sum of absolute values """
         return np.sum(np.abs(X))
 
-    def abs_energy(self, X):
+    @staticmethod
+    def abs_energy(X):
         """ absolute sum of squares for each variable """
         return np.sum(X * X)
 
-    def std(self, X):
+    @staticmethod
+    def std(X):
         """ statistical standard deviation for each variable in a segmented time series """
         return np.std(X)
 
-    def var(self, X):
+    @staticmethod
+    def var(X):
         """ statistical variance for each variable in a segmented time series """
         return np.var(X)
 
-    def median_absolute_deviation(self, X):
+    @staticmethod
+    def median_absolute_deviation(X):
         """ median absolute deviation for each variable in a segmented time series """
         if hasattr(stats, 'median_abs_deviation'):
             return stats.median_abs_deviation(X)
         else:
             return stats.median_absolute_deviation(X)
 
-    def variation(self, X):
+    @staticmethod
+    def variation(X):
         """ coefficient of variation """
         return stats.variation(X)
 
-    def minimum(self, X):
+    @staticmethod
+    def minimum(X):
         """ minimum value for each variable in a segmented time series """
         return np.min(X)
 
-    def maximum(self, X):
+    @staticmethod
+    def maximum(X):
         """ maximum value for each variable in a segmented time series """
         return np.max(X)
 
-    def skew(self, X):
+    @staticmethod
+    def skew(X):
         """ skewness for each variable in a segmented time series """
         return stats.skew(X)
 
-    def kurt(self, X):
+    @staticmethod
+    def kurt(X):
         """ kurtosis for each variable in a segmented time series """
         return stats.kurtosis(X)
 
-    def mean_diff(self, X):
+    @staticmethod
+    def mean_diff(X):
         """ mean temporal derivative """
         return np.mean(np.diff(X))
 
-    def means_abs_diff(self, X):
+    @staticmethod
+    def means_abs_diff(X):
         """ mean absolute temporal derivative """
         return np.mean(np.abs(np.diff(X)))
 
-    def mse(self, X):
+    @staticmethod
+    def mse(X):
         """ computes mean spectral energy for each variable in a segmented time series """
         return np.mean(np.square(np.abs(np.fft.fft(X))))
 
-    def mean_crossings(self, X):
+    @staticmethod
+    def mean_crossings(X):
         """ Computes number of mean crossings for each variable in a segmented time series """
         X = np.atleast_3d(X)
         N = X.shape[0]
@@ -156,11 +175,13 @@ class FeatureExtraction(CachedClass):
             mnx[:, i] = np.count_nonzero(c)
         return mnx
 
-    def mean_abs(self, X):
+    @staticmethod
+    def mean_abs(X):
         """ statistical mean of the absolute values for each variable in a segmented time series """
         return np.mean(np.abs(X))
 
-    def zero_crossing(self, X, threshold=0):
+    @staticmethod
+    def zero_crossing(X, threshold=0):
         """ number of zero crossings among two consecutive samples above a certain threshold for each
         variable in the segmented time series"""
 
@@ -168,59 +189,68 @@ class FeatureExtraction(CachedClass):
         abs_diff = np.abs(np.diff(X))
         return np.sum(sign * abs_diff >= threshold, dtype=X.dtype)
 
-    def slope_sign_changes(self, X, threshold=0):
+    @staticmethod
+    def slope_sign_changes(X, threshold=0):
         """ number of changes between positive and negative slope among three consecutive samples
         above a certain threshold for each variable in the segmented time series"""
 
         change = (X[:, 1:-1] - X[:, :-2]) * (X[:, 1:-1] - X[:, 2:])
         return np.sum(change >= threshold, dtype=X.dtype)
 
-    def waveform_length(self, X):
+    @staticmethod
+    def waveform_length(X):
         """ cumulative length of the waveform over a segment for each variable in the segmented time
         series """
         return np.sum(np.abs(np.diff(X)))
 
-    def root_mean_square(self, X):
+    @staticmethod
+    def root_mean_square(X):
+        # noinspection GrazieInspection
         """ root mean square for each variable in the segmented time series """
         segment_width = X.shape[1]
         return np.sqrt(np.sum(X * X) / segment_width)
 
-    def emg_var(self, X):
+    @staticmethod
+    def emg_var(X):
         """ variance (assuming a mean of zero) for each variable in the segmented time series
         (equals abs_energy divided by (seg_size - 1)) """
         segment_width = X.shape[1]
         return np.sum(X * X) / (segment_width - 1)
 
-    def willison_amplitude(self, X, threshold=0):
+    @staticmethod
+    def willison_amplitude(X, threshold=0):
         """ the Willison amplitude for each variable in the segmented time series """
         return np.sum(np.abs(np.diff(X)) >= threshold)
 
-    def shannon_entropy(self, X, b=2):
+    @staticmethod
+    def shannon_entropy(X, b=2):
         return pyinform.shannon.entropy(X, b=b)
 
-    def cid_ce(self, X, normalize=True):
+    @staticmethod
+    def cid_ce(X, normalize=True):
+        # noinspection GrazieInspection
         """
-        This function calculator is an estimate for a time series complexity [1] (A more complex time series has more peaks,
-        valleys etc.). It calculates the value of
+                This function calculator is an estimate for a time series complexity [1] (A more complex time series has more peaks,
+                valleys etc.). It calculates the value of
 
-        .. math::
+                .. math::
 
-            \\sqrt{ \\sum_{i=1}^{n-1} ( x_{i} - x_{i-1})^2 }
+                    \\sqrt{ \\sum_{i=1}^{n-1} ( x_{i} - x_{i-1})^2 }
 
-        .. rubric:: References
+                .. rubric:: References
 
-        |  [1] Batista, Gustavo EAPA, et al (2014).
-        |  CID: an efficient complexity-invariant distance for time series.
-        |  Data Mining and Knowledge Discovery 28.3 (2014): 634-669.
+                |  [1] Batista, Gustavo EAPA, et al (2014).
+                |  CID: an efficient complexity-invariant distance for time series.
+                |  Data Mining and Knowledge Discovery 28.3 (2014): 634-669.
 
-        :param x: the time series to calculate the feature of
-        :type x: numpy.ndarray
-        :param normalize: should the time series be z-transformed?
-        :type normalize: bool
+                :param x: the time series to calculate the feature of
+                :type x: numpy.ndarray
+                :param normalize: should the time series be z-transformed?
+                :type normalize: bool
 
-        :return: the value of this feature
-        :return type: float
-        """
+                :return: the value of this feature
+                :return type: float
+                """
         if not isinstance(X, (np.ndarray, pd.Series)):
             X = np.asarray(X)
         if normalize:
@@ -233,26 +263,28 @@ class FeatureExtraction(CachedClass):
         X = np.diff(X)
         return np.sqrt(np.dot(X, X))
 
-    def large_standard_deviation(self, x, r=0.5):
+    @staticmethod
+    def large_standard_deviation(x, r=0.5):
+        # noinspection GrazieInspection
         """
-        Does time series have *large* standard deviation?
+                Does time series have *large* standard deviation?
 
-        Boolean variable denoting if the standard dev of x is higher than 'r' times the range = difference between max and
-        min of x. Hence it checks if
+                Boolean variable denoting if the standard dev of x is higher than 'r' times the range = difference between max and
+                min of x. Hence it checks if
 
-        .. math::
+                .. math::
 
-            std(x) > r * (max(X)-min(X))
+                    std(x) > r * (max(X)-min(X))
 
-        According to a rule of the thumb, the standard deviation should be a forth of the range of the values.
+                According to a rule of the thumb, the standard deviation should be a forth of the range of the values.
 
-        :param x: the time series to calculate the feature of
-        :type x: numpy.ndarray
-        :param r: the percentage of the range to compare with
-        :type r: float
-        :return: the value of this feature
-        :return type: bool
-        """
+                :param x: the time series to calculate the feature of
+                :type x: numpy.ndarray
+                :param r: the percentage of the range to compare with
+                :type r: float
+                :return: the value of this feature
+                :return type: bool
+                """
         if not isinstance(x, (np.ndarray, pd.Series)):
             x = np.asarray(x)
         return np.std(x) > (r * (np.max(x) - np.min(x)))
@@ -292,7 +324,8 @@ class FeatureExtraction(CachedClass):
             x = np.asarray(x)
         return np.max(self._get_length_sequences_where(x < np.mean(x))) if x.size > 0 else 0
 
-    def percentage_of_reoccurring_datapoints_to_all_datapoints(self, x):
+    @staticmethod
+    def percentage_of_reoccurring_datapoints_to_all_datapoints(x):
         """
         Returns the percentage of non-unique data points. Non-unique means that they are
         contained another time in the time series again.
@@ -321,28 +354,31 @@ class FeatureExtraction(CachedClass):
 
         return reoccuring_values / x.size
 
-    def symmetry_looking(self, x, r=0.5):
+    @staticmethod
+    def symmetry_looking(x, r=0.5):
+        # noinspection GrazieInspection
         """
-        Boolean variable denoting if the distribution of x *looks symmetric*. This is the case if
+                Boolean variable denoting if the distribution of x *looks symmetric*. This is the case if
 
-        .. math::
+                .. math::
 
-            | mean(X)-median(X)| < r * (max(X)-min(X))
+                    | mean(X)-median(X)| < r * (max(X)-min(X))
 
-        :param x: the time series to calculate the feature of
-        :type x: numpy.ndarray
-        :param param: contains dictionaries {"r": x} with x (float) is the percentage of the range to compare with
-        :type param: list
-        :return: the value of this feature
-        :return type: bool
-        """
+                :param x: the time series to calculate the feature of
+                :type x: numpy.ndarray
+                :param param: contains dictionaries {"r": x} with x (float) is the percentage of the range to compare with
+                :type param: list
+                :return: the value of this feature
+                :return type: bool
+                """
         if not isinstance(x, (np.ndarray, pd.Series)):
             x = np.asarray(x)
         mean_median_difference = np.abs(np.mean(x) - np.median(x))
         max_min_difference = np.max(x) - np.min(x)
         return mean_median_difference < r * max_min_difference
 
-    def variance_larger_than_standard_deviation(self, x):
+    @staticmethod
+    def variance_larger_than_standard_deviation(x):
         """
         Is variance higher than the standard deviation?
 
@@ -443,7 +479,7 @@ class UMAP:
         self.reducer = pickle.load(open(path, "rb"))
 
 
-class ClusterTree():
+class ClusterTree:
     """ converts linkage matrix to searchable tree"""
 
     def __init__(self, Z):
