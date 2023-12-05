@@ -284,8 +284,8 @@ class Events(CachedClass):
     """
 
     def __init__(
-            self, event_dir: Union[str, Path, List[str]], lazy: bool = True,
-            data: Union[np.ndarray, da.Array, str, Path] = None,
+            self, event_dir: Union[str, Path, List[str]] = None, lazy: bool = True,
+            data: Union[np.ndarray, da.Array, str, Path, Video] = None,
             loc: str = None, group: Union[str, int] = None, subject_id: Union[str, int] = None,
             z_slice: Tuple[int, int] = None, index_prefix: str = None,
             custom_columns: Union[list, Tuple, Literal['v_area_norm', 'v_ara_footprint', 'cx', 'cy']] = (
@@ -385,6 +385,9 @@ class Events(CachedClass):
                     logging.warning("'data'::Video > Slice manually during Video object initialization")
 
                 self.data: Video = data
+
+            elif data is None:
+                self.data = None
 
             else:
                 logging.warning(f"data is not a valid type ({type(data)}). Defaulting to None")

@@ -7,7 +7,7 @@ from astrocast.clustering import *
 from astrocast.helper import DummyGenerator
 
 
-class Test_hdbscan:
+class TestHdbscan:
 
     def test_plain(self):
         dg = DummyGenerator(ragged=False)
@@ -60,7 +60,7 @@ class Test_hdbscan:
             assert np.allclose(lbls_1, lbls_2)
 
 
-class Test_dtw_linkage:
+class TestDtwLinkage:
 
     @pytest.mark.parametrize("criterion", ["distance", "maxclust"])
     @pytest.mark.parametrize("ragged", [True, False])
@@ -278,12 +278,15 @@ class TestDistance:
         assert distance_matrix.shape == (num_rows, num_rows)
 
 
-class Test_Correlation:
+class TestCorrelation:
+    correlation = None
+    corr_matrix = None
 
-    def setup_method(self):
+    @classmethod
+    def setup_class(cls):
         # Set up any necessary data for the tests
-        self.correlation = Distance()
-        self.corr_matrix = np.random.rand(100, 100)
+        cls.correlation = Distance()
+        cls.corr_matrix = np.random.rand(100, 100)
 
     @pytest.mark.parametrize("ragged", [True, False])
     @pytest.mark.parametrize("input_type", ["numpy", "dask", "pandas"])

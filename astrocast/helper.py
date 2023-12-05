@@ -14,6 +14,7 @@ import dask.array as da
 import h5py
 import numpy as np
 import pandas as pd
+import py.path
 import tifffile
 import tiledb
 import xxhash
@@ -23,18 +24,22 @@ from skimage.util import img_as_uint
 
 def remove_temp_safe(tmp_dir: tempfile.TemporaryDirectory, wait_time: int = 20):
     # necessary to give Windows time to release files
-    if platform.system() == "Windows":
+    if platform.system() in ["Windows", "win32"]:
+
+        time.sleep(wait_time)
 
         files = list(Path(tmp_dir.name).glob("*/*")) + list(Path(tmp_dir.name).glob("*"))
         for file in files:
 
-            if file.is_file():
-                file.unlink(missing_ok=True)
-            elif file.is_dir():
-                shutil.rmtree(file.as_posix())
+            try:
+                if file.is_file():
+                    file.unlink(missing_ok=True)
+                elif file.is_dir():
+                    shutil.rmtree(file.as_posix())
+            except PermissionError:
+                logging.warning(f"Unable to delete locked file: {file}")
 
         logging.warning(f"Assuming to be on windows. Waiting for files to be released!")
-        time.sleep(wait_time)
 
         if len(list(Path(tmp_dir.name).glob("*"))) != 0:
             logging.error(f"temp dir not empty after cleanup: {tmp_dir.name}")
@@ -546,22 +551,20 @@ class EventSim:
         return indices
 
     @staticmethod
-    def create_random_blob(section, min_gap=1, blob_size_fraction=0.2, event_num=1):
+    def create_random_blob(section: np.ndarray, min_gap: int = 1, blob_size_fraction: float = 0.2,
+                           event_num: int = 1) -> np.ndarray:
         """
         Generate a random blob of connected shape in a given array.
 
         Args:
-            shape (tuple): The shape of the array (depth, rows, cols).
-            min_gap (int, optional): The minimum distance of the blob to the edge of the array. Default is 1.
-            blob_size_fraction (float, optional): The average size of the blob as a fraction of the total array size.
-                                                  Default is 0.2.
-            event_num (int, optional): The value to assign to the blob pixels. Default is 1.
+            section: array to populate with blobs
+            min_gap: The minimum distance of the blob to the edge of the array.
+            blob_size_fraction: The average size of the blob as a fraction of the total array size.
+            event_num: The value to assign to the blob pixels.
 
         Returns:
             numpy.ndarray: The array with the generated random blob.
 
-        Raises:
-            None
         """
 
         # Get the dimensions of the array
@@ -606,31 +609,34 @@ class EventSim:
 
         return section
 
-    def simulate(
-            self, shape, z_fraction=0.2, xy_fraction=0.1, gap_space=5, gap_time=3, event_intensity="incr",
-            background_noise=None, blob_size_fraction=0.05, event_probability=0.2, skip_n=5
-    ):
+    def simulate(self, shape: Tuple[int, int, int], z_fraction: float = 0.2, xy_fraction: float = 0.1,
+                 gap_space: int = 5, gap_time: int = 3, event_intensity: Union[str, int, float] = "incr",
+                 background_noise: float = None, blob_size_fraction: float = 0.05,
+                 event_probability: float = 0.2, skip_n: int = 5) -> Tuple[np.ndarray, int]:
+        """ Simulates the generation of random events (blobs) in a 3D array.
 
-        """
-        Simulate the generation of random blobs in a 3D array.
+        This function creates a 3D numpy array of the given shape and populates it with randomly generated blobs.
+        The blobs' distribution and characteristics are determined by the specified parameters, allowing customization
+        of the simulation. The method is useful for generating synthetic data for testing or algorithm development in
+        image analysis.
 
         Args:
-            shape (tuple): The shape of the 3D array (depth, rows, cols).
-            z_fraction (float, optional): The fraction of the depth dimension to be covered by the blobs. Default is 0.2.
-            xy_fraction (float, optional): The fraction of the rows and columns dimensions to be covered by the blobs.
-                                           Default is 0.1.
-            gap_space (int, optional): The minimum distance between blobs along the rows and columns. Default is 1.
-            gap_time (int, optional): The minimum distance between blobs along the depth dimension. Default is 1.
-            blob_size_fraction (float, optional): The average size of the blob as a fraction of the total array size.
-                                                  Default is 0.05.
-            event_probability (float, optional): The probability of generating a blob in each section. Default is 0.2.
+            shape: The shape of the 3D array (Z, X, Y).
+            z_fraction: Fraction of the depth dimension to be covered by the blobs.
+            xy_fraction: Fraction of the rows and columns dimensions to be covered by the blobs.
+            gap_space: Minimum distance between blobs along rows and columns.
+            gap_time: Minimum distance between blobs along the depth dimension.
+            event_intensity: Determines intensity of the events. Can be 'incr' for incremental, or a specific int/float value.
+            background_noise: Background noise level. None for no noise.
+            blob_size_fraction: Average size of a blob as a fraction of the total array size.
+            event_probability: Probability of generating a blob in each section.
+            skip_n: Number of sections to skip for blob placement.
 
         Returns:
-            numpy.ndarray: The 3D array with the generated random blobs.
-            int: The number of created events.
+            A tuple containing the 3D array with generated blobs and the number of created events.
 
         Raises:
-            None
+            ValueError: If `event_intensity` is neither 'incr', int, nor float.
         """
 
         # Create empty array
@@ -713,13 +719,30 @@ class EventSim:
 
 class SampleInput:
 
-    def __init__(self, test_data_dir="./testdata/"):
+    def __init__(self, test_data_dir="./testdata/", tmp_dir=None):
         self.test_data_dir = Path(test_data_dir)
-        self.tmp_dir = tempfile.TemporaryDirectory()
+
+        if tmp_dir is None:
+            self.tmp_dir = tempfile.TemporaryDirectory()
+        else:
+            self.tmp_dir = Path(tmp_dir.strpath)
+
         self.sample_path = None
 
     def get_dir(self):
-        return Path(self.tmp_dir.name)
+
+        if isinstance(self.tmp_dir, tempfile.TemporaryDirectory):
+            return Path(self.tmp_dir.name)
+
+        elif isinstance(self.tmp_dir, py.path.LocalPath):
+            return Path(self.tmp_dir.strpath)
+
+        elif isinstance(self.tmp_dir, Path):
+            return self.tmp_dir
+
+        else:
+            raise ValueError(f"tmp_dir must be of type tempfile.TemporaryDirectory or py.path.LocalPath, "
+                             f"not {type(self.tmp_dir)}")
 
     def get_test_data(self, extension=".h5"):
 
@@ -781,8 +804,12 @@ class SampleInput:
 
                 return recursive_get_dataset(f, None)
 
-    def __del__(self):
-        self.tmp_dir.cleanup()
+    def clean_up(self):
+
+        tmp_dir = self.get_dir()
+
+        if tmp_dir is not None and tmp_dir.exists():
+            shutil.rmtree(tmp_dir)
 
 
 def is_ragged(data):

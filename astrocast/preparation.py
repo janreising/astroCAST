@@ -931,11 +931,10 @@ class IO:
                 self.exists_and_clean(fpath, overwrite=overwrite)
 
                 if isinstance(arr, np.ndarray):
-                    np.save(file=fpath.as_posix(), arr=arr)
+                    arr = da.from_array(arr)
 
-                else:
-                    with ProgressBar(minimum=10, dt=1):
-                        da.to_npy_stack(fpath, x=arr, axis=0)
+                with ProgressBar(minimum=10, dt=1):
+                    da.to_npy_stack(fpath, x=arr, axis=0)
 
                 saved_paths.append(fpath)
                 logging.info(f"saved data to {fpath}")
@@ -1443,7 +1442,7 @@ class Delta:
 
     """
 
-    def __init__(self, data: Union[str, Path, np.ndarray, da.Array], loc: str = ""):
+    def __init__(self, data: Union[str, Path, np.ndarray, da.Array], loc: str = None):
 
         # Convert the input to a Path object if it is a string
         self.data = Path(data) if isinstance(data, str) else data
