@@ -1,6 +1,43 @@
 Installation
 ============
 
+Compatibility
+-------------
+
++------------------+---------------+--------+---------+----------------+---------------+----------------+
+| Section          | Functionality | Linux  | Windows | MacOS (Intel)  | MacOS (M1/M2) | Docker         |
++==================+===============+========+=========+================+===============+================+
+| Preprocessing    | Motion        | ✓      | ✓       | ✓              | ✓             | ✓              |
+|                  | correction    |        |         |                |               |                |
++------------------+---------------+--------+---------+----------------+---------------+----------------+
+| Preprocessing    | Denoising     | ✓      | ◐*      | ✓              | ✓             | ✓              |
++------------------+---------------+--------+---------+----------------+---------------+----------------+
+| Preprocessing    | Delta         | ✓      | ✓       | ✓              | ✓             | ✓              |
++------------------+---------------+--------+---------+----------------+---------------+----------------+
+| Preprocessing    | Detection     | ✓      | ✓       | ✓              | ✓             | ✓              |
++------------------+---------------+--------+---------+----------------+---------------+----------------+
+| Preprocessing    | Umap outlier  | ✓      | ✓       | ✗              | ✗             | ✓              |
+|                  | detection     |        |         |                |               |                |
++------------------+---------------+--------+---------+----------------+---------------+----------------+
+| Encoding         | all           | ✓      | ✓       | ✓              | ✓             | ✓              |
++------------------+---------------+--------+---------+----------------+---------------+----------------+
+| Analysis         | DTW distance  | ✓      | ✓       | ✗              | ✗             | ✓              |
++------------------+---------------+--------+---------+----------------+---------------+----------------+
+| Analysis         | Barycenters   | ✓      | ✓       | ✗              | ✗             | ✓              |
++------------------+---------------+--------+---------+----------------+---------------+----------------+
+| Optional         | Video player  | ✓*     | ✓*      | ✓*             | ✓*            | ✗              |
++------------------+---------------+--------+---------+----------------+---------------+----------------+
+
+.. note::
+   - "✓" indicates full support.
+   - "◐" indicates partial support; might require additional steps by the user
+   - "✗" indicates that the functionality is not supported.
+   - Features marked with "*" are optional and only installed upon request by the user.
+
+
+Anaconda environment
+--------------------
+
 We recommend to first create a fresh conda environment to prevent conflicts with other packages.
 
 .. code-block:: shell
@@ -12,16 +49,8 @@ We recommend to first create a fresh conda environment to prevent conflicts with
     MacOS users with M1 chips may encounter compatibility issues during installation.
     For an effective workaround, please see the `Installation with containers`_ section.
 
-Installation via pip
----------------------
-.. code-block:: shell
-
-    pip install astrocast
-    # with optional features
-    pip install astrocast[all]
-
-Installation from source
--------------------------
+Installation from source (recommended)
+--------------------------------------
 .. code-block:: shell
 
     # install necessary packages
@@ -35,6 +64,14 @@ Installation from source
     poetry install
     ## with optional features
     poetry install -E all
+
+Installation via pip (easiest)
+------------------------------
+.. code-block:: shell
+
+    pip install astrocast
+    # with optional features
+    pip install astrocast[all]
 
 .. _installation-with-containers:
 
