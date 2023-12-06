@@ -251,19 +251,17 @@ class Explorer:
             return result  # .compute()
 
         @reactive.Calc
-        def get_delta_trace():
+        def get_delta_obj():
             small_data = get_pixel_traces()
 
             deltaObj = Delta(data=small_data, loc="")
-            result = deltaObj.run(
-                method=input.delta_method(), window=input.delta_window(), chunks=(-1, 1, 1),
-                overwrite_first_frame=input.delta_overwrite_first_frame()
+            deltaObj.run(
+                method=input.delta_method(), window=input.delta_window(),
+                overwrite_first_frame=input.delta_overwrite_first_frame(),
+                compute=True
             )
 
-            if isinstance(result, da.Array):
-                result = result.compute()
-
-            return result
+            return deltaObj
 
         @reactive.Calc
         def get_smooth():
@@ -466,35 +464,19 @@ class Explorer:
         @render.plot
         def delta():
 
-            delta_trace = get_delta_trace()
-            pixels, colors = get_pixel()
+            delta_obj = get_delta_obj()
+            abs_pixels, colors = get_pixel()
 
-            if input.delta_plot_original():
-                original = load_data()
-            else:
-                original = None
+            if isinstance(abs_pixels, tuple):
+                abs_pixels = [abs_pixels]
 
-            if input.delta_show_separate():
-                fig, axx = plt.subplots(len(pixels), figsize=(input.delta_figsize_x(), input.delta_figsize_y()))
-                axx = list(axx.flatten())
-                twin_axx = [ax.twinx() for ax in axx]
+            rel_pixels = [(i, 0) for i in range(len(abs_pixels))]
+            labels = [f"pixel {x}x{y}" for x, y in abs_pixels]
 
-            else:
-                fig, ax = plt.subplots(figsize=(input.delta_figsize_x(), input.delta_figsize_y()))
-                axx = [ax for _ in range(len(pixels))]
-
-                twinx = ax.twinx()
-                twin_axx = [twinx for _ in range(len(pixels))]
-
-            for i, ((x, y), color, ax, twinx) in enumerate(list(zip(pixels, colors, axx, twin_axx))):
-                ax.plot(delta_trace[:, i, 0], color=color)
-
-                if input.delta_plot_original() and input.delta_twinx():
-                    twinx.plot(original[:, x, y], color=color, linestyle="--", alpha=input.delta_alpha())
-                elif input.delta_plot_original():
-                    ax.plot(original[:, x, y], color=color, linestyle="--", alpha=input.delta_alpha())
-
-            return fig
+            return delta_obj.plot(pixels=rel_pixels, show_original=input.delta_plot_original(), colors=colors,
+                                  separate_panels=input.delta_show_separate(), alpha=input.delta_alpha(),
+                                  twin_y_axis=input.delta_twinx(), labels=labels,
+                                  figsize=(input.delta_figsize_x(), input.delta_figsize_y()))
 
         @output
         @render.plot
