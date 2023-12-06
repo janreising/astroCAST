@@ -46,7 +46,8 @@ class Explorer:
                     "Delta", ui.layout_sidebar(
                         ui.panel_sidebar(
                             ui.h5(""), ui.input_switch("use_delta", "calculate"),
-                            ui.input_select("delta_method", "method", choices=["background", "dF", "dFF"]),
+                            ui.input_select("delta_method", "method", choices=["background", "dF", "dFF"],
+                                            selected="dF"),
                             ui.input_numeric("delta_window", "window", 10),
                             ui.input_switch("delta_overwrite_first_frame", "Overwrite 1st frame"),
                             ui.h5("Plotting options"),
@@ -86,7 +87,7 @@ class Explorer:
                             ui.input_numeric("wlen", "Wlen", value=60), ui.row(
                                 ui.column(
                                     6, ui.h6("Time Series"), ui.input_switch("temp_show_trace", "activate"),
-                                    ui.input_switch("temp_show_separate", "separate panels"), ), ui.column(
+                                    ui.input_switch("temp_show_separate", "separate panels", value=True), ), ui.column(
                                     6, ui.h6("Frames"), ui.input_switch("use_temporal", "activate"), )
                             ), ui.panel_conditional(
                                 "input.use_spatial & input.use_temporal", ui.h5(""),
@@ -522,19 +523,55 @@ class Explorer:
 
                 if input.temp_show_separate():
                     fig, axx = plt.subplots(len(pixels), figsize=(5 * len(pixels), 20))
-                    for i in range(len(pixels)):
-                        x, y = pixels[i]
-                        axx[i].plot(data[:, x, y], linestyle="-", color=colors[i])
-                        axx[i].set_ylabel(f"{pixels[i]}")
-                        axx[i].twinx().plot(mask[:, i, 0], linestyle="--", color=colors[i])
-
                 else:
+                    fig, axx = plt.subplots(figsize=(5 * len(pixels), 20))
+                    axx = [axx for _ in range(len(pixels))]
 
-                    fig, ax = plt.subplots()
-                    twin_ax = ax.twinx()
-                    for i in range(len(pixels)):
-                        ax.plot(traces[:, i, 0], linestyle="-", color=colors[i])
-                        twin_ax.plot(mask[:, i, 0], linestyle="--", color=colors[i])
+                for i in range(len(pixels)):
+                    x, y = pixels[i]
+
+                    # Get indices where mask is 0 for background, and 1 for signal
+                    indices_background = np.where(mask[:, i, 0] == 0)[0]
+                    indices_signal = np.where(mask[:, i, 0] == 1)[0]
+
+                    if isinstance(indices_background, da.Array):
+                        indices_background = indices_background.compute()
+
+                    if isinstance(indices_signal, da.Array):
+                        indices_signal = indices_signal.compute()
+
+                    # Create the x-axis data range
+                    X = np.arange(data.shape[0])  # Use np.arange for better performance with NumPy
+
+                    # Get y-values for signal and background
+                    signal_y = data[indices_signal, x, y]
+                    background_y = data[indices_background, x, y]
+
+                    # Create contiguous sections for signal
+                    contiguous_signal_sections = np.split(signal_y, np.where(np.diff(indices_signal) != 1)[0] + 1)
+                    contiguous_signal_indices = np.split(indices_signal,
+                                                         np.where(np.diff(indices_signal) != 1)[0] + 1)
+
+                    # Plot each contiguous section for signal
+                    lbl = f"pixel {x}x{y}"
+                    for sec_indices, sec_y in zip(contiguous_signal_indices, contiguous_signal_sections):
+                        sec_x = X[sec_indices]
+
+                        axx[i].plot(sec_x, sec_y, linestyle="--", color=colors[i], label=lbl)
+                        lbl = None
+
+                    # Create contiguous sections for background
+                    contiguous_background_sections = np.split(background_y,
+                                                              np.where(np.diff(indices_background) != 1)[0] + 1)
+                    contiguous_background_indices = np.split(indices_background,
+                                                             np.where(np.diff(indices_background) != 1)[0] + 1)
+
+                    # Plot each contiguous section for background
+                    for bg_indices, bg_y in zip(contiguous_background_indices, contiguous_background_sections):
+                        bg_x = X[bg_indices]
+                        axx[i].plot(bg_x, bg_y, linestyle="-", color="gray")
+
+                    axx[i].legend()
 
                 return fig
 
@@ -673,7 +710,7 @@ class Explorer:
                     ax.set_ylabel(f"{lbls[x]}")
 
                 if pixels is not None:
-                    for px, py in pixels:
+                    for py, px in pixels:
                         ax.scatter(px, py, color="red", alpha=0.5)
 
         return fig
