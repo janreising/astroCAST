@@ -13,19 +13,26 @@ jobs:
         id: set-matrix
         run: |
           COMMIT_MSG="${{ github.event.head_commit.message }}"
-          MATRIX="["
-          [[ $COMMIT_MSG =~ "test-on: ubuntu-latest" ]] && MATRIX+='{"os":"ubuntu-latest","python-version":"3.9"},'
-          [[ $COMMIT_MSG =~ "test-on: windows-latest" ]] && MATRIX+='{"os":"windows-latest","python-version":"3.9"},'
-          [[ $COMMIT_MSG =~ "test-on: macos-latest" ]] && MATRIX+='{"os":"macos-latest","python-version":"3.9"},'
-          MATRIX="${MATRIX%,}]"
-          
-          if [ -z "$MATRIX" ] || [ "$MATRIX" == "[]" ]; then
-            echo "MATRIX_JSON=[]" >> $GITHUB_ENV
-          else
-            echo "MATRIX_JSON<<EOF" >> $GITHUB_ENV
-            echo "${MATRIX}" >> $GITHUB_ENV
-            echo "EOF" >> $GITHUB_ENV
+          MATRIX="["  # Start with an empty JSON array
+          if [[ $COMMIT_MSG =~ "test-on: ubuntu-latest" ]]; then
+            MATRIX+='{"os":"ubuntu-latest","python-version":"3.9"},'
           fi
+          if [[ $COMMIT_MSG =~ "test-on: windows-latest" ]]; then
+            MATRIX+='{"os":"windows-latest","python-version":"3.9"},'
+          fi
+          if [[ $COMMIT_MSG =~ "test-on: macos-latest" ]]; then
+            MATRIX+='{"os":"macos-latest","python-version":"3.9"},'
+          fi
+          MATRIX="${MATRIX%,}]"  # Remove trailing comma and close the array
+
+          # Ensure valid JSON even if empty
+          if [[ "$MATRIX" == "[]" ]]; then
+            MATRIX_JSON="[]"
+          else
+            MATRIX_JSON="${MATRIX}"
+          fi
+
+          echo "MATRIX_JSON=$MATRIX_JSON" >> $GITHUB_ENV
 
   build:
     needs: setup
