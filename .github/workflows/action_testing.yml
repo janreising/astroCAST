@@ -14,18 +14,19 @@ jobs:
         run: |
           COMMIT_MSG="${{ github.event.head_commit.message }}"
           MATRIX="["
-          if [[ $COMMIT_MSG =~ "test-on:ubuntu-latest" ]]; then
+          OS_LIST=$(echo $COMMIT_MSG | sed -n 's/.*test-on:\(.*\)/\1/p')
+
+          if [[ $OS_LIST =~ "ubuntu-latest" ]]; then
             MATRIX+='{"os":"ubuntu-latest","python-version":"3.9"},'
           fi
-          if [[ $COMMIT_MSG =~ "test-on:windows-latest" ]]; then
+          if [[ $OS_LIST =~ "windows-latest" ]]; then
             MATRIX+='{"os":"windows-latest","python-version":"3.9"},'
           fi
-          if [[ $COMMIT_MSG =~ "test-on:macos-latest" ]]; then
+          if [[ $OS_LIST =~ "macos-latest" ]]; then
             MATRIX+='{"os":"macos-latest","python-version":"3.9"},'
           fi
           MATRIX="${MATRIX%,}]"
 
-          # Debugging: Print the constructed matrix
           echo "Constructed matrix: $MATRIX"
           
           echo "MATRIX_JSON=$MATRIX" >> $GITHUB_ENV
