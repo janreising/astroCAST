@@ -61,9 +61,10 @@ simple-slurm = "^0.2.6"
 pydantic = { version = "^1", optional = true }
 jupyterlab = "^4.0.8"
 ipywidgets = "^8.1.1"
-napari = { version = "0.4.14", optional = true }
+napari = { version = "^0.4.14", extras = ["all"], optional = true }
 napari-plot = { version = "^0.1.5", optional = true }
 napari-time-series-plotter = { version = "*", optional = true }
+#PyQt5 = { version = "*", optional = true }
 pytest-cov = { version = "^4.1.0", optional = true }
 pytest-xdist = { version = "^3.3.1", optional = true }
 pytest = { extras = ["testing"], version = "^7.4.3", optional = true }

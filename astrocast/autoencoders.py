@@ -19,14 +19,14 @@ class EarlyStopper:
         self.patience = patience
         self.min_delta = min_delta
         self.counter = 0
-        self.min_validation_loss = float('inf')
+        self.min_loss = float('inf')
 
-    def early_stop(self, validation_loss):
+    def __call__(self, loss):
 
-        if validation_loss < self.min_validation_loss:
-            self.min_validation_loss = validation_loss
+        if loss < self.min_loss:
+            self.min_loss = loss
             self.counter = 0
-        elif validation_loss - self.min_validation_loss <= self.min_delta:
+        elif loss - self.min_loss <= self.min_delta:
             self.counter += 1
             if self.counter >= self.patience:
                 return True
@@ -256,7 +256,7 @@ class CNN_Autoencoder(nn.Module):
             losses.append((train_loss, val_loss))
 
             # Early stopping logic
-            if early_stopper.early_stop(val_loss):
+            if early_stopper(val_loss):
                 print("Early stopping!")
                 break
 

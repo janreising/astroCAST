@@ -20,6 +20,7 @@ import tiledb
 from dask.diagnostics import ProgressBar
 from dask.distributed import Client, LocalCluster
 from deprecated import deprecated
+from matplotlib import pyplot as plt
 from scipy import signal
 from scipy.ndimage import minimum_filter1d
 from skimage.transform import resize
@@ -1447,7 +1448,8 @@ class Delta:
 
         # Convert the input to a Path object if it is a string
         self.data = Path(data) if isinstance(data, str) else data
-        self.res = None
+        self.result = None
+        self.prep_data = None
 
         # Get the dimensions and chunk size of the input data
         self.dim, self.chunksize = get_data_dimensions(self.data, loc=loc)
@@ -1457,7 +1459,8 @@ class Delta:
 
     def run(
             self, window: int, method: Literal['background', 'dF', 'dFF'] = "dF",
-            chunk_strategy: Literal['balanced', 'XY', 'Z'] = "Z", chunks=None, overwrite_first_frame: bool = True
+            chunk_strategy: Literal['balanced', 'XY', 'Z'] = "Z", chunks=None, overwrite_first_frame: bool = True,
+            compute: bool = False
     ) -> Union[np.ndarray, da.Array]:
         # noinspection GrazieInspection
         """
@@ -1468,13 +1471,17 @@ class Delta:
                     method: The method to use for delta calculation.
                     chunk_strategy: Strategy to infer appropriate chunk size
                     chunks: User-defined chunk size (ignores inference strategy).
-                    overwrite_first_frame: A flag indicating whether to overwrite the values of the first frame with the second frame after delta calculation.
+                    overwrite_first_frame: A flag indicating whether to overwrite the values of the first frame with
+                        the second frame after delta calculation.
+                    compute: A flag indicating whether to return a dask array (False) or a NumPy array (True).
 
                 Raises:
                     ValueError: If the input data type is not recognized.
 
                 Notes:
-                    The function supports different types of input data, including numpy arrays, file paths (specifically .tdb and .h5 files), and Dask arrays. It also handles parallel execution for large datasets, especially when input is a .tdb file.
+                    The function supports different types of input data, including numpy arrays, file paths
+                    (specifically .tdb and .h5 files), and Dask arrays. It also handles parallel execution for large
+                    datasets, especially when input is a .tdb file.
 
                 .. warning::
 
@@ -1484,6 +1491,7 @@ class Delta:
 
         # Prepare the data for processing
         data = self._prepare_data(self.data, loc=self.loc, chunk_strategy=chunk_strategy, chunks=chunks)
+        self.prep_data = data
 
         # Sequential execution
         if isinstance(data, np.ndarray):
@@ -1550,7 +1558,11 @@ class Delta:
         if overwrite_first_frame:
             res[0, :, :] = res[1, :, :]
 
-        self.res = res
+        # convert to numpy array if requested
+        if compute and isinstance(res, da.Array):
+            res = res.compute()
+
+        self.result = res
         return res
 
     def save(
@@ -1581,7 +1593,8 @@ class Delta:
                 """
         io = IO()
         io.save(
-            output_path, data=self.res, loc=loc, chunk_strategy=chunk_strategy, chunks=chunks, compression=compression,
+            output_path, data=self.result, loc=loc, chunk_strategy=chunk_strategy, chunks=chunks,
+            compression=compression,
             overwrite=overwrite
         )
 
@@ -1787,6 +1800,81 @@ class Delta:
         res = np.reshape(res, original_dims)
 
         return res
+
+    def plot(self, pixels: Union[Tuple[int, int], List[Tuple[int, int]]], show_original: bool = False,
+             separate_panels: bool = False, twin_y_axis: bool = False, alpha: float = 1,
+             figsize: Tuple[int, int] = (10, 5), colors: List = None, labels: List[str] = None):
+        """
+        Render a plot based on delta data.
+
+        This method creates a plot based on the delta data. It allows for customization through various parameters,
+        including whether to plot the original data, whether to show separate plots, the size of the figure, etc.
+
+        Args:
+            pixels: The pixel(s) to plot. E.g. (10, 10) or [(5, 5), (10, 10)]
+            show_original: A boolean to decide whether to plot the original data.
+            separate_panels: A boolean to decide whether to show separate plots for each pixel.
+            figsize: Dimensions of the figure (width x height)
+            twin_y_axis: Show original and subtracted (Delta) pixel trace on separate y-axes.
+            alpha: The alpha value for the plot line.
+            colors: List of colors used for plotting.
+            labels: List of labels for time series (one for each pixel)
+
+        Returns:
+          A matplotlib figure object containing the generated plot.
+        """
+
+        # parameter quality control
+        if self.result is None:
+            raise RuntimeError("please subtract delta first by using the 'run' function of this class first.")
+
+        if isinstance(pixels, tuple):
+            pixels = [pixels]
+
+        if colors is None:
+            import seaborn as sns
+            colors = sns.color_palette("husl", n_colors=len(pixels))
+
+        if labels is not None and len(pixels) != len(labels):
+            logging.warning(
+                f"received incorrect number of labels: len(labels) {len(labels)} vs. len(pixels) {len(pixels)}")
+            labels = None
+
+        if labels is None:
+            labels = [f"pixel {x}x{y}" for x, y in pixels]
+
+        # get data
+        delta_trace = self.result
+        original = self.prep_data
+
+        # Create figure layout
+        if separate_panels:
+            fig, axx = plt.subplots(len(pixels), figsize=figsize)
+            axx = list(axx.flatten())
+            twin_axx = [ax.twinx() for ax in axx]
+
+        else:
+            fig, ax = plt.subplots(figsize=figsize)
+            axx = [ax for _ in range(len(pixels))]
+            twinned_axis = ax.twinx()
+            twin_axx = [twinned_axis for _ in range(len(pixels))]
+
+        # Plot pixels
+        for i, ((x, y), color, ax, twinned_axis, lbl) in enumerate(zip(pixels, colors, axx, twin_axx, labels)):
+            ax.plot(delta_trace[:, x, y], color=color, label=lbl)
+
+            if show_original and twin_y_axis:
+                twinned_axis.plot(original[:, x, y], color=color, linestyle="--", alpha=alpha)
+                twinned_axis.set_ylabel("Intensity")
+            elif show_original:
+                ax.plot(original[:, x, y], color=color, linestyle="--", alpha=alpha)
+
+            # add labels
+            ax.set_xlabel("frame")
+            ax.set_ylabel(r'$\Delta$ Intensity')
+            ax.legend()
+
+        return fig
 
 
 class XII:
