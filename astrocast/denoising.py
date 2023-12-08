@@ -840,94 +840,6 @@ class SubFrameGenerator(tf.keras.utils.Sequence):
         return True
 
 
-# class UNet(nn.Module):
-#     """
-#     The UNet class implements the U-Net architecture for image segmentation. It consists of an encoder path and a
-#     decoder path, connected by skip connections. The number of stacks determines the depth of the network.
-#
-#     """
-#
-#     def __init__(self, kernels: int = 64, kernel_size: int = 3, padding: int = 1, n_stacks: int = 3,
-#                  batch_normalize: bool = False):
-#         super(UNet, self).__init__()
-#
-#         n_channels = 1
-#         n_classes = 1
-#         self.n_stacks = n_stacks
-#
-#         self.batch_norm = nn.BatchNorm2d(n_channels) if batch_normalize else None
-#
-#         self.inc = InConv(n_channels, out_channels=64, kernel_size=kernel_size, padding=padding)
-#
-#         self.down_layers = []
-#         for i in range(n_stacks - 1):
-#             self.down_layers.append(Down(kernels * (2 ** i), kernels * (2 ** (i + 1)), kernel_size, padding))
-#
-#         self.up_layers = []
-#         for i in range(n_stacks - 1, 0, -1):
-#             self.up_layers.append(Up(kernels * (2 ** i), kernels * (2 ** (i - 1)), kernel_size, padding))
-#
-#         self.outc = OutConv(kernels, n_classes)
-#
-#     def forward(self, x):
-#
-#         if self.batch_norm is not None:
-#             x = self.batch_norm(x)
-#
-#         x1 = self.inc(x)
-#         xi = [x1]
-#         for layer in self.down_layers:
-#             xi.append(layer(xi[-1]))
-#         up_out = xi[-1]
-#         for xi_, layer in zip(xi[-2::-1], self.up_layers):
-#             up_out = layer(up_out, xi_)
-#         return self.outc(up_out)
-#
-#
-# class InConv(nn.Module):
-#     def __init__(self, in_channels, out_channels, kernel_size=3, padding=1):
-#         super(InConv, self).__init__()
-#         self.conv = nn.Conv2d(in_channels, out_channels, kernel_size=kernel_size, padding=padding)
-#
-#     def forward(self, x):
-#         x = self.conv(x)
-#         return x
-#
-#
-# class Down(nn.Module):
-#     def __init__(self, in_channels, out_channels, kernel_size=3, padding=1):
-#         super(Down, self).__init__()
-#         self.pool = nn.MaxPool2d(2)
-#         self.conv = nn.Conv2d(in_channels, out_channels, kernel_size=kernel_size, padding=padding)
-#
-#     def forward(self, x):
-#         x = self.pool(x)
-#         x = self.conv(x)
-#         return x
-#
-#
-# class Up(nn.Module):
-#     def __init__(self, in_channels, out_channels, kernel_size=3, padding=1):
-#         super(Up, self).__init__()
-#         self.up = nn.Upsample(scale_factor=2, mode='bilinear', align_corners=True)
-#         self.conv = nn.Conv2d(in_channels, out_channels, kernel_size=kernel_size, padding=padding)
-#
-#     def forward(self, x_up, x_down):
-#         x_up = self.up(x_up)
-#         x = torch.cat([x_down, x_up], dim=1)
-#         x = self.conv(x)
-#         return x
-#
-#
-# class OutConv(nn.Module):
-#     def __init__(self, in_channels, out_channels):
-#         super(OutConv, self).__init__()
-#         self.conv = nn.Conv2d(in_channels, out_channels, kernel_size=1)
-#
-#     def forward(self, x):
-#         x = self.conv(x)
-#         return x
-
 class UNet(nn.Module):
     def __init__(self, stack_length: int, kernels: int = 64, kernel_size: int = 3, padding: int = 1,
                  n_stacks: int = 3, batch_normalize: bool = False):
@@ -938,6 +850,7 @@ class UNet(nn.Module):
 
         if batch_normalize:
             logging.warning(f"batch normalization is currently not implemented for UNet.")
+            # todo implement
             # self.batch_norm = nn.BatchNorm2d(n_channels) if batch_normalize else None
 
         self.input_ = nn.Conv2d(stack_length - 1, kernels, kernel_size=kernel_size, padding=padding)
@@ -994,7 +907,6 @@ class UNet(nn.Module):
 
         # Pass input through the encoder layers and store outputs
         encoder_outputs = []
-        encoder_i = 0
         for i, layer in enumerate(self.encoders):
             x = layer(x)
 
@@ -1069,6 +981,10 @@ class PyTorchNetwork:
         # define attributes
         self.optimizer = None
         self.iterator = None
+        self.n_stacks = n_stacks
+        self.kernels = kernels
+        self.kernel_size = kernel_size
+        self.batch_normalize = batch_normalize
 
         # define generators
         self.train_gen = train_generator
