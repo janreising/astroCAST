@@ -1,4 +1,4 @@
-name: Testing from commit
+name: Testing from commit - v1
 
 on:
   push:  # Trigger on push events for all branches
