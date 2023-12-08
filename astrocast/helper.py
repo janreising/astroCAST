@@ -22,6 +22,29 @@ import yaml
 from skimage.util import img_as_uint
 
 
+def closest_power_of_two(value):
+    """
+    Check if the value is a power of two, and if not, find the closest power of two.
+
+    Args:
+        value (int): The input value to check.
+
+    Returns:
+        int: The closest power of two.
+    """
+    # Check if the value is already a power of two
+    if value & (value - 1) == 0 and value != 0:
+        return value
+
+    # Calculate the closest power of two
+    closest_power = int(np.power(2, np.round(np.log2(value))))
+
+    # Log a warning
+    logging.warning(f"Input value {value} is not a power of 2. Using the closest power of 2: {closest_power}")
+
+    return closest_power
+
+
 def remove_temp_safe(tmp_dir: tempfile.TemporaryDirectory, wait_time: int = 20):
     # necessary to give Windows time to release files
     if platform.system() in ["Windows", "win32"]:
@@ -778,28 +801,27 @@ class SampleInput:
                     return ref
 
                 # get dataset
-                def recursive_get_dataset(f, loc):
+                def recursive_get_dataset(f_, loc):
 
                     # choose first location if none is provided
                     if loc is None:
+                        locs = list(f_.keys())
 
-                        locs = list(f.keys())
+                        if "__DATA_TYPES__" in locs:
+                            locs.remove["__DATA_TYPES__"]
 
-                        if len(locs) < 2:
-                            raise ValueError(f"cannot find any datasets in sample file: {self.sample_path} ({locs})")
+                        loc = locs[0]
 
-                        loc = locs[1]
+                    if isinstance(f_[loc], h5py.Group):
 
-                    if isinstance(f[loc], h5py.Group):
-
-                        locs = list(f[loc].keys())
+                        locs = list(f_[loc].keys())
                         if len(loc) < 1:
                             raise ValueError(f"cannot find any datasets in sample file: {self.sample_path}")
 
                         loc = f"{loc}/{locs[0]}"
-                        return recursive_get_dataset(f, loc)
+                        return recursive_get_dataset(f_, loc)
 
-                    if isinstance(f[loc], h5py.Dataset):
+                    if isinstance(f_[loc], h5py.Dataset):
                         return loc
 
                 return recursive_get_dataset(f, None)
