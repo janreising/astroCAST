@@ -174,6 +174,8 @@ class TestGenerators:
 
         else:
 
+            pytest.importskip("tensor flow")
+
             net = Network(train_generator=train_gen, val_generator=train_gen, n_stacks=n_stacks, kernel=kernels,
                           batchNormalize=False, use_cpu=True)
 
@@ -236,6 +238,8 @@ class TestGenerators:
 
             net.run(num_epochs=2, patience=1, min_delta=0.01, save_model=save_model_dir)
         else:
+
+            pytest.importskip("tensor flow")
             net = Network(train_generator=train_gen, val_generator=train_gen, n_stacks=n_stacks, kernel=kernels,
                           batchNormalize=False, use_cpu=True)
             net.run(
@@ -281,6 +285,10 @@ class TestGenerators:
 
             net.run(num_epochs=2, patience=1, min_delta=0.01)
         else:
+
+            pytest.importskip("tensor flow")
+
+
             net = Network(train_generator=train_gen, val_generator=val_gen, n_stacks=n_stacks, kernel=8,
                           batchNormalize=False, use_cpu=True)
             net.run(batch_size=train_gen.batch_size, num_epochs=2, patience=1, min_delta=0.01, save_model=None)
