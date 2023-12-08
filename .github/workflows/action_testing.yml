@@ -18,7 +18,11 @@ jobs:
           [[ $COMMIT_MSG =~ "windows-latest" ]] && MATRIX+='{"os":"windows-latest","python-version":"3.9"},'
           [[ $COMMIT_MSG =~ "macos-latest" ]] && MATRIX+='{"os":"macos-latest","python-version":"3.9"},'
           MATRIX="${MATRIX%,}]"
-          echo "::set-output name=matrix::${MATRIX}"
+          
+          # Writing to the GITHUB_ENV
+          echo "MATRIX_JSON<<EOF" >> $GITHUB_ENV
+          echo "${MATRIX}" >> $GITHUB_ENV
+          echo "EOF" >> $GITHUB_ENV
 
   build:
     needs: setup
