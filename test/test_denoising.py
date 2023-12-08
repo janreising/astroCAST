@@ -242,8 +242,7 @@ class TestGenerators:
                 batch_size=train_gen.batch_size, num_epochs=2, patience=1, min_delta=0.01, save_model=save_model_dir
             )
 
-        res = train_gen.infer(model=save_model_path, output=None, out_loc="inf/ch0", rescale=False, n_stacks=n_stacks,
-                              kernels=kernels, kernel_size=kernel_size)
+        res = train_gen.infer(model=save_model_path, output=None, out_loc="inf/ch0", rescale=False)
 
     @pytest.mark.parametrize("extension", [".h5", ".tiff"])
     @pytest.mark.parametrize("use_torch", [True, False])
