@@ -29,7 +29,8 @@ jobs:
 
           echo "Constructed matrix: $MATRIX"
           
-          echo "MATRIX_JSON=$MATRIX" >> $GITHUB_ENV
+          # Directly output the matrix
+          echo "::set-output name=matrix::$MATRIX"
 
   build:
     needs: setup
