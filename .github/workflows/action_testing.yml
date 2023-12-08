@@ -1,49 +1,53 @@
 name: Testing from commit - v2
 
-on:
-  push:  # Trigger on push events for all branches
+on: push
 
 jobs:
-  setup:
+  test_ubuntu:
+    if: "contains(github.event.head_commit.message, 'ubuntu-latest')"
     runs-on: ubuntu-latest
-    outputs:
-      matrix: ${{ steps.set-matrix.outputs.matrix }}
-    steps:
-      - name: Extract OS from commit message
-        id: set-matrix
-        run: |
-          COMMIT_MSG="${{ github.event.head_commit.message }}"
-          MATRIX="["
-          OS_LIST=$(echo $COMMIT_MSG | sed -n 's/.*test-on:\(.*\)/\1/p')
-
-          if [[ $OS_LIST =~ "ubuntu-latest" ]]; then
-            MATRIX+='{"os":"ubuntu-latest","python-version":"3.9"},'
-          fi
-          if [[ $OS_LIST =~ "windows-latest" ]]; then
-            MATRIX+='{"os":"windows-latest","python-version":"3.9"},'
-          fi
-          if [[ $OS_LIST =~ "macos-latest" ]]; then
-            MATRIX+='{"os":"macos-latest","python-version":"3.9"},'
-          fi
-          MATRIX="${MATRIX%,}]"
-
-          echo "MATRIX=$MATRIX" >> $GITHUB_ENV
-          echo "::set-output name=matrix::$MATRIX"
-
-  build:
-    needs: setup
-    if: contains(github.event.head_commit.message, 'test-on:') && needs.setup.outputs.matrix != '[]'
-    strategy:
-      fail-fast: false
-      matrix: ${{fromJson(needs.setup.outputs.matrix)}}
-    runs-on: ${{ matrix.os }}
-
     steps:
       - uses: actions/checkout@v3
-      - name: Set up Python ${{ matrix.python-version }}
+      - name: Set up Python
         uses: actions/setup-python@v4
         with:
-          python-version: ${{ matrix.python-version }}
+          python-version: '3.9'
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install poetry
+          poetry install -E testing -vvv
+      - name: Test with pytest
+        run: |
+          poetry run pytest --disable-warnings -n auto -m "not vis and not long" --durations=25 --durations-min=30 --dist worksteal --cli-log-level 100
+
+  test_windows:
+    if: "contains(github.event.head_commit.message, 'windows-latest')"
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install poetry
+          poetry install -E testing -vvv
+      - name: Test with pytest
+        run: |
+          poetry run pytest --disable-warnings -n auto -m "not vis and not long" --durations=25 --durations-min=30 --dist worksteal --cli-log-level 100
+
+  test_macos:
+    if: "contains(github.event.head_commit.message, 'macos-latest')"
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
