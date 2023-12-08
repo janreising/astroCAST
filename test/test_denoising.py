@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from astrocast.denoising import Network
+from astrocast.denoising import Network, PyTorchNetwork
 from astrocast.denoising import SubFrameGenerator
 from astrocast.helper import SampleInput
 from astrocast.preparation import IO
@@ -148,10 +148,10 @@ class TestGenerators:
 
             gen.on_epoch_end()
 
-    @pytest.mark.tensorflow
     @pytest.mark.parametrize("extension", [".h5", ".tiff"])
-    @pytest.mark.parametrize("n_stacks", [1, 2])
-    def test_network(self, extension, n_stacks):
+    @pytest.mark.parametrize("use_torch", [True, True])
+    @pytest.mark.parametrize("n_stacks", [1, 3])
+    def test_network(self, extension, n_stacks, use_torch, kernels=4):
 
         file_path, loc = self.data[extension]
 
@@ -165,14 +165,23 @@ class TestGenerators:
             **param
         )
 
-        net = Network(
-            train_generator=train_gen, val_generator=train_gen, n_stacks=n_stacks, kernel=4, batchNormalize=False,
-            use_cpu=True
-        )
-        net.run(batch_size=train_gen.batch_size, num_epochs=2, patience=1, min_delta=0.01)
+        if use_torch:
+            net = PyTorchNetwork(train_generator=train_gen, val_generator=train_gen,
+                                 n_stacks=n_stacks, kernels=kernels,
+                                 batch_normalize=False, use_cpu=True)
+
+            net.run(num_epochs=2, patience=1, min_delta=0.01)
+
+        else:
+
+            net = Network(train_generator=train_gen, val_generator=train_gen, n_stacks=n_stacks, kernel=kernels,
+                          batchNormalize=False, use_cpu=True)
+
+            net.run(batch_size=train_gen.batch_size, num_epochs=2, patience=1, min_delta=0.01)
 
     @pytest.mark.xdist_group(name="tensorflow")
-    def test_network_retrain(self, extension=".h5"):
+    @pytest.mark.parametrize("use_torch", [True, False])
+    def test_network_retrain(self, use_torch, extension=".h5"):
 
         file_path, loc = self.data[extension]
 
@@ -186,20 +195,30 @@ class TestGenerators:
             **param
         )
 
-        net = Network(
-            train_generator=train_gen, val_generator=train_gen, n_stacks=1, kernel=4, batchNormalize=False, use_cpu=True
-        )
-        net.run(batch_size=train_gen.batch_size, num_epochs=2, patience=1, min_delta=0.01)
+        if use_torch:
+            net = PyTorchNetwork(train_generator=train_gen, val_generator=train_gen, n_stacks=1, kernels=4,
+                                 batch_normalize=False, use_cpu=True)
+
+            net.run(num_epochs=2, patience=1, min_delta=0.01)
+        else:
+            net = Network(train_generator=train_gen, val_generator=train_gen, n_stacks=1, kernel=4,
+                          batchNormalize=False, use_cpu=True)
+            net.run(batch_size=train_gen.batch_size, num_epochs=2, patience=1, min_delta=0.01)
 
         net.retrain_model(5, 5)
 
+    @pytest.mark.parametrize("use_torch", [True, False])
     @pytest.mark.xdist_group(name="tensorflow")
-    def test_network_save(self, tmpdir, extension=".h5"):
+    def test_network_save(self, tmpdir, use_torch, extension=".h5", n_stacks=2, kernels=4, kernel_size=3):
 
         file_path, loc = self.data[extension]
 
         save_model_dir = Path(tmpdir.strpath)
-        save_model_path = save_model_dir.joinpath("model.h5")
+
+        if use_torch:
+            save_model_path = save_model_dir.joinpath("model.pth")
+        else:
+            save_model_path = save_model_dir.joinpath("model.h5")
 
         param = dict(
             paths=file_path, loc=loc, input_size=(25, 25), pre_post_frame=5, gap_frames=0, normalize="global",
@@ -211,21 +230,27 @@ class TestGenerators:
             shuffle=True, **param
         )
 
-        net = Network(
-            train_generator=train_gen, val_generator=train_gen, n_stacks=1, kernel=4, batchNormalize=False,
-            use_cpu=True
-        )
-        net.run(
-            batch_size=train_gen.batch_size, num_epochs=2, patience=1, min_delta=0.01, save_model=save_model_dir
-        )
+        if use_torch:
+            net = PyTorchNetwork(train_generator=train_gen, val_generator=train_gen, n_stacks=n_stacks, kernels=kernels,
+                                 kernel_size=kernel_size, batch_normalize=False, use_cpu=True)
 
-        res = train_gen.infer(model=save_model_path, output=None, out_loc="inf/ch0", rescale=False)
+            net.run(num_epochs=2, patience=1, min_delta=0.01, save_model=save_model_dir)
+        else:
+            net = Network(train_generator=train_gen, val_generator=train_gen, n_stacks=n_stacks, kernel=kernels,
+                          batchNormalize=False, use_cpu=True)
+            net.run(
+                batch_size=train_gen.batch_size, num_epochs=2, patience=1, min_delta=0.01, save_model=save_model_dir
+            )
 
-    @pytest.mark.tensorflow
+        res = train_gen.infer(model=save_model_path, output=None, out_loc="inf/ch0", rescale=False, n_stacks=n_stacks,
+                              kernels=kernels, kernel_size=kernel_size)
+
     @pytest.mark.parametrize("extension", [".h5", ".tiff"])
+    @pytest.mark.parametrize("use_torch", [True, False])
     @pytest.mark.parametrize("output_file", [None, "inf.tiff", "inf.h5"])
     @pytest.mark.parametrize("rescale", [True, False])
-    def test_inference_sub(self, tmpdir, extension, output_file, rescale):
+    @pytest.mark.parametrize("n_stacks", [1, 2])
+    def test_inference_sub(self, tmpdir, extension, output_file, use_torch, rescale, n_stacks):
 
         file_path, loc = self.data[extension]
 
@@ -238,7 +263,7 @@ class TestGenerators:
             out_path = tmpdir.joinpath(output_file)
 
         param = dict(
-            paths=file_path, loc=loc, input_size=(25, 25), pre_post_frame=5, gap_frames=0, normalize="global",
+            paths=file_path, loc=loc, input_size=(32, 32), pre_post_frame=5, gap_frames=0, normalize="global",
             cache_results=True, in_memory=True
         )
 
@@ -251,11 +276,16 @@ class TestGenerators:
             **param
         )
 
-        net = Network(
-            train_generator=train_gen, val_generator=val_gen, n_stacks=1, kernel=8, batchNormalize=False,
-            use_cpu=True
-        )
-        net.run(batch_size=train_gen.batch_size, num_epochs=2, patience=1, min_delta=0.01, save_model=None)
+        if use_torch:
+            net = PyTorchNetwork(train_generator=train_gen, val_generator=train_gen, n_stacks=n_stacks, kernels=8,
+                                 batch_normalize=False, use_cpu=True)
+
+            net.run(num_epochs=2, patience=1, min_delta=0.01)
+        else:
+            net = Network(train_generator=train_gen, val_generator=val_gen, n_stacks=n_stacks, kernel=8,
+                          batchNormalize=False, use_cpu=True)
+            net.run(batch_size=train_gen.batch_size, num_epochs=2, patience=1, min_delta=0.01, save_model=None)
+
         model = net.model
 
         inf_gen = SubFrameGenerator(
