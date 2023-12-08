@@ -12,6 +12,7 @@ from torch.nn.modules.loss import _Loss
 from tqdm import tqdm
 
 from astrocast.autoencoders import EarlyStopper
+from astrocast.helper import closest_power_of_two
 from astrocast.preparation import IO
 
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
@@ -85,7 +86,7 @@ class SubFrameGenerator(tf.keras.utils.Sequence):
     """
 
     def __init__(
-            self, paths: Union[str, List[str]], batch_size: int, input_size: Tuple[int, int] = (100, 100),
+            self, paths: Union[str, List[str]], batch_size: int, input_size: Tuple[int, int] = (128, 128),
             pre_post_frame: Union[int, Tuple[int, int]] = 5, gap_frames: Union[int, Tuple[int, int]] = 0,
             z_steps: float = 0.1, z_select: Union[None, int, List[int]] = None, allowed_rotation: List[int] = [0],
             allowed_flip: List[int] = [-1], random_offset: bool = False, add_noise: bool = False,
@@ -97,6 +98,9 @@ class SubFrameGenerator(tf.keras.utils.Sequence):
     ):
 
         logging.basicConfig(level=logging_level)
+
+        # adjust input_size to be power of two
+        input_size = [closest_power_of_two(v) for v in input_size]
 
         if not isinstance(paths, list):
             paths = [paths]
@@ -930,6 +934,7 @@ class UNet(nn.Module):
         super(UNet, self).__init__()
 
         self.n_stacks = n_stacks
+        kernels = closest_power_of_two(kernels)
 
         if batch_normalize:
             logging.warning(f"batch normalization is currently not implemented for UNet.")
