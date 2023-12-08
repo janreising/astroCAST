@@ -803,10 +803,9 @@ class SampleInput:
                 # get dataset
                 def recursive_get_dataset(f_, loc):
 
-                    # choose first location if none is provided
                     if loc is None:
-                        locs = [k for k in f_.keys() if f != "__DATA_TYPES__"]
-
+                        # choose first location if none is provided
+                        locs = list(f.keys())
                         loc = locs[0]
 
                     if isinstance(f_[loc], h5py.Group):
