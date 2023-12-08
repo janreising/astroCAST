@@ -1,7 +1,7 @@
 name: Testing from commit
 
 on:
-  push:  # Trigger on push events for all branches
+  push:  # Trigger on push events for any branch
 
 jobs:
   setup:
