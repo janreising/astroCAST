@@ -1,7 +1,7 @@
 name: Testing from commit
 
 on:
-  push:  # Trigger on push events for any branches
+  push:  # Trigger on push events for all branches
 
 jobs:
   setup:
@@ -13,26 +13,22 @@ jobs:
         id: set-matrix
         run: |
           COMMIT_MSG="${{ github.event.head_commit.message }}"
-          MATRIX="["  # Start with an empty JSON array
-          if [[ $COMMIT_MSG =~ "test-on: ubuntu-latest" ]]; then
+          MATRIX="["
+          if [[ $COMMIT_MSG =~ "test-on:ubuntu-latest" ]]; then
             MATRIX+='{"os":"ubuntu-latest","python-version":"3.9"},'
           fi
-          if [[ $COMMIT_MSG =~ "test-on: windows-latest" ]]; then
+          if [[ $COMMIT_MSG =~ "test-on:windows-latest" ]]; then
             MATRIX+='{"os":"windows-latest","python-version":"3.9"},'
           fi
-          if [[ $COMMIT_MSG =~ "test-on: macos-latest" ]]; then
+          if [[ $COMMIT_MSG =~ "test-on:macos-latest" ]]; then
             MATRIX+='{"os":"macos-latest","python-version":"3.9"},'
           fi
-          MATRIX="${MATRIX%,}]"  # Remove trailing comma and close the array
+          MATRIX="${MATRIX%,}]"
 
-          # Ensure valid JSON even if empty
-          if [[ "$MATRIX" == "[]" ]]; then
-            MATRIX_JSON="[]"
-          else
-            MATRIX_JSON="${MATRIX}"
-          fi
-
-          echo "MATRIX_JSON=$MATRIX_JSON" >> $GITHUB_ENV
+          # Debugging: Print the constructed matrix
+          echo "Constructed matrix: $MATRIX"
+          
+          echo "MATRIX_JSON=$MATRIX" >> $GITHUB_ENV
 
   build:
     needs: setup
