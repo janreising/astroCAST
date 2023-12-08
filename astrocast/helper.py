@@ -805,10 +805,7 @@ class SampleInput:
 
                     # choose first location if none is provided
                     if loc is None:
-                        locs = list(f_.keys())
-
-                        if "__DATA_TYPES__" in locs:
-                            locs.remove["__DATA_TYPES__"]
+                        locs = [k for k in f_.keys() if f != "__DATA_TYPES__"]
 
                         loc = locs[0]
 
