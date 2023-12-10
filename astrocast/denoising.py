@@ -45,8 +45,8 @@ PyTorchLoss = Union[
 class SubFrameDataset(Dataset):
 
     def __init__(
-            self, paths: Union[str, List[str]], input_size: Tuple[int, int] = (128, 128),
-            pre_post_frame: Union[int, Tuple[int, int]] = 5, gap_frames: Union[int, Tuple[int, int]] = 0,
+            self, paths: Union[str, List[str]], input_size: Tuple[int, int] = (32, 32),
+            pre_post_frames: Union[int, Tuple[int, int]] = 5, gap_frames: Union[int, Tuple[int, int]] = 0,
             z_steps: float = 0.1, z_select: Union[None, int, List[int]] = None,
             allowed_rotation: Union[int, List[int]] = 0,
             allowed_flip: Union[int, List[int]] = -1, random_offset: bool = False, add_noise: bool = False,
@@ -74,9 +74,9 @@ class SubFrameDataset(Dataset):
         self.output_size = output_size
         self.save_global_descriptive = save_global_descriptive
 
-        if isinstance(pre_post_frame, int):
-            pre_post_frame = (pre_post_frame, pre_post_frame)
-        self.signal_frames = pre_post_frame
+        if isinstance(pre_post_frames, int):
+            pre_post_frames = (pre_post_frames, pre_post_frames)
+        self.signal_frames = pre_post_frames
 
         if isinstance(gap_frames, int):
             gap_frames = (gap_frames, gap_frames)
@@ -85,7 +85,7 @@ class SubFrameDataset(Dataset):
         self.z_steps = z_steps
         self.z_select = z_select
         self.max_per_file = max_per_file
-        self.stack_len = None
+        self.item_size = None
 
         # parse allowed rotations
         if isinstance(allowed_rotation, int):
@@ -105,10 +105,9 @@ class SubFrameDataset(Dataset):
         if random_offset and overlap is not None:
             raise ValueError(f"random_offset and overlap are incompatible. Please choose only one.")
 
-        if isinstance(overlap, int):
-            overlap = overlap + overlap % 2
-
-        self.overlap = overlap  # float
+        self.overlap = overlap
+        self.overlap_x = None
+        self.overlap_y = None
 
         assert padding in [None, "symmetric", "edge"]
         assert not (random_offset and (
@@ -214,10 +213,10 @@ class SubFrameDataset(Dataset):
 
         # define prediction length (Z)
         stack_len = signal_frames[0] + gap_frames[0] + 1 + gap_frames[1] + signal_frames[1]
-        self.stack_len = stack_len
         z_steps = max(1, int(self.z_steps * stack_len))
 
         self.fov_size = (stack_len, dw, dh)
+        self.item_size = (signal_frames[0] + signal_frames[1], dw, dh)
 
         x_start, y_start, z_start = 0, 0, 0
         # randomize input
@@ -237,8 +236,9 @@ class SubFrameDataset(Dataset):
         else:
             overlap_x, overlap_y = 0, 0
 
-            # x_start = -overlap_x  # y_start = -overlap_y
+        self.overlap_x, self.overlap_y = overlap_x, overlap_y
 
+        # adjust rotation and flip
         allowed_rotation = self.allowed_rotation if self.allowed_rotation is not None else [None]
         allowed_flip = self.allowed_flip if self.allowed_flip is not None else [None]
 
@@ -428,6 +428,8 @@ class SubFrameDataset(Dataset):
             return mean, confidence_span
 
         it = 0
+        mean_ = None
+        std_ = None
         while (frac < 1) and confidence_span > max_confidence_span:
 
             sel_items = items.sample(frac=frac)
@@ -617,7 +619,7 @@ class SubFrameGenerator(tf.keras.utils.Sequence):
         paths: Path(s) to .h5 file(s) containing video data.
         batch_size: The size of the data batches.
         input_size: The size of each input frame.
-        pre_post_frame: Number of frames before and after the central frame to consider.
+        pre_post_frames: Number of frames before and after the central frame to consider.
         gap_frames: Number of frames to skip before and after each central frame.
         z_steps: The step size in the z-direction.
         z_select: Criteria for selecting a subset of frames.
@@ -653,7 +655,7 @@ class SubFrameGenerator(tf.keras.utils.Sequence):
 
     def __init__(
             self, paths: Union[str, List[str]], batch_size: int, input_size: Tuple[int, int] = (128, 128),
-            pre_post_frame: Union[int, Tuple[int, int]] = 5, gap_frames: Union[int, Tuple[int, int]] = 0,
+            pre_post_frames: Union[int, Tuple[int, int]] = 5, gap_frames: Union[int, Tuple[int, int]] = 0,
             z_steps: float = 0.1, z_select: Union[None, int, List[int]] = None, allowed_rotation: List[int] = [0],
             allowed_flip: List[int] = [-1], random_offset: bool = False, add_noise: bool = False,
             drop_frame_probability: Union[None, float] = None, max_per_file: Union[None, int] = None, overlap: int = 0,
@@ -681,9 +683,9 @@ class SubFrameGenerator(tf.keras.utils.Sequence):
         self.output_size = output_size
         self.save_global_descriptive = save_global_descriptive
 
-        if isinstance(pre_post_frame, int):
-            pre_post_frame = (pre_post_frame, pre_post_frame)
-        self.signal_frames = pre_post_frame
+        if isinstance(pre_post_frames, int):
+            pre_post_frames = (pre_post_frames, pre_post_frames)
+        self.signal_frames = pre_post_frames
 
         if isinstance(gap_frames, int):
             gap_frames = (gap_frames, gap_frames)
@@ -984,6 +986,8 @@ class SubFrameGenerator(tf.keras.utils.Sequence):
             return mean, confidence_span
 
         it = 0
+        mean_ = None
+        std_ = None
         while (frac < 1) and confidence_span > max_confidence_span:
 
             sel_items = items.sample(frac=frac)
@@ -1229,15 +1233,12 @@ class SubFrameGenerator(tf.keras.utils.Sequence):
                 raise FileNotFoundError(f"cannot find model: {model}")
 
             if model_path.suffix in [".h5", ".hdf5", ".H5", ".HDF5"]:
-
                 model = load_model(
                     model_path, custom_objects={"annealed_loss": Network.annealed_loss,
                                                 "mean_squareroot_error": Network.mean_squareroot_error}
                 )
-            elif model_path.suffix in [".pth", ".PTH"]:
-                net = PyTorchNetwork(train_generator=self, load_model=model_path)
-                model = net.model
-                model.eval()
+            else:
+                raise ValueError(f"unknown model suffix: {model_path}")
 
         else:
             logging.warning(f"providing model via parameter. Model type: {type(model)}")
@@ -1407,19 +1408,23 @@ class SubFrameGenerator(tf.keras.utils.Sequence):
 
 
 class UNet(nn.Module):
-    def __init__(self, stack_length: int, kernels: int = 64, kernel_size: int = 3, padding: int = 1,
+    def __init__(self, item_size: Tuple[int, int, int], kernels: int = 64, kernel_size: int = 3, padding: int = 1,
                  n_stacks: int = 3, batch_normalize: bool = False):
         super(UNet, self).__init__()
 
         self.n_stacks = n_stacks
+        item_z, item_x, item_y = item_size
         kernels = closest_power_of_two(kernels)
+        self.kernels = kernels
+        self.kernel_size = kernel_size
+        self.batch_normalize = batch_normalize
 
         if batch_normalize:
             logging.warning(f"batch normalization is currently not implemented for UNet.")
             # todo implement
             # self.batch_norm = nn.BatchNorm2d(n_channels) if batch_normalize else None
 
-        self.input_ = nn.Conv2d(stack_length - 1, kernels, kernel_size=kernel_size, padding=padding)
+        self.input_ = nn.Conv2d(item_z, kernels, kernel_size=kernel_size, padding=padding)
 
         # Encoder layers
         self.encoders = nn.ModuleList()
@@ -1548,7 +1553,8 @@ class PyTorchNetwork:
         self.kernels = kernels
         self.kernel_size = kernel_size
         self.batch_normalize = batch_normalize
-        self.stack_len = train_dataset.stack_len
+        self.item_size = train_dataset.item_size
+        self.input_size = train_dataset.input_size
 
         # define generators
         self.train_dataloader = DataLoader(train_dataset, batch_size=batch_size, shuffle=shuffle,
@@ -1567,7 +1573,7 @@ class PyTorchNetwork:
             self.test_dataloader = None
 
         # Create fresh UNet
-        self.model = UNet(stack_length=self.stack_len, n_stacks=n_stacks,
+        self.model = UNet(item_size=self.item_size, n_stacks=n_stacks,
                           batch_normalize=batch_normalize,
                           kernels=kernels, kernel_size=kernel_size)
 
@@ -1725,12 +1731,10 @@ class PyTorchNetwork:
             AssertionError: If provided 'model' is not of the expected type or if data dimensions mismatch.
 
         Args:
-            model: A Keras model or the path to a model file/directory for inference.
             output: Path to the file where the output will be saved. If None, the output array is returned.
             out_loc: Location within the .h5 file to store the output. Required if output is an .h5 file.
             dtype: Data type of the output. 'same' uses the same dtype as the input data.
-            # TODO chunk_size should probably be updated
-            chunk_size: Size of chunks for .h5 file output. Can be 'infer', an integer, or None.
+            chunk_size: Size of chunks for .h5 file output. Automatically chosen if not provided.
             rescale: Whether to rescale the output based on global descriptive statistics.
 
         Returns:
@@ -1766,6 +1770,9 @@ class PyTorchNetwork:
             x, _ = dataset[0]
             dtype = x.dtype
             logging.warning(f"choosing dtype: {dtype}")
+
+        if output is not None:
+            output = Path(output)
 
         if output is not None and output.suffix in (".h5", ".hdf5"):
 
@@ -1808,7 +1815,7 @@ class PyTorchNetwork:
                 im_shape_orig = im.shape
 
                 pad_z0, pad_z1, pad_x0, pad_x1, pad_y0, pad_y1 = row.padding
-                overlap_x_half, overlap_y_half = int(dataset.overlap / 2), int(dataset.overlap / 2)
+                overlap_x_half, overlap_y_half = int(dataset.overlap_x / 2), int(dataset.overlap_y / 2)
 
                 x0, x0_ = (0, pad_x0) if row.x0 == 0 else (row.x0 + overlap_x_half, overlap_x_half + pad_x0)
                 y0, y0_ = (0, pad_y0) if row.y0 == 0 else (row.y0 + overlap_y_half, overlap_y_half + pad_y0)
@@ -1849,9 +1856,9 @@ class PyTorchNetwork:
     def save(self, path, extras: dict = None):
 
         model_dict = {'model_state_dict': self.model.state_dict(),
-                      'optimizer_state_dict': self.optimizer.state_dict(), 'stack_len': self.model.stack_len,
+                      'optimizer_state_dict': self.optimizer.state_dict(), 'item_size': self.item_size,
                       'n_stacks': self.n_stacks, 'kernels': self.kernels, 'kernel_size': self.kernel_size,
-                      'batch_normalize': self.batch_normalize}
+                      'batch_normalize': self.batch_normalize, 'input_size': self.input_size}
 
         if extras is not None:
             model_dict.update(extras)
@@ -1884,11 +1891,16 @@ class PyTorchNetwork:
         batch_normalize = load_dict['batch_normalize']
         kernels = load_dict['kernels']
         kernel_size = load_dict['kernel_size']
-        stack_len = load_dict['stack_len']
+        item_size = load_dict['item_size']
+        input_size = load_dict['input_size']
 
-        if self.stack_len != stack_len:
-            raise ValueError(f"loaded module expects a stack length of {stack_len}, got {self.stack_len}."
+        if self.item_size != item_size:
+            raise ValueError(f"loaded module expects a stack length of {item_size}, got {self.item_size}."
                              f"Stack length is defined by the pre and post frames during dataset initiation.")
+
+        if self.input_size != input_size:
+            raise ValueError(f"loaded module expects an input_size of {input_size}, got {self.input_size}."
+                             f"Input size is defined during dataset initiation.")
 
         # Load the saved model weights
         if 'model_state_dict' in load_dict:
@@ -1901,7 +1913,8 @@ class PyTorchNetwork:
         self.kernels = kernels
         self.kernel_size = kernel_size
         self.batch_normalize = batch_normalize
-        self.stack_len = stack_len
+        self.item_size = item_size
+        self.input_size = input_size
 
     def _train_one_epoch(self, data_generator: DataLoader, optimizer, criterion, lr_scheduler=None,
                          update_weights: bool = False):
@@ -2347,6 +2360,7 @@ class Network:
                 last_layer = conv
 
         # Decoder
+        decoder = None
         for i in range(n_stacks):
             if i != n_stacks - 1:
                 # Convolutional layer in the decoder
@@ -2362,7 +2376,7 @@ class Network:
                 decoded = Conv2D(1, (3, 3), activation=None, padding="same")(last_layer)
                 decoder = Model(input_window, decoded)
 
-        if verbose > 0:
+        if verbose > 0 and decoder is not None:
             # Print model summary
             decoder.summary(line_length=100)
 
