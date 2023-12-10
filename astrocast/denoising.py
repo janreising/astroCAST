@@ -3,10 +3,16 @@ import os
 import pathlib
 import random
 from pathlib import Path
-from typing import Union, List, Tuple, Literal
+from typing import Union, List, Tuple, Literal, Callable
 
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+from torch.nn.modules.loss import _Loss
 from tqdm import tqdm
 
+from astrocast.autoencoders import EarlyStopper
+from astrocast.helper import closest_power_of_two
 from astrocast.preparation import IO
 
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
@@ -80,7 +86,7 @@ class SubFrameGenerator(tf.keras.utils.Sequence):
     """
 
     def __init__(
-            self, paths: Union[str, List[str]], batch_size: int, input_size: Tuple[int, int] = (100, 100),
+            self, paths: Union[str, List[str]], batch_size: int, input_size: Tuple[int, int] = (128, 128),
             pre_post_frame: Union[int, Tuple[int, int]] = 5, gap_frames: Union[int, Tuple[int, int]] = 0,
             z_steps: float = 0.1, z_select: Union[None, int, List[int]] = None, allowed_rotation: List[int] = [0],
             allowed_flip: List[int] = [-1], random_offset: bool = False, add_noise: bool = False,
@@ -92,6 +98,9 @@ class SubFrameGenerator(tf.keras.utils.Sequence):
     ):
 
         logging.basicConfig(level=logging_level)
+
+        # adjust input_size to be power of two
+        input_size = [closest_power_of_two(v) for v in input_size]
 
         if not isinstance(paths, list):
             paths = [paths]
@@ -117,10 +126,12 @@ class SubFrameGenerator(tf.keras.utils.Sequence):
         self.z_steps = z_steps
         self.z_select = z_select
         self.max_per_file = max_per_file
+        self.stack_len = None
 
         if (1 in allowed_rotation) or (3 in allowed_rotation):
             assert input_size[0] == input_size[
-                1], f"when using 90 or 270 degree rotation (allowed rotation: 1 or 3) the 'input_size' needs to be square. However input size is: {input_size}"
+                1], (f"when using 90 or 270 degree rotation (allowed rotation: 1 or 3) the 'input_size' needs to be "
+                     f"square. However input size is: {input_size}")
         self.allowed_rotation = allowed_rotation
 
         self.allowed_flip = allowed_flip
@@ -160,9 +171,8 @@ class SubFrameGenerator(tf.keras.utils.Sequence):
         # cache
         self.cache_results = cache_results
         if cache_results:
-            logging.warning(
-                "using caching may lead to memory leaks. Please set to false if you experience Out-Of-Memory errors."
-            )
+            logging.warning("using caching may lead to memory leaks. Please set to false if you experience "
+                            "Out-Of-Memory errors.")
 
         self.cache = {}
 
@@ -175,6 +185,7 @@ class SubFrameGenerator(tf.keras.utils.Sequence):
 
         # define prediction length (Z)
         stack_len = signal_frames[0] + gap_frames[0] + 1 + gap_frames[1] + signal_frames[1]
+        self.stack_len = stack_len
         z_steps = max(1, int(self.z_steps * stack_len))
 
         self.fov_size = (stack_len, dw, dh)
@@ -636,7 +647,7 @@ class SubFrameGenerator(tf.keras.utils.Sequence):
 
             if os.path.isdir(model):
 
-                models = list(model.glob("*.h*5"))
+                models = list(model.glob("*.h*5")) + list(model.glob("*.pth"))
 
                 if len(models) < 1:
                     raise FileNotFoundError(f"cannot find model in provided directory: {model}")
@@ -651,22 +662,29 @@ class SubFrameGenerator(tf.keras.utils.Sequence):
             else:
                 raise FileNotFoundError(f"cannot find model: {model}")
 
-            model = load_model(
-                model_path, custom_objects={"annealed_loss": Network.annealed_loss,
-                                            "mean_squareroot_error": Network.mean_squareroot_error}
-            )
+            if model_path.suffix in [".h5", ".hdf5", ".H5", ".HDF5"]:
+
+                model = load_model(
+                    model_path, custom_objects={"annealed_loss": Network.annealed_loss,
+                                                "mean_squareroot_error": Network.mean_squareroot_error}
+                )
+            elif model_path.suffix in [".pth", ".PTH"]:
+                net = PyTorchNetwork(train_generator=self, load_model=model_path)
+                model = net.model
+                model.eval()
 
         else:
             logging.warning(f"providing model via parameter. Model type: {type(model)}")
 
             # deals with keras.__version__ > 2.10.0
+            expected_model_type = [UNet]
             try:
-                expected_model_type = keras.engine.functional.Functional
+                expected_model_type.append(keras.engine.functional.Functional)
             except AttributeError:
-                expected_model_type = keras.src.engine.functional.Functional
+                expected_model_type.append(keras.src.engine.functional.Functional)
 
-            assert type(model) == expected_model_type, f"Please provide keras model, " \
-                                                       f"file_path or dir_path instead of {type(model)}"
+            assert isinstance(model, tuple(expected_model_type)), f"Please provide keras/pytorch model, " \
+                                                                  f"file_path or dir_path instead of {type(model)}"
 
         # enforce pathlib.Path
         if output is not None:
@@ -709,9 +727,15 @@ class SubFrameGenerator(tf.keras.utils.Sequence):
         for batch in tqdm(self.items.batch.unique()):
 
             x, _ = self[batch]  # raw data
-            y = model.predict(x, verbose=0)  # denoised data
+            y = model.predict(x)  # denoised data
 
             if dtype != y.dtype:
+
+                if isinstance(y, torch.Tensor):
+                    y = y.numpy()
+                    y = np.moveaxis(y, 1, -1)
+                    logging.warning(f"y.shape: {y.shape}")
+
                 y = y.astype(dtype)
 
             x_items = items[items.batch == batch]  # meta data
@@ -814,6 +838,516 @@ class SubFrameGenerator(tf.keras.utils.Sequence):
                 f[std_loc] = std
 
         return True
+
+
+class UNet(nn.Module):
+    def __init__(self, stack_length: int, kernels: int = 64, kernel_size: int = 3, padding: int = 1,
+                 n_stacks: int = 3, batch_normalize: bool = False):
+        super(UNet, self).__init__()
+
+        self.n_stacks = n_stacks
+        kernels = closest_power_of_two(kernels)
+
+        if batch_normalize:
+            logging.warning(f"batch normalization is currently not implemented for UNet.")
+            # todo implement
+            # self.batch_norm = nn.BatchNorm2d(n_channels) if batch_normalize else None
+
+        self.input_ = nn.Conv2d(stack_length - 1, kernels, kernel_size=kernel_size, padding=padding)
+
+        # Encoder layers
+        self.encoders = nn.ModuleList()
+        in_channels = kernels
+        out_channels = kernels
+        encoder_outputs = []
+        for i in range(n_stacks):
+            # Convolution layer
+            self.encoders.append(nn.Conv2d(in_channels, out_channels, kernel_size=kernel_size, padding=padding))
+            encoder_outputs.append(out_channels)
+
+            # Max pooling layer for downsampling (except for the last stack)
+            if i < n_stacks - 1:
+                self.encoders.append(nn.MaxPool2d(2))
+
+                # Double the out_channels for the next level in the stack after pooling
+                in_channels = out_channels
+                out_channels *= 2
+
+        # Decoder layers
+        self.decoders = nn.ModuleList()
+        in_channels = encoder_outputs[-1]
+        out_channels = encoder_outputs[-1] // 2
+        last_out_channels = 0
+        for i in range(n_stacks):
+
+            if i < n_stacks - 1:
+
+                # Convolution layer in decoder
+                self.decoders.append(
+                    nn.Conv2d(in_channels, out_channels, kernel_size=kernel_size, padding=padding))
+
+                last_out_channels = out_channels
+
+                # Upsampling layer
+                self.decoders.append(nn.Upsample(scale_factor=2, mode='bilinear', align_corners=True))
+
+                # Adjust the in and output_channels considering concatenating
+                in_channels = out_channels * 2
+                out_channels = encoder_outputs[-i - 2] // 2
+
+            else:
+
+                # Last layer
+                in_channels = last_out_channels + encoder_outputs[0]
+                self.decoders.append(nn.Conv2d(in_channels, 1, kernel_size=kernel_size, padding=padding))
+
+    def forward(self, x):
+
+        x = self.input_(x)
+
+        # Pass input through the encoder layers and store outputs
+        encoder_outputs = []
+        for i, layer in enumerate(self.encoders):
+            x = layer(x)
+
+            if isinstance(layer, nn.Conv2d):
+                x = F.relu(x)
+            encoder_outputs.append(x)
+
+        # Pass through the decoder layers and concatenate with encoder outputs
+        for i in range(0, len(self.decoders)):
+            layer = self.decoders[i]
+            if isinstance(layer, nn.Conv2d):
+                x = layer(x)
+                # Apply ReLU activation for all but the last convolutional layer
+                if i < len(self.decoders) - 1:
+                    x = F.relu(x)
+            elif isinstance(layer, nn.Upsample):
+                x = layer(x)
+
+                # Concatenate - ensure the spatial dimensions match before concatenation
+                concat_layer = encoder_outputs[-(i + 2)]
+                x = torch.cat((x, concat_layer), dim=1)
+
+        return x
+
+    def predict(self, input_tensor):
+        """
+        Make a prediction using the U-Net model.
+
+        Args:
+            input_tensor (torch.Tensor): The input tensor for prediction.
+                                         Shape should match the model's expected input shape.
+
+        Returns:
+            torch.Tensor: The output tensor from the model.
+        """
+        # Ensure the model is in evaluation mode
+        self.eval()
+
+        # Disable gradient computation for inference
+        with torch.no_grad():
+
+            if isinstance(input_tensor, np.ndarray):
+                # Assuming inputs.shape is (batch_size, width, height, channels)
+                # Transpose the dimensions to match PyTorch format (batch_size, channels, height, width)
+                input_tensor = torch.from_numpy(input_tensor.transpose(0, 3, 1, 2)).to(torch.float32)
+
+            # Check if the input tensor is on the same device as the model
+            if next(self.parameters()).is_cuda:
+                input_tensor = input_tensor.to('cuda')
+            else:
+                input_tensor = input_tensor.to('cpu')
+
+            # Forward pass through the model
+            output_tensor = self.forward(input_tensor)
+
+        return output_tensor
+
+
+PyTorchLoss = Union[
+    Literal['annealed_loss', 'mean_square_root_error'], Callable[[torch.Tensor, torch.Tensor], torch.Tensor], _Loss]
+
+
+class PyTorchNetwork:
+    def __init__(
+            self, train_generator: SubFrameGenerator, val_generator: SubFrameGenerator = None,
+            test_generator: SubFrameGenerator = None,
+            learning_rate: float = 0.001, momentum: float = 0.9, decay_rate: float = 0.1, decay_steps: int = 30,
+            n_stacks: int = 3, kernels: int = 64, kernel_size: int = 3, batch_normalize: bool = False,
+            loss: PyTorchLoss = "annealed_loss",
+            load_model: Union[str, Path] = None, use_cpu: bool = False):
+
+        # define attributes
+        self.optimizer = None
+        self.iterator = None
+        self.n_stacks = n_stacks
+        self.kernels = kernels
+        self.kernel_size = kernel_size
+        self.batch_normalize = batch_normalize
+
+        # define generators
+        self.train_gen = train_generator
+        self.val_gen = val_generator
+        self.test_gen = test_generator
+
+        # Create fresh UNet
+        if load_model is None:
+
+            self.model = UNet(stack_length=train_generator.stack_len, n_stacks=n_stacks,
+                              batch_normalize=batch_normalize,
+                              kernels=kernels, kernel_size=kernel_size)
+
+        # load model
+        else:
+            load_dict = torch.load(load_model)
+            n_stacks = load_dict['n_stacks']
+            batch_normalize = load_dict['batch_normalize']
+            kernels = load_dict['kernels']
+            kernel_size = load_dict['kernel_size']
+            self.model = UNet(stack_length=train_generator.stack_len, n_stacks=n_stacks,
+                              batch_normalize=batch_normalize,
+                              kernels=kernels, kernel_size=kernel_size)
+
+            self.n_stacks = n_stacks
+            self.kernels = kernels
+            self.kernel_size = kernel_size
+            self.batch_normalize = batch_normalize
+
+        # Define loss
+        self.loss = loss
+
+        # define decay rate
+        self.learning_rate = learning_rate
+        self.momentum = momentum
+        self.decay_rate = decay_rate
+        self.decay_steps = decay_steps
+
+        # choose device and load model on device
+        self.device = 'cpu' if use_cpu or not torch.cuda.is_available() else 'cuda'
+
+        self.model = self.model.to(self.device)
+
+    def run(self, num_epochs: int = 25, save_model: Union[str, Path] = None,
+            patience: int = None, min_delta: float = 0.005, model_prefix: str = "model",
+            show_mode: Literal["auto", "progress", "notebook"] = None, save_checkpoints: bool = False):
+
+        # todo: keep history
+
+        # create directory to save model
+        save_model = Path(save_model) if save_model is not None else None
+        if save_model is not None and not save_model.is_dir():
+            logging.info(f"Created save dir at: {save_model}")
+            save_model.mkdir()
+
+        # define loss
+        if self.loss == 'annealed_loss':
+            criterion = self._annealed_loss
+        elif self.loss == 'mean_square_root_error':
+            criterion = self._mean_square_root_error
+        elif isinstance(self.loss, Callable):
+            criterion = self.loss
+        else:
+            raise ValueError(
+                f"Invalid loss, please provide one of 'annealed_loss' or 'mean_square_root_error' "
+                f"or torch Loss object")
+
+        # define optimizer
+        optimizer = torch.optim.SGD(self.model.parameters(), lr=self.learning_rate, momentum=self.momentum)
+        self.optimizer = optimizer
+
+        # define learning rate decay
+        if self.decay_rate is not None:
+            from torch.optim.lr_scheduler import StepLR
+            lr_scheduler = StepLR(optimizer=optimizer, step_size=self.decay_steps, gamma=self.decay_rate)
+        else:
+            lr_scheduler = None
+
+        # define early stopping
+        if patience is not None:
+            early_stopping = EarlyStopper(patience=patience, min_delta=min_delta)
+        else:
+            early_stopping = None
+
+        # loop over the dataset multiple times
+        self.iterator = None
+        min_loss = float('inf')
+        running_loss = float('inf')
+        val_loss = float('inf')
+        epoch = 0
+        for epoch in range(num_epochs):
+
+            # run one round of training
+            running_loss = self._train_one_epoch(self.train_gen, optimizer, criterion, epoch, lr_scheduler,
+                                                 update_weights=True)
+
+            # run one round of validation
+            if self.val_gen is not None:
+                val_loss = self._train_one_epoch(self.val_gen, optimizer, criterion, epoch, lr_scheduler,
+                                                 update_weights=False)
+            else:
+                val_loss = running_loss
+
+            # user feedback
+            self._show_progress(num_epochs=num_epochs, epoch=epoch, show_mode=show_mode, training_loss=running_loss,
+                                validation_loss=val_loss if self.val_gen is not None else None,
+                                patience_counter=early_stopping.counter if early_stopping is not None else None)
+
+            # check early stopping
+            if early_stopping is not None and early_stopping(val_loss):
+                logging.warning(f"Early stopping, patience exceeded.")
+                break
+
+            # implement checkpoint saving
+            if val_loss < min_loss and save_checkpoints and save_model is not None:
+                checkpoint_path = save_model.joinpath(f"{model_prefix}_epoch_{epoch}_val_loss_{val_loss:.2E}.pth")
+                extras = dict(epoch=epoch, training_loss=running_loss, validation_loss=val_loss)
+                self.save(checkpoint_path, extras=extras)
+
+        logging.info('Finished Training')
+
+        if self.test_gen is not None:
+            test_loss = self._train_one_epoch(self.test_gen, optimizer, criterion, 1, lr_scheduler,
+                                              update_weights=False)
+            logging.info(f"Test loss: {test_loss:.4f}")
+
+        if save_model is not None:
+            model_path = save_model.joinpath(f"{model_prefix}.pth")
+            extras = dict(num_epochs=epoch, training_loss=running_loss, validation_loss=val_loss)
+            self.save(model_path, extras=extras)
+            logging.info(f"Model saved to {model_path}")
+
+        return self.model
+
+    def retrain_model(self, frozen_epochs: int = 25, unfrozen_epochs: int = 5, patience: int = 3,
+                      min_delta: float = 0.005, save_model: Union[str, Path] = None,
+                      model_prefix: str = "retrain", show_mode: Literal["auto", "progress", "notebook"] = None):
+
+        # Freeze all layers
+        for param in self.model.parameters():
+            param.requires_grad = False
+
+        # Unfreeze the first encoder layer
+        for param in self.model.encoders[0].parameters():
+            param.requires_grad = True
+
+        # Unfreeze the last decoder layer
+        for param in self.model.decoders[-1].parameters():
+            param.requires_grad = True
+
+        # Run frozen epochs
+        self.run(num_epochs=frozen_epochs, patience=None, show_mode=show_mode)
+
+        # Unfreeze all layers
+        for param in self.model.parameters():
+            param.requires_grad = True
+
+        # Run unfrozen epochs
+        self.run(num_epochs=unfrozen_epochs, patience=patience, min_delta=min_delta, save_model=save_model,
+                 model_prefix=model_prefix, show_mode=show_mode)
+
+    def save(self, path, extras: dict = None):
+
+        model_dict = {'model_state_dict': self.model.state_dict(),
+                      'optimizer_state_dict': self.optimizer.state_dict(),
+                      'n_stacks': self.n_stacks, 'kernels': self.kernels, 'kernel_size': self.kernel_size,
+                      'batch_normalize': self.batch_normalize}
+
+        if extras is not None:
+            model_dict.update(extras)
+
+        if path.suffix != ".pth":
+            path = path.with_suffix(".pth")
+            logging.warning(f"changed path suffix to {path}")
+
+        torch.save(model_dict, path)
+        logging.info(f"saved model to {path}")
+
+    def _train_one_epoch(self, data_generator: SubFrameGenerator, optimizer, criterion, epoch, lr_scheduler=None,
+                         update_weights: bool = False):
+
+        # switch to training/evaluation mode and toggle gradient calculations
+        if update_weights:
+            self.model.train()
+            torch.set_grad_enabled(True)
+        else:
+            self.model.eval()
+            torch.set_grad_enabled(False)
+
+        running_loss = 0.0
+        for i, data in enumerate(data_generator):
+
+            # load data and convert to PyTorch tensors
+            inputs, labels = data
+
+            if isinstance(inputs, np.ndarray):
+                # Assuming inputs.shape is (batch_size, width, height, channels)
+                # Transpose the dimensions to match PyTorch format (batch_size, channels, height, width)
+                inputs = torch.from_numpy(inputs.transpose(0, 3, 1, 2)).to(torch.float32)
+
+            if isinstance(labels, np.ndarray):
+                # Assuming labels.shape is (batch_size, width, height)
+                labels = torch.from_numpy(labels).to(torch.float32)
+
+            # move data to appropriate device
+            inputs, labels = inputs.to(self.device), labels.to(self.device)
+
+            # Forward pass
+            outputs = self.model(inputs)
+            loss = criterion(outputs, labels)
+
+            if update_weights:
+                # Backward pass and optimization only during training
+                optimizer.zero_grad()
+                loss.backward()
+                optimizer.step()
+
+                if lr_scheduler is not None:
+                    lr_scheduler.step()
+
+            # Accumulate loss
+            running_loss += loss.item()
+
+        # Enable gradient calculations again, if needed later
+        torch.set_grad_enabled(True)
+
+        return running_loss
+
+    def _show_progress(self, num_epochs: int, epoch: int, training_loss: float,
+                       show_mode: Literal["auto", "progress", "notebook"] = None,
+                       validation_loss: float = None,
+                       patience_counter: int = None):
+
+        if show_mode is None:
+            return None
+
+        # define iterator if it is None
+        if self.iterator is None:
+
+            if show_mode == "progress":
+                self.iterator = tqdm(range(num_epochs), total=num_epochs)
+            elif show_mode == "notebook":
+                from IPython.display import clear_output
+                from IPython.core.display_functions import display
+                self.iterator = range(num_epochs)
+            else:
+                self.iterator = range(num_epochs)
+
+        # define which show mode to execute
+        if show_mode == "auto":
+            if self._is_notebook():
+                show_mode = "notebook"
+            else:
+                show_mode = "progress"
+
+        # progress
+        if show_mode == "progress":
+
+            if isinstance(training_loss, (list, tuple)):
+                training_loss = training_loss[-1]
+
+            progress_description = f"train>{training_loss:.2E} "
+
+            if validation_loss is not None:
+
+                if isinstance(validation_loss, (list, tuple)):
+                    validation_loss = validation_loss[-1]
+
+                progress_description += f"val>{validation_loss:.2E} "
+
+            if patience_counter is not None:
+                progress_description += f"patience>{patience_counter}"
+
+            self.iterator.set_description(progress_description)
+            self.iterator.update()
+
+        elif show_mode == "notebook":
+
+            from IPython.core.display_functions import clear_output, display
+            import matplotlib.pyplot as plt
+
+            plt.clf()
+            clear_output(wait=True)
+
+            fig, axx = plt.subplots(1, 2, figsize=(9, 4))
+
+            axx[0].plot(training_loss, color="black", label="training")
+            if validation_loss is not None:
+                axx[0].plot(np.array(validation_loss).flatten(), color="green", label="validation")
+
+            axx[0].set_title(f"losses")
+            axx[0].set_yscale("log")
+            axx[0].legend()
+
+            # set title
+            title = f"Epoch {epoch}/{num_epochs}"
+            if patience_counter is not None:
+                title += f"P{patience_counter}"
+
+            plt.tight_layout()
+
+            display(fig)
+
+        else:
+            raise ValueError(f"please choose a show_mode from ['auto', 'progress', 'notebook']")
+
+    @staticmethod
+    def _is_notebook() -> bool:
+        """
+        Returns whether we are running in a Jupyter notebook.
+        """
+        try:
+            shell = get_ipython().__class__.__name__
+            if shell == 'ZMQInteractiveShell':
+                return True  # Jupyter notebook or qtconsole
+            elif shell == 'TerminalInteractiveShell':
+                return False  # Terminal running IPython
+            else:
+                return False  # Other type, probably standard Python interpreter
+        except NameError:
+            return False  # Probably standard Python interpreter
+
+    @staticmethod
+    def _annealed_loss(y_pred: torch.Tensor, y_true: torch.Tensor) -> torch.Tensor:
+        """
+        Calculates the annealed loss between the true and predicted values.
+
+        Args:
+            y_true: The true values.
+            y_pred: The predicted values.
+
+        Returns:
+            torch.Tensor: The calculated annealed loss
+        """
+        local_power = 4
+        y_true = y_true.float()
+        y_pred = y_pred.float()
+
+        # Compute the element-wise absolute difference and apply local power
+        final_loss = torch.pow(
+            torch.abs(y_pred - y_true) + 1e-8, local_power
+        )
+
+        # Compute the mean of the final loss
+        return torch.mean(final_loss)
+
+    @staticmethod
+    def _mean_square_root_error(y_true: torch.Tensor, y_pred: torch.Tensor) -> torch.Tensor:
+        """
+        Calculates the mean square root error between the true and predicted values.
+
+        Args:
+            y_true: The true values.
+            y_pred: The predicted values.
+
+        Returns:
+            torch.Tensor: The calculated mean square root error.
+        """
+        y_true = y_true.float()
+        y_pred = y_pred.float()
+
+        # Compute the element-wise absolute difference, apply square root and compute mean
+        return torch.mean(torch.sqrt(torch.abs(y_pred - y_true) + 1e-8))
 
 
 class Network:
@@ -1077,6 +1611,7 @@ class Network:
                 # Convolutional layer in the decoder
                 conv = Conv2D(kernel, (3, 3), activation="relu", padding="same")(last_layer)
                 up = UpSampling2D((2, 2))(conv)
+                logging.warning(f"tensorflow i: {-(i + 2)}")
                 conc = Concatenate()([up, enc_conv[-(i + 2)]])
 
                 last_layer = conc
