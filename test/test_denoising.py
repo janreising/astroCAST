@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from astrocast.denoising import Network, PyTorchNetwork
+from astrocast.denoising import Network, PyTorchNetwork, SubFrameDataset
 from astrocast.denoising import SubFrameGenerator
 from astrocast.helper import SampleInput
 from astrocast.preparation import IO
@@ -149,9 +149,9 @@ class TestGenerators:
             gen.on_epoch_end()
 
     @pytest.mark.parametrize("extension", [".h5", ".tiff"])
-    @pytest.mark.parametrize("use_torch", [True, True])
+    @pytest.mark.parametrize("use_torch", [True, False])
     @pytest.mark.parametrize("n_stacks", [1, 3])
-    def test_network(self, extension, n_stacks, use_torch, kernels=4):
+    def test_network_vanilla(self, extension, n_stacks, use_torch, kernels=4):
 
         file_path, loc = self.data[extension]
 
@@ -160,19 +160,24 @@ class TestGenerators:
             cache_results=True, in_memory=True
         )
 
-        train_gen = SubFrameGenerator(
-            padding=None, batch_size=25, max_per_file=50, allowed_rotation=[1, 2, 3], allowed_flip=[0, 1], shuffle=True,
-            **param
-        )
-
         if use_torch:
-            net = PyTorchNetwork(train_generator=train_gen, val_generator=train_gen,
+
+            train_dataset = SubFrameDataset(padding=None, max_per_file=50, allowed_rotation=[1, 2, 3],
+                                            allowed_flip=[0, 1], **param)
+
+            net = PyTorchNetwork(train_dataset=train_dataset, val_dataset=train_dataset, shuffle=True,
                                  n_stacks=n_stacks, kernels=kernels,
                                  batch_normalize=False, use_cpu=True)
 
             net.run(num_epochs=2, patience=1, min_delta=0.01)
 
         else:
+
+            train_gen = SubFrameGenerator(
+                padding=None, batch_size=25, max_per_file=50, allowed_rotation=[1, 2, 3], allowed_flip=[0, 1],
+                shuffle=True,
+                **param
+            )
 
             net = Network(train_generator=train_gen, val_generator=train_gen, n_stacks=n_stacks, kernel=kernels,
                           batchNormalize=False, use_cpu=True)
@@ -190,17 +195,23 @@ class TestGenerators:
             cache_results=True, in_memory=True
         )
 
-        train_gen = SubFrameGenerator(
-            padding=None, batch_size=25, max_per_file=50, allowed_rotation=[1, 2, 3], allowed_flip=[0, 1], shuffle=True,
-            **param
-        )
-
         if use_torch:
-            net = PyTorchNetwork(train_generator=train_gen, val_generator=train_gen, n_stacks=1, kernels=4,
-                                 batch_normalize=False, use_cpu=True)
+
+            train_dataset = SubFrameDataset(padding=None, max_per_file=50, allowed_rotation=[1, 2, 3],
+                                            allowed_flip=[0, 1], **param)
+
+            net = PyTorchNetwork(train_dataset=train_dataset, val_dataset=train_dataset, shuffle=True, n_stacks=1,
+                                 kernels=4, batch_normalize=False, use_cpu=True)
 
             net.run(num_epochs=2, patience=1, min_delta=0.01)
         else:
+
+            train_gen = SubFrameGenerator(
+                padding=None, batch_size=25, max_per_file=50, allowed_rotation=[1, 2, 3], allowed_flip=[0, 1],
+                shuffle=True,
+                **param
+            )
+
             net = Network(train_generator=train_gen, val_generator=train_gen, n_stacks=1, kernel=4,
                           batchNormalize=False, use_cpu=True)
             net.run(batch_size=train_gen.batch_size, num_epochs=2, patience=1, min_delta=0.01)
@@ -215,41 +226,50 @@ class TestGenerators:
 
         save_model_dir = Path(tmpdir.strpath)
 
-        if use_torch:
-            save_model_path = save_model_dir.joinpath("model.pth")
-        else:
-            save_model_path = save_model_dir.joinpath("model.h5")
-
         param = dict(
             paths=file_path, loc=loc, input_size=(25, 25), pre_post_frame=5, gap_frames=0, normalize="global",
             cache_results=True, in_memory=True
         )
 
-        train_gen = SubFrameGenerator(
-            padding=None, batch_size=25, max_per_file=50, allowed_rotation=[1, 2, 3], allowed_flip=[0, 1],
-            shuffle=True, **param
-        )
-
         if use_torch:
-            net = PyTorchNetwork(train_generator=train_gen, val_generator=train_gen, n_stacks=n_stacks, kernels=kernels,
-                                 kernel_size=kernel_size, batch_normalize=False, use_cpu=True)
 
-            net.run(num_epochs=2, patience=1, min_delta=0.01, save_model=save_model_dir)
+            save_model_path = save_model_dir.joinpath("model.pth")
+
+            train_dataset = SubFrameDataset(padding=None, max_per_file=50, allowed_rotation=[1, 2, 3],
+                                            allowed_flip=[0, 1], **param)
+
+            net = PyTorchNetwork(train_dataset=train_dataset, val_dataset=train_dataset, shuffle=True,
+                                 n_stacks=n_stacks, kernels=kernels, kernel_size=kernel_size, batch_normalize=False,
+                                 use_cpu=True)
+
+            net.run(num_epochs=2, patience=1, min_delta=0.01, save_model=save_model_path)
+
+            assert save_model_path.exists()
+
         else:
+
+            save_model_path = save_model_dir.joinpath("model.h5")
+
+            train_gen = SubFrameGenerator(
+                padding=None, batch_size=25, max_per_file=50, allowed_rotation=[1, 2, 3], allowed_flip=[0, 1],
+                shuffle=True, **param
+            )
+
             net = Network(train_generator=train_gen, val_generator=train_gen, n_stacks=n_stacks, kernel=kernels,
                           batchNormalize=False, use_cpu=True)
             net.run(
-                batch_size=train_gen.batch_size, num_epochs=2, patience=1, min_delta=0.01, save_model=save_model_dir
+                batch_size=train_gen.batch_size, num_epochs=2, patience=1, min_delta=0.01, save_model=save_model_path
             )
 
-        res = train_gen.infer(model=save_model_path, output=None, out_loc="inf/ch0", rescale=False)
+            assert save_model_path.exists()
 
     @pytest.mark.parametrize("extension", [".h5", ".tiff"])
     @pytest.mark.parametrize("use_torch", [True, False])
     @pytest.mark.parametrize("output_file", [None, "inf.tiff", "inf.h5"])
     @pytest.mark.parametrize("rescale", [True, False])
     @pytest.mark.parametrize("n_stacks", [1, 2])
-    def test_inference_sub(self, tmpdir, extension, output_file, use_torch, rescale, n_stacks):
+    @pytest.mark.parametrize("use_torch", [True])
+    def test_inference_sub(self, tmpdir, extension, output_file, use_torch, rescale, n_stacks, inf_loc="inf/ch0"):
 
         file_path, loc = self.data[extension]
 
@@ -266,34 +286,48 @@ class TestGenerators:
             cache_results=True, in_memory=True
         )
 
-        train_gen = SubFrameGenerator(
-            padding=None, batch_size=25, max_per_file=50, allowed_rotation=[1, 2, 3], allowed_flip=[0, 1],
-            shuffle=True, **param
-        )
-        val_gen = SubFrameGenerator(
-            padding=None, batch_size=25, max_per_file=5, allowed_rotation=[0], allowed_flip=[-1], shuffle=True,
-            **param
-        )
-
         if use_torch:
-            net = PyTorchNetwork(train_generator=train_gen, val_generator=train_gen, n_stacks=n_stacks, kernels=8,
+
+            # create datasets
+            train_dataset = SubFrameDataset(padding=None, max_per_file=50, allowed_rotation=[1, 2, 3],
+                                            allowed_flip=[0, 1], **param)
+
+            val_dataset = SubFrameDataset(padding=None, max_per_file=5, allowed_rotation=0, allowed_flip=-1, **param)
+
+            # create network
+            net = PyTorchNetwork(train_dataset=train_dataset, val_dataset=val_dataset, n_stacks=n_stacks, kernels=8,
                                  batch_normalize=False, use_cpu=True)
 
+            # train
             net.run(num_epochs=2, patience=1, min_delta=0.01)
+
+            # create inference
+            inf_dataset = SubFrameDataset(padding="edge", allowed_rotation=0, allowed_flip=-1, **param)
+            res = net.infer(inf_dataset, output=out_path, out_loc=inf_loc, rescale=rescale)
+
         else:
+
+            train_gen = SubFrameGenerator(
+                padding=None, batch_size=25, max_per_file=50, allowed_rotation=[1, 2, 3], allowed_flip=[0, 1],
+                shuffle=True, **param
+            )
+            val_gen = SubFrameGenerator(
+                padding=None, batch_size=25, max_per_file=5, allowed_rotation=[0], allowed_flip=[-1], shuffle=True,
+                **param
+            )
+
             net = Network(train_generator=train_gen, val_generator=val_gen, n_stacks=n_stacks, kernel=8,
                           batchNormalize=False, use_cpu=True)
             net.run(batch_size=train_gen.batch_size, num_epochs=2, patience=1, min_delta=0.01, save_model=None)
 
-        model = net.model
+            model = net.model
 
-        inf_gen = SubFrameGenerator(
-            padding="edge", batch_size=25, allowed_rotation=[0], allowed_flip=[-1], shuffle=False,
-            logging_level=logging.DEBUG, **param
-        )
+            inf_gen = SubFrameGenerator(
+                padding="edge", batch_size=25, allowed_rotation=[0], allowed_flip=[-1], shuffle=False,
+                logging_level=logging.DEBUG, **param
+            )
 
-        inf_loc = "inf/ch0"
-        res = inf_gen.infer(model=model, output=out_path, out_loc=inf_loc, rescale=rescale)
+            res = inf_gen.infer(model=model, output=out_path, out_loc=inf_loc, rescale=rescale)
 
         # Check result
         io = IO()

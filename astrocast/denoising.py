@@ -9,6 +9,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.nn.modules.loss import _Loss
+from torch.utils.data import Dataset, DataLoader
 from tqdm import tqdm
 
 from astrocast.autoencoders import EarlyStopper
@@ -34,9 +35,574 @@ import pandas as pd
 
 from scipy.stats import bootstrap
 
+PyTorchLoss = Union[
+    Literal['annealed_loss', 'mean_square_root_error'], Callable[[torch.Tensor, torch.Tensor], torch.Tensor], _Loss]
+
 
 # TODO write plotting for generators
 # TODO write plotting for network history
+
+class SubFrameDataset(Dataset):
+
+    def __init__(
+            self, paths: Union[str, List[str]], input_size: Tuple[int, int] = (128, 128),
+            pre_post_frame: Union[int, Tuple[int, int]] = 5, gap_frames: Union[int, Tuple[int, int]] = 0,
+            z_steps: float = 0.1, z_select: Union[None, int, List[int]] = None,
+            allowed_rotation: Union[int, List[int]] = 0,
+            allowed_flip: Union[int, List[int]] = -1, random_offset: bool = False, add_noise: bool = False,
+            drop_frame_probability: Union[None, float] = None, max_per_file: Union[None, int] = None, overlap: int = 0,
+            padding: Union[None, Literal["symmetric", "edge"]] = None, shuffle: bool = True,
+            normalize: Union[None, Literal["local", "global"]] = None, loc: str = "data/",
+            output_size: Union[None, Tuple[int, int]] = None, cache_results: bool = False, in_memory: bool = False,
+            save_global_descriptive: bool = True, logging_level: int = logging.INFO
+    ):
+
+        logging.basicConfig(level=logging_level)
+
+        # adjust input_size to be power of two
+        input_size = [closest_power_of_two(v) for v in input_size]
+
+        if not isinstance(paths, list):
+            paths = [paths]
+        self.paths = paths
+        self.loc = loc
+
+        logging.debug(f"data files: {self.paths}")
+        logging.debug(f"data loc: {self.loc}")
+
+        self.input_size = input_size
+        self.output_size = output_size
+        self.save_global_descriptive = save_global_descriptive
+
+        if isinstance(pre_post_frame, int):
+            pre_post_frame = (pre_post_frame, pre_post_frame)
+        self.signal_frames = pre_post_frame
+
+        if isinstance(gap_frames, int):
+            gap_frames = (gap_frames, gap_frames)
+        self.gap_frames = gap_frames
+
+        self.z_steps = z_steps
+        self.z_select = z_select
+        self.max_per_file = max_per_file
+        self.stack_len = None
+
+        # parse allowed rotations
+        if isinstance(allowed_rotation, int):
+            allowed_rotation = [allowed_rotation]
+
+        if (1 in allowed_rotation) or (3 in allowed_rotation):
+            assert input_size[0] == input_size[
+                1], (f"when using 90 or 270 degree rotation (allowed rotation: 1 or 3) the 'input_size' needs to be "
+                     f"square. However input size is: {input_size}")
+        self.allowed_rotation = allowed_rotation
+
+        # parse allowed flips
+        if isinstance(allowed_flip, int):
+            allowed_flip = [allowed_flip]
+        self.allowed_flip = allowed_flip
+
+        if random_offset and overlap is not None:
+            raise ValueError(f"random_offset and overlap are incompatible. Please choose only one.")
+
+        if isinstance(overlap, int):
+            overlap = overlap + overlap % 2
+
+        self.overlap = overlap  # float
+
+        assert padding in [None, "symmetric", "edge"]
+        assert not (random_offset and (
+                padding is not None)), "cannot use 'padding' and 'random_offset' flag. Please choose one or the other!"
+        self.padding = padding
+
+        self.random_offset = random_offset
+        self.add_noise = add_noise
+        self.drop_frame_probability = drop_frame_probability
+
+        assert normalize in [None, "local", "global"], "normalize argument needs be one of: [None, local, global]"
+        self.normalize = normalize
+        if self.normalize == "global":
+            self.descr = {}
+
+        self.shuffle = shuffle
+        self.n = None
+
+        # in memory
+        self.mem_data = {} if in_memory else -1
+
+        # get items
+        self.fov_size = None
+        self.items = self._generate_items()
+
+        # cache
+        self.cache_results = cache_results
+        if cache_results:
+            logging.warning("using caching may lead to memory leaks. Please set to false if you experience "
+                            "Out-Of-Memory errors.")
+
+        self.cache = {}
+
+    def __len__(self):
+        return len(self.items)
+
+    def __getitem__(self, index):
+
+        # get cached value if it exists
+        if index in self.cache.keys():
+            return self.cache[index]
+
+        # load item information and load from disk
+        row = self.items.iloc[index]
+        data = self._load_row(row)
+
+        if data.shape != self.fov_size:
+            raise RuntimeError(f"loaded data does not match expected FOV size "
+                               f"(fov: {self.fov_size}) vs. (load: {data.shape}")
+
+        # apply rotation
+        if row.rot != 0:
+            data = np.rollaxis(data, 0, 3)
+            data = np.rot90(data, k=row.rot)
+            data = np.rollaxis(data, 2, 0)
+
+        # apply flip
+        if row.flip != -1:
+            data = np.flip(data, row.flip)
+
+        # apply noise
+        if row.noise is not None:
+            data = data + np.random.random(data.shape) * row.noise
+
+        # apply normalization
+        if self.normalize == "local":
+            sub = np.mean(data)
+            data = data - sub
+
+            div = np.std(data)
+            data = data / div
+
+        elif self.normalize == "global":
+            sub, div = self.descr[row.path]
+
+            data = data - sub
+            data = data / div
+
+        # apply frame dropping
+        if row.drop_frame != -1:
+            data[row.drop_frame, :, :] = np.zeros(data[0, :, :].shape)
+
+        x_indices = list(range(0, self.signal_frames[0])) + list(range(-self.signal_frames[1], 0))
+        input_frames = data[x_indices, :, :]
+
+        y_idx = self.signal_frames[0] + self.gap_frames[0]
+        target_frame = data[y_idx, :, :]
+
+        if (self.output_size is not None) and (self.output_size != target_frame.shape):
+            target_frame = resize(target_frame, self.output_size)
+
+        if self.cache_results:
+            self.cache[index] = (input_frames, target_frame)
+
+        return input_frames, target_frame
+
+    def _generate_items(self):
+
+        # define size of each predictive field of view (X, Y)
+        dw, dh = self.input_size
+        signal_frames = self.signal_frames
+        gap_frames = self.gap_frames
+
+        # define prediction length (Z)
+        stack_len = signal_frames[0] + gap_frames[0] + 1 + gap_frames[1] + signal_frames[1]
+        self.stack_len = stack_len
+        z_steps = max(1, int(self.z_steps * stack_len))
+
+        self.fov_size = (stack_len, dw, dh)
+
+        x_start, y_start, z_start = 0, 0, 0
+        # randomize input
+        if self.random_offset:
+            x_start = np.random.randint(0, dw)
+            y_start = np.random.randint(0, dh)
+            z_start = np.random.randint(0, stack_len)
+
+        # adjust for overlap
+        overlap = self.overlap
+        if overlap is not None:
+            if overlap < 1:
+                overlap_x, overlap_y = int(dw * overlap), int(dh * overlap)
+            else:
+                overlap_x, overlap_y = overlap, overlap
+
+        else:
+            overlap_x, overlap_y = 0, 0
+
+            # x_start = -overlap_x  # y_start = -overlap_y
+
+        allowed_rotation = self.allowed_rotation if self.allowed_rotation is not None else [None]
+        allowed_flip = self.allowed_flip if self.allowed_flip is not None else [None]
+
+        # iterate over possible items
+        idx = 0
+        container = []
+        for file in tqdm(self.paths, desc="file preprocessing"):
+
+            file_container = []
+            file = Path(file)
+            assert file.is_file(), "can't find: {}".format(file)
+
+            if file.suffix == ".h5":
+                with h5.File(file.as_posix(), "r") as f:
+
+                    if self.loc not in f:
+                        logging.warning(f"cannot find {self.loc} in {file}")
+                        continue
+
+                    data = f[self.loc]
+                    Z, X, Y = data.shape
+
+            elif file.suffix in (".tiff", ".tif"):
+
+                tif = tiff.TiffFile(file.as_posix())
+                Z = len(tif.pages)
+                X, Y = tif.pages[0].shape
+                tif.close()
+            else:
+                raise NotImplementedError(
+                    f"filetype is recognized - please provide .h5, .tif or .tiff instead of: {file}"
+                )
+
+            if self.z_select is not None:
+                Z0 = max(0, self.z_select[0])
+                Z1 = min(Z, self.z_select[1])
+            else:
+                Z0, Z1 = 0, Z
+
+            # Calculate padding (if applicable)
+            if self.padding is not None:
+                pad_z0 = signal_frames[0] + gap_frames[0]
+                pad_z1 = signal_frames[1] + gap_frames[1] + 1
+                pad_x1 = dw % X
+                pad_y1 = dh % Y
+            else:
+                pad_z0 = pad_z1 = pad_x1 = pad_y1 = 0
+
+            zRange = list(
+                range(
+                    Z0 + z_start - pad_z0, Z1 - stack_len - z_start + pad_z1, z_steps
+                )
+            )
+            xRange = list(
+                range(
+                    x_start, X - x_start + pad_x1 - dw, dw - overlap_x
+                )
+            )
+            yRange = list(
+                range(
+                    y_start, Y - y_start + pad_y1 - dh, dh - overlap_y
+                )
+            )
+
+            logging.debug(f"\nz_range: {zRange}")
+            logging.debug(f"\nx_range: {xRange}")
+            logging.debug(f"\nx_range param > x_start:{x_start}, X:{X} pad_x1:{pad_x1}, dw:{dw}")
+            logging.debug(f"\ny_range: {yRange}")
+
+            if self.shuffle:
+                random.shuffle(zRange)
+                random.shuffle(xRange)
+                random.shuffle(yRange)
+
+            for z0 in zRange:
+                z1 = z0 + stack_len
+
+                for x0 in xRange:
+                    x1 = x0 + dw
+
+                    for y0 in yRange:
+                        y1 = y0 + dh
+
+                        # choose modification
+                        rot = random.choice(allowed_rotation)
+                        flip = random.choice(allowed_flip)
+
+                        # mark dropped frame (if applicable)
+                        if (self.drop_frame_probability is not None) and (
+                                np.random.random() <= self.drop_frame_probability):
+                            drop_frame = np.random.randint(0, np.sum(signal_frames))
+                        else:
+                            drop_frame = -1
+
+                        # calculate necessary padding
+                        padding = np.zeros(6, dtype=int)
+
+                        padding[0] = min(0, z0)
+                        padding[1] = max(0, z1 - Z1)
+                        padding[3] = max(0, x1 - X)
+                        padding[5] = max(0, y1 - Y)
+
+                        padding = np.abs(padding)
+
+                        # cannot pad on empty axis
+                        if (padding[0] >= stack_len) or (padding[1] >= stack_len) or (padding[2] >= dw) or (
+                                padding[3] >= dh):
+                            continue
+
+                        # create item
+                        item = {"idx": idx, "path": file, "z0": z0, "z1": z1, "x0": x0, "x1": x1, "y0": y0, "y1": y1,
+                                "rot": rot, "flip": flip, "Z": Z, "X": X, "Y": Y, "noise": self.add_noise,
+                                "drop_frame": drop_frame, "padding": padding}
+
+                        file_container.append(item)
+
+                        idx += 1
+
+            file_container = pd.DataFrame(file_container)
+
+            if len(file_container) < 1:
+                raise ValueError("cannot find suitable data chunks.")
+
+            if self.normalize == "global":
+                if len(file_container) > 1:
+
+                    local_save = self._get_local_descriptive(file, loc=self.loc)
+
+                    if local_save is None and not self.save_global_descriptive:
+                        self.descr[file] = self._bootstrap_descriptive(file_container)
+
+                    elif local_save is None:
+
+                        mean, std = self._bootstrap_descriptive(file_container)
+                        self.descr[file] = (mean, std)
+
+                        if self.save_global_descriptive:
+                            self._set_local_descriptive(file, loc=self.loc, mean=mean, std=std)
+
+                    else:
+                        self.descr[file] = local_save
+
+                else:
+                    logging.warning(f"found file without eligible items: {file}")
+
+            if self.max_per_file is not None:
+                file_container = file_container.sample(self.max_per_file)
+
+            container.append(file_container)
+
+        items = pd.concat(container)
+        logging.debug(f"items: {items}")
+
+        if self.shuffle:
+            items = items.sample(frac=1).reset_index(drop=True)
+
+        self.n = len(items)
+
+        return items
+
+    def _bootstrap_descriptive(
+            self, items, frac=0.01, confidence_level=0.75, n_resamples=5000, max_confidence_span=0.2,
+            iteration_frac_increase=1.5
+    ):
+
+        means = []
+        raws = []
+
+        confidence_span = mean_conf = std_conf = max_confidence_span + 1
+
+        def custom_bootstrap(data):
+
+            try:
+                res = bootstrap(
+                    (np.array(data),), np.median, n_resamples=n_resamples, axis=0, vectorized=False,
+                    confidence_level=confidence_level, method="bca"
+                )
+            except:
+                logging.warning("all values are the same. Using np.mean instead of bootstrapping")
+                return np.mean(np.array(data)), 0
+
+            # calculate confidence span
+            ci = res.confidence_interval
+            mean = np.mean((ci.low, ci.high))
+            confidence_span = (ci.high - ci.low) / mean
+
+            return mean, confidence_span
+
+        it = 0
+        while (frac < 1) and confidence_span > max_confidence_span:
+
+            sel_items = items.sample(frac=frac)
+            if len(sel_items) < 1:
+                logging.debug(f"items: {items}")
+                logging.debug(f"sel items: {sel_items}")
+            for _, row in sel_items.iterrows():
+                raw = self._load_row(row).flatten()
+                raws.append(raw)
+
+                means += [np.nanmedian(raw)]
+
+            mean_, mean_conf = custom_bootstrap(means)
+
+            std_, std_conf = custom_bootstrap([np.std(r - mean_) for r in raws])
+
+            confidence_span = max(mean_conf, std_conf)
+
+            # increase frac
+            frac *= iteration_frac_increase
+            it += 1
+            logging.debug(f"iteration {it} {mean_:.2f}+-{mean_conf:.2f} / {std_:.2f}+-{std_conf:.2f} ")
+
+        if mean_ is None or np.isnan(mean_):
+            logging.warning(f"unable to calculate mean")
+            mean_ = np.nanmean(means)
+
+        if std_ is None or np.isnan(std_):
+            logging.warning(f"unable to calculate std")
+            std_ = np.nanmean([np.std(r - mean_) for r in raws])
+
+        return mean_, std_
+
+    def _load_row(self, row):
+
+        path, z0, z1, x0, x1, y0, y1, Z, X, Y = row.path, row.z0, row.z1, row.x0, row.x1, row.y0, row.y1, row.Z, row.X, row.Y
+        pad_z0, pad_z1, pad_x0, pad_x1, pad_y0, pad_y1 = row.padding
+
+        # adjust boundaries if padding is needed
+        if sum([pad_z0, pad_z1, pad_x0, pad_x1, pad_y0, pad_y1]) > 0:
+
+            # adjust Z boundaries
+            if z0 < 0:
+                pad_z0 = abs(z0)
+                z0 = 0
+            else:
+                pad_z0 = 0
+
+            if z1 > Z:
+                pad_z1 = abs(Z - z1)
+                z1 = Z
+            else:
+                pad_z1 = 0
+
+            # adjust X boundaries
+            if x0 < 0:
+                pad_x0 = abs(x0)
+                x0 = 0
+            else:
+                pad_x0 = 0
+
+            if x1 > X:
+                pad_x1 = abs(X - x1)
+                x1 = X
+            else:
+                pad_x1 = 0
+
+            # adjust Y boundaries
+            if y0 < 0:
+                pad_y0 = abs(y0)
+                y0 = 0
+            else:
+                pad_y0 = 0
+
+            if y1 > Y:
+                pad_y1 = abs(Y - y1)
+                y1 = Y
+            else:
+                pad_y1 = 0
+
+        if isinstance(self.mem_data, dict):
+
+            # load to memory if necessary
+            if path not in self.mem_data.keys():
+
+                if path.suffix == ".h5":
+                    with h5.File(path.as_posix(), "r") as f:
+                        self.mem_data[path] = f[self.loc][:]
+
+                elif path.suffix in (".tif", ".tiff"):
+                    self.mem_data[path] = tiff.imread(path.as_posix())
+
+            data = self.mem_data[path][z0:z1, x0:x1, y0:y1]
+
+        # todo: this should probably utilize helper.IO and not be implemented here
+        #  in that case we need to add a x_select and y_select variable in IO.load()
+        elif path.suffix == ".h5":
+            with h5.File(path.as_posix(), "r") as f:
+                data = f[self.loc][z0:z1, x0:x1, y0:y1]
+
+        elif path.suffix in (".tif", ".tiff"):
+            data = tiff.imread(path.as_posix(), key=range(z0, z1))
+            data = data[:, x0:x1, y0:y1]
+        else:
+            raise ValueError(f"Unexpected suffix (? {path.suffix}), please provide one of [.tiff, .h5].")
+
+        # pad loaded data if necessary
+        if np.sum((pad_z0, pad_z1, pad_x0, pad_x1, pad_y0, pad_y1)) > 0:
+            data = np.pad(
+                data, ((pad_z0, pad_z1), (pad_x0, pad_x1), (pad_y0, pad_y1)), mode=self.padding
+            )
+
+        return data
+
+    def __get_norm_parameters__(self, index):
+
+        files = self.items[self.items.batch == index].path.unique()
+
+        if len(files) == 1:
+            return self.descr[files[0]] if files[0] in self.descr.keys() else (1, 1)
+        elif len(files) > 1:
+            return {f: self.descr[f] if f in self.descr.keys() else (1, 1) for f in files}
+        else:
+            return None
+
+    @staticmethod
+    def _get_local_descriptive(path, loc):
+
+        if path.suffix != ".h5":
+            # local save only implemented for hdf5 files
+            return None
+
+        mean_loc = "/descr/" + loc + "/mean"
+        std_loc = "/descr/" + loc + "/std"
+
+        with h5.File(path.as_posix(), "r") as f:
+
+            if mean_loc in f:
+                mean = f[mean_loc][0]
+            else:
+                return None
+
+            if std_loc in f:
+                std = f[std_loc][0]
+            else:
+                return None
+
+        return mean, std
+
+    @staticmethod
+    def _set_local_descriptive(path, loc, mean, std):
+
+        logging.warning("saving results of descriptive")
+
+        if path.suffix != ".h5" or mean is None or std is None:
+            # local save only implemented for hdf5 files
+            return False
+
+        mean_loc = "/descr/" + loc + "/mean"
+        std_loc = "/descr/" + loc + "/std"
+
+        with h5.File(path.as_posix(), "a") as f:
+
+            if mean_loc not in f:
+                f.create_dataset(mean_loc, shape=(1), dtype=float, data=mean)
+            else:
+                f[mean_loc] = mean
+
+            if std_loc not in f:
+                f.create_dataset(std_loc, shape=(1), dtype=float, data=std)
+            else:
+                f[std_loc] = std
+
+        return True
+
 
 class SubFrameGenerator(tf.keras.utils.Sequence):
     """
@@ -949,9 +1515,10 @@ class UNet(nn.Module):
         with torch.no_grad():
 
             if isinstance(input_tensor, np.ndarray):
-                # Assuming inputs.shape is (batch_size, width, height, channels)
-                # Transpose the dimensions to match PyTorch format (batch_size, channels, height, width)
-                input_tensor = torch.from_numpy(input_tensor.transpose(0, 3, 1, 2)).to(torch.float32)
+                input_tensor = torch.from_numpy(input_tensor)
+
+            if input_tensor.dtype != torch.float32:
+                input_tensor = input_tensor.to(torch.float32)
 
             # Check if the input tensor is on the same device as the model
             if next(self.parameters()).is_cuda:
@@ -965,14 +1532,10 @@ class UNet(nn.Module):
         return output_tensor
 
 
-PyTorchLoss = Union[
-    Literal['annealed_loss', 'mean_square_root_error'], Callable[[torch.Tensor, torch.Tensor], torch.Tensor], _Loss]
-
-
 class PyTorchNetwork:
     def __init__(
-            self, train_generator: SubFrameGenerator, val_generator: SubFrameGenerator = None,
-            test_generator: SubFrameGenerator = None,
+            self, train_dataset: SubFrameDataset, val_dataset: SubFrameDataset = None,
+            test_dataset: SubFrameDataset = None, batch_size: int = 32, shuffle: bool = True, num_workers: int = 4,
             learning_rate: float = 0.001, momentum: float = 0.9, decay_rate: float = 0.1, decay_steps: int = 30,
             n_stacks: int = 3, kernels: int = 64, kernel_size: int = 3, batch_normalize: bool = False,
             loss: PyTorchLoss = "annealed_loss",
@@ -985,34 +1548,32 @@ class PyTorchNetwork:
         self.kernels = kernels
         self.kernel_size = kernel_size
         self.batch_normalize = batch_normalize
+        self.stack_len = train_dataset.stack_len
 
         # define generators
-        self.train_gen = train_generator
-        self.val_gen = val_generator
-        self.test_gen = test_generator
+        self.train_dataloader = DataLoader(train_dataset, batch_size=batch_size, shuffle=shuffle,
+                                           num_workers=num_workers)
+
+        if val_dataset is not None:
+            self.val_dataloader = DataLoader(val_dataset, batch_size=batch_size, shuffle=shuffle,
+                                             num_workers=num_workers)
+        else:
+            self.val_dataloader = None
+
+        if test_dataset is not None:
+            self.test_dataloader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False,
+                                              num_workers=num_workers)
+        else:
+            self.test_dataloader = None
 
         # Create fresh UNet
-        if load_model is None:
-
-            self.model = UNet(stack_length=train_generator.stack_len, n_stacks=n_stacks,
-                              batch_normalize=batch_normalize,
-                              kernels=kernels, kernel_size=kernel_size)
+        self.model = UNet(stack_length=self.stack_len, n_stacks=n_stacks,
+                          batch_normalize=batch_normalize,
+                          kernels=kernels, kernel_size=kernel_size)
 
         # load model
-        else:
-            load_dict = torch.load(load_model)
-            n_stacks = load_dict['n_stacks']
-            batch_normalize = load_dict['batch_normalize']
-            kernels = load_dict['kernels']
-            kernel_size = load_dict['kernel_size']
-            self.model = UNet(stack_length=train_generator.stack_len, n_stacks=n_stacks,
-                              batch_normalize=batch_normalize,
-                              kernels=kernels, kernel_size=kernel_size)
-
-            self.n_stacks = n_stacks
-            self.kernels = kernels
-            self.kernel_size = kernel_size
-            self.batch_normalize = batch_normalize
+        if load_model is not None:
+            self._load_model(model_path=load_model)
 
         # Define loss
         self.loss = loss
@@ -1078,19 +1639,19 @@ class PyTorchNetwork:
         for epoch in range(num_epochs):
 
             # run one round of training
-            running_loss = self._train_one_epoch(self.train_gen, optimizer, criterion, epoch, lr_scheduler,
+            running_loss = self._train_one_epoch(self.train_dataloader, optimizer, criterion, lr_scheduler,
                                                  update_weights=True)
 
             # run one round of validation
-            if self.val_gen is not None:
-                val_loss = self._train_one_epoch(self.val_gen, optimizer, criterion, epoch, lr_scheduler,
+            if self.val_dataloader is not None:
+                val_loss = self._train_one_epoch(self.val_dataloader, optimizer, criterion, lr_scheduler,
                                                  update_weights=False)
             else:
                 val_loss = running_loss
 
             # user feedback
             self._show_progress(num_epochs=num_epochs, epoch=epoch, show_mode=show_mode, training_loss=running_loss,
-                                validation_loss=val_loss if self.val_gen is not None else None,
+                                validation_loss=val_loss if self.val_dataloader is not None else None,
                                 patience_counter=early_stopping.counter if early_stopping is not None else None)
 
             # check early stopping
@@ -1106,8 +1667,8 @@ class PyTorchNetwork:
 
         logging.info('Finished Training')
 
-        if self.test_gen is not None:
-            test_loss = self._train_one_epoch(self.test_gen, optimizer, criterion, 1, lr_scheduler,
+        if self.test_dataloader is not None:
+            test_loss = self._train_one_epoch(self.test_dataloader, optimizer, criterion, lr_scheduler,
                                               update_weights=False)
             logging.info(f"Test loss: {test_loss:.4f}")
 
@@ -1146,10 +1707,149 @@ class PyTorchNetwork:
         self.run(num_epochs=unfrozen_epochs, patience=patience, min_delta=min_delta, save_model=save_model,
                  model_prefix=model_prefix, show_mode=show_mode)
 
+    def infer(self, dataset: SubFrameDataset, output: Union[str, Path] = None,
+              out_loc: str = None, batch_size: int = 16, num_workers: int = 4,
+              dtype: Union[Literal["same"], np.dtype] = "same", chunk_size: Union[str, Tuple[int, int, int]] = None,
+              rescale: bool = True
+              ) -> Union[np.ndarray, Path, None]:
+        """
+        Performs inference on video data using a provided model and generates output in specified format.
+
+        This method applies a deep learning model to the video data to perform tasks such as denoising or segmentation.
+        It supports different input and output formats, including .h5 and .tif files. The method also allows for optional
+        rescaling of the output and handles data chunking for efficient processing.
+
+        Raises:
+            FileNotFoundError: If the model file or directory cannot be found.
+            ValueError: If 'random_offset' and 'overlap' are set simultaneously or incompatible arguments are provided.
+            AssertionError: If provided 'model' is not of the expected type or if data dimensions mismatch.
+
+        Args:
+            model: A Keras model or the path to a model file/directory for inference.
+            output: Path to the file where the output will be saved. If None, the output array is returned.
+            out_loc: Location within the .h5 file to store the output. Required if output is an .h5 file.
+            dtype: Data type of the output. 'same' uses the same dtype as the input data.
+            # TODO chunk_size should probably be updated
+            chunk_size: Size of chunks for .h5 file output. Can be 'infer', an integer, or None.
+            rescale: Whether to rescale the output based on global descriptive statistics.
+
+        Returns:
+            Depending on 'output', either a numpy array of the processed data, a Path object pointing to the saved file, or None.
+
+        Example::
+
+            # Assuming a SubFrameGenerator instance 'generator' and a Keras model 'model'
+            output_data = generator.infer(model, output="output_path.h5",
+                out_loc="inference_results", dtype="float32")
+        """
+
+        f = None  # h5 file reference
+
+        # ensure inference on single file
+        if len(dataset.items.path.unique()) > 1:
+            raise ValueError(
+                f"inference from multiple files is currently not implemented: {dataset.items.path.unique()}")
+
+        items = dataset.items
+
+        # get padding values
+        if "padding" in items.columns:
+            pad_z_max = items.padding.apply(lambda x_: x_[1]).max()
+            pad_x_max = items.padding.apply(lambda x_: x_[3]).max()
+            pad_y_max = items.padding.apply(lambda x_: x_[5]).max()
+        else:
+            pad_z_max, pad_x_max, pad_y_max = 0, 0, 0
+
+        output_shape = (items.z1.max() - pad_z_max, items.x1.max() - pad_x_max, items.y1.max() - pad_y_max)
+
+        if dtype == "same":
+            x, _ = dataset[0]
+            dtype = x.dtype
+            logging.warning(f"choosing dtype: {dtype}")
+
+        if output is not None and output.suffix in (".h5", ".hdf5"):
+
+            if out_loc is None:
+                raise ValueError(f"when exporting results to .h5 file please provide 'out_loc' flag")
+
+            if chunk_size is None:
+                io = IO()
+                chunk_size = io.infer_chunks(output_shape, dtype, strategy="Z")
+
+            f = h5.File(output, "a")
+            rec = f.create_dataset(out_loc, shape=output_shape, chunks=chunk_size, dtype=dtype)
+        else:
+            rec = np.zeros(output_shape, dtype=dtype)
+
+        # infer frames
+        dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers)
+
+        for i, (inputs, _) in enumerate(dataloader):
+
+            y = self.model.predict(inputs)  # denoised data
+
+            if isinstance(y, torch.Tensor):
+                y = y.numpy()
+
+            if y.dtype != dtype:
+                y = y.astype(dtype)
+
+            idx_start, idx_stop = int(i * batch_size), int(i * batch_size + batch_size)
+            rows = dataset.items.iloc[idx_start:idx_stop]
+
+            if len(rows) != len(y):
+                raise ValueError(
+                    f"loaded metadata ({len(rows)} must have the same length as denoised frames ({len(y)})")
+
+            c = 0
+            for _, row in rows.iterrows():
+
+                im = y[c, 0, :, :]
+                im_shape_orig = im.shape
+
+                pad_z0, pad_z1, pad_x0, pad_x1, pad_y0, pad_y1 = row.padding
+                overlap_x_half, overlap_y_half = int(dataset.overlap / 2), int(dataset.overlap / 2)
+
+                x0, x0_ = (0, pad_x0) if row.x0 == 0 else (row.x0 + overlap_x_half, overlap_x_half + pad_x0)
+                y0, y0_ = (0, pad_y0) if row.y0 == 0 else (row.y0 + overlap_y_half, overlap_y_half + pad_y0)
+
+                x1, x1_ = (row.x1, -pad_x1) if row.x1 >= row.X else (
+                    row.x1 - overlap_x_half - pad_x1, -overlap_x_half - pad_x1)
+                y1, y1_ = (row.y1, -pad_y1) if row.y1 >= row.Y else (
+                    row.y1 - overlap_y_half - pad_y1, -overlap_y_half - pad_y1)
+
+                if x1_ == 0:
+                    x1_ = None
+
+                if y1_ == 0:
+                    y1_ = None
+
+                im = im[x0_:x1_, y0_:y1_]
+
+                if rescale:
+                    mean, std = dataset.descr[dataset.items.iloc[0].path]
+                    im = (im * std) + mean
+
+                gap = dataset.signal_frames[0] + dataset.gap_frames[0]
+                rec[row.z0 + gap, x0:x1, y0:y1] = im
+
+                c += 1
+
+        if output is None:
+            return rec
+
+        elif output.suffix in (".tiff", ".tif"):
+            tiff.imwrite(output, data=rec)
+            return output
+
+        elif output.suffix in (".h5", ".hdf5"):
+            f.close()
+            return output
+
     def save(self, path, extras: dict = None):
 
         model_dict = {'model_state_dict': self.model.state_dict(),
-                      'optimizer_state_dict': self.optimizer.state_dict(),
+                      'optimizer_state_dict': self.optimizer.state_dict(), 'stack_len': self.model.stack_len,
                       'n_stacks': self.n_stacks, 'kernels': self.kernels, 'kernel_size': self.kernel_size,
                       'batch_normalize': self.batch_normalize}
 
@@ -1163,7 +1863,47 @@ class PyTorchNetwork:
         torch.save(model_dict, path)
         logging.info(f"saved model to {path}")
 
-    def _train_one_epoch(self, data_generator: SubFrameGenerator, optimizer, criterion, epoch, lr_scheduler=None,
+    def _load_model(self, model_path):
+
+        model_path = Path(model_path)
+
+        if model_path.is_dir():
+
+            model_files = list(model_path.glob("*.pth"))
+
+            if len(model_files) == 0:
+                raise FileNotFoundError(f"No model files found in directory with '.pth' extension: {model_path}")
+
+            model_files.sort(key=lambda x: os.path.getmtime(x))
+            model_path = model_files[0]
+
+            logging.info(f"directory provided. Selected most recent model: {model_path}")
+
+        load_dict = torch.load(model_path.as_posix())
+        n_stacks = load_dict['n_stacks']
+        batch_normalize = load_dict['batch_normalize']
+        kernels = load_dict['kernels']
+        kernel_size = load_dict['kernel_size']
+        stack_len = load_dict['stack_len']
+
+        if self.stack_len != stack_len:
+            raise ValueError(f"loaded module expects a stack length of {stack_len}, got {self.stack_len}."
+                             f"Stack length is defined by the pre and post frames during dataset initiation.")
+
+        # Load the saved model weights
+        if 'model_state_dict' in load_dict:
+            self.model.load_state_dict(load_dict['model_state_dict'])
+        else:
+            raise KeyError("The loaded dictionary does not have a 'model_state_dict' key.")
+
+        # update the class attributes
+        self.n_stacks = n_stacks
+        self.kernels = kernels
+        self.kernel_size = kernel_size
+        self.batch_normalize = batch_normalize
+        self.stack_len = stack_len
+
+    def _train_one_epoch(self, data_generator: DataLoader, optimizer, criterion, lr_scheduler=None,
                          update_weights: bool = False):
 
         # switch to training/evaluation mode and toggle gradient calculations
@@ -1175,19 +1915,20 @@ class PyTorchNetwork:
             torch.set_grad_enabled(False)
 
         running_loss = 0.0
-        for i, data in enumerate(data_generator):
+        for i, (inputs, labels) in enumerate(data_generator):
 
-            # load data and convert to PyTorch tensors
-            inputs, labels = data
-
+            # convert to PyTorch tensors
             if isinstance(inputs, np.ndarray):
-                # Assuming inputs.shape is (batch_size, width, height, channels)
-                # Transpose the dimensions to match PyTorch format (batch_size, channels, height, width)
-                inputs = torch.from_numpy(inputs.transpose(0, 3, 1, 2)).to(torch.float32)
+                inputs = torch.from_numpy(inputs)
+
+            if inputs.dtype != torch.float32:
+                inputs = inputs.to(torch.float32)
 
             if isinstance(labels, np.ndarray):
-                # Assuming labels.shape is (batch_size, width, height)
-                labels = torch.from_numpy(labels).to(torch.float32)
+                labels = torch.from_numpy(labels)
+
+            if labels.dtype != torch.float32:
+                labels = labels.to(torch.float32)
 
             # move data to appropriate device
             inputs, labels = inputs.to(self.device), labels.to(self.device)
