@@ -1,4 +1,4 @@
-name: Testing from commit - v2
+name: Testing from commit - v3
 
 on: push
 
@@ -19,7 +19,7 @@ jobs:
           poetry install -E testing -vvv
       - name: Test with pytest
         run: |
-          poetry run pytest --disable-warnings -n auto -m "not vis and not long" --durations=25 --durations-min=30 --dist worksteal --cli-log-level 100
+          poetry run pytest --disable-warnings -n auto -m "not vis and not long" --durations=25 --durations-min=30 --dist worksteal --log-cli-level 100
 
   test_windows:
     if: "contains(github.event.head_commit.message, 'windows-latest')"
@@ -37,7 +37,7 @@ jobs:
           poetry install -E testing -vvv
       - name: Test with pytest
         run: |
-          poetry run pytest --disable-warnings -n auto -m "not vis and not long" --durations=25 --durations-min=30 --dist worksteal --cli-log-level 100
+          poetry run pytest --disable-warnings -n auto -m "not vis and not long" --durations=25 --durations-min=30 --dist worksteal --log-cli-level 100
 
   test_macos:
     if: "contains(github.event.head_commit.message, 'macos-latest')"
@@ -55,4 +55,4 @@ jobs:
           poetry install -E testing -vvv
       - name: Test with pytest
         run: |
-          poetry run pytest --disable-warnings -n auto -m "not vis and not long" --durations=25 --durations-min=30 --dist worksteal --cli-log-level 100
+          poetry run pytest --disable-warnings -n auto -m "not vis and not long" --durations=25 --durations-min=30 --dist worksteal --log-cli-level 100
