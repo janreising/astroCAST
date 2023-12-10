@@ -1109,19 +1109,19 @@ def analysis(input_path, video_path, loc, default_settings):
 
 
 @cli.command
-@click.argument('--save-path', type=click.Path())
+@click.argument('save-path', type=click.Path())
 @click_custom_option('--get-public', type=click.BOOL, default=True, help='Flag to download public datasets.')
 @click_custom_option('--get-custom', type=click.BOOL, default=True, help='Flag to download custom datasets.')
 def download_datasets(save_path, get_public, get_custom):
-    import helper
-    helper.download_sample_data(save_path, public_datasets=get_public, custom_datasets=get_custom)
+    from astrocast.helper import download_sample_data
+    download_sample_data(save_path, public_datasets=get_public, custom_datasets=get_custom)
 
 
 @cli.command
-@click.argument('--save-path', type=click.Path())
+@click.argument('save-path', type=click.Path())
 def download_models(save_path):
-    import helper
-    helper.download_pretrained_models(save_path)
+    from astrocast.helper import download_pretrained_models
+    download_pretrained_models(save_path)
 
 
 @cli.command
