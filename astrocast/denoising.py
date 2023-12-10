@@ -654,7 +654,8 @@ class SubFrameGenerator(tf.keras.utils.Sequence):
     """
 
     def __init__(
-            self, paths: Union[str, List[str]], batch_size: int, input_size: Tuple[int, int] = (128, 128),
+            self, paths: Union[str, List[str], Path, List[Path]], batch_size: int,
+            input_size: Tuple[int, int] = (128, 128),
             pre_post_frames: Union[int, Tuple[int, int]] = 5, gap_frames: Union[int, Tuple[int, int]] = 0,
             z_steps: float = 0.1, z_select: Union[None, int, List[int]] = None, allowed_rotation: List[int] = [0],
             allowed_flip: List[int] = [-1], random_offset: bool = False, add_noise: bool = False,

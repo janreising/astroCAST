@@ -576,7 +576,7 @@ def train_denoiser(
             )
 
         train_gen = denoising.SubFrameGenerator(paths=train_paths, max_per_file=max_per_file, loc=loc,
-                                                input_size=input_size, pre_post_frame=pre_post_frames,
+                                                input_size=input_size, pre_post_frames=pre_post_frames,
                                                 gap_frames=gap_frames, allowed_rotation=train_rotation, padding=padding,
                                                 batch_size=batch_size, normalize=normalize, in_memory=in_memory,
                                                 allowed_flip=train_flip)
