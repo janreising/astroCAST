@@ -657,8 +657,8 @@ class SubFrameGenerator(tf.keras.utils.Sequence):
             self, paths: Union[str, List[str], Path, List[Path]], batch_size: int,
             input_size: Tuple[int, int] = (128, 128),
             pre_post_frames: Union[int, Tuple[int, int]] = 5, gap_frames: Union[int, Tuple[int, int]] = 0,
-            z_steps: float = 0.1, z_select: Union[None, int, List[int]] = None, allowed_rotation: List[int] = [0],
-            allowed_flip: List[int] = [-1], random_offset: bool = False, add_noise: bool = False,
+            z_steps: float = 0.1, z_select: Union[None, int, List[int]] = None, allowed_rotation: List[int] = 0,
+            allowed_flip: List[int] = -1, random_offset: bool = False, add_noise: bool = False,
             drop_frame_probability: Union[None, float] = None, max_per_file: Union[None, int] = None, overlap: int = 0,
             padding: Union[None, Literal["symmetric", "edge"]] = None, shuffle: bool = True,
             normalize: Union[None, Literal["local", "global"]] = None, loc: str = "data/",
@@ -697,12 +697,17 @@ class SubFrameGenerator(tf.keras.utils.Sequence):
         self.max_per_file = max_per_file
         self.stack_len = None
 
+        if isinstance(allowed_rotation, int):
+            allowed_rotation = [allowed_rotation]
+
         if (1 in allowed_rotation) or (3 in allowed_rotation):
             assert input_size[0] == input_size[
                 1], (f"when using 90 or 270 degree rotation (allowed rotation: 1 or 3) the 'input_size' needs to be "
                      f"square. However input size is: {input_size}")
         self.allowed_rotation = allowed_rotation
 
+        if isinstance(allowed_flip, int):
+            allowed_flip = [allowed_flip]
         self.allowed_flip = allowed_flip
 
         if random_offset and overlap is not None:
@@ -1068,7 +1073,7 @@ class SubFrameGenerator(tf.keras.utils.Sequence):
             else:
                 pad_y1 = 0
 
-        if type(self.mem_data) == dict:
+        if isinstance(self.mem_data, dict):
 
             # load to memory if necessary
             if path not in self.mem_data.keys():
@@ -1089,6 +1094,9 @@ class SubFrameGenerator(tf.keras.utils.Sequence):
         elif path.suffix in (".tif", ".tiff"):
             data = tiff.imread(path.as_posix(), key=range(z0, z1))
             data = data[:, x0:x1, y0:y1]
+
+        else:
+            raise ValueError(f"please provide path as tif or h5 file.")
 
         if np.sum((pad_z0, pad_z1, pad_x0, pad_x1, pad_y0, pad_y1)) > 0:
             data = np.pad(
@@ -1282,7 +1290,7 @@ class SubFrameGenerator(tf.keras.utils.Sequence):
 
             assert out_loc is not None, "when exporting results to .h5 file please provide 'out_loc' flag"
 
-            if chunk_size == "infer":
+            if chunk_size is None:
                 io = IO()
                 chunk_size = io.infer_chunks(output_shape, dtype, strategy="Z")
 
