@@ -45,7 +45,7 @@ PyTorchLoss = Union[
 class SubFrameDataset(Dataset):
 
     def __init__(
-            self, paths: Union[str, List[str]], input_size: Tuple[int, int] = (32, 32),
+            self, paths: Union[str, List[str], Path, List[Path]], input_size: Tuple[int, int] = (32, 32),
             pre_post_frames: Union[int, Tuple[int, int]] = 5, gap_frames: Union[int, Tuple[int, int]] = 0,
             z_steps: float = 0.1, z_select: Union[None, int, List[int]] = None,
             allowed_rotation: Union[int, List[int]] = 0,
