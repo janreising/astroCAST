@@ -1,3 +1,5 @@
+use_pytorch: True
+use_cpu: False
 root_path: "/tf/data/"
 model_path: "/tf/data/model/"
 data:
@@ -26,11 +28,11 @@ data:
     loc: "data/ch0"
     max_per_file: 16
 param:
-  input_size: [[256, 256], [64, 64]]
-  pre_post_frame: [5]
-  gap_frames: [0, 2]
-  train_rotation: [[1, 2, 3], [0]]
-  architecture: [[3, 64], [2, 32]]
-  epochs: [50]
-  patience: [10]
-  min_delta: [0.0001]
+  input_size: [ [ 256, 256 ], [ 64, 64 ] ]
+  pre_post_frames: [ 5 ]
+  gap_frames: [ 0, 2 ]
+  train_rotation: [ [ 1, 2, 3 ], [ 0 ] ]
+  architecture: [ [ 3, 64 ], [ 2, 32 ] ]
+  epochs: [ 50 ]
+  patience: [ 10 ]
+  min_delta: [ 0.0001 ]
