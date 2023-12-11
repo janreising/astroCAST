@@ -523,7 +523,7 @@ class TestNetworkPytorch:
         net = self.default_network
 
         # create base param
-        inf_param = dict(padding="edge", allowed_rotation=0, allowed_flip=-1)
+        inf_param = dict(padding="edge", allowed_rotation=0, allowed_flip=-1, max_per_file=None)
         self._meta_network(net=net, inf_params=inf_param)
 
     @pytest.mark.parametrize("output_file", ["inf.tiff", "inf.h5"])
@@ -535,7 +535,7 @@ class TestNetworkPytorch:
         net = self.default_network
 
         # create base param
-        inf_param = dict(padding="edge", allowed_rotation=0, allowed_flip=-1)
+        inf_param = dict(padding="edge", allowed_rotation=0, allowed_flip=-1, max_per_file=None)
         output_file = Path(tmpdir.strpath).joinpath(output_file)
         self._meta_network(net=net, inf_params=inf_param, output=output_file)
 
@@ -547,5 +547,5 @@ class TestNetworkPytorch:
         net = self.default_network
 
         # create base param
-        inf_param = dict(padding="edge", allowed_rotation=0, allowed_flip=-1)
+        inf_param = dict(padding="edge", allowed_rotation=0, allowed_flip=-1, max_per_file=None)
         self._meta_network(net=net, inf_params=inf_param, rescale=True)
