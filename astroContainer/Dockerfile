@@ -20,8 +20,16 @@ RUN cd /home && git clone https://github.com/janreising/astroCAST.git
 RUN pip3 install poetry
 RUN cd /home/astroCAST && poetry install -E testing
 
+RUN echo "alias astrocast='poetry run astrocast'" >> ~/.bashrc \
+	&& echo "alias python='poetry run python'" >> ~/.bashrc \
+	&& echo "alias jupyter-lab='poetry run jupyter-lab'" >> ~/.bashrc 
+	#&& echo "source ~/.bashrc" >> ~/.bashrc
+
 # Install astroCAST and jupyterlab
 #RUN pip3 install astrocast[testing,documentation]
+
+# Change working directory
+WORKDIR /home/astroCAST
 
 # Run command
 CMD [ "/bin/bash" ]
