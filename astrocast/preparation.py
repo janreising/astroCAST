@@ -1850,7 +1850,12 @@ class Delta:
         # Create figure layout
         if separate_panels:
             fig, axx = plt.subplots(len(pixels), figsize=figsize)
-            axx = list(axx.flatten())
+
+            if len(pixels) > 1:
+                axx = list(axx.flatten())
+            else:
+                axx = [axx]
+
             twin_axx = [ax.twinx() for ax in axx]
 
         else:
