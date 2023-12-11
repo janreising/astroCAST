@@ -598,7 +598,7 @@ def train_denoiser(
 
             val_gen = denoising.SubFrameGenerator(paths=val_paths, max_per_file=max_per_val_file,
                                                   batch_size=batch_size_val, loc=loc, input_size=input_size,
-                                                  pre_post_frame=pre_post_frames, gap_frames=gap_frames,
+                                                  pre_post_frames=pre_post_frames, gap_frames=gap_frames,
                                                   allowed_rotation=[0], padding=padding, normalize=normalize,
                                                   in_memory=in_memory, allowed_flip=[-1], shuffle=False)
         else:
@@ -687,7 +687,7 @@ def denoise(
     with UserFeedback(params=locals(), logging_level=logging_level):
         # Initializing the SubFrameGenerator instance
         sub_frame_generator = SubFrameGenerator(paths=input_path, batch_size=batch_size, input_size=input_size,
-                                                pre_post_frame=pre_post_frames, gap_frames=gap_frames,
+                                                pre_post_frames=pre_post_frames, gap_frames=gap_frames,
                                                 z_select=z_select, allowed_rotation=[0], allowed_flip=[-1],
                                                 overlap=overlap, padding=padding, shuffle=False, normalize=normalize,
                                                 loc=loc, in_memory=in_memory, save_global_descriptive=False,
@@ -949,6 +949,9 @@ def view_data(input_path, loc, z_select, lazy, show_trace, window, colormap, tes
 
     import napari
     from astrocast.analysis import Video
+
+    if loc is None:
+        loc = ""
 
     vid = Video(data=input_path, z_slice=z_select, loc=loc, lazy=lazy)
     vid.show(show_trace=show_trace, window=window, colormap=colormap)
