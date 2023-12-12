@@ -19,7 +19,6 @@ import psutil
 import tifffile
 import tiledb
 from dask.diagnostics import ProgressBar
-from dask.distributed import Client, LocalCluster
 from deprecated import deprecated
 from matplotlib import pyplot as plt
 from scipy import signal
@@ -1463,102 +1462,67 @@ class Delta:
         self.loc = loc
     
     def run(
-            self, window: int, method: Literal['background', 'dF', 'dFF'] = "dF",
+            self, method: Literal['background', 'dF', 'dFF'] = "dF", max_tries: int = 1,
             chunk_strategy: Literal['balanced', 'XY', 'Z'] = "balanced", chunks=None, overwrite_first_frame: bool =
-            True,
-            compute: bool = False
+            False, compute: bool = False, neighbors: int = 50, scale_factor: float = 0.25, blur_sigma: int = 2,
+            blur_radius: int = 3, rbf_smoothing: float = 0.0, rbf_kernel='thin_plate_spline',
+            rbf_epsilon: float = None, rbf_degree: int = None, prominence: float = 0.1,
+            wlen: int = 100, distance: int = 10, width: int = 5, rel_height: float = 0.95, max_chunk_size_mb: int = 10
             ) -> Union[np.ndarray, da.Array]:
         # noinspection GrazieInspection
         """
                 Performs bleach correction on the input data using specified methods and parameters.
 
                 Args:
-                    window: The size of the window for the minimum filter.
-                    method: The method to use for delta calculation.
+                    neighbors: Number of neighboring points to consider in the interpolation. A higher number
+                       makes the interpolation consider more points around each evaluated point, potentially
+                       smoothing the results more. However, higher values lead to a significant increase in computational
+                       resources. This value is automatically scaled down in proportion to the 'scale_factor'.
                     chunk_strategy: Strategy to infer appropriate chunk size
-                    chunks: User-defined chunk size (ignores inference strategy).
+                    chunks: User defined size of chunks in each processing step. Automatically chosen if set to None.
+                    max_chunk_size_mb: Maximum allowed size for each processed chunk of the video in megabytes. This helps
+                                       control memory usage.
+                    scale_factor: Factor for downsizing the video chunk. A smaller factor reduces the resolution of the chunk,
+                                  which can speed up processing, but might decrease quality. Affects the scaling of 'neighbors'
+                                  and 'wlen'.
+                    blur_sigma: The standard deviation for the Gaussian kernel used in smoothing. Higher values result in more blur.
+                    blur_radius: The radius of the Gaussian blur. A larger radius means more pixels are considered in the blur.
+                    rbf_smoothing: Smoothing parameter for radial basis function interpolation. Zero means perfect interpolation
+                                   to data points (can be noisy), while higher values smooth the interpolated surface.
+                    rbf_kernel: Type of kernel to use in the interpolation. Different kernels can provide different smoothness
+                                and shapes to the interpolated surface.
+                    rbf_epsilon: Epsilon parameter for certain RBF kernels. It adjusts the smoothness/shape of the kernel function.
+                    rbf_degree: Degree of the polynomial for some RBF kernels. It influences the flexibility of the interpolation curve.
+                    prominence: Used in peak detection. A higher prominence means a peak must stand out more from its surroundings.
+                    wlen: Window length for peak detection. Only peaks that are the highest within this window are considered.
+                          This value is automatically scaled down in proportion to the 'scale_factor'.
+                    distance: Minimum horizontal distance (in samples) between neighboring peaks. Closer peaks are ignored.
+                    width: Width of the peaks. This parameter can help in identifying broader peaks.
+                    rel_height: Relative height to calculate the width of the peaks. It's a height where the peak is considered to end.
+                    method: The method to use for delta calculation.
                     overwrite_first_frame: A flag indicating whether to overwrite the values of the first frame with
                         the second frame after delta calculation.
                     compute: A flag indicating whether to return a dask array (False) or a NumPy array (True).
-
+                    max_tries: Maximum attempts to approximate background.
+                    
                 Raises:
                     ValueError: If the input data type is not recognized.
 
                 Notes:
                     The function supports different types of input data, including numpy arrays, file paths
-                    (specifically .tdb and .h5 files), and Dask arrays. It also handles parallel execution for large
-                    datasets, especially when input is a .tdb file.
-
-                .. warning::
-
-                    For .tdb files as input, this function will overwrite the provided file.
+                    (specifically .tdb and .h5 files), and Dask arrays.
 
                 """
         
         # Prepare the data for processing
-        data = self._prepare_data(self.data, loc=self.loc, chunk_strategy=chunk_strategy, chunks=chunks)
-        self.prep_data = data
+        self.prep_data = self._prepare_data(self.data, loc=self.loc, chunk_strategy=chunk_strategy, chunks=chunks)
         
-        # Sequential execution
-        if isinstance(data, np.ndarray):
-            # Calculate delta using the minimum filter on the input data
-            res = self._calculate_delta_min_filter(data, window, method=method, inplace=False)
-        
-        # Parallel from .tdb file
-        elif isinstance(data, (str, Path)) and Path(data).suffix in [".tdb", ".TDB"]:
-            # Warning message for overwriting the .tdb file
-            logging.warning("This function will overwrite the provided .tdb file!")
-            
-            # Define a wrapper function for parallel execution
-            calculate_delta_min_filter = self._calculate_delta_min_filter
-            
-            def wrapper(_path, ranges):
-                (_x0, x1), (_y0, y1) = ranges
-                
-                # Open the TileDB array and load the specified range
-                with tiledb.open(_path, mode="r") as tdb:
-                    _data = tdb[:, _x0:x1, _y0:y1]
-                
-                _res = calculate_delta_min_filter(_data, window, method=method, inplace=False)
-                
-                # Overwrite the range with the calculated delta values
-                with tiledb.open(path, mode="w") as tdb:
-                    tdb[:, _x0:x1, _y0:y1] = _res
-            
-            # Extract the path from the input data
-            path = data.as_posix()
-            
-            # Get the dimensions and chunk size of the .tdb file
-            (Z, X, Y), chunksize = get_data_dimensions(path, loc=None)
-            assert chunksize is not None
-            cz, cx, cy = chunksize
-            
-            # Execute the calculation in parallel using Dask
-            with LocalCluster() as lc:
-                with Client(lc) as client:
-                    futures = []
-                    for x0 in range(0, X, cx):
-                        for y0 in range(0, X, cy):
-                            range_ = ((x0, x0 + cx), (y0, y0 + cy))
-                            futures.append(client.submit(wrapper, (path, range_)))
-                    
-                    # Gather the results from parallel executions
-                    client.gather(futures)
-            
-            # Load the modified .tdb file into memory
-            io = IO()
-            res = io.load(Path(path))
-        
-        elif isinstance(data, da.Array):
-            # Calculate delta using Dask array for lazy loading and computation
-            
-            def xy_delta(x):
-                return self._calculate_delta_min_filter(x, window=window, method=method, inplace=False)
-            
-            res = data.map_blocks(xy_delta, dtype=float)
-        
-        else:
-            raise ValueError(f"Input data type not recognized: {type(data)}")
+        res = self.subtract_delta_rbf(arr=self.prep_data, neighbors=neighbors, chunk_size=chunks,
+                                      max_chunk_size_mb=max_chunk_size_mb, scale_factor=scale_factor,
+                                      blur_sigma=blur_sigma, rbf_degree=rbf_degree, max_tries=max_tries,
+                                      blur_radius=blur_radius, rbf_smoothing=rbf_smoothing, rbf_kernel=rbf_kernel,
+                                      rbf_epsilon=rbf_epsilon, prominence=prominence, wlen=wlen, distance=distance,
+                                      width=width, rel_height=rel_height, method=method)
         
         # Overwrite the first frame with the second frame if required
         if overwrite_first_frame:
@@ -1700,6 +1664,7 @@ class Delta:
         return np.squeeze(arr) if inplace else np.squeeze(res)
     
     @staticmethod
+    @deprecated(reason=f"function is unstable and requires too much fine-tuning", version="0.3.35")
     def _calculate_delta_min_filter(
             arr: np.ndarray, window: int, method: Literal['background', 'dF', 'dFF'] = "dF", inplace: bool = False
             ) -> np.ndarray:
@@ -1888,7 +1853,7 @@ class Delta:
         return fig
     
     @staticmethod
-    def calculate_chunk_size(arr_shape, max_chunk_size_mb, dtype):
+    def _calculate_chunk_size(arr_shape, max_chunk_size_mb, dtype):
         """
         Calculate the chunk dimensions based on the array shape, maximum chunk size in MB, and data type.
 
@@ -1912,12 +1877,12 @@ class Delta:
         
         return cz, cx, cy
     
-    def _subtract_delta_rbf(self, arr: Union[np.ndarray, da.Array], neighbors: int = 50,
-                            chunk_size: Tuple[int, int, int] = None, max_chunk_size_mb: int = 1024,
-                            scale_factor: float = 0.25, blur_sigma: int = 2,
-                            blur_radius: int = 3, rbf_smoothing: float = 0.0, rbf_kernel='thin_plate_spline',
-                            rbf_epsilon: float = None, rbf_degree: int = None, prominence: float = 0.1,
-                            wlen: int = 100, distance: int = 10, width: int = 5, rel_height: float = 0.95):
+    def subtract_delta_rbf(self, arr: Union[np.ndarray, da.Array], method: Literal["background", "dF", "dFF"] = "dF",
+                           neighbors: int = 50, chunk_size: Tuple[int, int, int] = None, max_chunk_size_mb: int = 10,
+                           scale_factor: float = 0.25, blur_sigma: int = 2, max_tries: int = 1,
+                           blur_radius: int = 3, rbf_smoothing: float = 0.0, rbf_kernel='thin_plate_spline',
+                           rbf_epsilon: float = None, rbf_degree: int = None, prominence: float = 0.1,
+                           wlen: int = 100, distance: int = 10, width: int = 5, rel_height: float = 0.95):
         """ Performs background subtraction in time-series fluorescence imaging recordings.
         
         This function aims to enhance the signal-to-noise ratio and reduce the effects of photo-bleaching in
@@ -1933,10 +1898,12 @@ class Delta:
     
         Args:
             arr: 3D numpy array representing the video data. Each dimension represents time, x, and y coordinates.
+            method: The method to use for delta calculation.
             neighbors: Number of neighboring points to consider in the interpolation. A higher number
                        makes the interpolation consider more points around each evaluated point, potentially
                        smoothing the results more. However, higher values lead to a significant increase in computational
                        resources. This value is automatically scaled down in proportion to the 'scale_factor'.
+            chunk_size: User defined size of chunks in each processing step. Automatically chosen if set to None.
             max_chunk_size_mb: Maximum allowed size for each processed chunk of the video in megabytes. This helps
                                control memory usage.
             scale_factor: Factor for downsizing the video chunk. A smaller factor reduces the resolution of the chunk,
@@ -1956,12 +1923,16 @@ class Delta:
             distance: Minimum horizontal distance (in samples) between neighboring peaks. Closer peaks are ignored.
             width: Width of the peaks. This parameter can help in identifying broader peaks.
             rel_height: Relative height to calculate the width of the peaks. It's a height where the peak is considered to end.
-    
+            max_tries: Maximum attempts to approximate background.
+            
         Returns:
             3D numpy array of the processed video, matching the original dimensions and dtype.
         """
         
         # [Determine chunk size]
+        
+        # if isinstance(arr, da.Array):
+        #     arr = arr.compute()
         
         # Extract the dimensions of the video
         time_dim, x_dim, y_dim = arr.shape
@@ -1970,7 +1941,6 @@ class Delta:
         scaled_neighbors = int(neighbors * scale_factor)
         scaled_wlen = int(wlen * scale_factor)
         scaled_distance = max(int(distance * scale_factor), 1)
-        logging.debug(f"neighbors: {neighbors} > {scaled_neighbors}, wlen: {wlen} > {scaled_wlen}")
         logging.debug(f"neighbors: {neighbors} > {scaled_neighbors}\n"
                       f"wlen: {wlen} > {scaled_wlen}\n"
                       f"distance: {distance} > {scaled_distance}")
@@ -1979,10 +1949,9 @@ class Delta:
         cz_min = scaled_wlen
         cx_min = cy_min = 2 * scaled_neighbors
         if chunk_size is None:
-            chunk_size = self.calculate_chunk_size(arr.shape, max_chunk_size_mb, arr.dtype)
+            chunk_size = self._calculate_chunk_size(arr.shape, max_chunk_size_mb, arr.dtype)
         chunk_size = (max(chunk_size[0], cz_min), max(chunk_size[1], cx_min), max(chunk_size[2], cy_min))
         logging.info(f"choosing chunk size: {chunk_size}")
-        logging.debug(f"choosing chunk size: {chunk_size}")
         
         # Calculate the max padding in each dimension
         padding_z = int(scaled_wlen / 2)
@@ -1996,7 +1965,7 @@ class Delta:
         total_chunks = num_chunks_z * num_chunks_x * num_chunks_y
         
         # Initialize an array to store the processed video
-        processed_video = np.zeros_like(arr, dtype=arr.dtype)
+        processed_video = np.zeros(arr.shape, dtype=arr.dtype)
         
         # Create a progress bar
         with tqdm(total=total_chunks, desc="Processing Chunks") as pbar:
@@ -2046,9 +2015,6 @@ class Delta:
                         logging.debug(
                                 f"chunk boundaries adjusted: {z_start}:{z_end}, {x_start}:{x_end}, {y_start}:{y_end}")
                         
-                        # todo: think about if it would be beneficial to use np.pad
-                        #  if we are exceeding the boundaries of the array?
-                        
                         # Extract the chunk
                         chunk = arr[z_start:z_end, x_start:x_end, y_start:y_end]
                         
@@ -2059,6 +2025,7 @@ class Delta:
                         
                         # Apply Gaussian blur to smooth the chunk
                         blurred_chunk = gaussian_filter(chunk, sigma=blur_sigma, radius=blur_radius)
+                        blurred_chunk = blurred_chunk.astype(float)
                         
                         # Downsize the chunk for efficient processing
                         original_chunk_shape = blurred_chunk.shape
@@ -2087,16 +2054,26 @@ class Delta:
                         xyz_obs = coordinates[valid_mask]
                         values_obs = values[valid_mask]
                         
-                        interpolator = RBFInterpolator(xyz_obs, values_obs, neighbors=scaled_neighbors,
-                                                       smoothing=rbf_smoothing,
-                                                       kernel=rbf_kernel, epsilon=rbf_epsilon, degree=rbf_degree)
-                        interpolated_chunk = interpolator(coordinates)
+                        n_tries = 0
+                        while n_tries < max_tries:
+                            interpolator = RBFInterpolator(xyz_obs, values_obs, neighbors=scaled_neighbors,
+                                                           smoothing=rbf_smoothing,
+                                                           kernel=rbf_kernel, epsilon=rbf_epsilon, degree=rbf_degree)
+                            interpolated_chunk = interpolator(coordinates)
+                            n_tries += 1
                         
                         # Resize interpolated chunk back to original size
                         resized_chunk = resize(interpolated_chunk, original_chunk_shape, anti_aliasing=True)
                         
                         # Subtract interpolated data from the original chunk
-                        subtracted_chunk = chunk - resized_chunk
+                        if method == "background":
+                            subtracted_chunk = resized_chunk
+                        elif method == "dF":
+                            subtracted_chunk = chunk - resized_chunk
+                        elif method == "dFF":
+                            subtracted_chunk = (chunk - resized_chunk) / resized_chunk
+                        else:
+                            raise ValueError(f"method must be one of ['background', 'dF', 'dFF']")
                         
                         # [Chunk insertion logic with padding]
                         
@@ -2110,6 +2087,7 @@ class Delta:
                                           ]
                         
                         logging.debug(f"un_padded_chunk: {un_padded_chunk.shape}")
+                        logging.debug(f"un_padded_chunk mean: {np.mean(un_padded_chunk)}")
                         
                         # save result to result array
                         processed_video[
@@ -2122,7 +2100,10 @@ class Delta:
                                       f"{z_start + padding_z_start}:{z_end - padding_z_end}, "
                                       f"{x_start + padding_x_start}:{x_end - padding_x_end}, "
                                       f"{y_start + padding_y_start}:{y_end - padding_y_end}"
-                                      f"\n {'-' * 10}")
+                                      )
+                        logging.debug(
+                                f"processed_video mean: {np.mean(processed_video[z_start + padding_z_start:z_end - padding_z_end, x_start + padding_x_start:x_end - padding_x_end, y_start + padding_y_start:y_end - padding_y_end])}")
+                        logging.debug(f"\n {'-' * 10}")
                         
                         # Update the progress bar
                         pbar.update(1)
