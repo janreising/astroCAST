@@ -2,6 +2,7 @@ import logging
 import os
 import shutil
 import tempfile
+import typing
 import warnings
 from collections import OrderedDict
 from pathlib import Path
@@ -1447,7 +1448,8 @@ class Delta:
 
     """
     
-    def __init__(self, data: Union[str, Path, np.ndarray, da.Array], loc: str = None):
+    def __init__(self, data: Union[str, Path, np.ndarray, da.Array], loc: str = None, logging_level=logging.INFO):
+        logging.basicConfig(level=logging_level)
         
         # Convert the input to a Path object if it is a string
         self.data = Path(data) if isinstance(data, str) else data
@@ -1462,7 +1464,8 @@ class Delta:
     
     def run(
             self, window: int, method: Literal['background', 'dF', 'dFF'] = "dF",
-            chunk_strategy: Literal['balanced', 'XY', 'Z'] = "Z", chunks=None, overwrite_first_frame: bool = True,
+            chunk_strategy: Literal['balanced', 'XY', 'Z'] = "balanced", chunks=None, overwrite_first_frame: bool =
+            True,
             compute: bool = False
             ) -> Union[np.ndarray, da.Array]:
         # noinspection GrazieInspection
@@ -1603,8 +1606,8 @@ class Delta:
     
     @staticmethod
     def _prepare_data(
-            data: Union[str, Path, np.ndarray, da.Array], chunk_strategy: Literal['balanced', 'XY', 'Z'] = 'Z',
-            chunks: Tuple[int, int, int] = None, loc: str = ''
+            data: Union[str, Path, np.ndarray, da.Array], chunk_strategy: Literal['balanced', 'XY', 'Z'] = 'balanced',
+            chunks: Tuple[int, int, int] = None, loc: str = '', dtype: typing.Type = int,
             ) -> da.Array:
         
         """ Preprocesses the input data by converting it to a dask compatible format or TileDB array and optionally
@@ -1624,7 +1627,7 @@ class Delta:
         if isinstance(data, Path):
             
             data = io.load(data, loc=loc, chunk_strategy=chunk_strategy, chunks=chunks)
-            data = data.astype(int)
+            data = data.astype(dtype)
             return data
         
         elif isinstance(data, (np.ndarray, da.Array)):
@@ -1637,7 +1640,7 @@ class Delta:
             if data.chunks != chunks:
                 data = data.rechunk(chunks)
             
-            data = data.astype(int)  # TODO this should not be hardcoded
+            data = data.astype(dtype)
             
             return data
         
@@ -1915,8 +1918,8 @@ class Delta:
                             blur_radius: int = 3, rbf_smoothing: float = 0.0, rbf_kernel='thin_plate_spline',
                             rbf_epsilon: float = None, rbf_degree: int = None, prominence: float = 0.1,
                             wlen: int = 100, distance: int = 10, width: int = 5, rel_height: float = 0.95):
-        """
-        Performs background subtraction in time-series fluorescence imaging recordings.
+        """ Performs background subtraction in time-series fluorescence imaging recordings.
+        
         This function aims to enhance the signal-to-noise ratio and reduce the effects of photo-bleaching in
         fluorescence imaging. It achieves this by identifying and approximating pixels with significant signal
         fluctuations, which are excluded from the background calculation. The function subdivides the video data into
@@ -1933,11 +1936,12 @@ class Delta:
             neighbors: Number of neighboring points to consider in the interpolation. A higher number
                        makes the interpolation consider more points around each evaluated point, potentially
                        smoothing the results more. However, higher values lead to a significant increase in computational
-                       resources.
+                       resources. This value is automatically scaled down in proportion to the 'scale_factor'.
             max_chunk_size_mb: Maximum allowed size for each processed chunk of the video in megabytes. This helps
                                control memory usage.
             scale_factor: Factor for downsizing the video chunk. A smaller factor reduces the resolution of the chunk,
-                          which can speed up processing, but might decrease quality.
+                          which can speed up processing, but might decrease quality. Affects the scaling of 'neighbors'
+                          and 'wlen'.
             blur_sigma: The standard deviation for the Gaussian kernel used in smoothing. Higher values result in more blur.
             blur_radius: The radius of the Gaussian blur. A larger radius means more pixels are considered in the blur.
             rbf_smoothing: Smoothing parameter for radial basis function interpolation. Zero means perfect interpolation
@@ -1948,25 +1952,42 @@ class Delta:
             rbf_degree: Degree of the polynomial for some RBF kernels. It influences the flexibility of the interpolation curve.
             prominence: Used in peak detection. A higher prominence means a peak must stand out more from its surroundings.
             wlen: Window length for peak detection. Only peaks that are the highest within this window are considered.
+                  This value is automatically scaled down in proportion to the 'scale_factor'.
             distance: Minimum horizontal distance (in samples) between neighboring peaks. Closer peaks are ignored.
             width: Width of the peaks. This parameter can help in identifying broader peaks.
             rel_height: Relative height to calculate the width of the peaks. It's a height where the peak is considered to end.
-
     
         Returns:
             3D numpy array of the processed video, matching the original dimensions and dtype.
         """
         
+        # [Determine chunk size]
+        
         # Extract the dimensions of the video
         time_dim, x_dim, y_dim = arr.shape
         
+        # Scale neighbors and wlen based on the scale_factor
+        scaled_neighbors = int(neighbors * scale_factor)
+        scaled_wlen = int(wlen * scale_factor)
+        scaled_distance = max(int(distance * scale_factor), 1)
+        logging.debug(f"neighbors: {neighbors} > {scaled_neighbors}, wlen: {wlen} > {scaled_wlen}")
+        logging.debug(f"neighbors: {neighbors} > {scaled_neighbors}\n"
+                      f"wlen: {wlen} > {scaled_wlen}\n"
+                      f"distance: {distance} > {scaled_distance}")
+        
         # Calculate minimum and actual chunk sizes
-        cz_min = wlen
-        cx_min = cy_min = 2 * neighbors
+        cz_min = scaled_wlen
+        cx_min = cy_min = 2 * scaled_neighbors
         if chunk_size is None:
             chunk_size = self.calculate_chunk_size(arr.shape, max_chunk_size_mb, arr.dtype)
         chunk_size = (max(chunk_size[0], cz_min), max(chunk_size[1], cx_min), max(chunk_size[2], cy_min))
         logging.info(f"choosing chunk size: {chunk_size}")
+        logging.debug(f"choosing chunk size: {chunk_size}")
+        
+        # Calculate the max padding in each dimension
+        padding_z = int(scaled_wlen / 2)
+        padding_x = int(scaled_neighbors / 2)
+        padding_y = int(scaled_neighbors / 2)
         
         # Determine the number of chunks needed in each dimension
         num_chunks_z = int(np.ceil(arr.shape[0] / chunk_size[0]))
@@ -1983,18 +2004,58 @@ class Delta:
             for k in range(num_chunks_z):
                 for i in range(num_chunks_x):
                     for j in range(num_chunks_y):
-                        # Calculate chunk boundaries with padding
-                        x_start = max(i * chunk_size[1] - neighbors, 0)
-                        x_end = min((i + 1) * chunk_size[1] + neighbors, x_dim)
-                        y_start = max(j * chunk_size[2] - neighbors, 0)
-                        y_end = min((j + 1) * chunk_size[2] + neighbors, y_dim)
                         
-                        # Adjust x_end and y_end to include padding
-                        x_end = min(x_end + neighbors, x_dim)
-                        y_end = min(y_end + neighbors, y_dim)
+                        # [Chunk extraction logic with padding]
                         
-                        # Extract the chunk with padding
-                        chunk = arr[:, x_start:x_end, y_start:y_end]
+                        # Calculate chunk boundaries
+                        z_start = k * chunk_size[0]
+                        z_end = min((k + 1) * chunk_size[0], time_dim)
+                        
+                        x_start = i * chunk_size[1]
+                        x_end = min((i + 1) * chunk_size[1], x_dim)
+                        
+                        y_start = j * chunk_size[2]
+                        y_end = min((j + 1) * chunk_size[2], y_dim)
+                        
+                        logging.debug(f"chunk boundaries: {z_start}:{z_end}, {x_start}:{x_end}, {y_start}:{y_end}")
+                        
+                        # Calculate padding taking video boundaries into account
+                        padding_z_start = padding_z if z_start >= padding_z else z_start
+                        padding_z_end = padding_z if z_end + padding_z <= time_dim else time_dim - z_end
+                        
+                        padding_x_start = padding_x if x_start >= padding_x else x_start
+                        padding_x_end = padding_x if x_end + padding_x <= x_dim else x_dim - x_end
+                        
+                        padding_y_start = padding_y if y_start >= padding_y else y_start
+                        padding_y_end = padding_y if y_end + padding_y <= y_dim else y_dim - y_end
+                        
+                        logging.debug(f"padding boundaries: {padding_z_start}:{padding_z_end}, "
+                                      f"{padding_x_start}:{padding_x_end}, "
+                                      f"{padding_y_start}:{padding_y_end}")
+                        
+                        # adjust the indices based on padding
+                        z_start -= padding_z_start
+                        z_end += padding_z_end
+                        
+                        x_start -= padding_x_start
+                        x_end += padding_x_end
+                        
+                        y_start -= padding_y_start
+                        y_end += padding_y_end
+                        
+                        logging.debug(
+                                f"chunk boundaries adjusted: {z_start}:{z_end}, {x_start}:{x_end}, {y_start}:{y_end}")
+                        
+                        # todo: think about if it would be beneficial to use np.pad
+                        #  if we are exceeding the boundaries of the array?
+                        
+                        # Extract the chunk
+                        chunk = arr[z_start:z_end, x_start:x_end, y_start:y_end]
+                        
+                        logging.debug(f"arr shape: {arr.shape}")
+                        logging.debug(f"chunk shape: {chunk.shape}\n")
+                        
+                        # [Chunk processing logic]
                         
                         # Apply Gaussian blur to smooth the chunk
                         blurred_chunk = gaussian_filter(chunk, sigma=blur_sigma, radius=blur_radius)
@@ -2009,8 +2070,8 @@ class Delta:
                             for y in range(chunk_y):
                                 # Find peaks in the time series of each pixel
                                 peak_x, res = signal.find_peaks(downsized_chunk[:, x, y], prominence=prominence,
-                                                                wlen=wlen,
-                                                                distance=distance, width=width, rel_height=rel_height)
+                                                                wlen=scaled_wlen, distance=scaled_distance,
+                                                                width=width, rel_height=rel_height)
                                 
                                 # Set identified peaks to NaN for interpolation
                                 for left, right in zip(res["left_ips"], res["right_ips"]):
@@ -2026,7 +2087,7 @@ class Delta:
                         xyz_obs = coordinates[valid_mask]
                         values_obs = values[valid_mask]
                         
-                        interpolator = RBFInterpolator(xyz_obs, values_obs, neighbors=neighbors,
+                        interpolator = RBFInterpolator(xyz_obs, values_obs, neighbors=scaled_neighbors,
                                                        smoothing=rbf_smoothing,
                                                        kernel=rbf_kernel, epsilon=rbf_epsilon, degree=rbf_degree)
                         interpolated_chunk = interpolator(coordinates)
@@ -2037,23 +2098,31 @@ class Delta:
                         # Subtract interpolated data from the original chunk
                         subtracted_chunk = chunk - resized_chunk
                         
-                        # Calculate the actual insert positions in the processed_video array
-                        insert_x_start = i * chunk_size[1]
-                        insert_x_end = min(insert_x_start + chunk_size[1], x_dim)
-                        insert_y_start = j * chunk_size[2]
-                        insert_y_end = min(insert_y_start + chunk_size[2], y_dim)
+                        # [Chunk insertion logic with padding]
                         
-                        # Remove padding from the processed chunk
-                        # Adjust the padding removal based on chunk position (edges or middle)
-                        padding_x_start = neighbors if x_start > 0 else 0
-                        padding_x_end = -neighbors if x_end < x_dim else None
-                        padding_y_start = neighbors if y_start > 0 else 0
-                        padding_y_end = -neighbors if y_end < y_dim else None
-                        processed_chunk = subtracted_chunk[:, padding_x_start:padding_x_end,
-                                          padding_y_start:padding_y_end]
+                        logging.debug(f"subtracted_chunk shape: {subtracted_chunk.shape}")
                         
-                        # Insert the processed chunk back into the processed_video array
-                        processed_video[:, insert_x_start:insert_x_end, insert_y_start:insert_y_end] = processed_chunk
+                        # extract unpadded chunk from processed chunk
+                        un_padded_chunk = subtracted_chunk[
+                                          padding_z_start:-padding_z_end if padding_z_end != 0 else None,
+                                          padding_x_start:-padding_x_end if padding_x_end != 0 else None,
+                                          padding_y_start:-padding_y_end if padding_y_end != 0 else None
+                                          ]
+                        
+                        logging.debug(f"un_padded_chunk: {un_padded_chunk.shape}")
+                        
+                        # save result to result array
+                        processed_video[
+                        z_start + padding_z_start:z_end - padding_z_end,
+                        x_start + padding_x_start:x_end - padding_x_end,
+                        y_start + padding_y_start:y_end - padding_y_end
+                        ] = un_padded_chunk
+                        
+                        logging.debug(f"indices: "
+                                      f"{z_start + padding_z_start}:{z_end - padding_z_end}, "
+                                      f"{x_start + padding_x_start}:{x_end - padding_x_end}, "
+                                      f"{y_start + padding_y_start}:{y_end - padding_y_end}"
+                                      f"\n {'-' * 10}")
                         
                         # Update the progress bar
                         pbar.update(1)
