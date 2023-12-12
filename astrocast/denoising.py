@@ -2,18 +2,21 @@ import logging
 import os
 import pathlib
 import random
+import time
 from pathlib import Path
 from typing import Union, List, Tuple, Literal, Callable
 
+import humanize
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import xxhash
 from torch.nn.modules.loss import _Loss
 from torch.utils.data import Dataset, DataLoader
 from tqdm import tqdm
 
 from astrocast.autoencoders import EarlyStopper
-from astrocast.helper import closest_power_of_two
+from astrocast.helper import closest_power_of_two, wrapper_local_cache
 from astrocast.preparation import IO
 
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
@@ -54,10 +57,18 @@ class SubFrameDataset(Dataset):
             padding: Union[None, Literal["symmetric", "edge"]] = None, shuffle: bool = True,
             normalize: Union[None, Literal["local", "global"]] = None, loc: str = "data/",
             output_size: Union[None, Tuple[int, int]] = None, cache_results: bool = False, in_memory: bool = False,
-            save_global_descriptive: bool = True, logging_level: int = logging.INFO
+            save_global_descriptive: bool = True, logging_level: int = logging.INFO,
+            cache_path: Union[str, Path] = None,
+            seed: int = 1
     ):
 
         logging.basicConfig(level=logging_level)
+        if cache_path is not None:
+            self.cache_path = Path(cache_path)
+            if not self.cache_path.exists():
+                self.cache_path.mkdir()
+
+        self.seed = seed
 
         # adjust input_size to be power of two
         input_size = [closest_power_of_two(v) for v in input_size]
@@ -85,7 +96,6 @@ class SubFrameDataset(Dataset):
         self.z_steps = z_steps
         self.z_select = z_select
         self.max_per_file = max_per_file
-        self.item_size = None
 
         # parse allowed rotations
         if isinstance(allowed_rotation, int):
@@ -106,8 +116,6 @@ class SubFrameDataset(Dataset):
             raise ValueError(f"random_offset and overlap are incompatible. Please choose only one.")
 
         self.overlap = overlap
-        self.overlap_x = None
-        self.overlap_y = None
 
         assert padding in [None, "symmetric", "edge"]
         assert not (random_offset and (
@@ -124,14 +132,12 @@ class SubFrameDataset(Dataset):
             self.descr = {}
 
         self.shuffle = shuffle
-        self.n = None
 
         # in memory
         self.mem_data = {} if in_memory else -1
 
         # get items
-        self.fov_size = None
-        self.items = self._generate_items()
+        self.items, self.fov_size, self.item_size, self.overlap_x, self.overlap_y, self.n = self._generate_items()
 
         # cache
         self.cache_results = cache_results
@@ -204,6 +210,16 @@ class SubFrameDataset(Dataset):
 
         return input_frames, target_frame
 
+    def __hash__(self):
+        args = [self.input_size, self.signal_frames, self.gap_frames, self.z_steps, self.random_offset,
+                self.overlap, self.allowed_rotation, self.allowed_flip, self.paths, self.loc, self.z_select,
+                self.padding, self.shuffle, self.drop_frame_probability, self.normalize, self.loc, self.max_per_file, ]
+        args = [str(arg) for arg in args]
+        args = "_".join(args).encode()
+
+        return xxhash.xxh128_intdigest(args, seed=self.seed)
+
+    @wrapper_local_cache
     def _generate_items(self):
 
         # define size of each predictive field of view (X, Y)
@@ -215,8 +231,8 @@ class SubFrameDataset(Dataset):
         stack_len = signal_frames[0] + gap_frames[0] + 1 + gap_frames[1] + signal_frames[1]
         z_steps = max(1, int(self.z_steps * stack_len))
 
-        self.fov_size = (stack_len, dw, dh)
-        self.item_size = (signal_frames[0] + signal_frames[1], dw, dh)
+        fov_size = (stack_len, dw, dh)
+        item_size = (signal_frames[0] + signal_frames[1], dw, dh)
 
         x_start, y_start, z_start = 0, 0, 0
         # randomize input
@@ -235,8 +251,6 @@ class SubFrameDataset(Dataset):
 
         else:
             overlap_x, overlap_y = 0, 0
-
-        self.overlap_x, self.overlap_y = overlap_x, overlap_y
 
         # adjust rotation and flip
         allowed_rotation = self.allowed_rotation if self.allowed_rotation is not None else [None]
@@ -395,9 +409,9 @@ class SubFrameDataset(Dataset):
         if self.shuffle:
             items = items.sample(frac=1).reset_index(drop=True)
 
-        self.n = len(items)
+        n = len(items)
 
-        return items
+        return items, fov_size, item_size, overlap_x, overlap_y, n
 
     def _bootstrap_descriptive(
             self, items, frac=0.01, confidence_level=0.75, n_resamples=5000, max_confidence_span=0.2,
@@ -1550,12 +1564,13 @@ class PyTorchNetwork:
     def __init__(
             self, train_dataset: SubFrameDataset, val_dataset: SubFrameDataset = None,
             test_dataset: SubFrameDataset = None, batch_size: int = 32, shuffle: bool = True, num_workers: int = 4,
-            learning_rate: float = 0.001, momentum: float = 0.9, decay_rate: float = 0.1, decay_steps: int = 30,
+            learning_rate: float = 0.0001, momentum: float = 0.9, decay_rate: float = 0.1, decay_steps: int = 30,
             n_stacks: int = 3, kernels: int = 64, kernel_size: int = 3, batch_normalize: bool = False,
             loss: PyTorchLoss = "annealed_loss",
             load_model: Union[str, Path] = None, use_cpu: bool = False):
 
         # define attributes
+        self.t0 = None
         self.optimizer = None
         self.iterator = None
         self.n_stacks = n_stacks
@@ -1564,6 +1579,7 @@ class PyTorchNetwork:
         self.batch_normalize = batch_normalize
         self.item_size = train_dataset.item_size
         self.input_size = train_dataset.input_size
+        self.history = None
 
         # define generators
         self.train_dataloader = DataLoader(train_dataset, batch_size=batch_size, shuffle=shuffle,
@@ -1608,8 +1624,6 @@ class PyTorchNetwork:
             patience: int = None, min_delta: float = 0.005, model_prefix: str = "model",
             show_mode: Literal["auto", "progress", "notebook"] = None, save_checkpoints: bool = False):
 
-        # todo: keep history
-
         # create directory to save model
         save_model = Path(save_model) if save_model is not None else None
         if save_model is not None and not save_model.is_dir():
@@ -1651,22 +1665,25 @@ class PyTorchNetwork:
         running_loss = float('inf')
         val_loss = float('inf')
         epoch = 0
+        self.history = dict(train_loss=[], val_loss=[], test_loss=[])
+        self.t0 = time.time()
         for epoch in range(num_epochs):
 
             # run one round of training
             running_loss = self._train_one_epoch(self.train_dataloader, optimizer, criterion, lr_scheduler,
                                                  update_weights=True)
+            self.history["train_loss"].append(running_loss)
 
             # run one round of validation
             if self.val_dataloader is not None:
                 val_loss = self._train_one_epoch(self.val_dataloader, optimizer, criterion, lr_scheduler,
                                                  update_weights=False)
+                self.history["val_loss"].append(val_loss)
             else:
                 val_loss = running_loss
 
             # user feedback
-            self._show_progress(num_epochs=num_epochs, epoch=epoch, show_mode=show_mode, training_loss=running_loss,
-                                validation_loss=val_loss if self.val_dataloader is not None else None,
+            self._show_progress(num_epochs=num_epochs, epoch=epoch, show_mode=show_mode,
                                 patience_counter=early_stopping.counter if early_stopping is not None else None)
 
             # check early stopping
@@ -1686,6 +1703,7 @@ class PyTorchNetwork:
             test_loss = self._train_one_epoch(self.test_dataloader, optimizer, criterion, lr_scheduler,
                                               update_weights=False)
             logging.info(f"Test loss: {test_loss:.4f}")
+            self.history["test_loss"].append(test_loss)
 
         if save_model is not None:
             model_path = save_model.joinpath(f"{model_prefix}.pth")
@@ -1800,7 +1818,7 @@ class PyTorchNetwork:
         # infer frames
         dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers)
 
-        for i, (inputs, _) in enumerate(dataloader):
+        for i, (inputs, _) in tqdm(enumerate(dataloader)):
 
             y = self.model.predict(inputs)  # denoised data
 
@@ -1976,10 +1994,8 @@ class PyTorchNetwork:
 
         return running_loss
 
-    def _show_progress(self, num_epochs: int, epoch: int, training_loss: float,
-                       show_mode: Literal["auto", "progress", "notebook"] = None,
-                       validation_loss: float = None,
-                       patience_counter: int = None):
+    def _show_progress(self, num_epochs: int, epoch: int,
+                       show_mode: Literal["auto", "progress", "notebook"] = None, patience_counter: int = None):
 
         if show_mode is None:
             return None
@@ -2003,15 +2019,20 @@ class PyTorchNetwork:
             else:
                 show_mode = "progress"
 
+        training_loss = self.history["train_loss"]
+        validation_loss = self.history["val_loss"]
+        test_loss = self.history["test_loss"]
+
         # progress
         if show_mode == "progress":
 
+            progress_description = ""
+
             if isinstance(training_loss, (list, tuple)):
                 training_loss = training_loss[-1]
+            progress_description += f"train>{training_loss:.2E} "
 
-            progress_description = f"train>{training_loss:.2E} "
-
-            if validation_loss is not None:
+            if validation_loss is not None and len(validation_loss) > 0:
 
                 if isinstance(validation_loss, (list, tuple)):
                     validation_loss = validation_loss[-1]
@@ -2035,17 +2056,24 @@ class PyTorchNetwork:
             fig, axx = plt.subplots(1, 2, figsize=(9, 4))
 
             axx[0].plot(training_loss, color="black", label="training")
-            if validation_loss is not None:
-                axx[0].plot(np.array(validation_loss).flatten(), color="green", label="validation")
-
             axx[0].set_title(f"losses")
             axx[0].set_yscale("log")
             axx[0].legend()
+
+            if len(validation_loss) > 0:
+                axx[1].plot(np.array(validation_loss).flatten(), color="green", label="validation")
+                axx[1].set_title(f"losses")
+                axx[1].set_yscale("log")
+                axx[1].legend()
 
             # set title
             title = f"Epoch {epoch}/{num_epochs}"
             if patience_counter is not None:
                 title += f"P{patience_counter}"
+
+            title += f" Elapsed time {humanize.naturaldelta(time.time() - self.t0)}"
+
+            fig.suptitle(title)
 
             plt.tight_layout()
 
