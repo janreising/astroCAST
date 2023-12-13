@@ -1154,12 +1154,12 @@ def explorer(input_path, loc):
 @click_custom_option('--video-path', type=click.Path(), default=None, help='Path to video file.')
 @click_custom_option('--loc', type=click.STRING, default="", help='dataset location for .h5 files')
 @click_custom_option('--default-settings', type=dict, default={}, help='settings for app.')
-def analysis(input_path, video_path, loc, default_settings):
-    """Run interactive analysis of events."""
+def exploratory_analysis(input_path, video_path, loc, default_settings):
+    """Run interactive Exploratory Analysis GUI of events."""
     
-    from astrocast.app_analysis import Analysis
+    from astrocast.app_analysis import ExploratoryAnalysis
     
-    app_instance = Analysis(
+    app_instance = ExploratoryAnalysis(
             input_path=input_path, video_path=video_path, loc=loc, default_settings=default_settings
             )
     app_instance.run()
