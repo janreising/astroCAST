@@ -432,7 +432,7 @@ def motion_correction(
                      help='Standard deviation for the Gaussian kernel used in smoothing.')
 @click_custom_option('--blur-radius', type=click.INT, default=3,
                      help='Radius of the Gaussian blur.')
-@click_custom_option('--rbf-smoothing', type=click.FLOAT, default=None,
+@click_custom_option('--rbf-smoothing', type=click.FLOAT, default=0.0,
                      help='Smoothing parameter for RBF interpolation.')
 @click_custom_option('--rbf-kernel', type=click.STRING, default='thin_plate_spline',
                      help='Type of kernel to use in RBF interpolation.')
