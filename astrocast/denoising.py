@@ -22,12 +22,11 @@ from astrocast.preparation import IO
 try:
     os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
     import tensorflow as tf
+    from tensorflow.keras import backend as K
 except ModuleNotFoundError:
     logging.warning(f"tensorflow not available. Some functionality might be missing.")
 
 import keras
-from tensorflow.keras import backend as K
-
 from keras.callbacks import EarlyStopping, ModelCheckpoint
 from keras.layers import Input, Conv2D, MaxPooling2D, UpSampling2D, Concatenate, BatchNormalization
 from keras.models import Model, load_model
