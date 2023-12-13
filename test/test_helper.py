@@ -19,21 +19,21 @@ class TestLocalCache:
     @staticmethod
     @wrapper_local_cache
     def func_simple(cache_path=None):
-        N = float(np.random.random(100000))
+        N = float(np.random.random(1))
         time.sleep(2)
         return N
     
     @staticmethod
     @wrapper_local_cache
     def func_arg(arg1, cache_path=None):
-        N = float(np.random.random(100000))
+        N = float(np.random.random(1))
         time.sleep(2)
         return N
     
     @staticmethod
     @wrapper_local_cache
     def func_kwarg(arg1, arg2=2.0, cache_path=None):
-        N = float(np.random.random(100000))
+        N = float(np.random.random(1))
         time.sleep(2)
         return N
     
