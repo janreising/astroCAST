@@ -168,43 +168,44 @@ class TestNormalization:
         norm = Normalization(data)
         res = norm.run({0: ["subtract", dict(mode=value_mode, population_wide=population_wide)]})
         
-        for l in [0, -1]:
+        control = np.array(1)
+        for idx in [0, -1]:
             
             if not population_wide:
                 
                 if value_mode == "first":
-                    control = norm.data[l] - norm.data[l][0]
+                    control = norm.data[idx] - norm.data[idx][0]
                 if value_mode == "mean":
-                    control = norm.data[l] - np.mean(norm.data[l])
+                    control = norm.data[idx] - np.mean(norm.data[idx])
                 if value_mode == "min":
-                    control = norm.data[l] - np.min(norm.data[l])
+                    control = norm.data[idx] - np.min(norm.data[idx])
                 if value_mode == "min_abs":
-                    control = norm.data[l] - np.min(np.abs(norm.data[l]))
+                    control = norm.data[idx] - np.min(np.abs(norm.data[idx]))
                 if value_mode == "max":
-                    control = norm.data[l] - np.max(norm.data[l])
+                    control = norm.data[idx] - np.max(norm.data[idx])
                 if value_mode == "max_abs":
-                    control = norm.data[l] - np.max(np.abs(norm.data[l]))
+                    control = norm.data[idx] - np.max(np.abs(norm.data[idx]))
                 if value_mode == "std":
-                    control = norm.data[l] - np.std(norm.data[l])
+                    control = norm.data[idx] - np.std(norm.data[idx])
             
             else:
                 
                 if value_mode == "first":
-                    control = norm.data[l] - np.mean([data[i][0] for i in range(len(data))])
+                    control = norm.data[idx] - np.mean([data[i][0] for i in range(len(data))])
                 if value_mode == "mean":
-                    control = norm.data[l] - np.mean(norm.data)
+                    control = norm.data[idx] - np.mean(norm.data)
                 if value_mode == "min":
-                    control = norm.data[l] - np.min(norm.data)
+                    control = norm.data[idx] - np.min(norm.data)
                 if value_mode == "min_abs":
-                    control = norm.data[l] - np.min(np.abs(norm.data))
+                    control = norm.data[idx] - np.min(np.abs(norm.data))
                 if value_mode == "max":
-                    control = norm.data[l] - np.max(norm.data)
+                    control = norm.data[idx] - np.max(norm.data)
                 if value_mode == "max_abs":
-                    control = norm.data[l] - np.max(np.abs(norm.data))
+                    control = norm.data[idx] - np.max(np.abs(norm.data))
                 if value_mode == "std":
-                    control = norm.data[l] - np.std(norm.data)
+                    control = norm.data[idx] - np.std(norm.data)
             
-            assert np.allclose(res[l], control)
+            assert np.allclose(res[idx], control)
     
     @staticmethod
     @pytest.mark.parametrize("value_mode", ["first", "mean", "min", "min_abs", "max", "max_abs", "std"])
@@ -226,43 +227,44 @@ class TestNormalization:
         norm = Normalization(data)
         res = norm.run({0: ["divide", dict(mode=value_mode, population_wide=population_wide)]})
         
-        for l in [0, -1]:
+        control = np.array(1)
+        for idx in [0, -1]:
             
             if not population_wide:
                 
                 if value_mode == "first":
-                    control = norm.data[l] / norm.data[l][0]
+                    control = norm.data[idx] / norm.data[idx][0]
                 if value_mode == "mean":
-                    control = norm.data[l] / np.mean(norm.data[l])
+                    control = norm.data[idx] / np.mean(norm.data[idx])
                 if value_mode == "min":
-                    control = norm.data[l] / np.min(norm.data[l])
+                    control = norm.data[idx] / np.min(norm.data[idx])
                 if value_mode == "min_abs":
-                    control = norm.data[l] / np.min(np.abs(norm.data[l]))
+                    control = norm.data[idx] / np.min(np.abs(norm.data[idx]))
                 if value_mode == "max":
-                    control = norm.data[l] / np.max(norm.data[l])
+                    control = norm.data[idx] / np.max(norm.data[idx])
                 if value_mode == "max_abs":
-                    control = norm.data[l] / np.max(np.abs(norm.data[l]))
+                    control = norm.data[idx] / np.max(np.abs(norm.data[idx]))
                 if value_mode == "std":
-                    control = norm.data[l] / np.std(norm.data[l])
+                    control = norm.data[idx] / np.std(norm.data[idx])
             
             else:
                 
                 if value_mode == "first":
-                    control = norm.data[l] / np.mean([data[i][0] for i in range(len(data))])
+                    control = norm.data[idx] / np.mean([data[i][0] for i in range(len(data))])
                 if value_mode == "mean":
-                    control = norm.data[l] / np.mean(norm.data)
+                    control = norm.data[idx] / np.mean(norm.data)
                 if value_mode == "min":
-                    control = norm.data[l] / np.min(norm.data)
+                    control = norm.data[idx] / np.min(norm.data)
                 if value_mode == "min_abs":
-                    control = norm.data[l] / np.min(np.abs(norm.data))
+                    control = norm.data[idx] / np.min(np.abs(norm.data))
                 if value_mode == "max":
-                    control = norm.data[l] / np.max(norm.data)
+                    control = norm.data[idx] / np.max(norm.data)
                 if value_mode == "max_abs":
-                    control = norm.data[l] / np.max(np.abs(norm.data))
+                    control = norm.data[idx] / np.max(np.abs(norm.data))
                 if value_mode == "std":
-                    control = norm.data[l] / np.std(norm.data)
+                    control = norm.data[idx] / np.std(norm.data)
             
-            assert np.allclose(res[l], control), f"res: {res[l]} \n {control}"
+            assert np.allclose(res[idx], control), f"res: {res[idx]} \n {control}"
     
     @staticmethod
     @pytest.mark.parametrize("data_type", ["list", "dataframe", "array"])
