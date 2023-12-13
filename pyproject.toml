@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "astrocast"
-version = "0.3.36"
+version = "0.4.0"
 description = "Package to analyze calcium fluorescence events in astrocytes"
 authors = ["Jan Philipp Reising <jan.reising@ki.se>", "Ana Cristina González"]
 
@@ -48,7 +48,10 @@ jnormcorre = "^0.0.7"
 dtaidistance = "^2.3.10"
 tsfresh = "^0.20.1"
 tslearn = "^0.6.2"
-umap-learn = "*"
+umap-learn = [
+    { version = "*", platform = 'windows' },
+    { version = "*", platform = 'linux' }
+]
 keras = "*"
 datashader = "^0.15.2"
 llvmlite = "~0.39"
