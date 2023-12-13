@@ -1,10 +1,9 @@
 # Import necessary modules of astroCAST
 import os
 import pathlib
-
-from astrocast.denoising import SubFrameGenerator, Network
-from astrocast.analysis import Video
 from pathlib import Path
+
+from astrocast.denoising import Network, SubFrameGenerator
 
 root = Path("/tf/data/")
 
@@ -20,12 +19,12 @@ if type(model_path) in [str, pathlib.PosixPath]:
     model_path = Path(model_path)
 
 if os.path.isdir(model_path):
-
+    
     models = list(model_path.glob("*.h*5"))
-
+    
     if len(models) < 1:
         raise FileNotFoundError(f"cannot find model in provided directory: {model_path}")
-
+    
     models.sort(key=lambda x: os.path.getmtime(x))
     model_path = models[0]
     print(f"directory provided. Selected most recent model: {model_path}")
@@ -37,23 +36,23 @@ else:
     raise FileNotFoundError(f"cannot find model: {model_path}")
 
 # Generators
-loc = "mc/ch0" # data/
+loc = "mc/ch0"  # data/
 param = dict(loc=loc, input_size=(256, 256), pre_post_frame=5, gap_frames=0, normalize="global", in_memory=True)
 
-train_gen = SubFrameGenerator(paths=train_paths, padding=None, batch_size=16 ,max_per_file=100,
-                               allowed_rotation=[1, 2, 3], allowed_flip=[0, 1], shuffle=True, **param)
+train_gen = SubFrameGenerator(paths=train_paths, padding=None, batch_size=16, max_per_file=100,
+                              allowed_rotation=[1, 2, 3], allowed_flip=[0, 1], shuffle=True, **param)
 
 # Network
 net = Network(train_generator=train_gen, val_generator=None, learning_rate=0.001, decay_rate=None,
-              pretrained_weights = model_path.as_posix(),
+              pretrained_weights=model_path.as_posix(),
               n_stacks=3, kernel=64,
               batchNormalize=False, use_cpu=False)
 
 # Train
 net.retrain_model(batch_size=1,
-        frozen_epochs=50, unfrozen_epochs=50,
-        patience=20, min_delta=0.0001, monitor="loss",
-        save_model=save_path)
+                  frozen_epochs=50, unfrozen_epochs=50,
+                  patience=20, min_delta=0.0001, monitor="loss",
+                  save_model=save_path)
 
 # if infer_output.is_file():
 #     infer_output.unlink()
@@ -65,4 +64,3 @@ net.retrain_model(batch_size=1,
 #                                 shuffle=False, max_per_file=None, **inf_param)
 #
 # inf_gen.infer(model=model_path, output=infer_output.as_posix(), out_loc="", rescale=True, dtype=float)
-
