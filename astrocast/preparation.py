@@ -1462,7 +1462,7 @@ class Delta:
         self.loc = loc
     
     def run(
-            self, method: Literal['background', 'dF', 'dFF'] = "dF", max_tries: int = 1,
+            self, method: Literal['background', 'dF', 'dFF'] = "dF",
             chunk_strategy: Literal['balanced', 'XY', 'Z'] = "balanced", chunks=None, overwrite_first_frame: bool =
             False, compute: bool = False, neighbors: int = 50, scale_factor: float = 0.25, blur_sigma: int = 2,
             blur_radius: int = 3, rbf_smoothing: float = 0.0, rbf_kernel='thin_plate_spline',
@@ -1503,7 +1503,6 @@ class Delta:
                     overwrite_first_frame: A flag indicating whether to overwrite the values of the first frame with
                         the second frame after delta calculation.
                     compute: A flag indicating whether to return a dask array (False) or a NumPy array (True).
-                    max_tries: Maximum attempts to approximate background.
                     
                 Raises:
                     ValueError: If the input data type is not recognized.
