@@ -47,7 +47,7 @@ class TestDelta:
             
             delta = Delta(data, loc=loc)
             
-            delta.run(method="background", scale_factor=0.5, max_tries=3)
+            delta.run(method="background", scale_factor=0.5)
             
             # save
             output_path = tmpdir.joinpath("out.tiff")
@@ -96,7 +96,7 @@ class TestDelta:
         
         # Initialize Delta object and run background subtraction
         delta = Delta(data)
-        recovered_background = delta.run(method="background", scale_factor=0.5, max_tries=3)
+        recovered_background = delta.run(method="background", scale_factor=0.5)
         
         assert np.allclose(background, recovered_background, atol=noise_std * 10)
 
