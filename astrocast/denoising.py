@@ -44,9 +44,6 @@ PyTorchLoss = Union[
     Literal['annealed_loss', 'mean_square_root_error'], Callable[[torch.Tensor, torch.Tensor], torch.Tensor], _Loss]
 
 
-# TODO write plotting for generators
-# TODO write plotting for network history
-
 class SubFrameDataset(Dataset):
     
     def __init__(
