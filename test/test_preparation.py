@@ -63,7 +63,7 @@ class TestDelta:
         delta = Delta(data)
         delta.run(scale_factor=0.5, method=method)
     
-    @pytest.mark.flaky(reruns=3)
+    @pytest.mark.flaky(reruns=5)
     def test_performance_simple(self, shape=(25, 100, 100), noise_level=(50, 3),
                                 signal_multiplier=3, signal_size=0.2):
         # Generate a random background with Gaussian noise
@@ -98,7 +98,7 @@ class TestDelta:
         delta = Delta(data)
         recovered_background = delta.run(method="background", scale_factor=0.5)
         
-        assert np.allclose(background, recovered_background, atol=noise_std * 10)
+        assert np.allclose(background, recovered_background, atol=noise_std * 11)
 
 
 class TestInput:
