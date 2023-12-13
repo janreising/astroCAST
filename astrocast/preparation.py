@@ -2,7 +2,6 @@ import logging
 import os
 import shutil
 import tempfile
-import typing
 import warnings
 from collections import OrderedDict
 from pathlib import Path
@@ -21,6 +20,7 @@ import tiledb
 from dask.diagnostics import ProgressBar
 from deprecated import deprecated
 from matplotlib import pyplot as plt
+from numpy.linalg import LinAlgError
 from scipy import signal
 from scipy.interpolate import RBFInterpolator
 from scipy.ndimage import gaussian_filter, minimum_filter1d
@@ -1515,12 +1515,12 @@ class Delta:
                 """
         
         # Prepare the data for processing
-        self.prep_data = self._prepare_data(self.data, loc=self.loc, chunk_strategy=chunk_strategy, chunks=chunks)
+        prep_data = self._prepare_data(self.data, loc=self.loc, chunk_strategy=chunk_strategy, chunks=chunks)
         
-        res = self.subtract_delta_rbf(arr=self.prep_data, neighbors=neighbors, chunk_size=chunks,
+        res = self.subtract_delta_rbf(arr=prep_data, neighbors=neighbors, chunk_size=chunks,
                                       max_chunk_size_mb=max_chunk_size_mb, scale_factor=scale_factor,
-                                      blur_sigma=blur_sigma, rbf_degree=rbf_degree, max_tries=max_tries,
-                                      blur_radius=blur_radius, rbf_smoothing=rbf_smoothing, rbf_kernel=rbf_kernel,
+                                      blur_sigma=blur_sigma, rbf_degree=rbf_degree, blur_radius=blur_radius,
+                                      rbf_smoothing=rbf_smoothing, rbf_kernel=rbf_kernel,
                                       rbf_epsilon=rbf_epsilon, prominence=prominence, wlen=wlen, distance=distance,
                                       width=width, rel_height=rel_height, method=method)
         
@@ -1561,17 +1561,17 @@ class Delta:
                     not specified, the method will infer appropriate chunk sizes based on the strategy. The 'overwrite' flag is
                     set to False by default, ensuring that existing files are not overwritten unless explicitly intended.
                 """
+        
+        self.prep_data = None
+        
         io = IO()
-        io.save(
-                output_path, data=self.result, loc=loc, chunk_strategy=chunk_strategy, chunks=chunks,
-                compression=compression,
-                overwrite=overwrite
-                )
+        io.save(output_path, data=self.result, loc=loc, chunk_strategy=chunk_strategy, chunks=chunks,
+                compression=compression, overwrite=overwrite)
     
     @staticmethod
     def _prepare_data(
             data: Union[str, Path, np.ndarray, da.Array], chunk_strategy: Literal['balanced', 'XY', 'Z'] = 'balanced',
-            chunks: Tuple[int, int, int] = None, loc: str = '', dtype: typing.Type = int,
+            chunks: Tuple[int, int, int] = None, loc: str = '',
             ) -> da.Array:
         
         """ Preprocesses the input data by converting it to a dask compatible format or TileDB array and optionally
@@ -1591,7 +1591,6 @@ class Delta:
         if isinstance(data, Path):
             
             data = io.load(data, loc=loc, chunk_strategy=chunk_strategy, chunks=chunks)
-            data = data.astype(dtype)
             return data
         
         elif isinstance(data, (np.ndarray, da.Array)):
@@ -1603,8 +1602,6 @@ class Delta:
             
             if data.chunks != chunks:
                 data = data.rechunk(chunks)
-            
-            data = data.astype(dtype)
             
             return data
         
@@ -1879,10 +1876,10 @@ class Delta:
     
     def subtract_delta_rbf(self, arr: Union[np.ndarray, da.Array], method: Literal["background", "dF", "dFF"] = "dF",
                            neighbors: int = 50, chunk_size: Tuple[int, int, int] = None, max_chunk_size_mb: int = 10,
-                           scale_factor: float = 0.25, blur_sigma: int = 2, max_tries: int = 1,
-                           blur_radius: int = 3, rbf_smoothing: float = 0.0, rbf_kernel='thin_plate_spline',
+                           scale_factor: float = 0.25, blur_sigma: int = 2, blur_radius: int = 3,
+                           rbf_smoothing: float = 0.0, rbf_kernel='thin_plate_spline',
                            rbf_epsilon: float = None, rbf_degree: int = None, prominence: float = 0.1,
-                           wlen: int = 100, distance: int = 10, width: int = 5, rel_height: float = 0.95):
+                           wlen: int = 100, distance: int = 10, width: int = 1, rel_height: float = 0.95, debug=False):
         """ Performs background subtraction in time-series fluorescence imaging recordings.
         
         This function aims to enhance the signal-to-noise ratio and reduce the effects of photo-bleaching in
@@ -1924,15 +1921,13 @@ class Delta:
             width: Width of the peaks. This parameter can help in identifying broader peaks.
             rel_height: Relative height to calculate the width of the peaks. It's a height where the peak is considered to end.
             max_tries: Maximum attempts to approximate background.
+            debug: Toggle debug mode with summary statistics for each chunk.
             
         Returns:
             3D numpy array of the processed video, matching the original dimensions and dtype.
         """
         
         # [Determine chunk size]
-        
-        # if isinstance(arr, da.Array):
-        #     arr = arr.compute()
         
         # Extract the dimensions of the video
         time_dim, x_dim, y_dim = arr.shape
@@ -1966,8 +1961,10 @@ class Delta:
         
         # Initialize an array to store the processed video
         processed_video = np.zeros(arr.shape, dtype=arr.dtype)
+        logging.info(f"creating output array of shape {processed_video.shape} and of type {processed_video.dtype}")
         
         # Create a progress bar
+        total_error_pixels = 0
         with tqdm(total=total_chunks, desc="Processing Chunks") as pbar:
             # Iterate over each chunk
             for k in range(num_chunks_z):
@@ -1986,7 +1983,7 @@ class Delta:
                         y_start = j * chunk_size[2]
                         y_end = min((j + 1) * chunk_size[2], y_dim)
                         
-                        logging.debug(f"chunk boundaries: {z_start}:{z_end}, {x_start}:{x_end}, {y_start}:{y_end}")
+                        original_boundaries = f"({z_start}:{z_end},{x_start}:{x_end},{y_start}:{y_end})"
                         
                         # Calculate padding taking video boundaries into account
                         padding_z_start = padding_z if z_start >= padding_z else z_start
@@ -1998,9 +1995,9 @@ class Delta:
                         padding_y_start = padding_y if y_start >= padding_y else y_start
                         padding_y_end = padding_y if y_end + padding_y <= y_dim else y_dim - y_end
                         
-                        logging.debug(f"padding boundaries: {padding_z_start}:{padding_z_end}, "
-                                      f"{padding_x_start}:{padding_x_end}, "
-                                      f"{padding_y_start}:{padding_y_end}")
+                        padding_values = (f"({padding_z_start}:{padding_z_end},"
+                                          f"{padding_x_start}:{padding_x_end},"
+                                          f"{padding_y_start}:{padding_y_end})")
                         
                         # adjust the indices based on padding
                         z_start -= padding_z_start
@@ -2012,14 +2009,16 @@ class Delta:
                         y_start -= padding_y_start
                         y_end += padding_y_end
                         
-                        logging.debug(
-                                f"chunk boundaries adjusted: {z_start}:{z_end}, {x_start}:{x_end}, {y_start}:{y_end}")
+                        final_boundaries = f"({z_start}:{z_end},{x_start}:{x_end},{y_start}:{y_end})"
                         
                         # Extract the chunk
                         chunk = arr[z_start:z_end, x_start:x_end, y_start:y_end]
                         
-                        logging.debug(f"arr shape: {arr.shape}")
-                        logging.debug(f"chunk shape: {chunk.shape}\n")
+                        if debug:
+                            logging.debug(
+                                    f"\noriginal: {original_boundaries} +- padding: {padding_values}"
+                                    f"\nvalue___: {np.mean(chunk):.2f}+-{np.std(chunk):.2f}, shape:{chunk.shape}, @{final_boundaries}"
+                                    )
                         
                         # [Chunk processing logic]
                         
@@ -2032,35 +2031,81 @@ class Delta:
                         downsized_chunk = rescale(blurred_chunk, scale_factor, anti_aliasing=True)
                         
                         # Identify peaks in each pixel time series and set to NaN
-                        _, chunk_x, chunk_y = downsized_chunk.shape
-                        for x in range(chunk_x):
-                            for y in range(chunk_y):
+                        count_nan = 0
+                        masked_chunk = downsized_chunk.copy()
+                        for x in range(masked_chunk.shape[1]):
+                            for y in range(masked_chunk.shape[2]):
                                 # Find peaks in the time series of each pixel
-                                peak_x, res = signal.find_peaks(downsized_chunk[:, x, y], prominence=prominence,
+                                xy = masked_chunk[:, x, y]
+                                peak_x, res = signal.find_peaks(xy, prominence=prominence,
                                                                 wlen=scaled_wlen, distance=scaled_distance,
                                                                 width=width, rel_height=rel_height)
                                 
                                 # Set identified peaks to NaN for interpolation
                                 for left, right in zip(res["left_ips"], res["right_ips"]):
-                                    downsized_chunk[int(left):int(right), x, y] = np.nan
+                                    masked_chunk[int(left):int(right), x, y] = np.nan
+                                    count_nan += int(right) - int(left)
                         
                         # Interpolate NaN values using RBFInterpolator in XYZ
                         coordinates = np.array(
-                                np.meshgrid(np.arange(downsized_chunk.shape[0]), np.arange(downsized_chunk.shape[1]),
-                                            np.arange(downsized_chunk.shape[2]), indexing='ij')).reshape(3, -1).T
-                        values = downsized_chunk.reshape(-1)
+                                np.meshgrid(np.arange(masked_chunk.shape[0]), np.arange(masked_chunk.shape[1]),
+                                            np.arange(masked_chunk.shape[2]), indexing='ij')).reshape(3, -1).T
+                        values = masked_chunk.reshape(-1)
                         
                         valid_mask = ~np.isnan(values)
                         xyz_obs = coordinates[valid_mask]
                         values_obs = values[valid_mask]
                         
-                        n_tries = 0
-                        while n_tries < max_tries:
-                            interpolator = RBFInterpolator(xyz_obs, values_obs, neighbors=scaled_neighbors,
-                                                           smoothing=rbf_smoothing,
-                                                           kernel=rbf_kernel, epsilon=rbf_epsilon, degree=rbf_degree)
+                        if debug:
+                            num_nan_values = valid_mask.size - np.sum(valid_mask)
+                            nan_percentage = num_nan_values / valid_mask.size
+                            logging.debug(
+                                    f"\n(downsiz): {np.nanmean(masked_chunk):.2f}+-{np.nanstd(masked_chunk):.2f}, shape:{masked_chunk.shape}"
+                                    f"\nNaN value: {num_nan_values} ({nan_percentage * 100:.2f}%); counted: {count_nan}"
+                                    )
+                        
+                        interpolator = RBFInterpolator(xyz_obs, values_obs, neighbors=scaled_neighbors,
+                                                       smoothing=rbf_smoothing,
+                                                       kernel=rbf_kernel, epsilon=rbf_epsilon,
+                                                       degree=rbf_degree)
+                        try:
                             interpolated_chunk = interpolator(coordinates)
-                            n_tries += 1
+                            interpolated_chunk = interpolated_chunk.reshape(masked_chunk.shape)
+                        
+                        except LinAlgError:
+                            
+                            values, nan_pixels, num_errors = self.binary_search_interpolate_1d(interpolator,
+                                                                                               coordinates, values,
+                                                                                               ref_values=downsized_chunk)
+                            
+                            total_error_pixels += num_errors
+                            if num_errors / len(values) * 100 > 0.1:
+                                logging.warning(f"encountered significant amount of pixels that could"
+                                                f"not be interpolated {num_errors}/{len(values)}"
+                                                f"({num_errors / len(values) * 100:.2f}%). "
+                                                f"This could impact quality of the subtraction.")
+                            
+                            interpolated_chunk = values.reshape(masked_chunk.shape)
+                            
+                            radius = blur_radius // 2
+                            for nan_pixel in nan_pixels:
+                                z, x, y = coordinates[nan_pixel].T
+                                
+                                # Calculate indices ensuring they are within bounds
+                                z0, z1 = max(z - radius, 0), min(z + radius + 1, masked_chunk.shape[0])
+                                x0, x1 = max(x - radius, 0), min(x + radius + 1, masked_chunk.shape[1])
+                                y0, y1 = max(y - radius, 0), min(y + radius + 1, masked_chunk.shape[2])
+                                
+                                # Apply Gaussian blur to the neighborhood
+                                blurred = gaussian_filter(interpolated_chunk[z0:z1, x0:x1, y0:y1], sigma=blur_sigma)
+                                
+                                # Find the relative position of the nan pixel within the blurred neighborhood
+                                relative_z = min(radius, z - z0)
+                                relative_x = min(radius, x - x0)
+                                relative_y = min(radius, y - y0)
+                                
+                                # Assign the blurred value to the nan pixel
+                                interpolated_chunk[z, x, y] = blurred[relative_z, relative_x, relative_y]
                         
                         # Resize interpolated chunk back to original size
                         resized_chunk = resize(interpolated_chunk, original_chunk_shape, anti_aliasing=True)
@@ -2075,9 +2120,14 @@ class Delta:
                         else:
                             raise ValueError(f"method must be one of ['background', 'dF', 'dFF']")
                         
-                        # [Chunk insertion logic with padding]
+                        if debug:
+                            logging.debug(
+                                    f"\n(interpo) values: {np.mean(interpolated_chunk):.2f}+-{np.std(interpolated_chunk):.2f}"
+                                    f"\n(resized) values: {np.mean(resized_chunk):.2f}+-{np.std(resized_chunk):.2f}"
+                                    f"\n(subtrac) values: {np.mean(subtracted_chunk):.2f}+-{np.std(subtracted_chunk):.2f}, shape:{subtracted_chunk.shape}"
+                                    )
                         
-                        logging.debug(f"subtracted_chunk shape: {subtracted_chunk.shape}")
+                        # [Chunk insertion logic with padding]
                         
                         # extract unpadded chunk from processed chunk
                         un_padded_chunk = subtracted_chunk[
@@ -2086,9 +2136,6 @@ class Delta:
                                           padding_y_start:-padding_y_end if padding_y_end != 0 else None
                                           ]
                         
-                        logging.debug(f"un_padded_chunk: {un_padded_chunk.shape}")
-                        logging.debug(f"un_padded_chunk mean: {np.mean(un_padded_chunk)}")
-                        
                         # save result to result array
                         processed_video[
                         z_start + padding_z_start:z_end - padding_z_end,
@@ -2096,20 +2143,86 @@ class Delta:
                         y_start + padding_y_start:y_end - padding_y_end
                         ] = un_padded_chunk
                         
-                        logging.debug(f"indices: "
-                                      f"{z_start + padding_z_start}:{z_end - padding_z_end}, "
-                                      f"{x_start + padding_x_start}:{x_end - padding_x_end}, "
-                                      f"{y_start + padding_y_start}:{y_end - padding_y_end}"
-                                      )
-                        logging.debug(
-                                f"processed_video mean: {np.mean(processed_video[z_start + padding_z_start:z_end - padding_z_end, x_start + padding_x_start:x_end - padding_x_end, y_start + padding_y_start:y_end - padding_y_end])}")
-                        logging.debug(f"\n {'-' * 10}")
+                        if debug:
+                            logging.debug(
+                                    f"\n(no pad): {np.mean(un_padded_chunk):.2f} +- {np.std(un_padded_chunk):.2f}, shape:{un_padded_chunk.shape}"
+                                    f"\nindices_:"
+                                    f"({z_start + padding_z_start}:{z_end - padding_z_end},"
+                                    f"{x_start + padding_x_start}:{x_end - padding_x_end},"
+                                    f"{y_start + padding_y_start}:{y_end - padding_y_end})"
+                                    f"\nfinal___: {np.mean(processed_video[z_start + padding_z_start:z_end - padding_z_end, x_start + padding_x_start:x_end - padding_x_end, y_start + padding_y_start:y_end - padding_y_end])}"
+                                    f"\n{'-' * 20}\n"
+                                    )
                         
                         # Update the progress bar
                         pbar.update(1)
         
+        if total_error_pixels > 0:
+            logging.warning(f"During interpolation {total_error_pixels} ("
+                            f"{total_error_pixels / processed_video.size * 100:.4f}%) "
+                            f"could not be interpolated. Please ensure parameters were chosen correctly.")
+        
         # Return the processed video array
         return processed_video
+    
+    def binary_search_interpolate_1d(self, interpolator, coordinates, values, start=0, end=None, num_errors=0,
+                                     nan_pixels=None, ref_values=None):
+        
+        if end is None:
+            end = len(coordinates)
+        
+        if nan_pixels is None:
+            nan_pixels = []
+        
+        if end - start <= 1:
+            # Replace undefined pixels
+            if ref_values is None:
+                values[start:end] = np.nan
+            else:
+                z, x, y = coordinates[start:end].T
+                values[start:end] = ref_values[z, x, y]
+            
+            nan_pixels += [start]
+            num_errors += 1
+            return values, nan_pixels, num_errors
+        
+        mid = (start + end) // 2
+        try:
+            # Try interpolating the left half
+            values[start:mid] = interpolator(coordinates[start:mid])
+            # Recursive call for the right half
+            values, nan_pixels, num_errors = self.binary_search_interpolate_1d(interpolator, coordinates, values,
+                                                                               mid, end, num_errors, nan_pixels,
+                                                                               ref_values)
+            return values, nan_pixels, num_errors
+        except LinAlgError:
+            # If interpolation fails, split further
+            values, nan_pixels, num_errors = self.binary_search_interpolate_1d(interpolator, coordinates, values,
+                                                                               start, mid, num_errors, nan_pixels,
+                                                                               ref_values)
+            
+            return self.binary_search_interpolate_1d(interpolator, coordinates, values,
+                                                     mid, end, num_errors, nan_pixels, ref_values)
+    
+    def binary_search_interpolate_3d(self, interpolator, coordinates, downsized_chunk, start, end, error_tolerance=5):
+        
+        if end - start <= error_tolerance:
+            # Gaussian blur on the small 3D segment
+            z, x, y = coordinates[start:end].T
+            downsized_chunk[z, x, y] = gaussian_filter(downsized_chunk[z, x, y], sigma=1)
+            return downsized_chunk
+        
+        mid = (start + end) // 2
+        try:
+            # Interpolate the left half in 3D space
+            z, x, y = coordinates[start:mid].T
+            downsized_chunk[z, x, y] = interpolator(coordinates[start:mid])
+            # Recursive call for the right half
+            return self.binary_search_interpolate_3d(interpolator, coordinates, downsized_chunk, mid, end)
+        except LinAlgError:
+            # Split further if interpolation fails
+            downsized_chunk = self.binary_search_interpolate_3d(interpolator, coordinates, downsized_chunk, start, mid)
+            return self.binary_search_interpolate_3d(interpolator, coordinates, downsized_chunk, mid, end)
 
 
 class XII:
