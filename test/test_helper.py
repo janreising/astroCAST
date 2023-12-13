@@ -25,15 +25,15 @@ class TestLocalCache:
     
     @staticmethod
     @wrapper_local_cache
-    def func_arg(add_fix, cache_path=None):
-        N = float(np.random.random(100000)) + add_fix
+    def func_arg(arg1, cache_path=None):
+        N = float(np.random.random(100000))
         time.sleep(2)
         return N
     
     @staticmethod
     @wrapper_local_cache
-    def func_kwarg(add_fix=2.0, cache_path=None):
-        N = float(np.random.random(100000)) + add_fix
+    def func_kwarg(arg1, arg2=2.0, cache_path=None):
+        N = float(np.random.random(100000))
         time.sleep(2)
         return N
     
@@ -65,21 +65,21 @@ class TestLocalCache:
         if position == "arg":
             
             t0 = time.time()
-            n1 = self.func_arg(data=data, cache_path=temp_dir)
+            n1 = self.func_arg(data, cache_path=temp_dir)
             d1 = time.time() - t0
             
             t0 = time.time()
-            n2 = self.func_arg(data=data, cache_path=temp_dir)
+            n2 = self.func_arg(data, cache_path=temp_dir)
             d2 = time.time() - t0
         
         elif position == "kwarg":
             
             t0 = time.time()
-            n1 = self.func_kwarg(data, cache_path=temp_dir)
+            n1 = self.func_kwarg("arg1", arg2=data, cache_path=temp_dir)
             d1 = time.time() - t0
             
             t0 = time.time()
-            n2 = self.func_kwarg(data, cache_path=temp_dir)
+            n2 = self.func_kwarg("arg1", arg2=data, cache_path=temp_dir)
             d2 = time.time() - t0
         
         else:
