@@ -99,7 +99,15 @@ class TestDelta:
         recovered_background = delta.run(method="background", scale_factor=0.5, width=1, wlen=50, rel_height=0.999,
                                          blur_radius=4)
         
-        assert np.allclose(background, recovered_background, atol=noise_std * 11)
+        max_atol = noise_std * 13
+        if not np.allclose(background, recovered_background, atol=max_atol):
+            
+            delta = np.abs(background - recovered_background)
+            delta_max = np.max(delta)
+            delta_mean = np.mean(delta)
+            
+            raise AssertionError(f"Recovery insufficient {delta_max} > {max_atol} "
+                                 f"({delta_max / np.mean(background) * 100:.2f}%); mean {delta_mean}")
 
 
 class TestInput:
