@@ -99,7 +99,13 @@ def wrapper_local_cache(f):
         
         from astrocast.analysis import Events, Video
         from astrocast.reduction import FeatureExtraction
-        from astrocast.denoising import SubFrameDataset
+        custom_classes = [Events, Video, FeatureExtraction]
+        
+        try:
+            from astrocast.denoising import SubFrameDataset
+            custom_classes += [SubFrameDataset]
+        except ImportError as err:
+            logging.warning(f"Could not import package: {err}")
         
         if isinstance(arg, np.ndarray):
             return hash_from_ndarray(arg)
@@ -111,7 +117,7 @@ def wrapper_local_cache(f):
         elif isinstance(arg, dict):
             return get_hash_from_dict(arg)
         
-        elif isinstance(arg, (Events, Video, FeatureExtraction, SubFrameDataset)):
+        elif isinstance(arg, tuple(custom_classes)):
             return hash(arg)
         
         elif isinstance(arg, (bool, int, tuple)):

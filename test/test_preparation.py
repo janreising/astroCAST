@@ -96,7 +96,8 @@ class TestDelta:
         
         # Initialize Delta object and run background subtraction
         delta = Delta(data)
-        recovered_background = delta.run(method="background", scale_factor=0.5)
+        recovered_background = delta.run(method="background", scale_factor=0.5, width=1, wlen=50, rel_height=0.999,
+                                         blur_radius=4)
         
         assert np.allclose(background, recovered_background, atol=noise_std * 11)
 
