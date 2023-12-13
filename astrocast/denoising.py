@@ -23,14 +23,15 @@ try:
     os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
     import tensorflow as tf
     from tensorflow.keras import backend as K
+    
+    import keras
+    from keras.callbacks import EarlyStopping, ModelCheckpoint
+    from keras.layers import Input, Conv2D, MaxPooling2D, UpSampling2D, Concatenate, BatchNormalization
+    from keras.models import Model, load_model
+    from keras.optimizers import Adam
+
 except ModuleNotFoundError:
     logging.warning(f"tensorflow not available. Some functionality might be missing.")
-
-import keras
-from keras.callbacks import EarlyStopping, ModelCheckpoint
-from keras.layers import Input, Conv2D, MaxPooling2D, UpSampling2D, Concatenate, BatchNormalization
-from keras.models import Model, load_model
-from keras.optimizers import Adam
 
 import numpy as np
 import h5py as h5
