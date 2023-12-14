@@ -385,6 +385,14 @@ def get_data_dimensions(
         return shape, chunksize
 
 
+class DummyTensorFlow:
+    class keras:
+        class utils:
+            class Sequence:
+                def __init__(self, *args, **kwargs):
+                    pass
+
+
 class DummyGenerator:
     
     def __init__(
