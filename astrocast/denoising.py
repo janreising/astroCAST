@@ -32,7 +32,7 @@ try:
 
 except ModuleNotFoundError:
     logging.warning(f"tensorflow not available. Some functionality might be missing.")
-    from helper import DummyTensorFlow as tf
+    from astrocast.helper import DummyTensorFlow as tf
 
 import numpy as np
 import h5py as h5
