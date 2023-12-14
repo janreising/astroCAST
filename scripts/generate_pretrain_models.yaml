@@ -1,30 +1,30 @@
 use_pytorch: True
-use_cpu: False
-root_path: "/tf/data/"
-model_path: "/tf/data/model/"
+use_cpu: True
+root_path: "data/"
+model_path: "models/"
 data:
   1p_exvivo:
-    train: "ast/train*.h5"
-    val: "ast/test*.h5"
+    train: "private_data/train*.h5"
+    val: "private_data/test*.h5"
     loc: "data/"
     max_per_file: 4
   2p_invivo:
-    train: "pub_data/ExVivoSuppRaw.h5"
-    val: "pub_data/ExVivoSuppRaw.h5"
+    train: "public_data/ExVivoSuppRaw.h5"
+    val: "public_data/ExVivoSuppRaw.h5"
     loc: "data/ch0"
     max_per_file: 16
   2p_exvivo:
-    train: "pub_data/InVivoSuppRaw.h5"
-    val: "pub_data/InVivoSuppRaw.h5"
+    train: "public_data/InVivoSuppRaw.h5"
+    val: "public_data/InVivoSuppRaw.h5"
     loc: "data/ch0"
     max_per_file: 16
   2p_Glusnfr:
-    train: "pub_data/GlusnfrSuppRaw.h5"
-    val: "pub_data/GlusnfrSuppRaw.h5"
+    train: "public_data/GlusnfrSuppRaw.h5"
+    val: "public_data/GlusnfrSuppRaw.h5"
     loc: "data/ch0"
     max_per_file: 16
   cell_scan:
-    val: "pub_data/cellscan_scim.h5"
+    val: "public_data/cellscan_scim.h5"
     loc: "data/ch0"
     max_per_file: 16
 param:
