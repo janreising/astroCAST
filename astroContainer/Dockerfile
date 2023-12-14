@@ -22,7 +22,8 @@ RUN cd /home/astroCAST && poetry install -E testing
 
 RUN echo "alias astrocast='poetry run astrocast'" >> ~/.bashrc \
 	&& echo "alias python='poetry run python'" >> ~/.bashrc \
-	&& echo "alias jupyter-lab='poetry run jupyter-lab'" >> ~/.bashrc
+	&& echo "alias jupyter-lab='poetry run jupyter-lab'" >> ~/.bashrc \
+	&& echo "alias pytest='poetry run pytest'" >> ~/.bashrc
 
 # Install astroCAST and jupyterlab
 #RUN pip3 install astrocast[testing,documentation]

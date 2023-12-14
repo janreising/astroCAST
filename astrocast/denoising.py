@@ -32,6 +32,7 @@ try:
 
 except ModuleNotFoundError:
     logging.warning(f"tensorflow not available. Some functionality might be missing.")
+    from astrocast.helper import DummyTensorFlow as tf
 
 import numpy as np
 import h5py as h5
@@ -1202,7 +1203,7 @@ class SubFrameGenerator(tf.keras.utils.Sequence):
             return None
     
     def infer(
-            self, model: Union[Model, str, Path], output: Union[str, Path] = None, out_loc: str = None,
+            self, model: Union[str, Path], output: Union[str, Path] = None, out_loc: str = None,
             dtype: Union[Literal["same"], np.dtype] = "same", chunk_size: Union[str, Tuple[int, int, int]] = None,
             rescale: bool = True
             ) -> Union[np.ndarray, Path, None]:

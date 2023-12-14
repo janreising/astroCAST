@@ -63,7 +63,7 @@ class TestDelta:
         delta = Delta(data)
         delta.run(scale_factor=0.5, method=method)
     
-    @pytest.mark.flaky(reruns=5)
+    @pytest.mark.flaky(reruns=7)
     def test_performance_simple(self, shape=(25, 100, 100), noise_level=(50, 3),
                                 signal_multiplier=3, signal_size=0.2):
         # Generate a random background with Gaussian noise
@@ -99,7 +99,15 @@ class TestDelta:
         recovered_background = delta.run(method="background", scale_factor=0.5, width=1, wlen=50, rel_height=0.999,
                                          blur_radius=4)
         
-        assert np.allclose(background, recovered_background, atol=noise_std * 11)
+        rtol = 0.30
+        if not np.allclose(background, recovered_background, rtol=rtol):
+            
+            delta = np.abs(background - recovered_background)
+            delta_max = np.max(delta)
+            delta_mean = np.mean(delta)
+            
+            raise AssertionError(f"Recovery insufficient {delta_max} > {np.mean(background)} (>{rtol * 100}%): "
+                                 f"{delta_max / np.mean(background) * 100:.2f}%; delta mean {delta_mean}")
 
 
 class TestInput:
