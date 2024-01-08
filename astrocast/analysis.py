@@ -4,7 +4,7 @@ import traceback
 from collections import defaultdict
 from functools import lru_cache
 from pathlib import Path
-from typing import Union, Tuple, Callable, Literal, List, Dict, Any
+from typing import Any, Callable, Dict, List, Literal, Tuple, Union
 
 import dask.array as da
 
@@ -2151,10 +2151,10 @@ class Plotting:
             axx[letters_right[i]].legend()
         
         if title_1 is not None:
-            axx[letters_left[0]].set_title("before denoising")
+            axx[letters_left[0]].set_title(title_1)
         
         if title_2 is not None:
-            axx[letters_right[0]].set_title("after denoising")
+            axx[letters_right[0]].set_title(title_2)
         
         axx[letters_left[-1]].set_xlabel("frames")
         axx[letters_right[-1]].set_xlabel("frames")
