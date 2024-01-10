@@ -22,6 +22,7 @@ from deprecated import deprecated
 from matplotlib import pyplot as plt
 from numpy.linalg import LinAlgError
 from scipy import signal
+from scipy.integrate import simps
 from scipy.interpolate import RBFInterpolator
 from scipy.ndimage import gaussian_filter, minimum_filter1d
 from skimage.transform import rescale, resize
@@ -2350,12 +2351,104 @@ class Signal1D:
         
         return de_trended
     
+    def find_peaks(self, dataset_name: str, prominence: float = 0.1, distance: int = None, norm_window: int = 5,
+                   norm_center: bool = True, window_sighs=None):
+        
+        """
+        
+        :param dataset_name:
+        :param prominence:
+        :param distance: in seconds
+        :param norm_window:
+        :param norm_center:
+        :param window_sighs:
+        :return:
+        """
+        
+        trace = self[dataset_name]
+        
+        # find peaks
+        if distance is not None:
+            distance = int(distance * self.sampling_rate)
+        
+        indices, meta = signal.find_peaks(trace, prominence=prominence, distance=distance)
+        
+        # rename columns to singular
+        for col in ['prominences', 'left_bases', 'right_bases']:
+            values = meta.pop(col, None)
+            if values is not None:
+                meta[col[:-1]] = values
+        
+        # convert range indices to time
+        indices = [trace.index[ind] for ind in indices]
+        meta['left_base'] = [trace.index[ind] for ind in meta['left_base']]
+        meta['right_base'] = [trace.index[ind] for ind in meta['right_base']]
+        
+        # convert to DataFrame
+        peaks = pd.DataFrame.from_dict(meta)
+        peaks["peak"] = indices
+        
+        peaks["val_height"] = [trace[ind] for ind in indices]
+        peaks["val_height_l"] = [trace[ind] for ind in peaks.left_base]
+        peaks["val_height_r"] = [trace[ind] for ind in peaks.right_base]
+        peaks["val_width"] = [x2 - x1 for x1, x2 in zip(peaks.left_base, peaks.right_base)]
+        peaks["val_rel_height"] = peaks.val_height - ((peaks.val_height_l + peaks.val_height_r) / 2)
+        peaks["val_pre_period"] = peaks.peak - peaks.peak.shift(1)
+        peaks["val_post_period"] = peaks.peak.shift(-1) - peaks.peak
+        peaks["val_norm_height"] = peaks.val_rel_height / peaks.val_rel_height.rolling(norm_window,
+                                                                                       center=norm_center).median()
+        peaks["val_frequency"] = 1 / peaks.val_pre_period
+        
+        peaks["val_AUC"] = [simps(trace[left:right]) for left, right in zip(peaks['left_base'], peaks['right_base'])]
+        
+        if window_sighs is not None:
+            rolling_median = peaks.val_norm_height.rolling(window_sighs, center=True, min_periods=1).median()
+            rolling_std = peaks.val_norm_height.rolling(window_sighs, center=True, min_periods=1).std()
+            peaks["sigh"] = [1 if sigh else 0 for sigh in peaks.val_norm_height > rolling_median + rolling_std]
+        
+        peaks = pd.DataFrame(peaks)
+        self.peaks[dataset_name] = peaks
+        
+        return peaks
+    
     @staticmethod
-    def align(video, timing, idx_channel=0, num_channels=2, offset_start=0, offset_stop=0):
+    def align(timing, num_frames, idx_channel=0, num_channels=2, offset_start=0, offset_stop=0):
+        """Align video frames with timing data, extrapolating if necessary.
+
+        Args:
+            video: The video data.
+            timing: Pandas Series mapping frame number to time in seconds.
+            idx_channel: Index of the channel.
+            num_channels: Number of channels.
+            offset_start: Offset to start from.
+            offset_stop: Offset to stop at.
+
+        Returns:
+            A tuple (idx, mapping) where idx is a Pandas Index object and mapping is a dictionary.
+
+        Raises:
+            ValueError: If the length of the indices and the video don't align.
+        """
         
-        idx = np.arange(offset_start + idx_channel, offset_start + len(video) * 2 - offset_stop, num_channels)
+        idx = np.arange(offset_start + idx_channel, offset_start + num_frames * 2 - offset_stop, num_channels)
         
-        if len(idx) != len(video):
+        if len(idx) * num_channels > len(timing):
+            
+            from scipy.stats import linregress
+            
+            # Linearly extrapolate the timing
+            last_idx = timing.index[-1]
+            slope, intercept, _, _, _ = linregress([last_idx - 1, last_idx], [timing.iloc[-2], timing.iloc[-1]])
+            
+            extra_indices = idx[idx > last_idx]
+            extra_timings = slope * extra_indices + intercept
+            
+            # Update timing with extrapolated values
+            timing = pd.concat([timing, pd.Series(extra_timings, index=extra_indices)])
+            
+            logging.warning(f"Timing data was extrapolated beyond its original range ({extra_indices}).")
+        
+        if len(idx) != num_frames:
             raise ValueError(
                     f"video length and indices don't align: video ({len(video)}) vs. idx ({len(idx)}). \n{idx}"
                     )
