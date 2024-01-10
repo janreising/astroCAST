@@ -107,8 +107,7 @@ Note: the explorer window will not be open automatically, you must copy and past
 For more detailed examples and usage instructions, please refer to to the companion paper [here](https://papers.ssrn.com/sol3/papers.cfm?abstract_id=4491483) (currently in preprint).
 
 ## Documentation<a name="documentation">
-[//]: # (The documentation for astroCAST can be found here.)
-We are currently working on the documentation. Please consult the `notebooks/` folder for example usage in the meantime.
+Our [documentation](https://astrocast.readthedocs.io) is hosted on readthedocs.
 
 ## Contributing<a name="contributing">
 Contributions to astroCAST are welcome! If you encounter any issues, have suggestions, or would like to contribute new features, please submit a pull request or open an issue in the GitHub repository.
