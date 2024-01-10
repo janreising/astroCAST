@@ -2252,6 +2252,7 @@ class Signal1D:
         
         elif isinstance(sampling_rate, str):
             
+            # todo convert to datapoints per second
             units = OrderedDict(
                     [("ps", 1e-12), ("ns", 1e-9), ("us", 1e-6), ("ms", 1e-3), ("s", 1), ("min", 60), ("h", 60 * 60)]
                     )
@@ -2262,6 +2263,8 @@ class Signal1D:
                 if sampling_rate.endswith(key):
                     sampling_rate = sampling_rate.replace(key, "")
                     sampling_rate = float(sampling_rate) * value
+                    sampling_rate = 1 / sampling_rate
+                    self.sampling_rate = sampling_rate
                     found_unit = True
                     
                     break
@@ -2271,8 +2274,15 @@ class Signal1D:
                         f"when providing the sampling_rate as string, the value has to end in one of these units: {units.keys()}"
                         )
         
+        # adjust for downsampling
+        if (downsample_factor is not None) and (downsample_factor != 1):
+            sampling_rate /= downsample_factor
+            logging.info(f"New sampling rate: {sampling_rate}")
+            
+            self.sampling_rate = sampling_rate
+        
         # define steps
-        timestep = sampling_rate * num_channels
+        timestep = (1 / sampling_rate) * num_channels
         
         # load data
         with h5py.File(file_path, "r") as f:
@@ -2288,6 +2298,10 @@ class Signal1D:
             
             data_ch = data[ch::num_channels]
             
+            if (downsample_factor is not None) and (downsample_factor != 1):
+                data_ch = data_ch[::downsample_factor]
+            
+            # todo: this doesn't take into account the number of channels (time is doubled for 2 channels)
             if isinstance(timestep, int):
                 idx = pd.RangeIndex(timestep * ch, timestep * ch + len(data_ch) * timestep, timestep)
             elif isinstance(timestep, float):
@@ -2351,6 +2365,15 @@ class Signal1D:
         
         return idx, mapping
     
+    def _convert_to_unit(values, unit):
+        
+        conversion_factor = {"s": 1, "min": 60, "h": 3600}
+        if unit in conversion_factor:
+            values /= conversion_factor[unit]
+        else:
+            logging.warning(f"unit {unit} is unknown. Ignoring parameter.")
+        
+        return values
     def show(
             self, dataset_name, mapping, viewer=None, viewer1d=None, down_sample=100, colormap=None, window=160,
             y_label="XII", x_label="step"
