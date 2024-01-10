@@ -5,13 +5,18 @@ Welcome to astrocast's documentation!
    :maxdepth: 2
    :caption: Contents:
 
+   overview
    quickstart
    installation
    sample_data
    preprocessing
    analysis
-   experimental
+   event_detection
+   quality_control
    visualization
+   experimental
+   faq
+   references
 
 Indices and tables
 ==================
