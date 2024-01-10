@@ -36,7 +36,8 @@ from astrocast.preparation import IO
 
 class Video:
     
-    def __init__(self, data, z_slice=None, loc=None, lazy=False, name=None):
+    def __init__(self, data, z_slice=None, loc=None, lazy=False, name=None,
+                 chunk_strategy: Literal['Z', 'balanced', 'XY'] = 'Z'):
         
         if isinstance(loc, (tuple, list)):
             if len(loc) == 1:
@@ -47,17 +48,17 @@ class Video:
             io = IO()
             
             if isinstance(loc, str):
-                self.data = io.load(data, loc=loc, lazy=lazy, z_slice=z_slice)
+                self.data = io.load(data, loc=loc, lazy=lazy, z_slice=z_slice, chunk_strategy=chunk_strategy)
                 self.Z, self.X, self.Y = self.data.shape
             
             elif isinstance(loc, (tuple, list)):
                 self.data = {}
                 for loc in loc:
-                    self.data[loc] = io.load(data, loc=loc, lazy=lazy, z_slice=z_slice)
+                    self.data[loc] = io.load(data, loc=loc, lazy=lazy, z_slice=z_slice, chunk_strategy=chunk_strategy)
             
             else:
                 logging.info("Data already loaded into memory.")
-                self.data = io.load(data, lazy=lazy, z_slice=z_slice)
+                self.data = io.load(data, lazy=lazy, z_slice=z_slice, chunk_strategy=chunk_strategy)
                 self.Z, self.X, self.Y = self.data.shape
         
         elif isinstance(data, (np.ndarray, da.Array)):
@@ -88,6 +89,9 @@ class Video:
         
         else:
             raise ValueError(f"please provide data as either np.ndarray or dask.array")
+    
+    def __len__(self):
+        return self.Z
     
     def get_data(self, in_memory=False):
         
