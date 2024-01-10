@@ -2338,12 +2338,24 @@ class Signal1D:
         
         return peaks
     
-    def detrend(self, dataset_name, window=25, inplace=True):
+    def detrend(self, dataset_name, absolute=True, window=25, smooth_window=None, inplace=True):
         
         trace = self.container[dataset_name]
+        
+        if absolute:
+            trace = np.abs(trace)
+        
+        # calculate baseline
         trend = trace.rolling(window, center=False).min()
         
+        # subtract baseline
         de_trended = trace - trend
+        
+        # smooth curve
+        if smooth_window is not None:
+            de_trended = de_trended.rolling(smooth_window, center=True).mean()
+        
+        # remove NaN values
         de_trended = de_trended.iloc[window:-window]
         
         if inplace:
@@ -2450,7 +2462,7 @@ class Signal1D:
         
         if len(idx) != num_frames:
             raise ValueError(
-                    f"video length and indices don't align: video ({len(video)}) vs. idx ({len(idx)}). \n{idx}"
+                    f"video length and indices don't align: video ({num_frames}) vs. idx ({len(idx)}). \n{idx}"
                     )
         
         mapping = timing.to_dict()
@@ -2458,6 +2470,7 @@ class Signal1D:
         
         return idx, mapping
     
+    @staticmethod
     def _convert_to_unit(values, unit):
         
         conversion_factor = {"s": 1, "min": 60, "h": 3600}
