@@ -8,6 +8,7 @@ import time
 import warnings
 from functools import partial
 from pathlib import Path
+from typing import Union
 
 import click
 import humanize
@@ -15,6 +16,7 @@ import numpy as np
 import yaml
 from colorama import Fore, init as init_colorama
 from prettytable import PrettyTable
+from tqdm import tqdm
 
 from astrocast.helper import is_docker
 from astrocast.preparation import Input
@@ -1323,6 +1325,106 @@ def push_slurm_tasks(log_path, cfg_path, data_path, tasks, base_command, account
                         slurm.add_arguments(dependency=dependency)
                     
                     last_jobid = slurm.sbatch(cmd)
+
+
+def save_projection(input_path_: Union[Path, str], loc: str, output_path_: Union[Path, str] = None,
+                    lazy=True, overwrite=False) -> None:
+    
+    import h5py
+    from astrocast.analysis import Video
+    from dask.diagnostics import ProgressBar
+    import dask.array as da
+    
+    # check input
+    input_path_ = Path(input_path_)
+    assert input_path_.is_file(), f"Path {input_path_} does not exist."
+    
+    # check output
+    if output_path_ is None:
+        output_path_ = input_path_.with_suffix('.proj.h5')
+    output_path_ = Path(output_path_)
+    
+    # skip if output exists
+    if not overwrite and output_path_.is_file():
+        with h5py.File(output_path_, "r") as f:
+            if loc in f:
+                print(f"Skipping existing output: {loc}")
+    
+    # load video and rechunk
+    video = Video(input_path_, loc=loc, lazy=lazy, chunk_strategy='balanced')
+    
+    # get projection
+    agg_func = da.mean if lazy else np.mean
+    proj = video.get_image_project(agg_func=agg_func, axis=(1, 2))
+    
+    if isinstance(proj, da.Array):
+        with ProgressBar():
+            proj = proj.compute()
+    
+    # save result
+    with h5py.File(output_path_, 'a') as f:
+        
+        # remove previous output
+        if loc in f and overwrite:
+            del f[loc]
+        
+        # save result
+        f.create_dataset(loc, data=proj)
+
+
+def find_all_datasets_recursively(input_path_: Union[Path, str], root_dataset: str = "/") -> list:
+    """
+    Recursively find all datasets in an HDF5 file and return their absolute paths.
+
+    Args:
+    input_path: Path to the HDF5 file.
+    root_dataset: Starting point for the search, defaults to the root group.
+
+    Returns:
+    List of paths (as strings) to each dataset in the HDF5 file.
+    """
+    
+    import h5py
+    
+    def recurse_datasets(h5obj, prefix, res):
+        """
+        Inner recursive function to traverse the HDF5 object.
+        """
+        for key in h5obj.keys():
+            item = h5obj[key]
+            path = f"{prefix}/{key}"
+            if isinstance(item, h5py.Dataset):
+                res.append(path)
+            elif isinstance(item, h5py.Group):
+                recurse_datasets(item, path, res)
+    
+    input_path_ = Path(input_path_)
+    assert input_path_.is_file(), f"Provided path '{input_path_}' is not a file."
+    
+    datasets_ = []
+    with h5py.File(input_path_, 'r') as f:
+        recurse_datasets(f, root_dataset, datasets_)
+    
+    return datasets_
+
+
+@cli.command()
+@click.argument('input_path', type=click.Path(exists=True, dir_okay=False))
+@click.option('--output_path', type=click.Path(dir_okay=False), default=None,
+              help="Optional output file path for projections.")
+@click.option('--lazy', is_flag=True, help="Overwrite existing output files.")
+@click.option('--overwrite', is_flag=True, help="Overwrite existing output files.")
+def export_projection(input_path: Union[Path, str], output_path: Union[Path, str], overwrite: bool, lazy: bool):
+    """Process and save projections of datasets from an HDF5 file."""
+    
+    datasets = find_all_datasets_recursively(input_path)
+    print(f"Found {len(datasets)} datasets: {datasets}")
+    
+    t0 = time.time()
+    for ds in tqdm(datasets, desc="Processing datasets"):
+        save_projection(input_path, loc=ds, output_path_=output_path, overwrite=overwrite, lazy=lazy)
+    
+    print(f"All projections saved in {humanize.naturaltime(time.time() - t0)}")
 
 
 if __name__ == '__main__':
