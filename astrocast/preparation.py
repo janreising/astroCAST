@@ -2480,6 +2480,107 @@ class Signal1D:
             logging.warning(f"unit {unit} is unknown. Ignoring parameter.")
         
         return values
+    
+    def plot(self, dataset_name: str, figsize=(10, 3), ax=None, unit: Literal["s", "min", "h"] = "s",
+             selection: Tuple[int, int] = None, show_peaks=True, index=None):
+        
+        # create plot
+        if ax is None:
+            fig, ax = plt.subplots(1, 1, figsize=figsize)
+        
+        # get data
+        trace = self[dataset_name].copy()
+        
+        if index is not None:
+            trace.index = index
+        
+        peaks = None
+        if show_peaks and dataset_name in self.peaks:
+            peaks = self.peaks[dataset_name].peak.copy()
+        
+        # adjust x-axis label
+        trace.index = self._convert_to_unit(trace.index, unit)
+        
+        if peaks is not None:
+            peaks = self._convert_to_unit(peaks, unit)
+        
+        # select values
+        if selection is not None:
+            t0, t1 = selection
+            trace = trace[(trace.index >= t0) & (trace.index < t1)]
+            
+            if peaks is not None:
+                peaks = peaks[(peaks >= t0) & (peaks < t1)]
+        
+        ax.plot(trace)
+        
+        if peaks is not None:
+            for px in peaks.tolist():
+                ax.axvline(px, color="red", alpha=0.5)
+        
+        ax.set_xlabel(f"Time ({unit})")
+        ax.set_ylabel(f"{dataset_name} (AU)")
+        
+        return ax
+    
+    def plot_peaks(self, dataset_name, column_name="val_frequency", notebook_mode: bool = False, figsize=(20, 3),
+                   selection: Tuple[int, int] = None, unit: Literal["s", "min", "h"] = "s", v_lines: List[int] = None,
+                   marker="x", color="black", alpha=0.75, ax=None):
+        """Plot peaks from a pandas DataFrame.
+
+        This function creates a scatter plot of peak values. In notebook mode, it provides an interactive widget to
+        select the column for plotting.
+
+        Args:
+          peaks: pandas DataFrame with peak data.
+          notebook_mode: If True, enables interactive mode for Jupyter notebooks with a widget to select columns.
+
+        Example:
+          # Example DataFrame
+          df = pd.DataFrame({'peak': [1, 2, 3], 'val_frequency': [0.1, 0.2, 0.3]})
+          plot_peaks(df, notebook_mode=True)
+        """
+        
+        peaks = self.peaks[dataset_name].copy()
+        peaks.peak = self._convert_to_unit(peaks.peak, unit)
+        
+        if selection is not None:
+            t0, t1 = selection
+            peaks = peaks[(peaks.peak >= t0) & (peaks.peak < t1)]
+            
+            if v_lines is not None:
+                v_lines = [i for i in v_lines if (i >= t0) and (i < t1)]
+        
+        def plot(column):
+            
+            if notebook_mode or ax is None:
+                fig, axx = plt.subplots(1, 1, figsize=figsize)
+            else:
+                axx = ax
+            
+            # scatter plots
+            axx.scatter(peaks.peak, peaks[column], marker=marker, color=color, alpha=alpha)
+            axx.set_ylim(0, None)
+            
+            if v_lines is not None:
+                for vl in v_lines:
+                    axx.axvline(vl, color="gray", linestyle="--")
+            
+            axx.axhline(peaks[column].median(), color="gray", linestyle="--")
+            
+            axx.set_xlabel("Time (s)")
+            axx.set_ylabel(column.replace("val_", ""))
+        
+        if notebook_mode:
+            
+            from ipywidgets import Dropdown, interact
+            
+            cols = [col for col in peaks.columns if col != "peak"]
+            dropdown = Dropdown(options=cols)
+            interact(plot, column=dropdown)
+        else:
+            plot(column_name)  # Default column or modify as needed
+    
     def show(
             self, dataset_name, mapping, viewer=None, viewer1d=None, down_sample=100, colormap=None, window=160,
             y_label="XII", x_label="step"
