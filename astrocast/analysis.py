@@ -89,6 +89,9 @@ class Video:
         else:
             raise ValueError(f"please provide data as either np.ndarray or dask.array")
     
+    def __len__(self):
+        return self.Z
+    
     def get_data(self, in_memory=False):
         
         if in_memory and isinstance(self.data, da.Array):
