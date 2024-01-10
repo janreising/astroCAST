@@ -2224,13 +2224,24 @@ class Delta:
             return self.binary_search_interpolate_3d(interpolator, coordinates, downsized_chunk, mid, end)
 
 
-class XII:
+class Signal1D:
     
-    def __init__(self, file_path, dataset_name, num_channels=1, sampling_rate=None, channel_names=None):
-        self.container = self.load_xii(file_path, dataset_name, num_channels, sampling_rate, channel_names)
+    def __init__(self, file_path: Union[str, Path], dataset_name: str, num_channels: int = 1,
+                 sampling_rate: Union[int, float, str] = None, channel_names: List[str] = None,
+                 downsample_factor: Union[int, float] = 1, logging_level=logging.WARNING):
+        
+        logging.basicConfig(level=logging_level)
+        
+        self.sampling_rate = sampling_rate
+        self.downsample_factor = downsample_factor
+        
+        self.container = self._load(file_path, dataset_name, num_channels, sampling_rate, channel_names,
+                                    downsample_factor)
+        self.peaks = {}
     
-    @staticmethod
-    def load_xii(file_path, dataset_name, num_channels=1, sampling_rate=None, channel_names=None):
+    def _load(self, file_path: Union[str, Path], dataset_name: str, num_channels: int = 1,
+              sampling_rate: Union[int, float, str] = None, channel_names: List[str] = None,
+              downsample_factor: Union[int, float] = None):
         
         # define sampling rate
         if sampling_rate is None:
