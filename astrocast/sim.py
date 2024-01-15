@@ -125,6 +125,26 @@ class EnvironmentGrid:
         x, y = location
         return self.shared_arrays[molecule][0][x][y]
     
+    def set_random_starting_concentration(self, molecule: str, n_spots: int = 10,
+                                          concentration_boundaries: Tuple[int, int] = (75, 150),
+                                          border: int = 3):
+        
+        if molecule not in self.molecules:
+            logging.error(f"Molecule {molecule} not found in the grid.")
+        
+        arr, _ = self.shared_arrays[molecule]
+        
+        locations = []
+        for n in range(n_spots):
+            x, y = (np.random.randint(border, self.grid_size[0] - border),
+                    np.random.randint(border, self.grid_size[1] - border))
+            concentration = np.random.randint(*concentration_boundaries)
+            
+            arr[x, y] = concentration
+            locations.append((x, y, concentration))
+        
+        return locations
+    
     @staticmethod
     def _check_cfl_condition(diffusion_rate: float, dt: float, dx=1):
         """
