@@ -293,16 +293,44 @@ class AstrocyteNode:
 
 
 class GlutamateReleaseManager:
-    def __init__(self, environment_grid):
+    def __init__(self, environment_grid: EnvironmentGrid, hotspots=None):
+        """
+        Initialize the GlutamateReleaseManager.
+
+        Args:
+            environment_grid: Instance of the EnvironmentGrid class.
+            hotspots: Optional list of tuples representing hotspot coordinates for glutamate release.
+        """
         self.environment_grid = environment_grid
+        self.hotspots = hotspots if hotspots else []
     
-    def stochastic_release(self):
+    def step(self, signal_function=None):
+        """
+        Advance the glutamate release simulation by one step.
+
+        Args:
+            signal_function: Optional function that returns a signal strength between 0 and 1.
+        """
+        if signal_function:
+            self._signal_based_release(signal_function)
+        else:
+            self._stochastic_release()
+    
+    def _stochastic_release(self):
+        """
+        Simulate a stochastic (random) release of glutamate.
+        """
+        # TODO: Implement stochastic release logic
         pass
     
-    def signal_based_release(self, signal):
-        pass
-    
-    def update_environment(self):
+    def _signal_based_release(self, signal_function):
+        """
+        Release glutamate based on a specific signal or function.
+
+        Args:
+            signal_function: Function that defines the release pattern.
+        """
+        # TODO: Implement signal-based release logic
         pass
 
 
