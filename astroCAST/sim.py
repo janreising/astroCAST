@@ -16,16 +16,45 @@ class SimulationEnvironment:
 
 
 class EnvironmentGrid:
-    def __init__(self):
-        self.grid = []  # Grid structure to store molecular concentrations
+    def __init__(self, grid_size, num_molecules):
+        """
+        Initialize the environment grid.
+
+        Args:
+            grid_size: A tuple representing the dimensions of the grid (NxM).
+            num_molecules: The number of different molecules to track in each grid cell.
+        """
+        self.grid_size = grid_size
+        self.num_molecules = num_molecules
+        self.grid = [[[0 for _ in range(num_molecules)] for _ in range(grid_size[1])] for _ in range(grid_size[0])]
     
     def update_concentrations(self):
+        """
+        Update the concentrations in the grid.
+        This method should implement the logic for molecular diffusion.
+        """
+        # TODO: Implement diffusion logic using the finite difference method
         pass
     
-    def get_concentration_at(self, location):
-        pass
+    def get_concentration_at(self, location, molecule_index):
+        """
+        Get the concentration of a specific molecule at a given location.
+
+        Args:
+            location: A tuple (x, y) representing the grid coordinates.
+            molecule_index: Index of the molecule in the grid cell.
+
+        Returns:
+            The concentration of the specified molecule at the given location.
+        """
+        x, y = location
+        return self.grid[x][y][molecule_index]
     
     def apply_diffusion(self):
+        """
+        Apply the diffusion process to the grid.
+        """
+        # TODO: Apply the diffusion equation to each cell in the grid
         pass
 
 
