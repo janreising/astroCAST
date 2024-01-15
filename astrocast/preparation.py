@@ -1105,7 +1105,6 @@ class IO:
 
 
 class MotionCorrection:
-    # noinspection GrazieInspection
     """ Class for performing motion correction based on the Jax-accelerated implementation of NoRMCorre.
 
         Args:
@@ -1470,7 +1469,6 @@ class Delta:
             rbf_epsilon: float = None, rbf_degree: int = None, prominence: float = 0.1,
             wlen: int = 100, distance: int = 10, width: int = 5, rel_height: float = 0.95, max_chunk_size_mb: int = 10
             ) -> Union[np.ndarray, da.Array]:
-        # noinspection GrazieInspection
         """
                 Performs bleach correction on the input data using specified methods and parameters.
 
@@ -1540,7 +1538,6 @@ class Delta:
             chunk_strategy: Literal['balanced', 'XY', 'Z'] = "balanced", chunks: Tuple[int, int, int] = None,
             compression: Literal['gzip', 'szip', 'lz4'] = None, overwrite: bool = False
             ):
-        # noinspection GrazieInspection
         """
                 Saves the result data to a specified file.
 
@@ -1665,7 +1662,6 @@ class Delta:
     def _calculate_delta_min_filter(
             arr: np.ndarray, window: int, method: Literal['background', 'dF', 'dFF'] = "dF", inplace: bool = False
             ) -> np.ndarray:
-        # noinspection GrazieInspection
         """
                 Calculates a delta value based on a specified method, applied to a 3D numpy array with a minimum filter over a window.
 

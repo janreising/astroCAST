@@ -255,9 +255,7 @@ class Video:
         return fig
 
 
-# noinspection GrazieInspection
 class Events(CachedClass):
-    # noinspection GrazieInspection
     """
         The Events class manages and processes astrocytic events detected in timeseries calcium recordings. It provides
         various functionalities such as loading, extending, filtering, and analyzing events.
@@ -468,7 +466,6 @@ class Events(CachedClass):
         return is_ragged(self.events.trace.tolist())
     
     def add_clustering(self, cluster_lookup_table: dict, column_name: str = "cluster") -> None:
-        # noinspection GrazieInspection
         """
                 Adds a clustering column to the events DataFrame based on a provided lookup table.
 
@@ -523,7 +520,6 @@ class Events(CachedClass):
         return results
     
     def get_counts_per_cluster(self, cluster_col: str, group_col: str = None) -> pd.DataFrame:
-        # noinspection GrazieInspection
         """
                 Computes the counts of events per cluster, optionally grouped by an additional column.
 
@@ -1180,7 +1176,6 @@ class Events(CachedClass):
                     'file_name', 'subject_id', 'group', 'z0', 'z1', 'x0', 'x1', 'y0', 'y1', 'mask', 'contours',
                     'footprint', 'fp_cx', 'fp_cy', 'trace', 'error', 'cx', 'cy')
             ) -> Union[pd.DataFrame, pd.Series]:
-        # noinspection GrazieInspection
         """
                 Calculate and return summary statistics (mean ± standard deviation) for event data.
 
@@ -1248,7 +1243,6 @@ class Events(CachedClass):
             multi_timing_behavior: Literal['first', 'expand', 'exclude'] = "first",
             output_format: Literal['array', 'dataframe'] = "array"
             ) -> Union[np.ndarray, pd.DataFrame]:
-        # noinspection GrazieInspection
         """
                 Extracts trials based on given timings and trial length, with options for handling multiple timings and output format.
 
@@ -1374,7 +1368,6 @@ class Events(CachedClass):
             normalization_instructions: Dict[int, List[Union[str, Dict[str, str]]]] = None, show_progress: bool = True,
             memmap_path: Union[str, Path] = None, save_path: Union[str, Path] = None, save_param: Dict[str, Any] = None
             ) -> Union[pd.DataFrame, Tuple[np.ndarray, List[int], List[int]]]:
-        # noinspection GrazieInspection
         """
                 Extends the footprint of individual events either over the entire z-range or a fixed number of bordering
                 frames of a time series recording.
@@ -1654,7 +1647,6 @@ class Events(CachedClass):
             self, min_length: Union[int, None] = None, pad_mode: str = "edge", max_length: Union[int, None] = None,
             inplace: bool = False
             ) -> pd.DataFrame:
-        # noinspection GrazieInspection
         """
                 Adjusts the length of each event trace in a DataFrame to meet specified minimum and/or maximum
                 length requirements.
@@ -1865,7 +1857,6 @@ class Events(CachedClass):
         return cluster_lookup_table
 
 
-# noinspection GrazieInspection
 class Plotting:
     
     def __init__(self, events: Events = None):
@@ -1926,7 +1917,6 @@ class Plotting:
         
         elif len(f) == 1:
             
-            # noinspection GrazieInspection
             if f[0] > max_n:
                 # If only one factor and it exceeds max_n, set grid dimensions to ceil(sqrt(N))
                 nx = ny = int(np.ceil(np.sqrt(N)))
