@@ -1,4 +1,5 @@
 import numpy as np
+import pytest
 
 from astrocast.sim import EnvironmentGrid
 
@@ -39,3 +40,16 @@ class TestEnvironmentGrid:
         
         border_sum = np.sum(arr[0, :]) + np.sum(arr[-1, :]) + np.sum(arr[:, 0]) + np.sum(arr[:, -1])
         assert border_sum == 0
+    
+    def test_set_concentration(self):
+        raise NotImplementedError
+    
+    @pytest.mark.parametrize("concentration", [-1, 1])
+    def test_update_concentration(self, concentration):
+        raise NotImplementedError
+
+
+class TestGlutamateReleaseManager:
+    
+    def test_vanilla(self):
+        raise NotImplementedError
