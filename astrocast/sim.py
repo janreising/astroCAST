@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import logging
 from multiprocessing import shared_memory
 from typing import Callable, List, Tuple, Union
@@ -7,6 +9,7 @@ import seaborn as sns
 from IPython.core.display import HTML
 from matplotlib import pyplot as plt
 from matplotlib.animation import FuncAnimation
+from rtree import index
 
 
 class EnvironmentGrid:
@@ -505,7 +508,10 @@ class Simulation:
 
 
 class Astrocyte:
-    def __init__(self):
+    
+    def __init__(self, environment_grid: EnvironmentGrid):
+        self.environment_grid = environment_grid
+        self.spatial_index = RtreeSpatialIndex()
         self.branches = []
     
     def manage_growth(self):
@@ -528,19 +534,143 @@ class AstrocyteNode:
 
 class RtreeSpatialIndex:
     def __init__(self):
-        self.rtree = None  # Placeholder for the R-tree structure
+        # Create an R-tree index
+        self.rtree = index.Index()
+        self.branch_counter = 0
     
-    def search(self, region):
-        pass
+    def search(self, region: Union[Tuple[int, int, int, int], AstrocyteBranch]):
+        """
+        Search for branches intersecting with the given region.
+
+        Args:
+            region: The region to search in (xmin, ymin, xmax, ymax).
+
+        Returns:
+            A list of branch IDs that intersect with the region.
+        """
+        
+        if isinstance(region, AstrocyteBranch):
+            region = self._get_bbox(region)
+        
+        return list(self.rtree.intersection(region))
     
     def insert(self, branch):
-        pass
+        """
+        Insert a new branch into the R-tree.
+
+        Args:
+            branch: The branch to insert.
+        """
+        bbox = self._get_bbox(branch)
+        self.rtree.insert(branch.id, bbox)
+        
+        self.branch_counter += 1
     
     def remove(self, branch):
-        pass
+        """
+        Remove a branch from the R-tree.
+
+        Args:
+            branch: The branch to remove.
+        """
+        self.rtree.delete(branch.id, self._get_bbox(branch))
     
     def update(self, branch):
-        pass
+        """
+        Update a branch in the R-tree.
+
+        Args:
+            branch: The branch to update.
+        """
+        self.remove(branch)
+        self.insert(branch)
+    
+    @staticmethod
+    def _get_bbox(branch):
+        """
+        Get the bounding box of a branch.
+
+        Args:
+            branch: The branch to get the bounding box for.
+
+        Returns:
+            The bounding box (xmin, ymin, xmax, ymax).
+        """
+        xmin = min(branch.start.x, branch.end.x)
+        ymin = min(branch.start.y, branch.end.y)
+        xmax = max(branch.start.x, branch.end.x)
+        ymax = max(branch.start.y, branch.end.y)
+        return xmin, ymin, xmax, ymax
+    
+    @staticmethod
+    def plot_line_low(x0, y0, x1, y1):
+        """
+        Helper function for Bresenham's algorithm for lines with absolute slope less than 1.
+        """
+        points = []
+        dx = x1 - x0
+        dy = y1 - y0
+        yi = 1
+        if dy < 0:
+            yi = -1
+            dy = -dy
+        D = (2 * dy) - dx
+        y = y0
+        
+        for x in range(x0, x1 + 1):
+            points.append((x, y))
+            if D > 0:
+                y += yi
+                D += (2 * (dy - dx))
+            else:
+                D += 2 * dy
+        return points
+    
+    @staticmethod
+    def plot_line_high(x0, y0, x1, y1):
+        """
+        Helper function for Bresenham's algorithm for lines with absolute slope greater than 1.
+        """
+        points = []
+        dx = x1 - x0
+        dy = y1 - y0
+        xi = 1
+        if dx < 0:
+            xi = -1
+            dx = -dx
+        D = (2 * dx) - dy
+        x = x0
+        
+        for y in range(y0, y1 + 1):
+            points.append((x, y))
+            if D > 0:
+                x += xi
+                D += (2 * (dx - dy))
+            else:
+                D += 2 * dx
+        return points
+    
+    def rasterize_line(self, x0, y0, x1, y1):
+        """
+        Rasterize a line using Bresenham's line algorithm.
+
+        Args:
+            x0, y0: The starting point of the line.
+            x1, y1: The ending point of the line.
+
+        Returns:
+            A list of grid cells (x, y) that the line intersects.
+        """
+        if abs(y1 - y0) < abs(x1 - x0):
+            if x0 > x1:
+                return self.plot_line_low(x1, y1, x0, y0)
+            else:
+                return self.plot_line_low(x0, y0, x1, y1)
+        else:
+            if y0 > y1:
+                return self.plot_line_high(x1, y1, x0, y0)
+            else:
+                return self.plot_line_high(x0, y0, x1, y1)
 
 
 class AstrocyteBranch:
@@ -551,9 +681,22 @@ class AstrocyteBranch:
     repellent_release = None
     history = None
     
-    def __init__(self, parent, start: Union[Tuple[int, int, int], AstrocyteNode],
-                 end: Union[Tuple[int, int, int], AstrocyteNode]):
+    def __init__(self, parent, nucleus: Astrocyte, start: Union[Tuple[int, int, int], AstrocyteNode],
+                 end: Union[Tuple[int, int, int], AstrocyteNode], branch_id: int = 0):
+        
+        self.direction_threshold = None
+        self.spatial_index = None
+        self.spawn_length = None
+        self.spawn_radius = None
+        self.min_radius = None
+        self.atp_cost_per_unit_surface = None
+        self.growth_factor = None
+        self.volume_factor = None
+        self.surface_factor = None
+        
         self.parent: AstrocyteBranch = parent
+        self.nucleus = nucleus
+        self.id = branch_id
         self.children: List[AstrocyteBranch] = []
         self.start: AstrocyteNode = AstrocyteNode(*start) if isinstance(start, tuple) else start
         self.end: AstrocyteNode = AstrocyteNode(*end) if isinstance(end, tuple) else end
@@ -592,32 +735,32 @@ class AstrocyteBranch:
         
         self.molecules[molecule] = concentration
     
-    def get_interacting_pixels(self) -> np.ndarray:
-        
-        # todo: collect pixels that the branch branch overlaps with or is adjacent to using the RtreeSpatialIndex
-        
-        # Assuming a method to get pixels from the spatial index is available
-        # And that the spatial index has been updated elsewhere when branches were created/updated
-        # This method would return a numpy array of the pixel coordinates that this branch interacts with
-        # The actual implementation will depend on how the spatial index is set up and queried
-        pass
+    def get_interacting_pixels(self) -> List[Tuple[int, int]]:
+        """
+        Get the grid cells (pixels) that are intersected by the current branch.
+
+        Returns:
+            A list of grid cells (x, y) that the branch intersects.
+        """
+        # Use the rasterize_line method from the RtreeSpatialIndex to get the pixels
+        interacting_pixels = self.nucleus.spatial_index.rasterize_line(self.start.x, self.start.y, self.end.x,
+                                                                       self.end.y)
+        return interacting_pixels
     
     def get_environment(self):
-        # Assuming environment_grid is accessible and has a method to get the concentration at a location
-        # Sum the concentrations for all interacting pixels
         
         # todo: move this functionality to EnvironmentGrid
         total_concentration = {molecule: 0.0 for molecule in self.molecules}
         for pixel in self.interacting_pixels:
             for molecule in self.molecules:
-                total_concentration[molecule] += self.environment_grid.get_concentration_at(pixel, molecule)
+                total_concentration[molecule] += self.nucleus.environment_grid.get_concentration_at(pixel, molecule)
         return total_concentration
     
     def update_environment(self, molecule, concentration):
         # Split the concentration evenly over all interacting pixels
         concentration_per_pixel = concentration / len(self.interacting_pixels)
         for pixel in self.interacting_pixels:
-            self.environment_grid.update_concentration_at(pixel, molecule, concentration_per_pixel)
+            self.nucleus.environment_grid.update_concentration_at(pixel, molecule, concentration_per_pixel)
     
     def _simulate_calcium(self):
         pass
@@ -668,6 +811,7 @@ class AstrocyteBranch:
         # Calculate the Euclidean distance between the start and end nodes to get the slant height of the truncated cone
         h = np.sqrt((end.x - start.x) ** 2 +
                     (end.y - start.y) ** 2)
+        
         # Use the radii of the start and end nodes
         r1, r2 = start.radius, end.radius
         
@@ -681,7 +825,7 @@ class AstrocyteBranch:
         self.interacting_pixels = self.get_interacting_pixels()
         self.volume = self.calculate_branch_volume()
         self.surface_area = self.calculate_branch_surface()
-        self.repellent_release = self.calculate_repellent_release()
+        self.repellent_release = self.calculate_repellent_release(self.surface_factor, self.volume_factor)
     
     def calculate_removal_capacity(self, uptake_rate: float) -> float:
         """
@@ -718,10 +862,11 @@ class AstrocyteBranch:
     
     def _act(self):
         
-        self._action_grow_or_shrink()
         # we prune automatically if the end radius drops below min_radius
+        self._action_grow_or_shrink(self.growth_factor, self.atp_cost_per_unit_surface, self.min_radius)
         
-        self._action_spawn_or_move()
+        self._action_spawn_or_move(self.spawn_radius, self.spawn_length, self.nucleus.environment_grid,
+                                   self.spatial_index, self.direction_threshold)
     
     def _action_grow_or_shrink(self, growth_factor: float, atp_cost_per_unit_surface: float, min_radius: float):
         """
@@ -807,23 +952,19 @@ class AstrocyteBranch:
             self._spawn_new_branch(spawn_radius, spawn_length, direction, spatial_index)
         else:
             # If direction is similar and branch has no children, move the branch
-            self._move_branch(spawn_length, direction, spatial_index)
+            self._move_branch(spawn_length, direction)
     
-    def _action_prune(self, spatial_index: RtreeSpatialIndex):
+    def _action_prune(self):
         """
         Prune the branch if it has no children.
-
-        Args:
-            spatial_index: The spatial index for managing branches.
         """
         # Ensure no children exist; else skip
-        # todo: how to proceed?
         if self.children:
             logging.warning("Branch has children, cannot prune.")
             return
         
         # Remove self from spatialIndexTree
-        spatial_index.remove(self)
+        self.spatial_index.remove(self)
         
         # Delete self from parent
         if self.parent:
@@ -857,7 +998,7 @@ class AstrocyteBranch:
                 )
         
         # Create the new branch
-        new_branch = AstrocyteBranch(parent=self, start=start_point, end=end_point)
+        new_branch = AstrocyteBranch(parent=self, start=start_point, end=end_point, nucleus=self.nucleus)
         
         # calculate cost
         atp_cost = atp_cost_per_unit_surface * new_branch.surface_area
@@ -872,14 +1013,13 @@ class AstrocyteBranch:
             # remove atp
             self.update_concentration("ATP", atp_cost)
     
-    def _move_branch(self, spawn_length: float, direction: Tuple[float, float], spatial_index: RtreeSpatialIndex):
+    def _move_branch(self, spawn_length: float, direction: Tuple[float, float]):
         """
         Move the current branch in a specified direction.
 
         Args:
             spawn_length: The length of the movement.
             direction: The direction for the movement.
-            spatial_index: The spatial index for managing branches.
         """
         # Calculate new end point
         new_end_position = (
@@ -892,7 +1032,7 @@ class AstrocyteBranch:
         self.end.x, self.end.y = new_end_position[:2]
         
         # Update the spatial index before changing the position
-        spatial_index.update(self, new_position=new_end_position)
+        self.nucleus.spatial_index.update(self)
         
         # Update the physical properties of the branch
         self.update_physical_properties()
@@ -914,7 +1054,7 @@ class AstrocyteBranch:
         dx = np.random.uniform(-1, 1)
         dy = np.random.uniform(-1, 1)
         norm = np.sqrt(dx ** 2 + dy ** 2)
-        return (dx / norm, dy / norm)
+        return dx / norm, dy / norm
 
 
 class DataLogger:
