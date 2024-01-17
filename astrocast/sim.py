@@ -515,25 +515,62 @@ class Astrocyte:
         pass
 
 
+class AstrocyteNode:
+    
+    def __init__(self, x, y, radius):
+        self.radius = radius
+        self.x = int(x)
+        self.y = int(y)
+    
+    def copy(self):
+        return AstrocyteNode(self.x, self.y, self.radius)
+
+
+class RtreeSpatialIndex:
+    def __init__(self):
+        self.rtree = None  # Placeholder for the R-tree structure
+    
+    def search(self, region):
+        pass
+    
+    def insert(self, branch):
+        pass
+    
+    def remove(self, branch):
+        pass
+    
+    def update(self, branch):
+        pass
+
+
 class AstrocyteBranch:
     
-    def __init__(self, parent, start: Tuple[int, int, int], end: Tuple[int, int, int]):
+    interacting_pixels = None
+    volume = None
+    surface_area = None
+    repellent_release = None
+    history = None
+    
+    def __init__(self, parent, start: Union[Tuple[int, int, int], AstrocyteNode],
+                 end: Union[Tuple[int, int, int], AstrocyteNode]):
         self.parent: AstrocyteBranch = parent
         self.children: List[AstrocyteBranch] = []
-        self.start: AstrocyteNode = AstrocyteNode(*start)
-        self.end: AstrocyteNode = AstrocyteNode(*end)
+        self.start: AstrocyteNode = AstrocyteNode(*start) if isinstance(start, tuple) else start
+        self.end: AstrocyteNode = AstrocyteNode(*end) if isinstance(end, tuple) else end
         
         self.molecules = {"glutamate": 0.0, "calcium": 0.0, "ATP": 0.0}
-        self.interacting_pixels = self.get_interacting_pixels()
+        
+        self.update_physical_properties()
         
         # todo: decide how to keep track of internal and external concentrations to guess steady state
-        self.history = None
     
     def step(self):
         self._simulate_calcium()
         self._simulate_atp()
         self._simulate_glutamate()
-        self._decide_action()
+        
+        # run through actions
+        self._act()
         
         # todo: update history
     
@@ -559,126 +596,325 @@ class AstrocyteBranch:
         
         # todo: collect pixels that the branch branch overlaps with or is adjacent to using the RtreeSpatialIndex
         
+        # Assuming a method to get pixels from the spatial index is available
+        # And that the spatial index has been updated elsewhere when branches were created/updated
+        # This method would return a numpy array of the pixel coordinates that this branch interacts with
+        # The actual implementation will depend on how the spatial index is set up and queried
         pass
     
     def get_environment(self):
+        # Assuming environment_grid is accessible and has a method to get the concentration at a location
+        # Sum the concentrations for all interacting pixels
         
-        # todo: sum the concentration of all identified pixels
-        
-        # todo return the sum
-        
-        pass
+        # todo: move this functionality to EnvironmentGrid
+        total_concentration = {molecule: 0.0 for molecule in self.molecules}
+        for pixel in self.interacting_pixels:
+            for molecule in self.molecules:
+                total_concentration[molecule] += self.environment_grid.get_concentration_at(pixel, molecule)
+        return total_concentration
     
     def update_environment(self, molecule, concentration):
-        
-        # todo: split concentration over all pixels
-        
-        # todo: update each pixel in the grid with the appropriate value
-        
-        pass
+        # Split the concentration evenly over all interacting pixels
+        concentration_per_pixel = concentration / len(self.interacting_pixels)
+        for pixel in self.interacting_pixels:
+            self.environment_grid.update_concentration_at(pixel, molecule, concentration_per_pixel)
     
     def _simulate_calcium(self):
         pass
     
     def _simulate_atp(self):
-        
-        # todo: get concentration in parent and child
-        
-        # todo: move atp based on concentration gradient
-        
-        pass
+        # Get ATP concentration from the parent and child, if they exist
+        parent_atp = self.parent.get_concentration("ATP") if self.parent else 0
+        child_atp = min(child.get_concentration("ATP") for child in self.children) if self.children else 0
+        # todo: Move ATP based on concentration gradient
+        # This is a placeholder; the actual movement logic needs to be implemented based on your model
+        # self.set_concentration("ATP", (parent_atp + child_atp) / 2)
     
     def _simulate_glutamate(self):
+        # todo: Calculate the capacity for glutamate removal based on the branch's volume
+        # This is a placeholder for the capacity calculation
+        glutamate_removal_capacity = self.calculate_removal_capacity()
         
-        # todo: calculate maximum capacity for glutamate removal
-        
-        # todo: remove glutamate from the external environment
+        # todo: Remove glutamate from the external environment
+        # This is a placeholder; the actual removal logic needs to be implemented based on your model
+        environmental_glutamate = self.get_environment()["glutamate"]
+        glutamate_to_remove = min(glutamate_removal_capacity, environmental_glutamate)
+        self.update_environment("glutamate", -glutamate_to_remove)
         
         # todo: decide whether or not to keep track of internal glutamate
         
-        pass
+        # todo: add ATP cost of converting glutamate
     
     def _simulate_repellent(self):
-        
-        # todo: calculate released repellent based on branch volume (radius of start and end node)
-        
-        # todo: release repellent into environment
-        
-        pass
+        # Release repellent into environment, assuming a fixed concentration for demonstration purposes
+        self.update_environment("repellent", self.repellent_release)
     
-    def _decide_action(self):
+    def calculate_branch_volume(self):
+        # Calculate the Euclidean distance between the start and end nodes to get the height of the truncated cone
+        h = np.sqrt((self.end.x - self.start.x) ** 2 +
+                    (self.end.y - self.start.y) ** 2)
+        # Use the radii of the start and end nodes
+        r1, r2 = self.start.radius, self.end.radius
         
-        # todo: decide on rules for decision making
-        
-        # todo: choose action grow, spawn, prune, move
-        
-        pass
+        # Volume of a truncated cone
+        volume = (1 / 3) * np.pi * h * (r1 ** 2 + r1 * r2 + r2 ** 2)
+        return volume
     
-    def _action_grow(self):
+    def calculate_branch_surface(self, start: AstrocyteNode = None, end: AstrocyteNode = None):
         
-        # todo: calculate how much ATP is needed based on start and end node radius
+        start = self.start if start is None else start
+        end = self.end if end is None else end
         
-        # todo: check that parent node always has bigger radius then start node
+        # Calculate the Euclidean distance between the start and end nodes to get the slant height of the truncated cone
+        h = np.sqrt((end.x - start.x) ** 2 +
+                    (end.y - start.y) ** 2)
+        # Use the radii of the start and end nodes
+        r1, r2 = start.radius, end.radius
         
-        # todo: increase radius of start and end node
-        
-        # todo: remove ATP concentration
-        
-        pass
+        # Lateral surface area of a truncated cone
+        # This calculation assumes that 'h' is the slant height of the cone's lateral surface
+        slant_height = np.sqrt((r2 - r1) ** 2 + h ** 2)
+        surface = np.pi * (r1 + r2) * slant_height
+        return surface
     
-    def _action_spawn_branch(self):
-        
-        # todo: calculate direction of new branch based on glutamate and repellent gradients
-        
-        # todo: create new branch
-        
-        # todo: save child to self.children
-        
-        # todo: update spatialIndexTree
-        
-        pass
+    def update_physical_properties(self):
+        self.interacting_pixels = self.get_interacting_pixels()
+        self.volume = self.calculate_branch_volume()
+        self.surface_area = self.calculate_branch_surface()
+        self.repellent_release = self.calculate_repellent_release()
     
-    def _action_prune(self):
-        
-        # todo: ensure no children exist; else skip
-        
-        # todo: remove self from spatialIndexTree
-        
-        # todo: delete self from parent
-        
-        pass
-    
-    def _action_move(self):
-        
-        # todo: choose new end Node location based on glutamate gradient and repellent
-        
-        # todo: update end node
-        
-        # todo: update start node location in children if they exist
-        
-        pass
+    def calculate_removal_capacity(self, uptake_rate: float) -> float:
+        """
+        Calculate the glutamate removal capacity of the branch.
 
+        Args:
+            uptake_rate: The rate of uptake per unit surface area, representing channel density or efficiency.
 
-class AstrocyteNode:
+        Returns:
+            The glutamate removal capacity of the branch.
+        """
+        
+        # Calculate the removal capacity as the product of surface area and uptake rate
+        removal_capacity = self.surface_area * uptake_rate
+        
+        return removal_capacity
     
-    def __init__(self, x, y, radius):
-        self.radius = radius
-        self.x = x
-        self.y = y
+    def calculate_repellent_release(self, surface_factor: float, volume_factor: float) -> float:
+        """
+        Calculate the repellent release of the branch based on its geometry.
 
+        Args:
+            surface_factor: The factor that determines how much the surface area contributes to repellent release.
+            volume_factor: The factor that determines how much the volume contributes to repellent release.
 
-class RtreeSpatialIndex:
-    def __init__(self):
-        self.rtree = None  # Placeholder for the R-tree structure
+        Returns:
+            The repellent release of the branch.
+        """
+        
+        # Calculate the repellent release as a weighted sum of surface area and volume contributions
+        repellent_release = (self.surface_area * surface_factor) + (self.volume * volume_factor)
+        
+        return repellent_release
     
-    def insert_branch(self, branch):
-        pass
+    def _act(self):
+        
+        self._action_grow_or_shrink()
+        # we prune automatically if the end radius drops below min_radius
+        
+        self._action_spawn_or_move()
     
-    def remove_branch(self, branch):
-        pass
+    def _action_grow_or_shrink(self, growth_factor: float, atp_cost_per_unit_surface: float, min_radius: float):
+        """
+        Grow or shrink the branch by adjusting the radius of the end node.
+
+        Args:
+            growth_factor: The factor determining how much the node grows or shrinks.
+            atp_cost_per_unit_surface: The ATP cost (or gain, if negative) for each unit of surface area change.
+            min_radius: The minimum allowed radius of the end node to prevent over-shrinkage.
+        """
+        
+        # todo: when would we want to grow?
+        #  - glutamate cannot be removed efficiently
+        #  - more ATP required (eg, history of ATP in children is decreasing
+        #  - what if converting glutamate takes ATP?
+        # todo: when would we want to shrink the branch?
+        #  - not using enough ATP?
+        
+        # Calculate the new surface area after growth/shrinkage
+        new_end = self.end.copy()
+        new_end.radius += growth_factor
+        
+        if new_end.radius < min_radius:
+            self._action_prune()
+            return
+        
+        new_surface_area = self.calculate_branch_surface(start=self.start, end=new_end)
+        
+        # Ensure the end node radius is not less than the start node radius after growth/shrinkage
+        if new_end.radius <= self.start.radius:
+            logging.info("Growth constrained by start node size.")
+            return
+        
+        # Calculate the required ATP based on the change in surface area
+        delta_surface = new_surface_area - self.surface_area
+        required_atp = delta_surface * atp_cost_per_unit_surface
+        
+        # If shrinking, ATP is released (required_atp will be negative)
+        available_atp = self.get_concentration("ATP")
+        
+        # Check if there's enough ATP to support the growth, or if ATP needs to be added back for shrinkage
+        if growth_factor > 0 and available_atp < required_atp:
+            logging.info("Not enough ATP to support growth.")
+            return
+        
+        # Update new end node
+        self.end = new_end
+        
+        # Update the ATP concentration in the branch
+        if growth_factor > 0:
+            self.update_concentration("ATP", -required_atp)
+        
+        # Update the physical properties of the branch (e.g., recalculate volume, surface area)
+        self.update_physical_properties()
     
-    def search(self, region):
-        pass
+    def _action_spawn_or_move(self, spawn_radius: float, spawn_length: float, environment_grid: EnvironmentGrid,
+                              spatial_index: RtreeSpatialIndex, direction_threshold: float):
+        """
+        Spawn a new branch or move the current branch based on the environmental factors.
+
+        If the direction of growth does not vary too much from the current direction and the branch has no children,
+        the branch will move. Otherwise, a new branch will be spawned.
+
+        Args:
+            spawn_radius: The radius factor for the new branch.
+            spawn_length: The length of the new branch or movement.
+            environment_grid: The grid that represents the environment.
+            spatial_index: The spatial index for managing branches.
+            direction_threshold: The threshold for how much the new direction can vary from the current direction.
+        """
+        
+        # todo: when would we want to move or spawn?
+        #  - calculate the gradient for glutamate and repellent
+        #  - if only one direction, that is consistent with current direction, move further along
+        #  - if competing directions, spawn new child
+        #  - there should be a cutoff in gradient steepness; only adjust if steep enough
+        
+        # Calculate the direction of the new branch based on glutamate and repellent gradients
+        direction = self._calculate_spawn_direction(environment_grid)
+        
+        if len(self.children) > 0 or np.linalg.norm(direction) > direction_threshold:
+            # If direction varies too much or branch has children, spawn a new branch
+            self._spawn_new_branch(spawn_radius, spawn_length, direction, spatial_index)
+        else:
+            # If direction is similar and branch has no children, move the branch
+            self._move_branch(spawn_length, direction, spatial_index)
+    
+    def _action_prune(self, spatial_index: RtreeSpatialIndex):
+        """
+        Prune the branch if it has no children.
+
+        Args:
+            spatial_index: The spatial index for managing branches.
+        """
+        # Ensure no children exist; else skip
+        # todo: how to proceed?
+        if self.children:
+            logging.warning("Branch has children, cannot prune.")
+            return
+        
+        # Remove self from spatialIndexTree
+        spatial_index.remove(self)
+        
+        # Delete self from parent
+        if self.parent:
+            self.parent.children.remove(self)
+        
+        # Additional cleanup if needed (e.g., freeing resources or nullifying references)
+        self.parent = None
+        self.children = []
+        self.start = None
+        self.end = None
+        
+        logging.info("Branch pruned successfully.")
+    
+    def _spawn_new_branch(self, radius_factor: float, length_factor: float, direction: Tuple[float, float],
+                          spatial_index: RtreeSpatialIndex, atp_cost_per_unit_surface: float = None):
+        """
+        Spawn a new branch from the current branch.
+
+        Args:
+            radius_factor: The radius factor for the new branch.
+            length_factor: The length of the new branch.
+            direction: The direction for the new branch.
+            spatial_index: The spatial index for managing branches.
+        """
+        # Determine the starting point and end point of the new branch
+        start_point = self.end  # New branch starts where the current branch ends
+        end_point = AstrocyteNode(
+                x=int(start_point.x + direction[0] * length_factor),
+                y=int(start_point.y + direction[1] * length_factor),
+                radius=start_point.radius * radius_factor
+                )
+        
+        # Create the new branch
+        new_branch = AstrocyteBranch(parent=self, start=start_point, end=end_point)
+        
+        # calculate cost
+        atp_cost = atp_cost_per_unit_surface * new_branch.surface_area
+        if atp_cost <= self.get_concentration("ATP"):
+            
+            # Save the new branch to the list of children
+            self.children.append(new_branch)
+            
+            # Update the spatial index with the new branch
+            spatial_index.insert(new_branch)
+            
+            # remove atp
+            self.update_concentration("ATP", atp_cost)
+    
+    def _move_branch(self, spawn_length: float, direction: Tuple[float, float], spatial_index: RtreeSpatialIndex):
+        """
+        Move the current branch in a specified direction.
+
+        Args:
+            spawn_length: The length of the movement.
+            direction: The direction for the movement.
+            spatial_index: The spatial index for managing branches.
+        """
+        # Calculate new end point
+        new_end_position = (
+            int(self.start.x + direction[0] * spawn_length),
+            int(self.start.y + direction[1] * spawn_length),
+            self.start.radius  # Assuming radius remains constant during movement
+            )
+        
+        # Update the end node
+        self.end.x, self.end.y = new_end_position[:2]
+        
+        # Update the spatial index before changing the position
+        spatial_index.update(self, new_position=new_end_position)
+        
+        # Update the physical properties of the branch
+        self.update_physical_properties()
+    
+    def _calculate_spawn_direction(self, environment_grid: EnvironmentGrid) -> Tuple[float, float]:
+        """
+        Calculate the direction for spawning a new branch based on environmental factors.
+
+        Args:
+            environment_grid: The grid that represents the environment.
+
+        Returns:
+            A tuple representing the direction vector (dx, dy).
+        """
+        # todo: Placeholder for actual direction calculation based on glutamate and repellent gradients
+        # This will require accessing the environment grid and potentially performing calculations
+        # to determine the gradient direction
+        # For now, we return a random direction for demonstration purposes
+        dx = np.random.uniform(-1, 1)
+        dy = np.random.uniform(-1, 1)
+        norm = np.sqrt(dx ** 2 + dy ** 2)
+        return (dx / norm, dy / norm)
 
 
 class DataLogger:
