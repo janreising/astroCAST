@@ -516,30 +516,155 @@ class Astrocyte:
 
 
 class AstrocyteBranch:
-    def __init__(self):
-        self.nodes = []
-        self.status = "active"  # or "pruned"
     
-    def grow(self):
+    def __init__(self, parent, start: Tuple[int, int, int], end: Tuple[int, int, int]):
+        self.parent: AstrocyteBranch = parent
+        self.children: List[AstrocyteBranch] = []
+        self.start: AstrocyteNode = AstrocyteNode(*start)
+        self.end: AstrocyteNode = AstrocyteNode(*end)
+        
+        self.molecules = {"glutamate": 0.0, "calcium": 0.0, "ATP": 0.0}
+        self.interacting_pixels = self.get_interacting_pixels()
+        
+        # todo: decide how to keep track of internal and external concentrations to guess steady state
+        self.history = None
+    
+    def step(self):
+        self._simulate_calcium()
+        self._simulate_atp()
+        self._simulate_glutamate()
+        self._decide_action()
+        
+        # todo: update history
+    
+    def update_concentration(self, molecule, concentration):
+        if molecule not in self.molecules:
+            raise ValueError(f"Unknown molecule {molecule}")
+        
+        self.molecules[molecule] += concentration
+    
+    def get_concentration(self, molecule):
+        if molecule not in self.molecules:
+            raise ValueError(f"Unknown molecule {molecule}")
+        
+        return self.molecules[molecule]
+    
+    def set_concentration(self, molecule, concentration):
+        if molecule not in self.molecules:
+            raise ValueError(f"Unknown molecule {molecule}")
+        
+        self.molecules[molecule] = concentration
+    
+    def get_interacting_pixels(self) -> np.ndarray:
+        
+        # todo: collect pixels that the branch branch overlaps with or is adjacent to using the RtreeSpatialIndex
+        
         pass
     
-    def branch(self):
+    def get_environment(self):
+        
+        # todo: sum the concentration of all identified pixels
+        
+        # todo return the sum
+        
         pass
     
-    def prune(self):
+    def update_environment(self, molecule, concentration):
+        
+        # todo: split concentration over all pixels
+        
+        # todo: update each pixel in the grid with the appropriate value
+        
+        pass
+    
+    def _simulate_calcium(self):
+        pass
+    
+    def _simulate_atp(self):
+        
+        # todo: get concentration in parent and child
+        
+        # todo: move atp based on concentration gradient
+        
+        pass
+    
+    def _simulate_glutamate(self):
+        
+        # todo: calculate maximum capacity for glutamate removal
+        
+        # todo: remove glutamate from the external environment
+        
+        # todo: decide whether or not to keep track of internal glutamate
+        
+        pass
+    
+    def _simulate_repellent(self):
+        
+        # todo: calculate released repellent based on branch volume (radius of start and end node)
+        
+        # todo: release repellent into environment
+        
+        pass
+    
+    def _decide_action(self):
+        
+        # todo: decide on rules for decision making
+        
+        # todo: choose action grow, spawn, prune, move
+        
+        pass
+    
+    def _action_grow(self):
+        
+        # todo: calculate how much ATP is needed based on start and end node radius
+        
+        # todo: check that parent node always has bigger radius then start node
+        
+        # todo: increase radius of start and end node
+        
+        # todo: remove ATP concentration
+        
+        pass
+    
+    def _action_spawn_branch(self):
+        
+        # todo: calculate direction of new branch based on glutamate and repellent gradients
+        
+        # todo: create new branch
+        
+        # todo: save child to self.children
+        
+        # todo: update spatialIndexTree
+        
+        pass
+    
+    def _action_prune(self):
+        
+        # todo: ensure no children exist; else skip
+        
+        # todo: remove self from spatialIndexTree
+        
+        # todo: delete self from parent
+        
+        pass
+    
+    def _action_move(self):
+        
+        # todo: choose new end Node location based on glutamate gradient and repellent
+        
+        # todo: update end node
+        
+        # todo: update start node location in children if they exist
+        
         pass
 
 
 class AstrocyteNode:
-    def __init__(self, position, diameter):
-        self.position = position
-        self.diameter = diameter
     
-    def update_position(self, new_position):
-        pass
-    
-    def change_diameter(self, new_diameter):
-        pass
+    def __init__(self, x, y, radius):
+        self.radius = radius
+        self.x = x
+        self.y = y
 
 
 class RtreeSpatialIndex:
