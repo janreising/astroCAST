@@ -13,8 +13,8 @@ from rtree import index
 
 
 class EnvironmentGrid:
-    def __init__(self, grid_size: Tuple[int, int], molecules: List[str], diffusion_rate: float, dt: float,
-                 dtype: str = 'float16'):
+    def __init__(self, grid_size: Tuple[int, int], diffusion_rate: float, dt: float,
+                 molecules: List[str] = ["glutamate", "calcium", "repellent"], dtype: str = 'float16'):
         """
         Initialize the environment grid with shared numpy arrays for each molecule.
 
@@ -97,7 +97,11 @@ class EnvironmentGrid:
         for t in range(time_step):
             self._update_concentrations()
     
-    def get_concentration_at(self, location: Tuple[int, int], molecule: str):
+    def get_tracked_molecules(self) -> List[str]:
+        return list(self.shared_arrays.keys())
+    
+    def get_concentration_at(self, location: Union[Tuple[int, int], List[Tuple[int, int]]],
+                             molecule: str) -> Union[float, List[float]]:
         """
         Get the concentration of a specific molecule at a given location.
 
@@ -108,8 +112,18 @@ class EnvironmentGrid:
         Returns:
             The concentration of the specified molecule at the given location.
         """
-        x, y = location
-        return self.shared_arrays[molecule][0][x][y]
+        
+        if isinstance(location, tuple):
+            location = [location]
+        
+        concentrations = []
+        for x, y in location:
+            concentrations.append(self.shared_arrays[molecule][0][x][y])
+        
+        if len(concentrations) < 2:
+            return concentrations[0]
+        else:
+            return concentrations
     
     def set_concentration_at(self, location: Tuple[int, int], molecule: str, concentration: float):
         """
@@ -126,20 +140,34 @@ class EnvironmentGrid:
         else:
             logging.error(f"Molecule {molecule} not found in the grid.")
     
-    def update_concentration_at(self, location: Tuple[int, int], molecule: str, concentration_change: float):
+    def update_concentration_at(self, location: Union[Tuple[int, int], List[Tuple[int, int]]],
+                                molecule: str,
+                                concentration_change: float):
         """
-        Update the concentration of a specific molecule at a given location.
+        Update the concentration of a specific molecule at a given location or multiple locations.
 
         Args:
-            location: A tuple (x, y) representing the grid coordinates.
+            location: A single tuple (x, y) representing the grid coordinates or a list of such tuples.
             molecule: Name of the molecule.
-            concentration_change: Amount to increment the concentration by.
+            concentration_change: Amount to increment the concentration by at each location.
         """
-        x, y = location
-        if molecule in self.shared_arrays:
+        if molecule not in self.shared_arrays:
+            raise ValueError(f"Molecule {molecule} not found in the grid.")
+        
+        # If a single location is provided, wrap it in a list.
+        if isinstance(location, tuple):
+            location = [location]
+        
+        # evenly distribute concentration across pixels
+        concentration_change /= len(location)
+        
+        # Update the concentration at each location by the specified amount.
+        for x, y in location:
+            
             self.shared_arrays[molecule][0][x, y] += concentration_change
-        else:
-            print(f"Molecule {molecule} not found in the grid.")
+            
+            if self.shared_arrays[molecule][0][x, y] < 0:
+                self.shared_arrays[molecule][0][x, y] = 0
     
     def set_random_starting_concentration(self, molecule: str, n_spots: int = 10,
                                           concentration_boundaries: Tuple[int, int] = (75, 150),
@@ -704,18 +732,25 @@ class AstrocyteBranch:
         self.molecules = {"glutamate": 0.0, "calcium": 0.0, "ATP": 0.0}
         
         self.update_physical_properties()
-        
-        # todo: decide how to keep track of internal and external concentrations to guess steady state
     
     def step(self):
+        
+        # simulate flow of molecules
         self._simulate_calcium()
         self._simulate_atp()
         self._simulate_glutamate()
+        self._simulate_repellent()
         
         # run through actions
         self._act()
         
-        # todo: update history
+        # save new state
+        self.update_history()
+    
+    def update_history(self):
+        # todo: implement
+        
+        pass
     
     def update_concentration(self, molecule, concentration):
         if molecule not in self.molecules:
@@ -749,20 +784,19 @@ class AstrocyteBranch:
     
     def get_environment(self):
         
-        # todo: move this functionality to EnvironmentGrid
-        total_concentration = {molecule: 0.0 for molecule in self.molecules}
-        for pixel in self.interacting_pixels:
-            for molecule in self.molecules:
-                total_concentration[molecule] += self.nucleus.environment_grid.get_concentration_at(pixel, molecule)
+        env_grid = self.nucleus.environment_grid
+        
+        total_concentration = {}
+        for molecule in env_grid.get_tracked_molecules():
+            total_concentration[molecule] = np.sum(env_grid.get_concentration_at(self.interacting_pixels, molecule))
+        
         return total_concentration
     
     def update_environment(self, molecule, concentration):
-        # Split the concentration evenly over all interacting pixels
-        concentration_per_pixel = concentration / len(self.interacting_pixels)
-        for pixel in self.interacting_pixels:
-            self.nucleus.environment_grid.update_concentration_at(pixel, molecule, concentration_per_pixel)
+        self.nucleus.environment_grid.update_concentration_at(self.interacting_pixels, molecule, concentration)
     
     def _simulate_calcium(self):
+        # todo: implement
         pass
     
     def _simulate_atp(self):
