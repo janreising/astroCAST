@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from collections import deque
 from multiprocessing import shared_memory
 from typing import Callable, List, Tuple, Union
 
@@ -13,7 +14,7 @@ from rtree import index
 
 
 class EnvironmentGrid:
-    def __init__(self, grid_size: Tuple[int, int], diffusion_rate: float, dt: float,
+    def __init__(self, grid_size: Tuple[int, int], diffusion_rate: float, dt: float, pixel_volume: float = 1.0,
                  molecules: List[str] = ["glutamate", "calcium", "repellent"], dtype: str = 'float16'):
         """
         Initialize the environment grid with shared numpy arrays for each molecule.
@@ -28,6 +29,7 @@ class EnvironmentGrid:
         """
         self.grid_size = grid_size
         self.molecules = molecules
+        self.pixel_volume = pixel_volume
         self.diffusion_rate = diffusion_rate
         self.dt = dt
         
@@ -125,6 +127,12 @@ class EnvironmentGrid:
         else:
             return concentrations
     
+    def get_amount_at(self, location: Union[Tuple[int, int], List[Tuple[int, int]]],
+                      molecule: str) -> Union[float, List[float]]:
+        
+        concentrations = self.get_concentration_at(location, molecule)
+        return [conc / self.pixel_volume for conc in concentrations]
+    
     def set_concentration_at(self, location: Tuple[int, int], molecule: str, concentration: float):
         """
         Set the concentration of a specific molecule at a given location.
@@ -142,14 +150,14 @@ class EnvironmentGrid:
     
     def update_concentration_at(self, location: Union[Tuple[int, int], List[Tuple[int, int]]],
                                 molecule: str,
-                                concentration_change: float):
+                                amount: float):
         """
         Update the concentration of a specific molecule at a given location or multiple locations.
 
         Args:
             location: A single tuple (x, y) representing the grid coordinates or a list of such tuples.
             molecule: Name of the molecule.
-            concentration_change: Amount to increment the concentration by at each location.
+            amount: Amount to increment in mol.
         """
         if molecule not in self.shared_arrays:
             raise ValueError(f"Molecule {molecule} not found in the grid.")
@@ -159,15 +167,22 @@ class EnvironmentGrid:
             location = [location]
         
         # evenly distribute concentration across pixels
-        concentration_change /= len(location)
+        amount /= len(location)
+        concentration_change = amount / self.pixel_volume
         
         # Update the concentration at each location by the specified amount.
+        actually_removed = 0
         for x, y in location:
             
             self.shared_arrays[molecule][0][x, y] += concentration_change
             
             if self.shared_arrays[molecule][0][x, y] < 0:
+                actually_removed += concentration_change - self.shared_arrays[molecule][0][x, y]
                 self.shared_arrays[molecule][0][x, y] = 0
+            else:
+                actually_removed += concentration_change
+        
+        return actually_removed
     
     def set_random_starting_concentration(self, molecule: str, n_spots: int = 10,
                                           concentration_boundaries: Tuple[int, int] = (75, 150),
@@ -310,6 +325,7 @@ class GlutamateReleaseManager:
             num_branches: Number of dendritic branches to simulate.
             z_thickness: Thickness of the imaging plane in Z-dimension.
             jitter: Amount of jitter in the hotspot placement, default is 0.1.
+            release_amplitude: Maximum release amplitude of a glutamate event in mol.
             stochastic_probability: Probability of release at each hotspot.
             signal_function: Function to generate signal-based probabilities.
         """
@@ -416,7 +432,7 @@ class GlutamateReleaseManager:
             # Update the grid for each hotspot where release is decided
             for (x, y, _), release, difference in zip(self.hotspots, release_decision, release_difference):
                 if release:
-                    release_amount = difference * self.release_amplitude
+                    release_amount = difference * self.release_amplitude  # todo: should be in mol
                     self.environment_grid.update_concentration_at((int(x), int(y)), "glutamate", release_amount)
             
             self.time_step += 1
@@ -707,20 +723,25 @@ class AstrocyteBranch:
     volume = None
     surface_area = None
     repellent_release = None
-    history = None
+    environment = None
+    diffusion_rate = None
     
     def __init__(self, parent, nucleus: Astrocyte, start: Union[Tuple[int, int, int], AstrocyteNode],
-                 end: Union[Tuple[int, int, int], AstrocyteNode], branch_id: int = 0):
+                 end: Union[Tuple[int, int, int], AstrocyteNode], branch_id: int = 0, max_history=100):
         
+        self.min_steepness = None  # minimum steepness for spawning
+        self.atp_cost_per_glutamate = None  # mol ATP / mol Glutamate
+        self.diffusion_coefficient = None
+        self.glutamate_uptake_rate = None  # mol/m² --> same as surface factor?
         self.direction_threshold = None
         self.spatial_index = None
-        self.spawn_length = None
-        self.spawn_radius = None
-        self.min_radius = None
-        self.atp_cost_per_unit_surface = None
+        self.spawn_length = None  # m
+        self.spawn_radius = None  # m
+        self.min_radius = None  # m
+        self.atp_cost_per_unit_surface = None  # mol/m²
         self.growth_factor = None
-        self.volume_factor = None
-        self.surface_factor = None
+        self.volume_factor = None  # mol/m³
+        self.surface_factor = None  # mol/m²
         
         self.parent: AstrocyteBranch = parent
         self.nucleus = nucleus
@@ -729,40 +750,62 @@ class AstrocyteBranch:
         self.start: AstrocyteNode = AstrocyteNode(*start) if isinstance(start, tuple) else start
         self.end: AstrocyteNode = AstrocyteNode(*end) if isinstance(end, tuple) else end
         
+        # Establish initial concentrations
+        self.get_environment()
         self.molecules = {"glutamate": 0.0, "calcium": 0.0, "ATP": 0.0}
+        
+        self.intracellular_history = {molecule: deque(maxlen=max_history) for molecule in self.molecules}
+        self.extracellular_history = {molecule: deque(maxlen=max_history) for molecule in self.environment}
         
         self.update_physical_properties()
     
     def step(self):
         
+        # update environment
+        self.get_environment()
+        
         # simulate flow of molecules
         self._simulate_calcium()
-        self._simulate_atp()
         self._simulate_glutamate()
         self._simulate_repellent()
         
         # run through actions
         self._act()
         
-        # save new state
-        self.update_history()
-    
-    def update_history(self):
-        # todo: implement
+        # simulate molecule diffusion
+        self.diffuse_molecules()
         
-        pass
+        # save new state
+        self._update_history()
     
-    def update_concentration(self, molecule, concentration):
+    def _update_history(self):
+        """
+        Update the intracellular and extracellular history of molecule concentrations.
+        Each history dictionary keeps track of the concentrations in a rolling fashion,
+        storing at most 'max_history' values and dropping the oldest values.
+        """
+        # Update intracellular history
+        for molecule, concentration in self.molecules.items():
+            self.intracellular_history[molecule].append(concentration)
+        
+        # Update extracellular history
+        for molecule, concentration in self.environment.items():
+            self.extracellular_history[molecule].append(concentration)
+    
+    def update_concentration(self, molecule, amount):
         if molecule not in self.molecules:
             raise ValueError(f"Unknown molecule {molecule}")
         
-        self.molecules[molecule] += concentration
+        self.molecules[molecule] += amount
     
     def get_concentration(self, molecule):
         if molecule not in self.molecules:
             raise ValueError(f"Unknown molecule {molecule}")
         
         return self.molecules[molecule]
+    
+    def get_amount(self, molecule):
+        return self.volume * self.get_concentration(molecule)
     
     def set_concentration(self, molecule, concentration):
         if molecule not in self.molecules:
@@ -786,44 +829,74 @@ class AstrocyteBranch:
         
         env_grid = self.nucleus.environment_grid
         
-        total_concentration = {}
+        total_amount = {}
         for molecule in env_grid.get_tracked_molecules():
-            total_concentration[molecule] = np.sum(env_grid.get_concentration_at(self.interacting_pixels, molecule))
+            total_amount[molecule] = np.sum(env_grid.get_amount_at(self.interacting_pixels, molecule))
         
-        return total_concentration
+        self.environment = total_amount
     
-    def update_environment(self, molecule, concentration):
-        self.nucleus.environment_grid.update_concentration_at(self.interacting_pixels, molecule, concentration)
+    def update_environment(self, molecule, amount):
+        return self.nucleus.environment_grid.update_concentration_at(self.interacting_pixels, molecule, amount)
+    
+    def _calculate_diffusion_rate(self) -> float:
+        """
+        Calculate the diffusion rate of ions along the branch.
+
+        Returns:
+            The diffusion rate for the branch.
+        """
+        # Calculate the average radius of the branch
+        average_radius = (self.start.radius + self.end.radius) / 2
+        
+        # Calculate the length of the branch
+        length_of_branch = np.sqrt((self.end.x - self.start.x) ** 2 + (self.end.y - self.start.y) ** 2)
+        
+        # Apply the formula for diffusion rate
+        diffusion_rate = self.diffusion_coefficient * (1 / length_of_branch) * (1 / (np.pi * average_radius ** 2))
+        
+        return diffusion_rate
+    
+    def diffuse_molecules(self):
+        
+        for molecule, concentration in self.molecules.items():
+            for target in [self.parent] + self.children:
+                
+                # Calculate the concentration difference between the branch and the target
+                concentration_difference = abs(self.get_concentration(molecule) - target.get_concentration(molecule))
+                
+                if concentration_difference == 0:
+                    continue
+                
+                # calculate ions/molecules to move
+                dt = 1  # one time step
+                ions_to_move = self.diffusion_rate * concentration_difference * dt
+                
+                # update new concentrations
+                self.update_concentration(molecule, - ions_to_move)
+                target.update_concentration(molecule, ions_to_move)
     
     def _simulate_calcium(self):
         # todo: implement
         pass
     
-    def _simulate_atp(self):
-        # Get ATP concentration from the parent and child, if they exist
-        parent_atp = self.parent.get_concentration("ATP") if self.parent else 0
-        child_atp = min(child.get_concentration("ATP") for child in self.children) if self.children else 0
-        # todo: Move ATP based on concentration gradient
-        # This is a placeholder; the actual movement logic needs to be implemented based on your model
-        # self.set_concentration("ATP", (parent_atp + child_atp) / 2)
-    
     def _simulate_glutamate(self):
-        # todo: Calculate the capacity for glutamate removal based on the branch's volume
-        # This is a placeholder for the capacity calculation
-        glutamate_removal_capacity = self.calculate_removal_capacity()
         
-        # todo: Remove glutamate from the external environment
-        # This is a placeholder; the actual removal logic needs to be implemented based on your model
-        environmental_glutamate = self.get_environment()["glutamate"]
-        glutamate_to_remove = min(glutamate_removal_capacity, environmental_glutamate)
-        self.update_environment("glutamate", -glutamate_to_remove)
+        glutamate_removal_capacity = self.calculate_removal_capacity(self.glutamate_uptake_rate)
         
-        # todo: decide whether or not to keep track of internal glutamate
+        # remove from environment
+        actually_removed = self.update_environment("glutamate", glutamate_removal_capacity)
         
-        # todo: add ATP cost of converting glutamate
+        # increase intracellular concentration with actually removed concentration
+        self.update_concentration("glutamate", actually_removed)
+        
+        # convert glutamate using up ATP
+        atp_needed = self.get_amount("glutamate") * self.atp_cost_per_glutamate
+        atp_used = min(self.get_amount("ATP"), atp_needed)
+        self.update_concentration("ATP", -atp_used)
+        self.update_concentration("glutamate", int(atp_used / self.atp_cost_per_glutamate))
     
     def _simulate_repellent(self):
-        # Release repellent into environment, assuming a fixed concentration for demonstration purposes
+        # Release repellent into environment
         self.update_environment("repellent", self.repellent_release)
     
     def calculate_branch_volume(self):
@@ -859,6 +932,7 @@ class AstrocyteBranch:
         self.interacting_pixels = self.get_interacting_pixels()
         self.volume = self.calculate_branch_volume()
         self.surface_area = self.calculate_branch_surface()
+        self.diffusion_rate = self._calculate_diffusion_rate()
         self.repellent_release = self.calculate_repellent_release(self.surface_factor, self.volume_factor)
     
     def calculate_removal_capacity(self, uptake_rate: float) -> float:
@@ -899,8 +973,7 @@ class AstrocyteBranch:
         # we prune automatically if the end radius drops below min_radius
         self._action_grow_or_shrink(self.growth_factor, self.atp_cost_per_unit_surface, self.min_radius)
         
-        self._action_spawn_or_move(self.spawn_radius, self.spawn_length, self.nucleus.environment_grid,
-                                   self.spatial_index, self.direction_threshold)
+        self._action_spawn_or_move(self.spawn_radius, self.spawn_length, self.min_steepness, self.direction_threshold)
     
     def _action_grow_or_shrink(self, growth_factor: float, atp_cost_per_unit_surface: float, min_radius: float):
         """
@@ -918,10 +991,11 @@ class AstrocyteBranch:
         #  - what if converting glutamate takes ATP?
         # todo: when would we want to shrink the branch?
         #  - not using enough ATP?
+        # todo: wouldn't the current implementation effectively prefer to grow always?
         
         # Calculate the new surface area after growth/shrinkage
         new_end = self.end.copy()
-        new_end.radius += growth_factor
+        new_end.radius += growth_factor  # todo: should be relative and include shrinking or growing (+/-)
         
         if new_end.radius < min_radius:
             self._action_prune()
@@ -939,7 +1013,7 @@ class AstrocyteBranch:
         required_atp = delta_surface * atp_cost_per_unit_surface
         
         # If shrinking, ATP is released (required_atp will be negative)
-        available_atp = self.get_concentration("ATP")
+        available_atp = self.get_amount("ATP")
         
         # Check if there's enough ATP to support the growth, or if ATP needs to be added back for shrinkage
         if growth_factor > 0 and available_atp < required_atp:
@@ -956,8 +1030,8 @@ class AstrocyteBranch:
         # Update the physical properties of the branch (e.g., recalculate volume, surface area)
         self.update_physical_properties()
     
-    def _action_spawn_or_move(self, spawn_radius: float, spawn_length: float, environment_grid: EnvironmentGrid,
-                              spatial_index: RtreeSpatialIndex, direction_threshold: float):
+    def _action_spawn_or_move(self, spawn_radius: float, spawn_length: float, min_steepness: float,
+                              direction_threshold: float):
         """
         Spawn a new branch or move the current branch based on the environmental factors.
 
@@ -967,26 +1041,23 @@ class AstrocyteBranch:
         Args:
             spawn_radius: The radius factor for the new branch.
             spawn_length: The length of the new branch or movement.
-            environment_grid: The grid that represents the environment.
-            spatial_index: The spatial index for managing branches.
+            min_steepness: Minimum steepness of the combined gradient (glutamate and repellent) that triggers
+                spawning of a new branch or movement.
             direction_threshold: The threshold for how much the new direction can vary from the current direction.
         """
         
-        # todo: when would we want to move or spawn?
-        #  - calculate the gradient for glutamate and repellent
-        #  - if only one direction, that is consistent with current direction, move further along
-        #  - if competing directions, spawn new child
-        #  - there should be a cutoff in gradient steepness; only adjust if steep enough
+        # todo: collision control
         
         # Calculate the direction of the new branch based on glutamate and repellent gradients
-        direction = self._calculate_spawn_direction(environment_grid)
+        direction, steepness = self._calculate_spawn_direction()
         
-        if len(self.children) > 0 or np.linalg.norm(direction) > direction_threshold:
-            # If direction varies too much or branch has children, spawn a new branch
-            self._spawn_new_branch(spawn_radius, spawn_length, direction, spatial_index)
-        else:
-            # If direction is similar and branch has no children, move the branch
-            self._move_branch(spawn_length, direction)
+        if direction is not None and steepness > min_steepness:
+            if len(self.children) > 0 or np.linalg.norm(direction) > direction_threshold:
+                # If direction varies too much or branch has children, spawn a new branch
+                self._spawn_new_branch(spawn_radius, spawn_length, direction, self.spatial_index)
+            else:
+                # If direction is similar and branch has no children, move the branch
+                self._move_branch(spawn_length, direction)
     
     def _action_prune(self):
         """
@@ -1036,7 +1107,7 @@ class AstrocyteBranch:
         
         # calculate cost
         atp_cost = atp_cost_per_unit_surface * new_branch.surface_area
-        if atp_cost <= self.get_concentration("ATP"):
+        if atp_cost <= self.get_amount("ATP"):
             
             # Save the new branch to the list of children
             self.children.append(new_branch)
@@ -1046,6 +1117,9 @@ class AstrocyteBranch:
             
             # remove atp
             self.update_concentration("ATP", atp_cost)
+        
+        else:
+            logging.info(f"Insufficient ATP available.")
     
     def _move_branch(self, spawn_length: float, direction: Tuple[float, float]):
         """
@@ -1071,24 +1145,58 @@ class AstrocyteBranch:
         # Update the physical properties of the branch
         self.update_physical_properties()
     
-    def _calculate_spawn_direction(self, environment_grid: EnvironmentGrid) -> Tuple[float, float]:
+    def _calculate_spawn_direction(self, repellent_name='repellent'):
         """
         Calculate the direction for spawning a new branch based on environmental factors.
 
         Args:
-            environment_grid: The grid that represents the environment.
+            repellent_name: The name of the repellent substance in the environment grid.
 
         Returns:
             A tuple representing the direction vector (dx, dy).
         """
-        # todo: Placeholder for actual direction calculation based on glutamate and repellent gradients
-        # This will require accessing the environment grid and potentially performing calculations
-        # to determine the gradient direction
-        # For now, we return a random direction for demonstration purposes
-        dx = np.random.uniform(-1, 1)
-        dy = np.random.uniform(-1, 1)
-        norm = np.sqrt(dx ** 2 + dy ** 2)
-        return dx / norm, dy / norm
+        environment_grid = self.nucleus.environment_grid
+        
+        # Get the position of the current branch's end node
+        x, y = self.end.x, self.end.y
+        
+        # Define the range to look around the end node for gradient calculation
+        range_x = range(max(0, x - 1), min(self.nucleus.environment_grid.grid_size[0], x + 2))
+        range_y = range(max(0, y - 1), min(self.nucleus.environment_grid.grid_size[1], y + 2))
+        
+        # Get the concentrations of glutamate and repellent around the end node
+        glutamate_concentration = environment_grid.get_concentration_at((x, y), 'glutamate')
+        repellent_concentration = environment_grid.get_concentration_at((x, y), repellent_name)
+        
+        # Initialize variables to store gradient sums
+        gradient_sum_glutamate = np.array([0.0, 0.0])
+        gradient_sum_repellent = np.array([0.0, 0.0])
+        
+        # Calculate the sum of gradients for glutamate and repellent
+        for i in range_x:
+            for j in range_y:
+                if (i, j) != (x, y):
+                    direction = np.array([i - x, j - y])
+                    distance = np.linalg.norm(direction)
+                    direction_normalized = direction / distance
+                    
+                    diff_glu = environment_grid.get_concentration_at((i, j), 'glutamate') - glutamate_concentration
+                    diff_rep = environment_grid.get_concentration_at((i, j), repellent_name) - repellent_concentration
+                    
+                    gradient_sum_glutamate += direction_normalized * diff_glu
+                    gradient_sum_repellent += direction_normalized * diff_rep
+        
+        # Combine gradients: attract towards glutamate, repel from repellent
+        combined_gradient = gradient_sum_glutamate - gradient_sum_repellent
+        
+        # Normalize the combined gradient to get a unit direction vector
+        if np.linalg.norm(combined_gradient) > 0:
+            steepness = np.linalg.norm(combined_gradient)
+            direction_vector = combined_gradient / steepness
+            return tuple(direction_vector), steepness
+        else:
+            # If the gradient is zero (no preference) return None
+            return None
 
 
 class DataLogger:
