@@ -12,6 +12,9 @@ from matplotlib import pyplot as plt
 from matplotlib.animation import FuncAnimation
 from matplotlib.patches import Circle
 from rtree import index
+from scipy.constants import physical_constants
+
+avogadro = physical_constants['Avogadro constant']
 
 
 class EnvironmentGrid:
@@ -88,10 +91,16 @@ class EnvironmentGrid:
                     current_concentration[1:-1, 2:])  # concentration from right column
             
             shared_array[1:-1, 1:-1] = current_concentration[1:-1, 1:-1] + change
+            
+            if np.min(shared_array) < 0:
+                logging.warning(f"Concentration({molecule}) < 0: {np.min(shared_array)}."
+                                f"Diffusion simulation is unstable, reduce 'diffusion_rate'.")
     
     def _degrade_molecules(self):
         for molecule in self.degrades:
-            self.shared_arrays[molecule] *= self.degradation_factor
+            arr, shm = self.shared_arrays[molecule]
+            arr *= self.degradation_factor
+            self.shared_arrays[molecule] = arr, shm
     
     def step(self, time_step: int = 1):
         """
@@ -125,6 +134,9 @@ class EnvironmentGrid:
             The concentration of the specified molecule at the given location.
         """
         
+        if location is None:
+            raise ValueError(f"Invalid location: {location}")
+        
         if isinstance(location, tuple):
             location = [location]
         
@@ -141,7 +153,12 @@ class EnvironmentGrid:
                       molecule: str) -> Union[float, List[float]]:
         
         concentrations = self.get_concentration_at(location, molecule)
-        return [concentration / self.pixel_volume for concentration in concentrations]
+        
+        if isinstance(concentrations, list):
+            return [int(concentration * self.pixel_volume) for concentration in concentrations]
+        
+        else:
+            return int(concentrations * self.pixel_volume)
     
     def set_concentration_at(self, location: Tuple[int, int], molecule: str, concentration: float):
         """
@@ -243,7 +260,7 @@ class EnvironmentGrid:
         """
         self.close()
     
-    def plot_concentration(self, molecule: str, figsize: tuple = (10, 8), cmap: str = 'inferno', ax: plt.axis = None):
+    def plot_concentration(self, molecule: str, figsize: tuple = (5, 5), cmap: str = 'inferno', ax: plt.axis = None):
         """
         Plot the concentration of a specified molecule across the grid using Matplotlib.
 
@@ -267,10 +284,12 @@ class EnvironmentGrid:
             ax.clear()
         
         # Plotting the concentration heatmap
-        ax.imshow(concentration_array, cmap=cmap, interpolation='nearest')
+        sns.heatmap(concentration_array.transpose(), vmin=0, cmap=cmap, cbar=False, ax=ax)
         
         # Adding a colorbar and setting titles and labels
         # plt.colorbar(heatmap, ax=ax)
+        ax.invert_yaxis()
+        ax.set_aspect('equal')
         ax.set_title(f"Concentration of {molecule}")
         ax.set_xlabel("X Coordinate")
         ax.set_ylabel("Y Coordinate")
@@ -437,12 +456,13 @@ class GlutamateReleaseManager:
             combined_prob = stochastic_vector + signal_vector
             random_vector = np.random.uniform(0, 1, size=combined_prob.shape)
             release_decision = random_vector < combined_prob
-            release_difference = combined_prob - release_decision
+            release_difference = combined_prob - random_vector
             
             # Update the grid for each hotspot where release is decided
             for (x, y, _), release, difference in zip(self.hotspots, release_decision, release_difference):
                 if release:
                     release_amount = difference * self.release_amplitude
+                    
                     self.environment_grid.update_concentration_at((int(x), int(y)), "glutamate", release_amount)
             
             self.time_step += 1
@@ -531,18 +551,43 @@ class GlutamateReleaseManager:
 
 
 class Simulation:
-    def __init__(self, environment_grid: EnvironmentGrid, glutamate_release_manager: GlutamateReleaseManager = None):
-        self.environment_grid = environment_grid
+    
+    axx = None
+    fig = None
+    
+    def __init__(self, num_astrocytes=1, grid_size=(100, 100), border=10,
+                 environment_dict: dict = None, glutamate_release_param: dict = None, astrocyte_param: dict = None):
+        
+        self.grid_size = grid_size
+        self.data_logger = DataLogger()
+        
+        environment_dict = {} if environment_dict is None else environment_dict
+        glutamate_release_param = {} if glutamate_release_param is None else glutamate_release_param
+        astrocyte_param = {} if astrocyte_param is None else astrocyte_param
+        
+        self.spatial_index = RtreeSpatialIndex()
+        self.environment_grid = EnvironmentGrid(grid_size=grid_size, **environment_dict)
+        self.glutamate_release_manager = GlutamateReleaseManager(environment_grid=self.environment_grid,
+                                                                 **glutamate_release_param)
+        
         self.astrocytes = []
-        self.glutamate_release_manager = glutamate_release_manager
-        self.spatial_index = RtreeSpatialIndex()  # Optional
+        for i in range(num_astrocytes):
+            x = np.random.randint(border, grid_size[0] - border)
+            y = np.random.randint(border, grid_size[1] - border)
+            ast = Astrocyte(position=(x, y), spatial_index=self.spatial_index, environment_grid=self.environment_grid,
+                            data_logger=self.data_logger,
+                            **astrocyte_param)
+            self.astrocytes.append(ast)
     
     def run_simulation_step(self, time_step=1):
         
-        if self.glutamate_release_manager is not None:
-            self.glutamate_release_manager.step(time_step=time_step)
-        
+        self.glutamate_release_manager.step(time_step=time_step)
         self.environment_grid.step(time_step=time_step)
+        
+        for astrocyte in self.astrocytes:
+            astrocyte.step(time_step=time_step)
+        
+        self.data_logger.step()
     
     def add_astrocyte(self, astrocyte):
         pass
@@ -550,15 +595,45 @@ class Simulation:
     def remove_astrocyte(self, astrocyte):
         pass
     
-    def plot(self, molecule="glutamate", figsize=(10, 5)):
+    def plot(self, figsize=(10, 10), last_n_messages=10):
         
-        fig, axx = plt.subplot_mosaic("AB", figsize=figsize)
+        X, Y = self.grid_size
         
-        self.environment_grid.plot_concentration(molecule=molecule, ax=axx["A"])
-        if self.glutamate_release_manager is not None:
-            self.glutamate_release_manager.plot(ax=axx["B"])
+        if self.axx is None:
+            self.fig, axx = plt.subplot_mosaic("AB\nCD", figsize=figsize,
+                                               gridspec_kw={
+                                                   "wspace": 0.2,
+                                                   "hspace": 0.2}
+                                               )
+            self.axx = axx
+        else:
+            axx = self.axx
+            
+            for k, ax in axx.items():
+                ax.clear()
         
-        return fig
+        self.environment_grid.plot_concentration(molecule="glutamate", ax=axx["A"])
+        axx["A"].set_title("Glutamate")
+        
+        self.environment_grid.plot_concentration(molecule="repellent", ax=axx["B"])
+        axx["B"].set_title("Repellent")
+        
+        self.glutamate_release_manager.plot(ax=axx["C"])
+        axx["C"].set_xlim(0, X)
+        axx["C"].set_ylim(0, Y)
+        axx["C"].set_aspect('equal')
+        
+        for astrocyte in self.astrocytes:
+            astrocyte.plot(ax=axx["D"])
+        axx["D"].set_xlim(0, X)
+        axx["D"].set_ylim(0, Y)
+        axx["D"].set_aspect('equal')
+        axx["D"].set_title('Astrocytes')
+        
+        # Display the last N messages as HTML
+        from IPython.core.display import HTML
+        html_content = "<br>".join(self.data_logger.get_messages(last_n_messages))
+        display(HTML(html_content))
 
 
 class Astrocyte:
@@ -570,11 +645,12 @@ class Astrocyte:
                  max_branch_radius: float, start_spawn_radius: float, spawn_length: int,
                  repellent_concentration: float,
                  environment_grid: EnvironmentGrid, spatial_index: RtreeSpatialIndex,
-                 max_history: int = 100, molecules: dict = None):
+                 max_history: int = 100, molecules: dict = None, data_logger: DataLogger = None):
         
         self.max_history = max_history
         self.environment_grid = environment_grid
         self.spatial_index = spatial_index
+        self.data_logger = data_logger
         
         self.x, self.y = position
         self.radius = radius
@@ -585,11 +661,16 @@ class Astrocyte:
                                     spawn_radius=start_spawn_radius, spawn_length=spawn_length)
         
         # Establish initial concentrations
-        self.molecules = dict(glutamate=0, calcium=1e-6, ATP=10e-6) if molecules is None else molecules
+        # todo set to something more reasonable
+        self.molecules = dict(glutamate=0, calcium=10, ATP=100) if molecules is None else molecules
         self.repellent_concentration = repellent_concentration
     
     def step(self, time_step=1):
         for i in range(time_step):
+            
+            for child in self.children:
+                for molecule, concentration in self.molecules.items():
+                    child.set_concentration(molecule, concentration)
             
             for branch in self.branches:
                 branch.step()
@@ -651,11 +732,9 @@ class Astrocyte:
             spawn_radius: The radius at which the branches spawn from the cell body.
             spawn_length: The length of the branch from the starting point.
         """
-        # Calculate the angle between each branch
-        angle_increment = 2 * np.pi / num_branches
         
         for i in range(num_branches):
-            angle = i * angle_increment
+            angle = np.random.uniform(0, 2 * np.pi)
             
             # Choose a random location on the boundary (x, y, radius)
             start_x = self.x + np.cos(angle) * self.radius
@@ -854,31 +933,38 @@ class AstrocyteBranch:
     repellent_release = None
     environment = None
     diffusion_rate = None
+    glutamate_uptake_capacity = None
     id = 0
+    current_time_step = 0
     
     def __init__(self, parent, nucleus: Astrocyte, start: Union[Tuple[int, int, int], AstrocyteNode],
                  end: Union[Tuple[int, int, int], AstrocyteNode], max_history=100):
         
-        self.min_trend_amplitude = None  # minimum trend in ATP and glutamate to grow or shrink
-        self.min_steepness = None  # minimum steepness for spawning
-        self.atp_cost_per_glutamate = None  # mol ATP / mol Glutamate
-        self.diffusion_coefficient = None
-        self.glutamate_uptake_rate = None  # mol/m² --> same as surface factor?
-        self.direction_threshold = None
-        self.spatial_index = None
-        self.spawn_length = None  # m
-        self.spawn_radius_factor = None  # Relative proportion of end point compared to start point
-        self.min_radius = None  # m
-        self.atp_cost_per_unit_surface = None  # mol/m²
-        self.growth_factor = None
-        self.volume_factor = None  # mol/m³
-        self.surface_factor = None  # mol/m²
+        # todo: make to parameters
+        self.min_trend_amplitude = 0.5  # minimum trend in ATP and glutamate to grow or shrink
+        self.min_steepness = 0.5  # minimum steepness for spawning
+        self.atp_cost_per_glutamate = 1 / 18  # mol ATP / mol Glutamate
+        self.diffusion_coefficient = 1
+        self.glutamate_uptake_rate = 100  # mol/m² --> same as surface factor?
+        self.direction_threshold = 0.1
+        self.spatial_index = nucleus.spatial_index
+        self.spawn_length = 4  # m
+        self.spawn_radius_factor = 0.1  # Relative proportion of end point compared to start point
+        self.min_radius = 0.001  # m
+        self.atp_cost_per_unit_surface = 1  # mol/m²
+        self.growth_factor = 0.01
+        self.volume_factor = 0.01  # mol/m³
+        self.surface_factor = 0.1  # mol/m²
         
         self.parent: AstrocyteBranch = parent
         self.nucleus = nucleus
+        self.data_logger = nucleus.data_logger
         self.children: List[AstrocyteBranch] = []
         self.start: AstrocyteNode = AstrocyteNode(*start) if isinstance(start, tuple) else start
         self.end: AstrocyteNode = AstrocyteNode(*end) if isinstance(end, tuple) else end
+        
+        # update physical properties
+        self.update_physical_properties()
         
         # Establish initial concentrations
         self.get_environment()
@@ -886,10 +972,10 @@ class AstrocyteBranch:
         
         self.intracellular_history = {molecule: deque(maxlen=max_history) for molecule in self.molecules}
         self.extracellular_history = {molecule: deque(maxlen=max_history) for molecule in self.environment}
-        
-        self.update_physical_properties()
     
     def step(self):
+        
+        self.log(f"GLU: {self.get_amount('glutamate')}, ATP: {self.get_amount('ATP')}, ")
         
         # update environment
         self.get_environment()
@@ -907,6 +993,7 @@ class AstrocyteBranch:
         
         # save new state
         self._update_history()
+        self.current_time_step += 1
     
     def _update_history(self):
         """
@@ -934,7 +1021,7 @@ class AstrocyteBranch:
             Slope (m) of the linear regression line, representing the trend.
         """
         history = self.intracellular_history[molecule] if intra else self.extracellular_history[molecule]
-        if not history:
+        if not history or len(history) < 2:
             return 0.0  # No trend if history is empty
         history = np.array(history)
         
@@ -959,7 +1046,7 @@ class AstrocyteBranch:
         return self.molecules[molecule]
     
     def get_amount(self, molecule):
-        return self.volume * self.get_concentration(molecule)
+        return int(self.volume * self.get_concentration(molecule))
     
     def set_concentration(self, molecule, concentration):
         if molecule not in self.molecules:
@@ -1016,9 +1103,9 @@ class AstrocyteBranch:
             for target in [self.parent] + self.children:
                 
                 # Calculate the concentration difference between the branch and the target
-                concentration_difference = abs(self.get_concentration(molecule) - target.get_concentration(molecule))
+                concentration_difference = self.get_concentration(molecule) - target.get_concentration(molecule)
                 
-                if concentration_difference == 0:
+                if concentration_difference <= 0:
                     continue
                 
                 # calculate ions/molecules to move
@@ -1026,8 +1113,8 @@ class AstrocyteBranch:
                 ions_to_move = self.diffusion_rate * concentration_difference * dt
                 
                 # update new concentrations
-                self.update_concentration(molecule, - ions_to_move)
-                target.update_concentration(molecule, ions_to_move)
+                self.update_concentration(molecule, ions_to_move)
+                target.update_concentration(molecule, -ions_to_move)
     
     def _simulate_calcium(self):
         # todo: implement
@@ -1035,19 +1122,27 @@ class AstrocyteBranch:
     
     def _simulate_glutamate(self):
         
-        glutamate_removal_capacity = self.calculate_removal_capacity(self.glutamate_uptake_rate)
-        
         # remove from environment
-        actually_removed = self.update_environment("glutamate", glutamate_removal_capacity)
+        extracellular_glutamate = self.environment["glutamate"]
+        to_remove = max(0, extracellular_glutamate - self.glutamate_uptake_capacity)
+        
+        actually_removed = self.update_environment("glutamate", to_remove)
         
         # increase intracellular concentration with actually removed concentration
         self.update_concentration("glutamate", actually_removed)
         
         # convert glutamate using up ATP
-        atp_needed = self.get_amount("glutamate") * self.atp_cost_per_glutamate
-        atp_used = min(self.get_amount("ATP"), atp_needed)
-        self.update_concentration("ATP", -atp_used)
-        self.update_concentration("glutamate", int(atp_used / self.atp_cost_per_glutamate))
+        intra_glutamate = self.get_amount("glutamate")
+        if intra_glutamate > 0:
+            atp_needed = int(intra_glutamate * self.atp_cost_per_glutamate)
+            atp_used = min(self.get_amount("ATP"), atp_needed)
+            
+            self.log(f"GLU: {self.get_amount('glutamate'):.1E}, "
+                     f"ATP: {self.get_amount('ATP'):.1E}, "
+                     f"used: {atp_used:.1E}/{atp_needed:.1E}, "
+                     f"dGLU: {atp_used / self.atp_cost_per_glutamate:.1E}")
+            self.update_concentration("ATP", -atp_used)
+            self.update_concentration("glutamate", int(atp_used / self.atp_cost_per_glutamate))
     
     def _simulate_repellent(self):
         # Release repellent into environment
@@ -1087,6 +1182,7 @@ class AstrocyteBranch:
         self.volume = self.calculate_branch_volume()
         self.surface_area = self.calculate_branch_surface()
         self.diffusion_rate = self._calculate_diffusion_rate()
+        self.glutamate_uptake_capacity = self.calculate_removal_capacity(self.glutamate_uptake_rate)
         self.repellent_release = self.calculate_repellent_release(self.surface_factor, self.volume_factor)
     
     def calculate_removal_capacity(self, uptake_rate: float) -> float:
@@ -1172,7 +1268,7 @@ class AstrocyteBranch:
         
         # Ensure the end node radius is not less than the start node radius after growth/shrinkage
         if new_end.radius <= self.start.radius:
-            logging.info("Growth constrained by start node size.")
+            self.log("Growth constrained by start node size.")
             return
         
         # Calculate the required ATP based on the change in surface area
@@ -1184,7 +1280,7 @@ class AstrocyteBranch:
         
         # Check if there's enough ATP to support the growth, or if ATP needs to be added back for shrinkage
         if growth_factor > 0 and available_atp < required_atp:
-            logging.info("Not enough ATP to support growth.")
+            self.log("Not enough ATP to support growth.")
             return
         
         # Update new end node
@@ -1196,6 +1292,8 @@ class AstrocyteBranch:
         
         # Update the physical properties of the branch (e.g., recalculate volume, surface area)
         self.update_physical_properties()
+        
+        self.log(f"Branch grown/shrunken by {growth_factor}")
     
     def _action_spawn_or_move(self, spawn_radius_factor: float, spawn_length: float, min_steepness: float,
                               direction_threshold: float):
@@ -1232,7 +1330,7 @@ class AstrocyteBranch:
         """
         # Ensure no children exist; else skip
         if self.children:
-            logging.warning("Branch has children, cannot prune.")
+            self.log("Branch has children, cannot prune.")
             return
         
         # Remove self from spatialIndexTree
@@ -1247,10 +1345,10 @@ class AstrocyteBranch:
         self.start = None
         self.end = None
         
-        logging.info("Branch pruned successfully.")
+        self.log("Branch pruned successfully.")
     
     def _spawn_new_branch(self, radius_factor: float, length_factor: float, direction: Tuple[float, float],
-                          spatial_index: RtreeSpatialIndex, atp_cost_per_unit_surface: float = None):
+                          spatial_index: RtreeSpatialIndex):
         """
         Spawn a new branch from the current branch.
 
@@ -1272,7 +1370,7 @@ class AstrocyteBranch:
         new_branch = AstrocyteBranch(parent=self, start=start_point, end=end_point, nucleus=self.nucleus)
         
         # calculate cost
-        atp_cost = atp_cost_per_unit_surface * new_branch.surface_area
+        atp_cost = self.atp_cost_per_unit_surface * new_branch.surface_area
         if atp_cost <= self.get_amount("ATP"):
             
             # Save the new branch to the list of children
@@ -1283,10 +1381,12 @@ class AstrocyteBranch:
             spatial_index.insert(new_branch)
             
             # remove atp
-            self.update_concentration("ATP", atp_cost)
+            self.update_concentration("ATP", -atp_cost)
+            
+            self.log(f"Spawned new branch at: {(end_point.x, end_point.y)} for {atp_cost:.1E}")
         
         else:
-            logging.info(f"Insufficient ATP available.")
+            self.log(f"Insufficient ATP available for branch spawning ({atp_cost:.1E}/{self.get_amount('ATP'):.1E}).")
     
     def _move_branch(self, spawn_length: float, direction: Tuple[float, float]):
         """
@@ -1311,6 +1411,8 @@ class AstrocyteBranch:
         
         # Update the physical properties of the branch
         self.update_physical_properties()
+        
+        self.log(f"Moved branch to {(self.end.x, self.end.y)}")
     
     def _calculate_spawn_direction(self, repellent_name='repellent'):
         """
@@ -1354,21 +1456,51 @@ class AstrocyteBranch:
                     gradient_sum_repellent += direction_normalized * diff_rep
         
         # Combine gradients: attract towards glutamate, repel from repellent
+        steepness_glutamate = np.linalg.norm(gradient_sum_glutamate)
+        steepness_repellent = np.linalg.norm(gradient_sum_repellent)
+        
+        # self.log(f"GLU: gradient_sum > {gradient_sum_glutamate} steepness > {steepness_glutamate}")
+        # self.log(f"REP: gradient_sum > {gradient_sum_repellent} steepness > {steepness_repellent}")
         combined_gradient = gradient_sum_glutamate - gradient_sum_repellent
         
         # Normalize the combined gradient to get a unit direction vector
         if np.linalg.norm(combined_gradient) > 0:
             steepness = np.linalg.norm(combined_gradient)
             direction_vector = combined_gradient / steepness
-            return tuple(direction_vector), steepness
+            return tuple(direction_vector), steepness_glutamate
         else:
             # If the gradient is zero (no preference) return None
             return None
+    
+    def log(self, msg: str) -> None:
+        msg = f"b{self.id}: {msg}"
+        
+        if self.data_logger is not None:
+            self.data_logger.add_message(msg)
+        else:
+            logging.warning(msg)
 
 
 class DataLogger:
+    
+    messages = []
+    steps = 0
+    
     def __init__(self):
-        self.logged_data = []
+        pass
+    
+    def step(self):
+        self.steps += 1
+    
+    def add_message(self, msg: str) -> None:
+        self.messages.append(f"step {self.steps}:{msg}")
+    
+    def get_messages(self, n=None) -> list:
+        
+        if n is None:
+            return self.messages
+        else:
+            return self.messages[-n:]
     
     def log_data(self, data):
         pass
