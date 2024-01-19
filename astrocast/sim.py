@@ -935,6 +935,7 @@ class AstrocyteBranch:
         history = self.intracellular_history[molecule] if intra else self.extracellular_history[molecule]
         if not history:
             return 0.0  # No trend if history is empty
+        history = np.array(history)
         
         # Create an array of time points (assuming equal time intervals)
         x = np.arange(len(history))
