@@ -735,6 +735,7 @@ def denoise(
     
     from astrocast.denoising import SubFrameGenerator
     
+    # todo: this is actually superseded
     chunks = parse_chunks(infer_chunks, chunks)
     
     with UserFeedback(params=locals(), logging_level=logging_level):
