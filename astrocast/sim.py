@@ -576,12 +576,13 @@ class Astrocyte:
         self.environment_grid = environment_grid
         self.spatial_index = spatial_index
         
-        self.spawn_initial_branches(num_branches=num_branches, max_branch_radius=max_branch_radius,
-                                    spawn_radius=start_spawn_radius, spawn_length=spawn_length)
-        
         self.x, self.y = position
         self.radius = radius
         self.pixels = self.get_pixels_within_cell()
+        
+        # spawn mother branches
+        self.spawn_initial_branches(num_branches=num_branches, max_branch_radius=max_branch_radius,
+                                    spawn_radius=start_spawn_radius, spawn_length=spawn_length)
         
         # Establish initial concentrations
         self.molecules = dict(glutamate=0, calcium=1e-6, ATP=10e-6) if molecules is None else molecules
