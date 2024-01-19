@@ -131,7 +131,7 @@ class EnvironmentGrid:
                       molecule: str) -> Union[float, List[float]]:
         
         concentrations = self.get_concentration_at(location, molecule)
-        return [conc / self.pixel_volume for conc in concentrations]
+        return [concentration / self.pixel_volume for concentration in concentrations]
     
     def set_concentration_at(self, location: Tuple[int, int], molecule: str, concentration: float):
         """
