@@ -10,6 +10,7 @@ import seaborn as sns
 from IPython.core.display import HTML
 from matplotlib import pyplot as plt
 from matplotlib.animation import FuncAnimation
+from matplotlib.patches import Circle
 from rtree import index
 
 
@@ -675,9 +676,15 @@ class Astrocyte:
     
     def plot(self, figsize=(5, 5), ax: plt.Axes = None):
         
+        # create figure
         if ax is None:
             fig, ax = plt.subplots(1, 1, figsize=figsize)
         
+        # plot cell body
+        cell_body = Circle((self.x, self.y), self.radius, color='blue', fill=False)
+        ax.add_patch(cell_body)
+        
+        # plot branches
         for branch in self.branches:
             x0, y0 = branch.start.x, branch.start.y
             x1, y1 = branch.end.x, branch.end.y
