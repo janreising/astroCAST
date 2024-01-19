@@ -15,7 +15,9 @@ from rtree import index
 
 class EnvironmentGrid:
     def __init__(self, grid_size: Tuple[int, int], diffusion_rate: float, dt: float, pixel_volume: float = 1.0,
-                 molecules: List[str] = ["glutamate", "calcium", "repellent"], dtype: str = 'float16'):
+                 molecules: List[str] = ("glutamate", "calcium", "repellent"),
+                 degrades: List[str] = ("repellent",), degradation_factor: float = 0.75,
+                 dtype: str = 'float16'):
         """
         Initialize the environment grid with shared numpy arrays for each molecule.
 
@@ -29,6 +31,8 @@ class EnvironmentGrid:
         """
         self.grid_size = grid_size
         self.molecules = molecules
+        self.degrades = degrades
+        self.degradation_factor = degradation_factor
         self.pixel_volume = pixel_volume
         self.diffusion_rate = diffusion_rate
         self.dt = dt
@@ -84,6 +88,10 @@ class EnvironmentGrid:
             
             shared_array[1:-1, 1:-1] = current_concentration[1:-1, 1:-1] + change
     
+    def _degrade_molecules(self):
+        for molecule in self.degrades:
+            self.shared_arrays[molecule] *= self.degradation_factor
+    
     def step(self, time_step: int = 1):
         """
         Advance the simulation by a specified number of time steps.
@@ -98,6 +106,7 @@ class EnvironmentGrid:
         """
         for t in range(time_step):
             self._update_concentrations()
+            self._degrade_molecules()
     
     def get_tracked_molecules(self) -> List[str]:
         return list(self.shared_arrays.keys())
@@ -432,7 +441,7 @@ class GlutamateReleaseManager:
             # Update the grid for each hotspot where release is decided
             for (x, y, _), release, difference in zip(self.hotspots, release_decision, release_difference):
                 if release:
-                    release_amount = difference * self.release_amplitude  # todo: should be in mol
+                    release_amount = difference * self.release_amplitude
                     self.environment_grid.update_concentration_at((int(x), int(y)), "glutamate", release_amount)
             
             self.time_step += 1
@@ -729,6 +738,7 @@ class AstrocyteBranch:
     def __init__(self, parent, nucleus: Astrocyte, start: Union[Tuple[int, int, int], AstrocyteNode],
                  end: Union[Tuple[int, int, int], AstrocyteNode], branch_id: int = 0, max_history=100):
         
+        self.min_trend_amplitude = None  # minimum trend in ATP and glutamate to grow or shrink
         self.min_steepness = None  # minimum steepness for spawning
         self.atp_cost_per_glutamate = None  # mol ATP / mol Glutamate
         self.diffusion_coefficient = None
@@ -791,6 +801,29 @@ class AstrocyteBranch:
         # Update extracellular history
         for molecule, concentration in self.environment.items():
             self.extracellular_history[molecule].append(concentration)
+    
+    def get_trend(self, molecule: str, intra: bool) -> float:
+        """
+        Perform linear regression on the history of a molecule's concentration.
+
+        Args:
+            molecule: Name of the molecule.
+            intra: True for intracellular history, False for extracellular history.
+
+        Returns:
+            Slope (m) of the linear regression line, representing the trend.
+        """
+        history = self.intracellular_history[molecule] if intra else self.extracellular_history[molecule]
+        if not history:
+            return 0.0  # No trend if history is empty
+        
+        # Create an array of time points (assuming equal time intervals)
+        x = np.arange(len(history))
+        
+        # Perform linear regression
+        slope, _ = np.polyfit(x, history, 1)
+        
+        return slope
     
     def update_concentration(self, molecule, amount):
         if molecule not in self.molecules:
@@ -971,13 +1004,23 @@ class AstrocyteBranch:
     def _act(self):
         
         # we prune automatically if the end radius drops below min_radius
-        self._action_grow_or_shrink(self.growth_factor, self.atp_cost_per_unit_surface, self.min_radius)
+        self._action_grow_or_shrink(self.growth_factor, self.min_trend_amplitude,
+                                    self.atp_cost_per_unit_surface, self.min_radius)
         
         self._action_spawn_or_move(self.spawn_radius, self.spawn_length, self.min_steepness, self.direction_threshold)
     
-    def _action_grow_or_shrink(self, growth_factor: float, atp_cost_per_unit_surface: float, min_radius: float):
+    def _action_grow_or_shrink(self, growth_factor: float, min_trend_amplitude: float,
+                               atp_cost_per_unit_surface: float, min_radius: float):
         """
         Grow or shrink the branch by adjusting the radius of the end node.
+
+        .. note::
+        
+            | Glutamate vs ATP | Low | Medium | High |
+            |-----------------|-----|--------|------|
+            | High            | MIX | GROW    | GROW  |
+            | Medium          |  SHRINK  | -    | GROW  |
+            | Low             | SHRINK | SHRINK | MIX   |
 
         Args:
             growth_factor: The factor determining how much the node grows or shrinks.
@@ -985,17 +1028,19 @@ class AstrocyteBranch:
             min_radius: The minimum allowed radius of the end node to prevent over-shrinkage.
         """
         
-        # todo: when would we want to grow?
-        #  - glutamate cannot be removed efficiently
-        #  - more ATP required (eg, history of ATP in children is decreasing
-        #  - what if converting glutamate takes ATP?
-        # todo: when would we want to shrink the branch?
-        #  - not using enough ATP?
-        # todo: wouldn't the current implementation effectively prefer to grow always?
+        atp_trend = self.get_trend("ATP", intra=True)
+        glutamate_trend = self.get_trend("glutamate", intra=False)
+        combined_trend = glutamate_trend - atp_trend
+        
+        if abs(combined_trend) < min_trend_amplitude:
+            return
+        
+        if combined_trend < 0:
+            growth_factor *= -1
         
         # Calculate the new surface area after growth/shrinkage
         new_end = self.end.copy()
-        new_end.radius += growth_factor  # todo: should be relative and include shrinking or growing (+/-)
+        new_end.radius *= growth_factor
         
         if new_end.radius < min_radius:
             self._action_prune()
