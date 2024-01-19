@@ -562,16 +562,127 @@ class Simulation:
 
 class Astrocyte:
     
-    def __init__(self, environment_grid: EnvironmentGrid):
+    children: List[AstrocyteBranch] = []
+    branches: List[AstrocyteBranch] = []
+    
+    def __init__(self, position: Tuple[int, int], radius: int, num_branches: int,
+                 max_branch_radius: float, start_spawn_radius: float, spawn_length: int,
+                 repellent_concentration: float,
+                 environment_grid: EnvironmentGrid, spatial_index: RtreeSpatialIndex,
+                 max_history: int = 100, molecules: dict = None):
+        
+        self.max_history = max_history
         self.environment_grid = environment_grid
-        self.spatial_index = RtreeSpatialIndex()
-        self.branches = []
+        self.spatial_index = spatial_index
+        
+        self.spawn_initial_branches(num_branches=num_branches, max_branch_radius=max_branch_radius,
+                                    spawn_radius=start_spawn_radius, spawn_length=spawn_length)
+        
+        self.x, self.y = position
+        self.radius = radius
+        self.pixels = self.get_pixels_within_cell()
+        
+        # Establish initial concentrations
+        self.molecules = dict(glutamate=0, calcium=1e-6, ATP=10e-6) if molecules is None else molecules
+        self.repellent_concentration = repellent_concentration
     
-    def manage_growth(self):
+    def step(self, time_step=1):
+        for i in range(time_step):
+            
+            for branch in self.branches:
+                branch.step()
+            
+            self.remove_molecules_from_cell_body()
+            self.release_repellent()
+    
+    def get_pixels_within_cell(self) -> List[Tuple[int, int]]:
+        """
+        Get the grid cells (pixels) that are within the astrocyte's cell body.
+
+        Returns:
+            A list of tuples, where each tuple represents the coordinates (x, y) of a grid cell within the cell body.
+        """
+        pixels = []
+        # Define the bounding box around the astrocyte
+        x_min = max(0, self.x - self.radius)
+        x_max = min(self.environment_grid.grid_size[0], self.x + self.radius)
+        y_min = max(0, self.y - self.radius)
+        y_max = min(self.environment_grid.grid_size[1], self.y + self.radius)
+        
+        # Check each pixel within the bounding box to see if it's within the astrocyte's radius
+        for x in range(x_min, x_max):
+            for y in range(y_min, y_max):
+                # Calculate the distance from the center of the astrocyte to this pixel
+                distance = np.sqrt((x - self.x) ** 2 + (y - self.y) ** 2)
+                # If the distance is less than the radius, the pixel is within the astrocyte
+                if distance <= self.radius:
+                    pixels.append((x, y))
+        
+        return pixels
+    
+    def remove_molecules_from_cell_body(self):
+        
+        for pixel in self.pixels:
+            for molecule in self.environment_grid.get_tracked_molecules():
+                self.environment_grid.set_concentration_at(pixel, molecule=molecule, concentration=0.0)
+    
+    def release_repellent(self):
+        for pixel in self.pixels:
+            self.environment_grid.set_concentration_at(pixel, molecule="repellent",
+                                                       concentration=self.repellent_concentration)
+    
+    def get_concentration(self, molecule: str):
+        return self.molecules[molecule]
+    
+    def update_concentration(self, molecule: str, amount: float):
+        # cell body acts as infinite sink
         pass
     
-    def interact_with_environment(self, environment_grid):
-        pass
+    def spawn_initial_branches(self, num_branches: int, max_branch_radius: float, spawn_radius: float,
+                               spawn_length: float):
+        """
+        Spawn initial branches for the astrocyte.
+
+        Args:
+            num_branches: Number of branches to spawn.
+            max_branch_radius: Maximum radius for a branch.
+            spawn_radius: The radius at which the branches spawn from the cell body.
+            spawn_length: The length of the branch from the starting point.
+        """
+        # Calculate the angle between each branch
+        angle_increment = 2 * np.pi / num_branches
+        
+        for i in range(num_branches):
+            angle = i * angle_increment
+            
+            # Choose a random location on the boundary (x, y, radius)
+            start_x = self.x + np.cos(angle) * self.radius
+            start_y = self.y + np.sin(angle) * self.radius
+            start = AstrocyteNode(start_x, start_y, max_branch_radius)
+            
+            # Set the end point perpendicular to the center of the astrocyte with 'spawn_length' and 'spawn_radius'
+            end_x = start_x + np.cos(angle) * spawn_length
+            end_y = start_y + np.sin(angle) * spawn_length
+            end = AstrocyteNode(end_x, end_y, spawn_radius)
+            
+            # Create the new branch
+            new_branch = AstrocyteBranch(parent=self, nucleus=self, start=start, end=end, max_history=self.max_history)
+            self.children.append(new_branch)
+            self.branches.append(new_branch)
+            
+            # Add the new branch to the spatial index
+            self.spatial_index.insert(new_branch)
+    
+    def plot(self, figsize=(5, 5), ax: plt.Axes = None):
+        
+        if ax is None:
+            fig, ax = plt.subplots(1, 1, figsize=figsize)
+        
+        for branch in self.branches:
+            x0, y0 = branch.start.x, branch.start.y
+            x1, y1 = branch.end.x, branch.end.y
+            
+            ax.plot([x0, x1], [y0, y1], color="black")
 
 
 class AstrocyteNode:
@@ -615,6 +726,7 @@ class RtreeSpatialIndex:
             branch: The branch to insert.
         """
         bbox = self._get_bbox(branch)
+        branch.id = self.branch_counter
         self.rtree.insert(branch.id, bbox)
         
         self.branch_counter += 1
@@ -734,9 +846,10 @@ class AstrocyteBranch:
     repellent_release = None
     environment = None
     diffusion_rate = None
+    id = 0
     
     def __init__(self, parent, nucleus: Astrocyte, start: Union[Tuple[int, int, int], AstrocyteNode],
-                 end: Union[Tuple[int, int, int], AstrocyteNode], branch_id: int = 0, max_history=100):
+                 end: Union[Tuple[int, int, int], AstrocyteNode], max_history=100):
         
         self.min_trend_amplitude = None  # minimum trend in ATP and glutamate to grow or shrink
         self.min_steepness = None  # minimum steepness for spawning
@@ -746,7 +859,7 @@ class AstrocyteBranch:
         self.direction_threshold = None
         self.spatial_index = None
         self.spawn_length = None  # m
-        self.spawn_radius = None  # m
+        self.spawn_radius_factor = None  # Relative proportion of end point compared to start point
         self.min_radius = None  # m
         self.atp_cost_per_unit_surface = None  # mol/m²
         self.growth_factor = None
@@ -755,7 +868,6 @@ class AstrocyteBranch:
         
         self.parent: AstrocyteBranch = parent
         self.nucleus = nucleus
-        self.id = branch_id
         self.children: List[AstrocyteBranch] = []
         self.start: AstrocyteNode = AstrocyteNode(*start) if isinstance(start, tuple) else start
         self.end: AstrocyteNode = AstrocyteNode(*end) if isinstance(end, tuple) else end
@@ -1007,7 +1119,8 @@ class AstrocyteBranch:
         self._action_grow_or_shrink(self.growth_factor, self.min_trend_amplitude,
                                     self.atp_cost_per_unit_surface, self.min_radius)
         
-        self._action_spawn_or_move(self.spawn_radius, self.spawn_length, self.min_steepness, self.direction_threshold)
+        self._action_spawn_or_move(self.spawn_radius_factor, self.spawn_length, self.min_steepness,
+                                   self.direction_threshold)
     
     def _action_grow_or_shrink(self, growth_factor: float, min_trend_amplitude: float,
                                atp_cost_per_unit_surface: float, min_radius: float):
@@ -1075,7 +1188,7 @@ class AstrocyteBranch:
         # Update the physical properties of the branch (e.g., recalculate volume, surface area)
         self.update_physical_properties()
     
-    def _action_spawn_or_move(self, spawn_radius: float, spawn_length: float, min_steepness: float,
+    def _action_spawn_or_move(self, spawn_radius_factor: float, spawn_length: float, min_steepness: float,
                               direction_threshold: float):
         """
         Spawn a new branch or move the current branch based on the environmental factors.
@@ -1084,7 +1197,7 @@ class AstrocyteBranch:
         the branch will move. Otherwise, a new branch will be spawned.
 
         Args:
-            spawn_radius: The radius factor for the new branch.
+            spawn_radius_factor: The radius factor for the new branch.
             spawn_length: The length of the new branch or movement.
             min_steepness: Minimum steepness of the combined gradient (glutamate and repellent) that triggers
                 spawning of a new branch or movement.
@@ -1099,7 +1212,7 @@ class AstrocyteBranch:
         if direction is not None and steepness > min_steepness:
             if len(self.children) > 0 or np.linalg.norm(direction) > direction_threshold:
                 # If direction varies too much or branch has children, spawn a new branch
-                self._spawn_new_branch(spawn_radius, spawn_length, direction, self.spatial_index)
+                self._spawn_new_branch(spawn_radius_factor, spawn_length, direction, self.spatial_index)
             else:
                 # If direction is similar and branch has no children, move the branch
                 self._move_branch(spawn_length, direction)
@@ -1117,11 +1230,10 @@ class AstrocyteBranch:
         self.spatial_index.remove(self)
         
         # Delete self from parent
-        if self.parent:
-            self.parent.children.remove(self)
+        self.parent.children.remove(self)
+        self.nucleus.branches.remove(self)
         
         # Additional cleanup if needed (e.g., freeing resources or nullifying references)
-        self.parent = None
         self.children = []
         self.start = None
         self.end = None
@@ -1156,6 +1268,7 @@ class AstrocyteBranch:
             
             # Save the new branch to the list of children
             self.children.append(new_branch)
+            self.nucleus.branches.append(new_branch)
             
             # Update the spatial index with the new branch
             spatial_index.insert(new_branch)
