@@ -513,7 +513,7 @@ def subtract_delta(
         help="Path to validation file or a glob search string (eg. './train_*.h5')"
         )
 @click_custom_option(
-        '--loc', type=click.STRING, default=None, help="Dataset location if .h5 files are provided."
+        '--loc-in', type=click.STRING, default=None, help="Dataset location if .h5 files are provided."
         )
 @click_custom_option(
         '--batch-size', type=click.INT, default=16, help="Batch size that is trained at once."
@@ -605,7 +605,7 @@ def subtract_delta(
 @click_custom_option('--logging-level', type=click.INT, default=logging.INFO, help='Logging level for messages.')
 def train_denoiser(
         training_files, validation_files, input_size, learning_rate, decay_rate, decay_steps, n_stacks, kernel,
-        batch_normalize, loss, pretrained_weights, use_cpu, train_rotation, pre_post_frames, gap_frames, loc,
+        batch_normalize, loss, pretrained_weights, use_cpu, train_rotation, pre_post_frames, gap_frames, loc_in,
         max_per_file, max_per_val_file, batch_size, padding, in_memory, normalize, train_flip, batch_size_val, epochs,
         patience, min_delta, save_path, logging_level
         ):
@@ -626,7 +626,7 @@ def train_denoiser(
                     f"{train_str.name}"
                     )
         
-        train_gen = denoising.SubFrameGenerator(paths=train_paths, max_per_file=max_per_file, loc=loc,
+        train_gen = denoising.SubFrameGenerator(paths=train_paths, max_per_file=max_per_file, loc=loc_in,
                                                 input_size=input_size, pre_post_frames=pre_post_frames,
                                                 gap_frames=gap_frames, allowed_rotation=train_rotation, padding=padding,
                                                 batch_size=batch_size, normalize=normalize, in_memory=in_memory,
@@ -648,7 +648,7 @@ def train_denoiser(
                         )
             
             val_gen = denoising.SubFrameGenerator(paths=val_paths, max_per_file=max_per_val_file,
-                                                  batch_size=batch_size_val, loc=loc, input_size=input_size,
+                                                  batch_size=batch_size_val, loc=loc_in, input_size=input_size,
                                                   pre_post_frames=pre_post_frames, gap_frames=gap_frames,
                                                   allowed_rotation=[0], padding=padding, normalize=normalize,
                                                   in_memory=in_memory, allowed_flip=[-1], shuffle=False)
@@ -698,12 +698,12 @@ def train_denoiser(
 @click_custom_option('--padding', type=click.STRING, default="edge", help='Padding mode for the data chunks.')
 @click_custom_option('--normalize', type=click.STRING, default="global", help='Normalization mode for the data.')
 @click_custom_option(
-        '--loc', type=click.STRING, default="data/", help='Location in the input file(s) where the data is stored.'
+        '--loc-in', type=click.STRING, default="data/", help='Location in the input file(s) where the data is stored.'
         )
 @click_custom_option('--in-memory', type=click.BOOL, default=False, help='Whether to store data in memory.')
 @click_custom_option('--logging-level', type=click.INT, default=logging.INFO, help='Logging level for messages.')
 @click_custom_option(
-        '--out-loc', type=click.STRING, default=None,
+        '--loc-out', type=click.STRING, default=None,
         help='Location in the output file where the results will be saved.'
         )
 @click_custom_option(
@@ -719,8 +719,8 @@ def train_denoiser(
         )
 @click_custom_option('--rescale', type=click.BOOL, default=True, help='Whether to rescale the output values.')
 def denoise(
-        input_path, batch_size, input_size, pre_post_frames, gap_frames, z_select, logging_level, model, out_loc, dtype,
-        infer_chunks, chunks, rescale, overlap, padding, normalize, loc, in_memory, output_file
+        input_path, batch_size, input_size, pre_post_frames, gap_frames, z_select, logging_level, model, loc_out, dtype,
+        infer_chunks, chunks, rescale, overlap, padding, normalize, loc_in, in_memory, output_file
         ):
     """
     Denoise the input data using the SubFrameGenerator class and infer method.
@@ -744,12 +744,12 @@ def denoise(
                                                 pre_post_frames=pre_post_frames, gap_frames=gap_frames,
                                                 z_select=z_select, allowed_rotation=[0], allowed_flip=[-1],
                                                 overlap=overlap, padding=padding, shuffle=False, normalize=normalize,
-                                                loc=loc, in_memory=in_memory, save_global_descriptive=False,
+                                                loc=loc_in, in_memory=in_memory, save_global_descriptive=False,
                                                 logging_level=logging_level)
         
         # Running the infer method
         result = sub_frame_generator.infer(
-                model=model, output=output_file, out_loc=out_loc, dtype=dtype, chunk_size=chunks, rescale=rescale
+                model=model, output=output_file, out_loc=loc_out, dtype=dtype, chunk_size=chunks, rescale=rescale
                 )
         
         logging.info(f"saved inference to: {output_file}")
