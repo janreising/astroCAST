@@ -1679,7 +1679,7 @@ class AstrocyteBranch:
         
         self._log(f"Moved branch to {(self.end.x, self.end.y)}")
     
-    def _find_best_spawn_location(self, num_candidates=45) -> Union[Tuple[AstrocyteBranch, float], None]:
+    def _find_best_spawn_location(self, num_candidates=15) -> Union[Tuple[AstrocyteBranch, float], None]:
         
         # Generate a set of candidate directions
         candidate_branches = []
