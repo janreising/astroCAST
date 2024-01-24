@@ -47,6 +47,7 @@ class EnvironmentGrid:
         self.pixel_volume = pixel_volume
         self.diffusion_rate = diffusion_rate
         self.dt = dt
+        self.history = {molecule: [] for molecule in molecules}
         
         self.shared_arrays = self._create_shared_arrays(grid_size, molecules, dtype=dtype)
         
@@ -129,9 +130,25 @@ class EnvironmentGrid:
         for t in range(time_step):
             self._update_concentrations()
             self._degrade_molecules()
+            
+            self.update_history()
+    
+    def update_history(self):
+        total_amounts = self.get_total_amount()
+        for molecule in self.molecules:
+            self.history[molecule].append(total_amounts[molecule])
+    
+    def get_total_amount(self):
+        
+        total_amounts = {}
+        for molecule in self.molecules:
+            amount = np.sum(self.shared_arrays[molecule][0]) * self.pixel_volume
+            total_amounts[molecule] = amount
+        
+        return total_amounts
     
     def get_tracked_molecules(self) -> List[str]:
-        return list(self.shared_arrays.keys())
+        return self.molecules
     
     def get_concentration_at(self, location: Union[Tuple[int, int], List[Tuple[int, int]]],
                              molecule: str) -> Union[float, List[float]]:
@@ -1024,7 +1041,7 @@ class RtreeSpatialIndex:
         
         # check collision with border
         x0, y0, x1, y1 = bbox
-        border = self.simulation.border
+        border = 1
         X, Y = self.simulation.grid_size
         for x in [x0, x1]:
             if x < border or x > X - border:
