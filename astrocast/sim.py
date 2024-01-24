@@ -1142,13 +1142,6 @@ class AstrocyteBranch:
     def _simulate_glutamate(self):
         
         # remove from environment
-        extracellular_glutamate = self.environment["glutamate"]
-        to_remove = max(0, extracellular_glutamate - self.glutamate_uptake_capacity)
-        
-        actually_removed = self.update_environment("glutamate", to_remove)
-        
-        # increase intracellular concentration with actually removed concentration
-        self.update_concentration("glutamate", actually_removed)
         extracellular_glutamate = np.sum(
                 self.nucleus.environment_grid.get_amount_at(self.interacting_pixels, "glutamate"))
         if extracellular_glutamate > self.nucleus.numerical_tolerance:
@@ -1541,7 +1534,29 @@ class DataLogger:
         self.steps += 1
     
     def add_message(self, msg: str) -> None:
-        self.messages.append(f"step {self.steps}:{msg}")
+        
+        # Get the calling object (caller)
+        stack = inspect.stack()
+        if len(stack) > 1:
+            caller_frame = stack[1][0]
+            caller_locals = caller_frame.f_locals
+            if 'self' in caller_locals:
+                caller = caller_locals['self']
+                if hasattr(caller, 'id'):
+                    caller_id = caller.get_short_id()
+                else:
+                    caller_id = "Unknown"
+            else:
+                caller_id = "Unknown"
+        else:
+            caller_id = "Unknown"
+        
+        str_ = ""
+        str_ += f"step {self.steps: <3}: "
+        str_ += f"{caller_id}: "
+        str_ += msg
+        
+        self.messages.append(str_)
     
     def get_messages(self, n=None) -> list:
         
@@ -1549,6 +1564,12 @@ class DataLogger:
             return self.messages
         else:
             return self.messages[-n:]
+    
+    def save(self, path: Path):
+        with open(path.as_posix(), "w") as txt:
+            for msg in self.messages:
+                txt.writelines(msg)
+                txt.writelines("\n")
     
     def log_data(self, data):
         pass
