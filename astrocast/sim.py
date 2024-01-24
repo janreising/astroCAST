@@ -290,13 +290,14 @@ class EnvironmentGrid:
             ax.clear()
         
         # Plotting the concentration heatmap
-        sns.heatmap(concentration_array.transpose(), vmin=0, cmap=cmap, cbar=False, ax=ax)
+        sns.heatmap(concentration_array.transpose(), vmin=0, cmap=cmap, cbar=False, robust=True, ax=ax)
         
         # Adding a colorbar and setting titles and labels
         # plt.colorbar(heatmap, ax=ax)
         ax.invert_yaxis()
         ax.set_aspect('equal')
-        ax.set_title(f"Concentration of {molecule}")
+        ax.set_title(f"{molecule} "
+                     f"({humanize.metric(np.sum(concentration_array) * self.pixel_volume, 'mol')})")
         ax.set_xlabel("X Coordinate")
         ax.set_ylabel("Y Coordinate")
         
