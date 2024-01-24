@@ -704,32 +704,79 @@ class Simulation:
 
 class Astrocyte:
     
-    children: List[AstrocyteBranch] = []
-    branches: List[AstrocyteBranch] = []
-    
     def __init__(self, position: Tuple[int, int], radius: int, num_branches: int,
-                 max_branch_radius: float, start_spawn_radius: float, spawn_length: int,
+                 max_branch_radius: float, start_spawn_radius: float,
                  repellent_concentration: float,
                  environment_grid: EnvironmentGrid, spatial_index: RtreeSpatialIndex,
-                 max_history: int = 100, molecules: dict = None, data_logger: DataLogger = None):
+                 numerical_tolerance=1e-6, allow_pruning=True,
+                 min_trend_amplitude=0.5, min_steepness=0.05, spawn_angle_threshold=5,
+                 diffusion_coefficient=50, glutamate_uptake_rate=100,
+                 spawn_length=3, spawn_radius_factor=0.1, min_radius=0.001,
+                 growth_factor=0.01,
+                 repellent_volume_factor=0.00001, repellent_surface_factor=0.00001,
+                 atp_cost_per_glutamate=- 18, atp_cost_per_unit_surface=1,
+                 max_history: int = 1000, max_tries=5, molecules: dict = None, data_logger: DataLogger = None):
         
-        self.max_history = max_history
         self.environment_grid = environment_grid
         self.spatial_index = spatial_index
         self.data_logger = data_logger
+        self.max_branch_radius = max_branch_radius
+        self.children = []
+        self.branches = []
         
+        # computational parameters
+        self.max_history = max_history
+        self.max_tries = max_tries
+        self.numerical_tolerance = numerical_tolerance
+        
+        # decision parameters
+        self.allow_pruning = allow_pruning  # True
+        self.min_trend_amplitude = min_trend_amplitude  # minimum trend in ATP and glutamate to grow or shrink
+        self.min_steepness = min_steepness  # minimum steepness for spawning
+        self.spawn_angle_threshold = spawn_angle_threshold  # °
+        
+        # ion flow parameters
+        self.diffusion_coefficient = diffusion_coefficient
+        self.glutamate_uptake_rate = glutamate_uptake_rate  # mol/m² --> same as surface factor?
+        
+        # cost parameters
+        self.atp_cost_per_glutamate = atp_cost_per_glutamate  # mol ATP / mol Glutamate  # 1/18
+        self.atp_cost_per_unit_surface = atp_cost_per_unit_surface  # mol/m²
+        
+        # physical properties
+        self.spawn_length = spawn_length  # m
+        self.spawn_radius_factor = spawn_radius_factor  # Relative proportion of end point compared to start point
+        self.min_radius = min_radius  # m
+        self.growth_factor = growth_factor
+        self.repellent_volume_factor = repellent_volume_factor  # mol/m³
+        self.repellent_surface_factor = repellent_surface_factor  # mol/m²
+        
+        self.id = uuid.uuid1()
         self.x, self.y = position
         self.radius = radius
         self.pixels = self.get_pixels_within_cell()
+        self.bbox = self.get_bbox()
         
         # spawn mother branches
         self.spawn_initial_branches(num_branches=num_branches, max_branch_radius=max_branch_radius,
                                     spawn_radius=start_spawn_radius, spawn_length=spawn_length)
         
         # Establish initial concentrations
-        # todo set to something more reasonable
-        self.molecules = dict(glutamate=0, calcium=10, ATP=100) if molecules is None else molecules
+        self.molecules = dict(glutamate=0, calcium=0, ATP=10) if molecules is None else molecules
         self.repellent_concentration = repellent_concentration
+    
+    def get_short_id(self):
+        return xxhash.xxh32_hexdigest(self.id.hex)
+    
+    def get_bbox(self):
+        x0, x1 = self.x - self.radius, self.x + self.radius
+        y0, y1 = self.y - self.radius, self.y + self.radius
+        
+        xmin = min(x0, x1)
+        ymin = min(y0, y1)
+        xmax = max(x0, x1)
+        ymax = max(y0, y1)
+        return xmin, ymin, xmax, ymax
     
     def step(self, time_step=1):
         for i in range(time_step):
@@ -741,7 +788,7 @@ class Astrocyte:
             for branch in self.branches:
                 branch.step()
             
-            self.remove_molecules_from_cell_body()
+            # self.remove_molecules_from_cell_body()
             self.release_repellent()
     
     def get_pixels_within_cell(self) -> List[Tuple[int, int]]:
