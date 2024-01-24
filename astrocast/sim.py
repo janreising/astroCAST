@@ -607,11 +607,17 @@ class Simulation:
     
     def run_simulation_step(self, time_step=1):
         
+        t0 = time.time()
+        
         self.glutamate_release_manager.step(time_step=time_step)
         self.environment_grid.step(time_step=time_step)
         
         for astrocyte in self.astrocytes:
             astrocyte.step(time_step=time_step)
+        
+        delta_step = time.time() - t0
+        self.data_logger.add_message(f"runtime {humanize.naturaldelta(delta_step)} for "
+                                     f"{humanize.intword(self.get_num_branches())} branches")
         
         self.data_logger.step()
     
