@@ -679,10 +679,10 @@ class Simulation:
                 ax.clear()
         
         self.environment_grid.plot_concentration(molecule="glutamate", ax=axx["A"])
-        axx["A"].set_title("Glutamate")
+        # axx["A"].set_title("Glutamate")
         
         self.environment_grid.plot_concentration(molecule="repellent", ax=axx["B"])
-        axx["B"].set_title("Repellent")
+        # axx["B"].set_title("Repellent")
         
         self.glutamate_release_manager.plot(ax=axx["C"])
         axx["C"].set_xlim(0, X)
@@ -1704,25 +1704,9 @@ class AstrocyteBranch:
         if length_of_branch == 0:
             return 0
         
-        # Initialize variables to store gradient sums
-        gradient_sum_glutamate = np.array([0.0, 0.0])
-        gradient_sum_repellent = np.array([0.0, 0.0])
         # Calculate the gradient
         gradient = concentration_difference / length_of_branch
         
-        # Calculate the sum of gradients for glutamate and repellent
-        for i in range_x:
-            for j in range_y:
-                if (i, j) != (x, y):
-                    direction = np.array([i - x, j - y])
-                    distance = np.linalg.norm(direction)
-                    direction_normalized = direction / distance
-                    
-                    diff_glu = environment_grid.get_concentration_at((i, j), 'glutamate') - glutamate_concentration
-                    diff_rep = environment_grid.get_concentration_at((i, j), repellent_name) - repellent_concentration
-                    
-                    gradient_sum_glutamate += direction_normalized * diff_glu
-                    gradient_sum_repellent += direction_normalized * diff_rep
         return gradient
     
     def get_norm_direction(self):
