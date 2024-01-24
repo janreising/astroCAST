@@ -1679,30 +1679,36 @@ class AstrocyteBranch:
     
     def _calculate_gradient_along_branch(self, candidate: AstrocyteBranch, molecule: str) -> float:
         """
-        Calculate the direction for spawning a new branch based on environmental factors.
+        Calculate the gradient of a specified molecule along a branch.
 
         Args:
-            repellent_name: The name of the repellent substance in the environment grid.
+            candidate: The candidate branch (AstrocyteBranch object) along which to calculate the gradient.
+            molecule: The name of the molecule for which to calculate the gradient.
 
         Returns:
-            A tuple representing the direction vector (dx, dy).
+            The gradient of the specified molecule along the branch.
         """
-        environment_grid = self.nucleus.environment_grid
+        # Get the molecule concentration at the start and end of the branch
+        concentration_start = self.nucleus.environment_grid.get_concentration_at(candidate.start.get_position(),
+                                                                                 molecule)
+        concentration_end = self.nucleus.environment_grid.get_concentration_at(candidate.end.get_position(), molecule)
         
-        # Get the position of the current branch's end node
-        x, y = self.end.x, self.end.y
+        # Calculate the concentration difference
+        concentration_difference = concentration_end - concentration_start
         
-        # Define the range to look around the end node for gradient calculation
-        range_x = range(max(0, x - 1), min(self.nucleus.environment_grid.grid_size[0], x + 2))
-        range_y = range(max(0, y - 1), min(self.nucleus.environment_grid.grid_size[1], y + 2))
+        # Calculate the length of the branch
+        length_of_branch = np.sqrt(
+                (candidate.end.x - candidate.start.x) ** 2 + (candidate.end.y - candidate.start.y) ** 2)
         
-        # Get the concentrations of glutamate and repellent around the end node
-        glutamate_concentration = environment_grid.get_concentration_at((x, y), 'glutamate')
-        repellent_concentration = environment_grid.get_concentration_at((x, y), repellent_name)
+        # Avoid division by zero
+        if length_of_branch == 0:
+            return 0
         
         # Initialize variables to store gradient sums
         gradient_sum_glutamate = np.array([0.0, 0.0])
         gradient_sum_repellent = np.array([0.0, 0.0])
+        # Calculate the gradient
+        gradient = concentration_difference / length_of_branch
         
         # Calculate the sum of gradients for glutamate and repellent
         for i in range_x:
@@ -1717,27 +1723,34 @@ class AstrocyteBranch:
                     
                     gradient_sum_glutamate += direction_normalized * diff_glu
                     gradient_sum_repellent += direction_normalized * diff_rep
-        
-        # Combine gradients: attract towards glutamate, repel from repellent
-        steepness_glutamate = np.linalg.norm(gradient_sum_glutamate)
-        steepness_repellent = np.linalg.norm(gradient_sum_repellent)
-        
-        # self.log(f"GLU: gradient_sum > {gradient_sum_glutamate} steepness > {steepness_glutamate}")
-        # self.log(f"REP: gradient_sum > {gradient_sum_repellent} steepness > {steepness_repellent}")
-        combined_gradient = gradient_sum_glutamate - gradient_sum_repellent
-        
-        # Normalize the combined gradient to get a unit direction vector
-        if np.linalg.norm(combined_gradient) > 0:
-            steepness = np.linalg.norm(combined_gradient)
-            direction_vector = combined_gradient / steepness
-            return tuple(direction_vector), steepness_glutamate
-        else:
-            # If the gradient is zero (no preference) return None
-            return None
+        return gradient
     
-    def log(self, msg: str) -> None:
-        msg = f"b{self.id}: {msg}"
+    def get_norm_direction(self):
+        """
+        Calculate the normalized direction vector (unit vector) from the start to the end of the branch.
+
+        Returns:
+            A tuple representing the normalized direction vector (dx, dy).
+        """
+        # Direction vector from start to end
+        direction_vector = np.array([self.end.x - self.start.x, self.end.y - self.start.y])
         
+        # Calculate the norm (magnitude) of the direction vector
+        norm = np.linalg.norm(direction_vector)
+        
+        # Normalize the direction vector to get a unit vector
+        if norm > 0:
+            norm_direction = direction_vector / norm
+        else:
+            # If the norm is zero (start and end are the same), return a zero vector
+            norm_direction = np.array([0, 0])
+        
+        return tuple(norm_direction)
+    
+    def get_short_id(self):
+        return xxhash.xxh32_hexdigest(self.id.hex)
+    
+    def _log(self, msg: str) -> None:
         if self.data_logger is not None:
             self.data_logger.add_message(msg)
         else:
