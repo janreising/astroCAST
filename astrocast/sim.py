@@ -1058,41 +1058,29 @@ class RtreeSpatialIndex:
 
 class AstrocyteBranch:
     
-    interacting_pixels = None
-    volume = None
-    surface_area = None
-    repellent_release = None
-    environment = None
-    diffusion_rate = None
-    glutamate_uptake_capacity = None
-    id = 0
-    current_time_step = 0
-    
     def __init__(self, parent, nucleus: Astrocyte, start: Union[Tuple[int, int, int], AstrocyteNode],
-                 end: Union[Tuple[int, int, int], AstrocyteNode], max_history=100):
+                 end: Union[Tuple[int, int, int], AstrocyteNode]):
         
-        # todo: make to parameters
-        self.min_trend_amplitude = 0.5  # minimum trend in ATP and glutamate to grow or shrink
-        self.min_steepness = 0.5  # minimum steepness for spawning
-        self.atp_cost_per_glutamate = 1 / 18  # mol ATP / mol Glutamate
-        self.diffusion_coefficient = 1
-        self.glutamate_uptake_rate = 100  # mol/m² --> same as surface factor?
-        self.direction_threshold = 0.1
-        self.spatial_index = nucleus.spatial_index
-        self.spawn_length = 4  # m
-        self.spawn_radius_factor = 0.1  # Relative proportion of end point compared to start point
-        self.min_radius = 0.001  # m
-        self.atp_cost_per_unit_surface = 1  # mol/m²
-        self.growth_factor = 0.01
-        self.volume_factor = 0.01  # mol/m³
-        self.surface_factor = 0.1  # mol/m²
-        
+        # Instances
+        self.id = uuid.uuid1()
         self.parent: AstrocyteBranch = parent
         self.nucleus = nucleus
+        self.spatial_index = nucleus.spatial_index
         self.data_logger = nucleus.data_logger
         self.children: List[AstrocyteBranch] = []
-        self.start: AstrocyteNode = AstrocyteNode(*start) if isinstance(start, tuple) else start
-        self.end: AstrocyteNode = AstrocyteNode(*end) if isinstance(end, tuple) else end
+        self.start: AstrocyteNode = start if isinstance(start, AstrocyteNode) else AstrocyteNode(*start)
+        self.end: AstrocyteNode = end if isinstance(end, AstrocyteNode) else AstrocyteNode(*end)
+        
+        self.interacting_pixels = None
+        self.volume = None
+        self.surface_area = None
+        self.repellent_release = None
+        self.environment = None
+        self.diffusion_rate = None
+        self.glutamate_uptake_capacity = None
+        self.current_time_step = 0
+        self.pruned = False
+        self.counter_failed_spawn = 0
         
         # update physical properties
         self.update_physical_properties()
@@ -1101,8 +1089,19 @@ class AstrocyteBranch:
         self.get_environment()
         self.molecules = {"glutamate": 0.0, "calcium": 0.0, "ATP": 0.0}
         
-        self.intracellular_history = {molecule: deque(maxlen=max_history) for molecule in self.molecules}
-        self.extracellular_history = {molecule: deque(maxlen=max_history) for molecule in self.environment}
+        self.intracellular_history = {molecule: deque(maxlen=nucleus.max_history) for molecule in self.molecules}
+        self.extracellular_history = {molecule: deque(maxlen=nucleus.max_history) for molecule in self.environment}
+    
+    def get_bbox(self):
+        
+        x0, y0 = self.start.x, self.start.y
+        x1, y1 = self.end.x, self.end.y
+        
+        xmin = min(x0, x1)
+        ymin = min(y0, y1)
+        xmax = max(x0, x1)
+        ymax = max(y0, y1)
+        return xmin, ymin, xmax, ymax
     
     def step(self):
         
