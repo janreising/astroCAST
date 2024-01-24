@@ -700,9 +700,10 @@ class Simulation:
         axx["D"].set_title('Astrocytes')
         
         # Display the last N messages as HTML
-        from IPython.core.display import HTML
-        html_content = "<br>".join(self.data_logger.get_messages(last_n_messages))
-        display(HTML(html_content))
+        if last_n_messages is not None:
+            from IPython.core.display import HTML
+            html_content = "<br>".join(self.data_logger.get_messages(last_n_messages))
+            display(HTML(html_content))
 
 
 class Astrocyte:
