@@ -180,9 +180,9 @@ class EnvironmentGrid:
         else:
             logging.error(f"Molecule {molecule} not found in the grid.")
     
-    def update_concentration_at(self, location: Union[Tuple[int, int], List[Tuple[int, int]]],
-                                molecule: str,
-                                amount: float):
+    def update_amount_at(self, location: Union[Tuple[int, int], List[Tuple[int, int]]],
+                         molecule: str,
+                         amount: float):
         """
         Update the concentration of a specific molecule at a given location or multiple locations.
 
@@ -204,6 +204,7 @@ class EnvironmentGrid:
         
         # Update the concentration at each location by the specified amount.
         actually_removed = 0
+        random.shuffle(location)
         for x, y in location:
             
             self.shared_arrays[molecule][0][x, y] += concentration_change
