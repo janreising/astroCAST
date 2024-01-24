@@ -73,28 +73,33 @@ class EnvironmentGrid:
         Dirichlet boundary conditions (edges as sinks).
         """
         for molecule, (shared_array, _) in self.shared_arrays.items():
-            # Creating a copy of the current state of the grid
-            current_concentration = np.copy(shared_array)
             
-            # Applying Dirichlet boundary conditions (setting edges to zero)
-            current_concentration[0, :] = current_concentration[-1, :] = 0
-            current_concentration[:, 0] = current_concentration[:, -1] = 0
-            
-            # Vectorized diffusion update
-            # Using slicing for interior cells and avoiding loop calculations
-            change = self.diffusion_rate * self.dt * (
-                    current_concentration[:-2, 1:-1] -  # concentration from upper row
-                    2 * current_concentration[1:-1, 1:-1] +  # current cell concentration (doubled for laplacian)
-                    current_concentration[2:, 1:-1] +  # concentration from lower row
-                    current_concentration[1:-1, :-2] -  # concentration from left column
-                    2 * current_concentration[1:-1, 1:-1] +  # current cell concentration (doubled for laplacian)
-                    current_concentration[1:-1, 2:])  # concentration from right column
-            
-            shared_array[1:-1, 1:-1] = current_concentration[1:-1, 1:-1] + change
-            
-            if np.min(shared_array) < 0:
-                logging.warning(f"Concentration({molecule}) < 0: {np.min(shared_array)}."
-                                f"Diffusion simulation is unstable, reduce 'diffusion_rate'.")
+            for _ in range(int(self.dt)):
+                # Creating a copy of the current state of the grid
+                current_concentration = np.copy(shared_array)
+                
+                # Applying Dirichlet boundary conditions (setting edges to zero)
+                current_concentration[0, :] = current_concentration[-1, :] = 0
+                current_concentration[:, 0] = current_concentration[:, -1] = 0
+                
+                # todo: this is really unstable
+                #  maybe check if the np.sum(change) == 0?
+                
+                # Vectorized diffusion update
+                # Using slicing for interior cells and avoiding loop calculations
+                change = self.diffusion_rate * (  # >>> self.dt *
+                        current_concentration[:-2, 1:-1] -  # concentration from upper row
+                        2 * current_concentration[1:-1, 1:-1] +  # current cell concentration (doubled for laplacian)
+                        current_concentration[2:, 1:-1] +  # concentration from lower row
+                        current_concentration[1:-1, :-2] -  # concentration from left column
+                        2 * current_concentration[1:-1, 1:-1] +  # current cell concentration (doubled for laplacian)
+                        current_concentration[1:-1, 2:])  # concentration from right column
+                
+                shared_array[1:-1, 1:-1] = current_concentration[1:-1, 1:-1] + change
+                
+                if np.min(shared_array) < 0:
+                    logging.warning(f"Concentration({molecule}) < 0: {np.min(shared_array)}."
+                                    f"Diffusion simulation is unstable, reduce 'diffusion_rate'.")
     
     def _degrade_molecules(self):
         for molecule in self.degrades:
