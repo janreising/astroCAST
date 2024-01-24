@@ -957,10 +957,11 @@ class AstrocyteNode:
 
 
 class RtreeSpatialIndex:
-    def __init__(self):
+    def __init__(self, simulation):
         # Create an R-tree index
         self.rtree = index.Index()
         self.branch_counter = 0
+        self.simulation = simulation
     
     def search(self, region: Union[Tuple[int, int, int, int], AstrocyteBranch]):
         """
@@ -1573,27 +1574,25 @@ class AstrocyteBranch:
         """
         Prune the branch if it has no children.
         """
-        # Ensure no children exist; else skip
-        if self.children:
-            self.log("Branch has children, cannot prune.")
-            return
-        
-        # Remove self from spatialIndexTree
-        self.spatial_index.remove(self)
-        
-        # Delete self from parent
-        self.parent.children.remove(self)
-        self.nucleus.branches.remove(self)
-        
-        # Additional cleanup if needed (e.g., freeing resources or nullifying references)
-        self.children = []
-        self.start = None
-        self.end = None
-        
-        self.log("Branch pruned successfully.")
+        if self.nucleus.allow_pruning:
+            
+            # Ensure no children exist; else skip
+            if self.children:
+                self._log("Branch has children, cannot prune.")
+                return
+            
+            # Remove self from spatialIndexTree
+            self.spatial_index.remove(self)
+            
+            # Delete self from parent
+            self.parent.children.remove(self)
+            self.nucleus.branches.remove(self)
+            
+            # Additional cleanup if needed (e.g., freeing resources or nullifying references)
+            self.pruned = True
+            self._log("Branch pruned successfully.")
     
-    def _spawn_new_branch(self, radius_factor: float, length_factor: float, direction: Tuple[float, float],
-                          spatial_index: RtreeSpatialIndex):
+    def _spawn_new_branch(self, branch: AstrocyteBranch):
         """
         Spawn a new branch from the current branch.
 
