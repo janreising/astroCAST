@@ -152,9 +152,12 @@ class EnvironmentGrid:
         if isinstance(location, tuple):
             location = [location]
         
-        concentrations = []
-        for x, y in location:
-            concentrations.append(self.shared_arrays[molecule][0][x][y])
+        # Extracting x and y coordinates separately from the location tuples
+        x_coords, y_coords = zip(*location)
+        
+        # Accessing the specified elements in one go using NumPy advanced indexing
+        # todo List here necessary?
+        concentrations = self.shared_arrays[molecule][0][x_coords, y_coords].tolist()
         
         if len(concentrations) < 2:
             return concentrations[0]
@@ -1658,7 +1661,7 @@ class AstrocyteBranch:
         
         self._log(f"Moved branch to {(self.end.x, self.end.y)}")
     
-    def _find_best_spawn_location(self, num_candidates=180) -> Union[Tuple[AstrocyteBranch, float], None]:
+    def _find_best_spawn_location(self, num_candidates=45) -> Union[Tuple[AstrocyteBranch, float], None]:
         
         # Generate a set of candidate directions
         candidate_branches = []
