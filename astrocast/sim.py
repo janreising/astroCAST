@@ -1,12 +1,19 @@
 from __future__ import annotations
 
+import inspect
 import logging
+import random
+import time
+import uuid
 from collections import deque
 from multiprocessing import shared_memory
-from typing import Callable, List, Tuple, Union
+from pathlib import Path
+from typing import Callable, List, Literal, Tuple, Union
 
+import humanize
 import numpy as np
 import seaborn as sns
+import xxhash
 from IPython.core.display import HTML
 from matplotlib import pyplot as plt
 from matplotlib.animation import FuncAnimation
@@ -592,6 +599,11 @@ class Simulation:
             self.astrocytes.append(ast)
             tries = 0
     
+    def get_short_id(self):
+        return xxhash.xxh32_hexdigest(self.id.hex)
+    
+    def get_num_branches(self):
+        return np.sum([len(ast.branches) for ast in self.astrocytes])
     
     def run_simulation_step(self, time_step=1):
         
@@ -784,7 +796,8 @@ class Astrocyte:
             spawn_length: The length of the branch from the starting point.
         """
         
-        for i in range(num_branches):
+        tries = 0
+        while len(self.children) < num_branches and tries < self.max_tries:
             angle = np.random.uniform(0, 2 * np.pi)
             
             # Choose a random location on the boundary (x, y, radius)
