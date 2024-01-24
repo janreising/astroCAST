@@ -160,10 +160,10 @@ class EnvironmentGrid:
         concentrations = self.get_concentration_at(location, molecule)
         
         if isinstance(concentrations, list):
-            return [int(concentration * self.pixel_volume) for concentration in concentrations]
+            return [concentration * self.pixel_volume for concentration in concentrations]
         
         else:
-            return int(concentrations * self.pixel_volume)
+            return concentrations * self.pixel_volume
     
     def set_concentration_at(self, location: Tuple[int, int], molecule: str, concentration: float):
         """
@@ -468,7 +468,7 @@ class GlutamateReleaseManager:
                 if release:
                     release_amount = difference * self.release_amplitude
                     
-                    self.environment_grid.update_concentration_at((int(x), int(y)), "glutamate", release_amount)
+                    self.environment_grid.update_amount_at((int(x), int(y)), "glutamate", release_amount)
             
             self.time_step += 1
     
@@ -722,7 +722,11 @@ class Astrocyte:
     def get_concentration(self, molecule: str):
         return self.molecules[molecule]
     
-    def update_concentration(self, molecule: str, amount: float):
+    def update_concentration(self, molecule: str, concentration: float):
+        # cell body acts as infinite sink
+        pass
+    
+    def update_amount(self, molecule: str, amount: float):
         # cell body acts as infinite sink
         pass
     
@@ -1038,11 +1042,21 @@ class AstrocyteBranch:
         
         return slope
     
-    def update_concentration(self, molecule, amount):
-        if molecule not in self.molecules:
-            raise ValueError(f"Unknown molecule {molecule}")
+    def update_concentration(self, molecule, concentration):
+        new_concentration = self.molecules[molecule] + concentration
         
-        self.molecules[molecule] += amount
+        if new_concentration < 0:
+            
+            if new_concentration >= self.nucleus.numerical_tolerance:
+                self._log(f"Unstable branch simulation: {new_concentration} !> 0")
+                raise ArithmeticError(f"Unstable branch simulation: {new_concentration} !> 0")
+            
+            new_concentration = 0
+        
+        self.molecules[molecule] = new_concentration
+    
+    def update_amount(self, molecule, amount):
+        self.update_concentration(molecule, amount / self.volume)
     
     def get_concentration(self, molecule):
         if molecule not in self.molecules:
@@ -1051,7 +1065,7 @@ class AstrocyteBranch:
         return self.molecules[molecule]
     
     def get_amount(self, molecule):
-        return int(self.volume * self.get_concentration(molecule))
+        return self.volume * self.get_concentration(molecule)
     
     def set_concentration(self, molecule, concentration):
         if molecule not in self.molecules:
@@ -1082,7 +1096,7 @@ class AstrocyteBranch:
         self.environment = total_amount
     
     def update_environment(self, molecule, amount):
-        return self.nucleus.environment_grid.update_concentration_at(self.interacting_pixels, molecule, amount)
+        return self.nucleus.environment_grid.update_amount_at(self.interacting_pixels, molecule, amount)
     
     def _calculate_diffusion_rate(self) -> float:
         """
@@ -1118,8 +1132,8 @@ class AstrocyteBranch:
                 ions_to_move = self.diffusion_rate * concentration_difference * dt
                 
                 # update new concentrations
-                self.update_concentration(molecule, ions_to_move)
-                target.update_concentration(molecule, -ions_to_move)
+                self.update_amount(molecule, -ions_to_move)
+                target.update_amount(molecule, ions_to_move)
     
     def _simulate_calcium(self):
         # todo: implement
@@ -1135,19 +1149,48 @@ class AstrocyteBranch:
         
         # increase intracellular concentration with actually removed concentration
         self.update_concentration("glutamate", actually_removed)
+        extracellular_glutamate = np.sum(
+                self.nucleus.environment_grid.get_amount_at(self.interacting_pixels, "glutamate"))
+        if extracellular_glutamate > self.nucleus.numerical_tolerance:
+            to_remove = np.min([extracellular_glutamate, self.glutamate_uptake_capacity])
+            
+            actually_removed = self.update_environment("glutamate", -to_remove)
+            
+            # increase intracellular concentration with actually removed concentration
+            self.update_amount("glutamate", abs(actually_removed))
+            
+            self._log(
+                    f"Removed GLU: {humanize.metric(to_remove, 'mol')}/{humanize.metric(abs(actually_removed), 'mol')} "
+                    f"({actually_removed / extracellular_glutamate * 100:.1f}%)")
         
         # convert glutamate using up ATP
         intra_glutamate = self.get_amount("glutamate")
-        if intra_glutamate > 0:
-            atp_needed = int(intra_glutamate * self.atp_cost_per_glutamate)
-            atp_used = min(self.get_amount("ATP"), atp_needed)
+        if intra_glutamate > self.nucleus.numerical_tolerance:
+            atp_change = intra_glutamate * self.nucleus.atp_cost_per_glutamate
             
-            self.log(f"GLU: {self.get_amount('glutamate'):.1E}, "
-                     f"ATP: {self.get_amount('ATP'):.1E}, "
-                     f"used: {atp_used:.1E}/{atp_needed:.1E}, "
-                     f"dGLU: {atp_used / self.atp_cost_per_glutamate:.1E}")
-            self.update_concentration("ATP", -atp_used)
-            self.update_concentration("glutamate", int(atp_used / self.atp_cost_per_glutamate))
+            # glutamate conversion costs energy
+            if atp_change > 0:
+                atp_used = min(self.get_amount("ATP"), atp_change)
+                glu_converted = abs(atp_used / self.nucleus.atp_cost_per_glutamate)
+                self._log(f"Used {atp_used:.1f} ATP ({atp_change / self.get_amount('ATP') * 100:.1f}%) "
+                          f"to convert {glu_converted:.1f} GLU ({glu_converted / intra_glutamate * 100:.1f}%)")
+                
+                self.update_amount('ATP', atp_used)
+                self.update_amount('glutamate', -glu_converted)
+                
+                self._log(f"Converted "
+                          f"{humanize.metric(glu_converted, 'mol')} GLU using "
+                          f"{humanize.metric(atp_used, 'mol')} ATP")
+            
+            # glutamate conversion generates energy
+            else:
+                atp_generated = abs(atp_change)
+                
+                self.update_amount("ATP", atp_generated)
+                self.update_amount("glutamate", -intra_glutamate)
+                
+                self._log(f"Generated {humanize.metric(atp_generated, 'mol')} ATP from "
+                          f"{humanize.metric(intra_glutamate, 'mol')} GLU")
     
     def _simulate_repellent(self):
         # Release repellent into environment
@@ -1284,8 +1327,8 @@ class AstrocyteBranch:
         available_atp = self.get_amount("ATP")
         
         # Check if there's enough ATP to support the growth, or if ATP needs to be added back for shrinkage
-        if growth_factor > 0 and available_atp < required_atp:
-            self.log("Not enough ATP to support growth.")
+        if growth_factor > 1 and available_atp < required_atp:
+            self._log(f"Growth not supported by ATP: ({available_atp / required_atp * 100:.1f}%).")
             return
         
         # Update new end node
@@ -1293,7 +1336,7 @@ class AstrocyteBranch:
         
         # Update the ATP concentration in the branch
         if growth_factor > 0:
-            self.update_concentration("ATP", -required_atp)
+            self.update_amount("ATP", -required_atp)
         
         # Update the physical properties of the branch (e.g., recalculate volume, surface area)
         self.update_physical_properties()
