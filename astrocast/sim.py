@@ -173,7 +173,6 @@ class EnvironmentGrid:
         x_coords, y_coords = zip(*location)
         
         # Accessing the specified elements in one go using NumPy advanced indexing
-        # todo List here necessary?
         concentrations = self.shared_arrays[molecule][0][x_coords, y_coords].tolist()
         
         if len(concentrations) < 2:
