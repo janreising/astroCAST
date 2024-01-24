@@ -851,7 +851,47 @@ class Astrocyte:
             x0, y0 = branch.start.x, branch.start.y
             x1, y1 = branch.end.x, branch.end.y
             
-            ax.plot([x0, x1], [y0, y1], color="black")
+            width = self._scale_branch_thickness(np.mean([branch.start.radius, branch.end.radius]),
+                                                 line_thickness=line_thickness, line_scaling=line_scaling)
+            
+            ax.plot([x0, x1], [y0, y1], color="black", linewidth=width)
+    
+    def _scale_branch_thickness(self, radius, line_thickness, line_scaling: Literal['log', 'sqrt'] = 'log'):
+        
+        min_width = line_thickness * 0.1  # Minimum width for branches with very small radius
+        if line_scaling == 'log':
+            if radius > 0:
+                width = np.log10(radius) / np.log10(self.max_branch_radius) * line_thickness
+            else:
+                width = min_width
+        
+        elif line_scaling == 'sqrt':
+            width = np.sqrt(radius) / np.sqrt(self.max_branch_radius) * line_thickness
+        
+        else:
+            raise ValueError('Unknown line scaling use one of ["log", "sqrt"]')
+        
+        if width < min_width:
+            width = min_width
+        
+        return width
+    
+    def plot_branch_history(self):
+        
+        M = self.branches[0].intracellular_history.keys()
+        fig, axx = plt.subplots(len(M), 1, sharex=True)
+        
+        for ax in axx:
+            ax.set_yscale('log')
+        
+        colors = sns.color_palette("husl", len(self.branches))
+        for m, branch in enumerate(self.branches):
+            history = branch.intracellular_history
+            for i, (molecule, values) in enumerate(history.items()):
+                axx[i].plot(values, color=colors[m])
+        
+        for i, m in enumerate(M):
+            axx[i].set_title(m)
 
 
 class AstrocyteNode:
