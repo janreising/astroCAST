@@ -1609,9 +1609,74 @@ class AstrocyteBranch:
         # Update the physical properties of the branch
         self.update_physical_properties()
         
-        self.log(f"Moved branch to {(self.end.x, self.end.y)}")
+        self._log(f"Moved branch to {(self.end.x, self.end.y)}")
     
-    def _calculate_spawn_direction(self, repellent_name='repellent'):
+    def _find_best_spawn_location(self, num_candidates=180) -> Union[Tuple[AstrocyteBranch, float], None]:
+        
+        # Generate a set of candidate directions
+        candidate_branches = []
+        angle_increment = 2 * np.pi / num_candidates
+        
+        # check if too many fails
+        spawn_probability = 1 if self.counter_failed_spawn == 0 else 1 / self.counter_failed_spawn
+        spawn_probability = max(0.01, spawn_probability)
+        if spawn_probability <= np.random.random():
+            self._log(f"Spawn failed too many times: {self.counter_failed_spawn} ({spawn_probability * 100:.1f}%)")
+            return None
+        
+        # New branch radius
+        new_branch_radius = self.end.radius * self.nucleus.spawn_radius_factor
+        if new_branch_radius < self.nucleus.min_radius:
+            self._log(f"Spawned branch would be below minimum radius "
+                      f"{humanize.metric(new_branch_radius, 'm')} !> "
+                      f"{humanize.metric(self.nucleus.min_radius, 'm')}")
+            return None
+        
+        for i in range(num_candidates):
+            angle = i * angle_increment
+            dx = np.cos(angle)
+            dy = np.sin(angle)
+            
+            # End coordinates of the candidate branch
+            end_x = self.end.x + dx * self.nucleus.spawn_length
+            end_y = self.end.y + dy * self.nucleus.spawn_length
+            
+            X, Y = self.nucleus.environment_grid.grid_size
+            if end_x > X or end_x < 0 or end_y > Y or end_y < 0:
+                continue
+            
+            # create candidate branch
+            new_end_node = AstrocyteNode(x=end_x, y=end_y, radius=new_branch_radius)
+            candidate = AstrocyteBranch(parent=self, nucleus=self.nucleus, start=self.end, end=new_end_node)
+            
+            candidate_branches.append(candidate)
+        
+        # Choose best candidate
+        best_candidate = None
+        max_steepness = -np.inf
+        
+        for candidate in candidate_branches:
+            # Check for collision with existing branches
+            end_collision_zone = (candidate.end.x - 1, candidate.end.y - 1,
+                                  candidate.end.x + 1, candidate.end.y + 1)
+            if not self.nucleus.spatial_index.check_collision(end_collision_zone):
+                # Calculate the combined gradient along the theoretical branch
+                steepness_glutamate = self._calculate_gradient_along_branch(candidate, molecule="glutamate")
+                steepness_repellent = self._calculate_gradient_along_branch(candidate, molecule="repellent")
+                combined_steepness = steepness_glutamate - steepness_repellent
+                
+                if combined_steepness > max_steepness:
+                    max_steepness = combined_steepness
+                    best_candidate = candidate
+        
+        if best_candidate is not None:
+            # Normalize the best direction vector
+            return best_candidate, max_steepness
+        else:
+            # If no valid direction is found or if the gradient is zero, return None
+            return None
+    
+    def _calculate_gradient_along_branch(self, candidate: AstrocyteBranch, molecule: str) -> float:
         """
         Calculate the direction for spawning a new branch based on environmental factors.
 
