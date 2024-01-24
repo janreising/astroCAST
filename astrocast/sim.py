@@ -20,15 +20,16 @@ from matplotlib.animation import FuncAnimation
 from matplotlib.patches import Circle
 from rtree import index
 from scipy.constants import physical_constants
+from scipy.ndimage import convolve
 
 avogadro = physical_constants['Avogadro constant']
 
 
 class EnvironmentGrid:
     def __init__(self, grid_size: Tuple[int, int], diffusion_rate: float, dt: float, pixel_volume: float = 1.0,
-                 molecules: List[str] = ("glutamate", "calcium", "repellent"),
-                 degrades: List[str] = ("repellent",), degradation_factor: float = 0.75,
-                 dtype: str = 'float16'):
+                 molecules: Union[List[str], str] = "glutamate",
+                 degrades: Union[str, List[str]] = None, degradation_factor: float = 0.75,
+                 dtype: str = np.float32):
         """
         Initialize the environment grid with shared numpy arrays for each molecule.
 
@@ -40,8 +41,13 @@ class EnvironmentGrid:
             dtype: The data type of the arrays.
 
         """
+        
+        if isinstance(molecules, list):
+            self.molecules = molecules
+        else:
+            self.molecules = [molecules]
+        
         self.grid_size = grid_size
-        self.molecules = molecules
         self.degrades = degrades
         self.degradation_factor = degradation_factor
         self.pixel_volume = pixel_volume
@@ -54,7 +60,7 @@ class EnvironmentGrid:
         self._check_cfl_condition(diffusion_rate=diffusion_rate, dt=dt)
     
     @staticmethod
-    def _create_shared_arrays(grid_size: Tuple[int, int], molecules: List[str], dtype='float16'):
+    def _create_shared_arrays(grid_size: Tuple[int, int], molecules: List[str], dtype=np.float32, parallel=False):
         """
         Create shared numpy arrays for each molecule.
 
@@ -68,14 +74,47 @@ class EnvironmentGrid:
         """
         shared_arrays = {}
         for molecule in molecules:
-            # Create a new shared memory block
-            shm = shared_memory.SharedMemory(create=True, size=np.prod(grid_size) * np.dtype(dtype).itemsize)
-            # Create a numpy array using the shared memory
-            shared_array = np.ndarray(grid_size, dtype=dtype, buffer=shm.buf)
-            shared_arrays[molecule] = (shared_array, shm)
+            
+            if parallel:
+                # Create a new shared memory block
+                shm = shared_memory.SharedMemory(create=True, size=np.prod(grid_size) * np.dtype(dtype).itemsize)
+                # Create a numpy array using the shared memory
+                shared_array = np.ndarray(grid_size, dtype=dtype, buffer=shm.buf)
+                shared_arrays[molecule] = (shared_array, shm)
+            
+            else:
+                shared_array = np.zeros(grid_size, dtype=dtype)
+                shared_arrays[molecule] = (shared_array, None)
+        
         return shared_arrays
     
     def _update_concentrations(self):
+        """
+        Update the concentrations in the grid using a convolution approach with
+        Dirichlet boundary conditions (edges as sinks).
+        """
+        # Define the diffusion kernel
+        kernel = np.array([[0, 1, 0],
+                           [1, -4, 1],
+                           [0, 1, 0]], dtype=float)
+        
+        for molecule, (shared_array, _) in self.shared_arrays.items():
+            for _ in range(int(self.dt)):
+                # Apply Dirichlet boundary conditions
+                shared_array[0, :] = shared_array[-1, :] = 0
+                shared_array[:, 0] = shared_array[:, -1] = 0
+                
+                # Compute changes using convolution
+                change = convolve(shared_array, kernel, mode='constant', cval=0.0)
+                
+                # Update the shared_array with the changes
+                shared_array += self.diffusion_rate * change
+                
+                if np.min(shared_array) < 0:
+                    logging.warning(f"Concentration({molecule}) < 0: {np.min(shared_array)}."
+                                    f"Diffusion simulation is unstable, reduce 'diffusion_rate'.")
+    
+    def old_update_concentrations(self):
         """
         Update the concentrations in the grid using a vectorized approach with
         Dirichlet boundary conditions (edges as sinks).
@@ -110,10 +149,17 @@ class EnvironmentGrid:
                                     f"Diffusion simulation is unstable, reduce 'diffusion_rate'.")
     
     def _degrade_molecules(self):
-        for molecule in self.degrades:
-            arr, shm = self.shared_arrays[molecule]
-            arr *= self.degradation_factor
-            self.shared_arrays[molecule] = arr, shm
+        if self.degrades is not None:
+            
+            if not isinstance(self.degrades, list):
+                molecules = [self.degrades]
+            else:
+                molecules = self.degrades
+            
+            for molecule in molecules:
+                arr, shm = self.shared_arrays[molecule]
+                arr *= self.degradation_factor
+                self.shared_arrays[molecule] = arr, shm
     
     def step(self, time_step: int = 1):
         """
@@ -151,7 +197,7 @@ class EnvironmentGrid:
         return self.molecules
     
     def get_concentration_at(self, location: Union[Tuple[int, int], List[Tuple[int, int]]],
-                             molecule: str) -> Union[float, List[float]]:
+                             molecule: str) -> Union[float, np.array]:
         """
         Get the concentration of a specific molecule at a given location.
 
@@ -168,14 +214,17 @@ class EnvironmentGrid:
         
         if isinstance(location, tuple):
             location = [location]
+            return_float = True
+        else:
+            return_float = False
         
         # Extracting x and y coordinates separately from the location tuples
         x_coords, y_coords = zip(*location)
         
         # Accessing the specified elements in one go using NumPy advanced indexing
-        concentrations = self.shared_arrays[molecule][0][x_coords, y_coords].tolist()
+        concentrations = self.shared_arrays[molecule][0][x_coords, y_coords]
         
-        if len(concentrations) < 2:
+        if return_float:
             return concentrations[0]
         else:
             return concentrations
@@ -184,12 +233,7 @@ class EnvironmentGrid:
                       molecule: str) -> Union[float, List[float]]:
         
         concentrations = self.get_concentration_at(location, molecule)
-        
-        if isinstance(concentrations, list):
-            return [concentration * self.pixel_volume for concentration in concentrations]
-        
-        else:
-            return concentrations * self.pixel_volume
+        return concentrations * self.pixel_volume
     
     def set_concentration_at(self, location: Tuple[int, int], molecule: str, concentration: float):
         """
@@ -282,8 +326,10 @@ class EnvironmentGrid:
         Close and unlink all shared memory blocks.
         """
         for _, (array, shm) in self.shared_arrays.items():
-            shm.close()
-            shm.unlink()
+            
+            if shm is not None:
+                shm.close()
+                shm.unlink()
     
     def __del__(self):
         """
@@ -291,6 +337,17 @@ class EnvironmentGrid:
         This method is automatically called when the object is garbage collected.
         """
         self.close()
+    
+    def plot_history(self, molecule, figsize=(5, 5), ax=None):
+        
+        if ax is None:
+            fig, ax = plt.subplots(1, 1, figsize=figsize)
+        
+        history = self.history[molecule]
+        ax.plot(history, label=molecule)
+        ax.set_aspect('equal')
+        ax.legend()
+        ax.set_title(f"Total concentration {molecule}")
     
     def plot_concentration(self, molecule: str, figsize: tuple = (5, 5), cmap: str = 'inferno', ax: plt.axis = None):
         """
@@ -697,23 +754,25 @@ class Simulation:
             for k, ax in axx.items():
                 ax.clear()
         
-        self.environment_grid.plot_concentration(molecule="glutamate", ax=axx["A"])
-        # axx["A"].set_title("Glutamate")
+        ax = axx['A']
+        self.environment_grid.plot_concentration(molecule="glutamate", ax=ax)
         
-        self.environment_grid.plot_concentration(molecule="repellent", ax=axx["B"])
-        # axx["B"].set_title("Repellent")
-        
-        self.glutamate_release_manager.plot(ax=axx["C"])
-        axx["C"].set_xlim(0, X)
-        axx["C"].set_ylim(0, Y)
-        axx["C"].set_aspect('equal')
-        
+        ax = axx['B']
         for astrocyte in self.astrocytes:
-            astrocyte.plot(ax=axx["D"])
-        axx["D"].set_xlim(0, X)
-        axx["D"].set_ylim(0, Y)
-        axx["D"].set_aspect('equal')
-        axx["D"].set_title('Astrocytes')
+            astrocyte.plot(ax=ax)
+        ax.set_xlim(0, X)
+        ax.set_ylim(0, Y)
+        ax.set_aspect('equal')
+        ax.set_title('Astrocytes')
+        
+        ax = axx['C']
+        self.glutamate_release_manager.plot(ax=ax)
+        ax.set_xlim(0, X)
+        ax.set_ylim(0, Y)
+        ax.set_aspect('equal')
+        
+        ax = axx['D']
+        self.environment_grid.plot_history("glutamate", ax=ax)
         
         # Display the last N messages as HTML
         if last_n_messages is not None:
@@ -726,8 +785,8 @@ class Astrocyte:
     
     def __init__(self, position: Tuple[int, int], radius: int, num_branches: int,
                  max_branch_radius: float, start_spawn_radius: float,
-                 repellent_concentration: float,
                  environment_grid: EnvironmentGrid, spatial_index: RtreeSpatialIndex,
+                 repellent_name: str = None, repellent_concentration: float = 1,
                  numerical_tolerance=1e-6, allow_pruning=True,
                  min_trend_amplitude=0.5, min_steepness=0.05, spawn_angle_threshold=5,
                  diffusion_coefficient=50, glutamate_uptake_rate=100,
@@ -758,6 +817,7 @@ class Astrocyte:
         # ion flow parameters
         self.diffusion_coefficient = diffusion_coefficient
         self.glutamate_uptake_rate = glutamate_uptake_rate  # mol/m² --> same as surface factor?
+        self.repellent_name = repellent_name
         
         # cost parameters
         self.atp_cost_per_glutamate = atp_cost_per_glutamate  # mol ATP / mol Glutamate  # 1/18
@@ -843,9 +903,10 @@ class Astrocyte:
                 self.environment_grid.set_concentration_at(pixel, molecule=molecule, concentration=0.0)
     
     def release_repellent(self):
-        for pixel in self.pixels:
-            self.environment_grid.set_concentration_at(pixel, molecule="repellent",
-                                                       concentration=self.repellent_concentration)
+        if self.repellent_name is not None:
+            for pixel in self.pixels:
+                self.environment_grid.set_concentration_at(pixel, molecule=self.repellent_name,
+                                                           concentration=self.repellent_concentration)
     
     def get_concentration(self, molecule: str):
         return self.molecules[molecule]
@@ -1031,7 +1092,7 @@ class RtreeSpatialIndex:
         self.remove(obj)
         self.insert(obj)
     
-    def check_collision(self, obj: Union[AstrocyteBranch, Astrocyte, Tuple[int, int, int, int]]):
+    def check_collision(self, obj: Union[AstrocyteBranch, Astrocyte, Tuple[int, int, int, int]], border=3):
         
         if not isinstance(obj, tuple):
             bbox = obj.get_bbox()
@@ -1040,7 +1101,7 @@ class RtreeSpatialIndex:
         
         # check collision with border
         x0, y0, x1, y1 = bbox
-        border = 1
+        
         X, Y = self.simulation.grid_size
         for x in [x0, x1]:
             if x < border or x > X - border:
@@ -1223,7 +1284,7 @@ class AstrocyteBranch:
         history = self.intracellular_history[molecule] if intra else self.extracellular_history[molecule]
         if not history or len(history) < 2:
             return 0.0  # No trend if history is empty
-        history = np.array(history)[:last_n]
+        history = np.array(history)[:last_n].astype(float)
         
         # Create an array of time points (assuming equal time intervals)
         x = np.arange(len(history))
@@ -1380,7 +1441,8 @@ class AstrocyteBranch:
     
     def _simulate_repellent(self):
         # Release repellent into environment
-        self.update_environment("repellent", self.repellent_release)
+        if self.nucleus.repellent_name is not None and self.repellent_release is not None:
+            self.update_environment(self.nucleus.repellent_name, self.repellent_release)
     
     def calculate_branch_volume(self):
         # Calculate the Euclidean distance between the start and end nodes to get the height of the truncated cone
@@ -1417,8 +1479,10 @@ class AstrocyteBranch:
         self.surface_area = self.calculate_branch_surface()
         self.diffusion_rate = self._calculate_diffusion_rate()
         self.glutamate_uptake_capacity = self.calculate_removal_capacity(self.nucleus.glutamate_uptake_rate)
-        self.repellent_release = self.calculate_repellent_release(self.nucleus.repellent_surface_factor,
-                                                                  self.nucleus.repellent_volume_factor)
+        
+        if self.nucleus.repellent_name is not None and self.repellent_release is not None:
+            self.repellent_release = self.calculate_repellent_release(self.nucleus.repellent_surface_factor,
+                                                                      self.nucleus.repellent_volume_factor)
     
     def calculate_removal_capacity(self, uptake_rate: float) -> float:
         """
@@ -1678,11 +1742,7 @@ class AstrocyteBranch:
         
         self._log(f"Moved branch to {(self.end.x, self.end.y)}")
     
-    def _find_best_spawn_location(self, num_candidates=15) -> Union[Tuple[AstrocyteBranch, float], None]:
-        
-        # Generate a set of candidate directions
-        candidate_branches = []
-        angle_increment = 2 * np.pi / num_candidates
+    def _find_best_spawn_location(self, num_candidates=8) -> Union[Tuple[AstrocyteBranch, float], None]:
         
         # check if too many fails
         spawn_probability = 1 if self.counter_failed_spawn == 0 else 1 / self.counter_failed_spawn
@@ -1699,8 +1759,12 @@ class AstrocyteBranch:
                       f"{humanize.metric(self.nucleus.min_radius, 'm')}")
             return None
         
+        # Generate a set of candidate directions
+        candidate_branches = []
+        angle_increment = 2 * np.pi / num_candidates
+        
         for i in range(num_candidates):
-            angle = i * angle_increment
+            angle = i * angle_increment + np.random.random() * angle_increment
             dx = np.cos(angle)
             dy = np.sin(angle)
             
@@ -1729,7 +1793,12 @@ class AstrocyteBranch:
             if not self.nucleus.spatial_index.check_collision(end_collision_zone):
                 # Calculate the combined gradient along the theoretical branch
                 steepness_glutamate = self._calculate_gradient_along_branch(candidate, molecule="glutamate")
-                steepness_repellent = self._calculate_gradient_along_branch(candidate, molecule="repellent")
+                
+                if self.nucleus.repellent_name is not None and self.repellent_release is not None:
+                    steepness_repellent = self._calculate_gradient_along_branch(candidate, molecule="repellent")
+                else:
+                    steepness_repellent = 0
+                
                 combined_steepness = steepness_glutamate - steepness_repellent
                 
                 if combined_steepness > max_steepness:
