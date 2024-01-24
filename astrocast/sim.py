@@ -1154,8 +1154,6 @@ class AstrocyteBranch:
     
     def step(self):
         
-        self.log(f"GLU: {self.get_amount('glutamate')}, ATP: {self.get_amount('ATP')}, ")
-        
         # update environment
         self.get_environment()
         
@@ -1166,6 +1164,9 @@ class AstrocyteBranch:
         
         # run through actions
         self._act()
+        if self.pruned:
+            self._log("I was pruned. Aborting simulation step.")
+            return
         
         # simulate molecule diffusion
         self.diffuse_molecules()
@@ -1188,7 +1189,7 @@ class AstrocyteBranch:
         for molecule, concentration in self.environment.items():
             self.extracellular_history[molecule].append(concentration)
     
-    def get_trend(self, molecule: str, intra: bool) -> float:
+    def get_trend(self, molecule: str, intra: bool, last_n=10) -> float:
         """
         Perform linear regression on the history of a molecule's concentration.
 
@@ -1202,7 +1203,7 @@ class AstrocyteBranch:
         history = self.intracellular_history[molecule] if intra else self.extracellular_history[molecule]
         if not history or len(history) < 2:
             return 0.0  # No trend if history is empty
-        history = np.array(history)
+        history = np.array(history)[:last_n]
         
         # Create an array of time points (assuming equal time intervals)
         x = np.arange(len(history))
@@ -1282,14 +1283,15 @@ class AstrocyteBranch:
         length_of_branch = np.sqrt((self.end.x - self.start.x) ** 2 + (self.end.y - self.start.y) ** 2)
         
         # Apply the formula for diffusion rate
-        diffusion_rate = self.diffusion_coefficient * (1 / length_of_branch) * (1 / (np.pi * average_radius ** 2))
+        diffusion_rate = self.nucleus.diffusion_coefficient * (1 / length_of_branch) * (
+                1 / (np.pi * average_radius ** 2))
         
         return diffusion_rate
     
     def diffuse_molecules(self):
         
         for molecule, concentration in self.molecules.items():
-            for target in [self.parent] + self.children:
+            for target in self.children + [self.parent]:
                 
                 # Calculate the concentration difference between the branch and the target
                 concentration_difference = self.get_concentration(molecule) - target.get_concentration(molecule)
@@ -1300,6 +1302,7 @@ class AstrocyteBranch:
                 # calculate ions/molecules to move
                 dt = 1  # one time step
                 ions_to_move = self.diffusion_rate * concentration_difference * dt
+                ions_to_move = min(ions_to_move, self.get_amount(molecule))
                 
                 # update new concentrations
                 self.update_amount(molecule, -ions_to_move)
@@ -1393,8 +1396,9 @@ class AstrocyteBranch:
         self.volume = self.calculate_branch_volume()
         self.surface_area = self.calculate_branch_surface()
         self.diffusion_rate = self._calculate_diffusion_rate()
-        self.glutamate_uptake_capacity = self.calculate_removal_capacity(self.glutamate_uptake_rate)
-        self.repellent_release = self.calculate_repellent_release(self.surface_factor, self.volume_factor)
+        self.glutamate_uptake_capacity = self.calculate_removal_capacity(self.nucleus.glutamate_uptake_rate)
+        self.repellent_release = self.calculate_repellent_release(self.nucleus.repellent_surface_factor,
+                                                                  self.nucleus.repellent_volume_factor)
     
     def calculate_removal_capacity(self, uptake_rate: float) -> float:
         """
@@ -1431,12 +1435,13 @@ class AstrocyteBranch:
     
     def _act(self):
         
-        # we prune automatically if the end radius drops below min_radius
-        self._action_grow_or_shrink(self.growth_factor, self.min_trend_amplitude,
-                                    self.atp_cost_per_unit_surface, self.min_radius)
+        spawn_probability = 1 if len(self.children) == 0 else 1 / len(self.children)
+        if spawn_probability > np.random.random():
+            self._action_spawn_or_move(self.nucleus.min_steepness, self.nucleus.spawn_angle_threshold)
         
-        self._action_spawn_or_move(self.spawn_radius_factor, self.spawn_length, self.min_steepness,
-                                   self.direction_threshold)
+        # we prune automatically if the end radius drops below min_radius
+        self._action_grow_or_shrink(self.nucleus.growth_factor, self.nucleus.min_trend_amplitude,
+                                    self.nucleus.atp_cost_per_unit_surface, self.nucleus.min_radius)
     
     def _action_grow_or_shrink(self, growth_factor: float, min_trend_amplitude: float,
                                atp_cost_per_unit_surface: float, min_radius: float):
@@ -1457,29 +1462,40 @@ class AstrocyteBranch:
             min_radius: The minimum allowed radius of the end node to prevent over-shrinkage.
         """
         
-        atp_trend = self.get_trend("ATP", intra=True)
+        # atp_trend = self.get_trend("ATP", intra=True)
         glutamate_trend = self.get_trend("glutamate", intra=False)
-        combined_trend = glutamate_trend - atp_trend
+        # combined_trend = glutamate_trend - atp_trend
+        combined_trend = glutamate_trend
         
         if abs(combined_trend) < min_trend_amplitude:
+            
+            if combined_trend > self.nucleus.numerical_tolerance:
+                self._log(f"Growth trend too low: {combined_trend:.1E} "
+                          f"({combined_trend / min_trend_amplitude * 100:.1f}%)")
+            
             return
         
         if combined_trend < 0:
-            growth_factor *= -1
+            growth = 1 - growth_factor
+        else:
+            growth = 1 + growth_factor
         
         # Calculate the new surface area after growth/shrinkage
         new_end = self.end.copy()
-        new_end.radius *= growth_factor
+        new_end.radius *= growth
         
         if new_end.radius < min_radius:
+            self._log(f"Growth prune: {humanize.metric(new_end.radius, 'm')} ({growth})")
             self._action_prune()
             return
         
         new_surface_area = self.calculate_branch_surface(start=self.start, end=new_end)
         
         # Ensure the end node radius is not less than the start node radius after growth/shrinkage
-        if new_end.radius <= self.start.radius:
-            self.log("Growth constrained by start node size.")
+        if new_end.radius >= self.start.radius:
+            self._log(f"Growth constrained by start node size: "
+                      f"{humanize.metric(new_end.radius, 'm')} vs. "
+                      f"{humanize.metric(self.start.radius, 'm')}")
             return
         
         # Calculate the required ATP based on the change in surface area
@@ -1504,7 +1520,9 @@ class AstrocyteBranch:
         # Update the physical properties of the branch (e.g., recalculate volume, surface area)
         self.update_physical_properties()
         
-        self.log(f"Branch grown/shrunken by {growth_factor}")
+        self._log(f"Growth adjusted to "
+                  f"{humanize.metric(new_end.radius, 'm')} for "
+                  f"{humanize.metric(abs(required_atp), 'mol')} ATP")
     
     def _action_spawn_or_move(self, min_steepness: float,
                               angle_threshold: float):
@@ -1597,58 +1615,40 @@ class AstrocyteBranch:
         Spawn a new branch from the current branch.
 
         Args:
-            radius_factor: The radius factor for the new branch.
-            length_factor: The length of the new branch.
-            direction: The direction for the new branch.
-            spatial_index: The spatial index for managing branches.
+            branch: The branch that will be spawned.
         """
-        # Determine the starting point and end point of the new branch
-        start_point = self.end  # New branch starts where the current branch ends
-        end_point = AstrocyteNode(
-                x=int(start_point.x + direction[0] * length_factor),
-                y=int(start_point.y + direction[1] * length_factor),
-                radius=start_point.radius * radius_factor
-                )
-        
-        # Create the new branch
-        new_branch = AstrocyteBranch(parent=self, start=start_point, end=end_point, nucleus=self.nucleus)
         
         # calculate cost
-        atp_cost = self.atp_cost_per_unit_surface * new_branch.surface_area
+        atp_cost = self.nucleus.atp_cost_per_unit_surface * branch.surface_area
         if atp_cost <= self.get_amount("ATP"):
             
             # Save the new branch to the list of children
-            self.children.append(new_branch)
-            self.nucleus.branches.append(new_branch)
+            self.children.append(branch)
+            self.nucleus.branches.append(branch)
             
             # Update the spatial index with the new branch
-            spatial_index.insert(new_branch)
+            self.nucleus.spatial_index.insert(branch)
             
             # remove atp
-            self.update_concentration("ATP", -atp_cost)
+            self.update_amount("ATP", -atp_cost)
             
-            self.log(f"Spawned new branch at: {(end_point.x, end_point.y)} for {atp_cost:.1E}")
+            self._log(f"Spawned new branch at: {(branch.end.x, branch.end.y)} for "
+                      f"{humanize.metric(atp_cost, 'mol')} ATP")
         
         else:
-            self.log(f"Insufficient ATP available for branch spawning ({atp_cost:.1E}/{self.get_amount('ATP'):.1E}).")
+            self._log(
+                    f"Insufficient ATP available for branch spawning ({atp_cost:.2f} !< {self.get_amount('ATP'):.2f}).")
     
-    def _move_branch(self, spawn_length: float, direction: Tuple[float, float]):
+    def _move_branch(self, new_branch: AstrocyteBranch):
         """
         Move the current branch in a specified direction.
 
         Args:
-            spawn_length: The length of the movement.
-            direction: The direction for the movement.
+            new_branch: The location of the new branch.
         """
-        # Calculate new end point
-        new_end_position = (
-            int(self.start.x + direction[0] * spawn_length),
-            int(self.start.y + direction[1] * spawn_length),
-            self.start.radius  # Assuming radius remains constant during movement
-            )
         
         # Update the end node
-        self.end.x, self.end.y = new_end_position[:2]
+        self.end.x, self.end.y = new_branch.end.x, new_branch.end.y
         
         # Update the spatial index before changing the position
         self.nucleus.spatial_index.update(self)
