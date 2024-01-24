@@ -568,6 +568,7 @@ class Simulation:
     
     axx = None
     fig = None
+    id = uuid.uuid1()
     
     def __init__(self, num_astrocytes=1, grid_size=(100, 100), border=10, max_astrocyte_placement_tries=5,
                  environment_dict: dict = None, glutamate_release_param: dict = None, astrocyte_param: dict = None):
