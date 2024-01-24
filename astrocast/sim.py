@@ -562,29 +562,36 @@ class Simulation:
     axx = None
     fig = None
     
-    def __init__(self, num_astrocytes=1, grid_size=(100, 100), border=10,
+    def __init__(self, num_astrocytes=1, grid_size=(100, 100), border=10, max_astrocyte_placement_tries=5,
                  environment_dict: dict = None, glutamate_release_param: dict = None, astrocyte_param: dict = None):
         
         self.grid_size = grid_size
+        self.border = border
         self.data_logger = DataLogger()
         
         environment_dict = {} if environment_dict is None else environment_dict
         glutamate_release_param = {} if glutamate_release_param is None else glutamate_release_param
         astrocyte_param = {} if astrocyte_param is None else astrocyte_param
         
-        self.spatial_index = RtreeSpatialIndex()
+        self.spatial_index = RtreeSpatialIndex(simulation=self)
         self.environment_grid = EnvironmentGrid(grid_size=grid_size, **environment_dict)
         self.glutamate_release_manager = GlutamateReleaseManager(environment_grid=self.environment_grid,
                                                                  **glutamate_release_param)
         
         self.astrocytes = []
-        for i in range(num_astrocytes):
-            x = np.random.randint(border, grid_size[0] - border)
-            y = np.random.randint(border, grid_size[1] - border)
-            ast = Astrocyte(position=(x, y), spatial_index=self.spatial_index, environment_grid=self.environment_grid,
-                            data_logger=self.data_logger,
-                            **astrocyte_param)
+        tries = 0
+        while tries < max_astrocyte_placement_tries and len(self.astrocytes) < num_astrocytes:
+            
+            ast = self.add_astrocyte(astrocyte_param=astrocyte_param)
+            
+            if ast is None:
+                logging.warning(f"placement failed (tries: {tries})")
+                tries += 1
+                continue
+            
             self.astrocytes.append(ast)
+            tries = 0
+    
     
     def run_simulation_step(self, time_step=1):
         
@@ -596,8 +603,41 @@ class Simulation:
         
         self.data_logger.step()
     
-    def add_astrocyte(self, astrocyte):
-        pass
+    def add_astrocyte(self, x=None, y=None, radius=3, astrocyte_param=None):
+        
+        # set parameters
+        if astrocyte_param is None:
+            astrocyte_param = {}
+        
+        # get location
+        X, Y = self.grid_size
+        if x is None:
+            x = np.random.randint(self.border, X - self.border)
+        
+        if y is None:
+            y = np.random.randint(self.border, Y - self.border)
+        
+        # get radius
+        if "radius" in astrocyte_param:
+            radius = astrocyte_param["radius"]
+        
+        # check validity of location
+        x0, x1 = x - radius, x + radius
+        y0, y1 = y - radius, y + radius
+        valid_placement = not self.spatial_index.check_collision((x0, y0, x1, y1))
+        
+        # place astrocyte
+        if valid_placement:
+            
+            ast = Astrocyte(position=(x, y), spatial_index=self.spatial_index, environment_grid=self.environment_grid,
+                            data_logger=self.data_logger,
+                            **astrocyte_param)
+            
+            self.spatial_index.insert(ast)
+            return ast
+        
+        else:
+            return None
     
     def remove_astrocyte(self, astrocyte):
         pass
@@ -758,14 +798,26 @@ class Astrocyte:
             end = AstrocyteNode(end_x, end_y, spawn_radius)
             
             # Create the new branch
-            new_branch = AstrocyteBranch(parent=self, nucleus=self, start=start, end=end, max_history=self.max_history)
-            self.children.append(new_branch)
-            self.branches.append(new_branch)
+            new_branch = AstrocyteBranch(parent=self, nucleus=self, start=start, end=end)
             
-            # Add the new branch to the spatial index
-            self.spatial_index.insert(new_branch)
+            if not self.spatial_index.check_collision(new_branch):
+                
+                self.children.append(new_branch)
+                self.branches.append(new_branch)
+                
+                # Add the new branch to the spatial index
+                self.spatial_index.insert(new_branch)
+                
+                tries = 0
+            
+            else:
+                tries += 1
+        
+        if tries >= self.max_tries:
+            logging.warning(f"Maximum astrocyte tries exceeded: {tries}")
     
-    def plot(self, figsize=(5, 5), ax: plt.Axes = None):
+    def plot(self, line_thickness=2, line_scaling: Literal['log', 'sqrt'] = 'sqrt',
+             figsize=(5, 5), ax: plt.Axes = None):
         
         # create figure
         if ax is None:
@@ -790,6 +842,9 @@ class AstrocyteNode:
         self.x = int(x)
         self.y = int(y)
     
+    def get_position(self):
+        return self.x, self.y
+    
     def copy(self):
         return AstrocyteNode(self.x, self.y, self.radius)
 
@@ -811,59 +866,65 @@ class RtreeSpatialIndex:
             A list of branch IDs that intersect with the region.
         """
         
-        if isinstance(region, AstrocyteBranch):
-            region = self._get_bbox(region)
+        if isinstance(region, (AstrocyteBranch, Astrocyte)):
+            region = region.get_bbox()
         
         return list(self.rtree.intersection(region))
     
-    def insert(self, branch):
+    def insert(self, obj):
         """
         Insert a new branch into the R-tree.
 
         Args:
-            branch: The branch to insert.
+            obj: The branch to insert.
         """
-        bbox = self._get_bbox(branch)
-        branch.id = self.branch_counter
-        self.rtree.insert(branch.id, bbox)
+        bbox = obj.get_bbox()
+        id_ = obj.id.int
+        self.rtree.insert(id_, bbox)
         
         self.branch_counter += 1
     
-    def remove(self, branch):
+    def remove(self, obj):
         """
         Remove a branch from the R-tree.
 
         Args:
-            branch: The branch to remove.
+            obj: The branch to remove.
         """
-        self.rtree.delete(branch.id, self._get_bbox(branch))
+        self.rtree.delete(obj.id.int, obj.get_bbox())
     
-    def update(self, branch):
+    def update(self, obj):
         """
         Update a branch in the R-tree.
 
         Args:
-            branch: The branch to update.
+            obj: The branch to update.
         """
-        self.remove(branch)
-        self.insert(branch)
+        self.remove(obj)
+        self.insert(obj)
     
-    @staticmethod
-    def _get_bbox(branch):
-        """
-        Get the bounding box of a branch.
-
-        Args:
-            branch: The branch to get the bounding box for.
-
-        Returns:
-            The bounding box (xmin, ymin, xmax, ymax).
-        """
-        xmin = min(branch.start.x, branch.end.x)
-        ymin = min(branch.start.y, branch.end.y)
-        xmax = max(branch.start.x, branch.end.x)
-        ymax = max(branch.start.y, branch.end.y)
-        return xmin, ymin, xmax, ymax
+    def check_collision(self, obj: Union[AstrocyteBranch, Astrocyte, Tuple[int, int, int, int]]):
+        
+        if not isinstance(obj, tuple):
+            bbox = obj.get_bbox()
+        else:
+            bbox = obj
+        
+        # check collision with border
+        x0, y0, x1, y1 = bbox
+        border = self.simulation.border
+        X, Y = self.simulation.grid_size
+        for x in [x0, x1]:
+            if x < border or x > X - border:
+                return True
+        for y in [y0, y1]:
+            if y < border or y > Y - border:
+                return True
+        
+        # check collision with other objects
+        collisions = self.search(bbox)
+        
+        return len(collisions) > 0
     
     @staticmethod
     def plot_line_low(x0, y0, x1, y1):
