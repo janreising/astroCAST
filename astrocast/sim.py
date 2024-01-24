@@ -513,7 +513,7 @@ class GlutamateReleaseManager:
         
         signal_probability = np.zeros(len(self.hotspots))
         if isinstance(signal_function, Callable):
-            signal_probability[:] = signal_function(self.time_step)
+            signal_probability[:] = signal_function(int(self.time_step))
         elif isinstance(signal_function, np.ndarray):
             idx = self.time_step % len(signal_function)
             signal_probability[:] = signal_function[idx]
