@@ -1457,8 +1457,8 @@ class AstrocyteBranch:
         
         self.log(f"Branch grown/shrunken by {growth_factor}")
     
-    def _action_spawn_or_move(self, spawn_radius_factor: float, spawn_length: float, min_steepness: float,
-                              direction_threshold: float):
+    def _action_spawn_or_move(self, min_steepness: float,
+                              angle_threshold: float):
         """
         Spawn a new branch or move the current branch based on the environmental factors.
 
@@ -1466,25 +1466,60 @@ class AstrocyteBranch:
         the branch will move. Otherwise, a new branch will be spawned.
 
         Args:
-            spawn_radius_factor: The radius factor for the new branch.
-            spawn_length: The length of the new branch or movement.
             min_steepness: Minimum steepness of the combined gradient (glutamate and repellent) that triggers
                 spawning of a new branch or movement.
-            direction_threshold: The threshold for how much the new direction can vary from the current direction.
+            angle_threshold: The threshold for how much the new direction can vary from the current direction.
         """
         
-        # todo: collision control
-        
         # Calculate the direction of the new branch based on glutamate and repellent gradients
-        direction, steepness = self._calculate_spawn_direction()
+        spawn_locations = self._find_best_spawn_location()
         
-        if direction is not None and steepness > min_steepness:
-            if len(self.children) > 0 or np.linalg.norm(direction) > direction_threshold:
+        if spawn_locations is None:
+            self.counter_failed_spawn += 1
+            self._log(f"No branch found.")
+            return
+        
+        best_branch, steepness = spawn_locations
+        
+        self.counter_failed_spawn = 0
+        if steepness > min_steepness:
+            
+            # determine angle between new and current branch
+            angle = self._get_angle_between_branches(best_branch, self)
+            
+            if len(self.children) > 0 or angle > angle_threshold:
                 # If direction varies too much or branch has children, spawn a new branch
-                self._spawn_new_branch(spawn_radius_factor, spawn_length, direction, self.spatial_index)
+                self._spawn_new_branch(best_branch)
             else:
                 # If direction is similar and branch has no children, move the branch
-                self._move_branch(spawn_length, direction)
+                self._move_branch(best_branch)
+                self._log(f"Moving branch: {angle} < {angle_threshold}")
+        else:
+            if steepness > self.nucleus.numerical_tolerance:
+                self._log(
+                        f"Branch spawning steepness low: {steepness:.1E} !> {min_steepness:.1E} "
+                        f"({steepness / min_steepness * 100:.1f}%)")
+    
+    @staticmethod
+    def _get_angle_between_branches(branch1, branch2):
+        
+        # get normalized direction
+        direction_1 = branch1.get_norm_direction()
+        direction_2 = branch2.get_norm_direction()
+        
+        # Calculate the dot product of the two direction vectors
+        dot_product = np.dot(direction_1, direction_2)
+        
+        # Ensure the dot product does not exceed 1 due to numerical errors
+        dot_product = np.clip(dot_product, -1.0, 1.0)
+        
+        # Calculate the angle using the arccosine of the dot product
+        angle = np.arccos(dot_product)
+        
+        # convert to degrees
+        angle = np.degrees(angle)
+        
+        return abs(angle)
     
     def _action_prune(self):
         """
