@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-import inspect
 import logging
 import random
 import time
 import uuid
 from collections import deque
+from functools import lru_cache
 from multiprocessing import shared_memory
 from pathlib import Path
 from typing import Callable, List, Literal, Tuple, Union
@@ -1798,12 +1798,13 @@ class AstrocyteBranch:
         
         return tuple(norm_direction)
     
+    @lru_cache
     def get_short_id(self):
         return xxhash.xxh32_hexdigest(self.id.hex)
     
     def _log(self, msg: str) -> None:
         if self.data_logger is not None:
-            self.data_logger.add_message(msg)
+            self.data_logger.add_message(msg, self.get_short_id())
         else:
             logging.warning(msg)
 
@@ -1819,23 +1820,7 @@ class DataLogger:
     def step(self):
         self.steps += 1
     
-    def add_message(self, msg: str) -> None:
-        
-        # Get the calling object (caller)
-        stack = inspect.stack()
-        if len(stack) > 1:
-            caller_frame = stack[1][0]
-            caller_locals = caller_frame.f_locals
-            if 'self' in caller_locals:
-                caller = caller_locals['self']
-                if hasattr(caller, 'id'):
-                    caller_id = caller.get_short_id()
-                else:
-                    caller_id = "Unknown"
-            else:
-                caller_id = "Unknown"
-        else:
-            caller_id = "Unknown"
+    def add_message(self, msg: str, caller_id='unknown') -> None:
         
         str_ = ""
         str_ += f"step {self.steps: <3}: "
