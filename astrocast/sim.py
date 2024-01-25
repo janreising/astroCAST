@@ -345,7 +345,6 @@ class EnvironmentGrid:
         
         history = self.history[molecule]
         ax.plot(history, label=molecule)
-        ax.set_aspect('equal')
         ax.legend()
         ax.set_title(f"Total concentration {molecule}")
     
@@ -481,12 +480,12 @@ class GlutamateReleaseManager:
     
     def _generate_random_line(self) -> Tuple[Tuple[float, float, float], Tuple[float, float, float]]:
         # Generate random start and end points for the line within the grid boundaries
-        start_point = (np.random.uniform(self.border, self.environment_grid.grid_size[0] - self.border),
-                       np.random.uniform(self.border, self.environment_grid.grid_size[1] - self.border),
+        start_point = (np.random.uniform(-self.border, self.environment_grid.grid_size[0] + self.border),
+                       np.random.uniform(-self.border, self.environment_grid.grid_size[1] + self.border),
                        np.random.uniform(0, self.z_thickness))
         
-        end_point = (np.random.uniform(self.border, self.environment_grid.grid_size[0] - self.border),
-                     np.random.uniform(self.border, self.environment_grid.grid_size[1] - self.border),
+        end_point = (np.random.uniform(-self.border, self.environment_grid.grid_size[0] + self.border),
+                     np.random.uniform(-self.border, self.environment_grid.grid_size[1] + self.border),
                      np.random.uniform(0, self.z_thickness))
         
         return start_point, end_point
@@ -508,24 +507,29 @@ class GlutamateReleaseManager:
         num_hotspots = np.random.randint(low=max(2, min_num_hotspots), high=max_num_hotspots)
         
         # Randomly distribute hotspot locations
-        for i in range(num_hotspots):
-            # Interpolate along the line to get the hotspot position
-            t = i / float(num_hotspots - 1)
-            x = start_point[0] + t * (end_point[0] - start_point[0])
-            y = start_point[1] + t * (end_point[1] - start_point[1])
-            
-            # Apply jitter
-            x_jitter = x + np.random.uniform(-self.jitter, self.jitter)
-            y_jitter = y + np.random.uniform(-self.jitter, self.jitter)
-            
-            # Ensure the hotspot is still within the grid boundaries
-            x_jitter = max(0, min(x_jitter, self.environment_grid.grid_size[0] - 1))
-            y_jitter = max(0, min(y_jitter, self.environment_grid.grid_size[1] - 1))
-            
-            # ensure type int
-            x_jitter, y_jitter = int(x_jitter), int(y_jitter)
-            
-            hotspots.append((x_jitter, y_jitter, branch_id))
+        while len(hotspots) < num_hotspots:
+            for i in range(num_hotspots):
+                # Interpolate along the line to get the hotspot position
+                t = i / float(num_hotspots - 1)
+                x = start_point[0] + t * (end_point[0] - start_point[0])
+                y = start_point[1] + t * (end_point[1] - start_point[1])
+                
+                X, Y = self.environment_grid.grid_size
+                if x < self.border or x > X - self.border or y < self.border or y > Y:
+                    continue
+                
+                # Apply jitter
+                x_jitter = x + np.random.uniform(-self.jitter, self.jitter)
+                y_jitter = y + np.random.uniform(-self.jitter, self.jitter)
+                
+                # Ensure the hotspot is still within the grid boundaries
+                x_jitter = max(0, min(x_jitter, self.environment_grid.grid_size[0] - 1))
+                y_jitter = max(0, min(y_jitter, self.environment_grid.grid_size[1] - 1))
+                
+                # ensure type int
+                x_jitter, y_jitter = int(x_jitter), int(y_jitter)
+                
+                hotspots.append((x_jitter, y_jitter, branch_id))
         
         return hotspots
     
@@ -724,7 +728,8 @@ class Simulation:
         # place astrocyte
         if valid_placement:
             
-            ast = Astrocyte(position=(x, y), spatial_index=self.spatial_index, environment_grid=self.environment_grid,
+            ast = Astrocyte(simulation=self, position=(x, y), spatial_index=self.spatial_index,
+                            environment_grid=self.environment_grid,
                             data_logger=self.data_logger,
                             **astrocyte_param)
             
@@ -783,7 +788,7 @@ class Simulation:
 
 class Astrocyte:
     
-    def __init__(self, position: Tuple[int, int], radius: int, num_branches: int,
+    def __init__(self, simulation, position: Tuple[int, int], radius: int, num_branches: int,
                  max_branch_radius: float, start_spawn_radius: float,
                  environment_grid: EnvironmentGrid, spatial_index: RtreeSpatialIndex,
                  repellent_name: str = None, repellent_concentration: float = 1,
@@ -791,17 +796,22 @@ class Astrocyte:
                  min_trend_amplitude=0.5, min_steepness=0.05, spawn_angle_threshold=5,
                  diffusion_coefficient=50, glutamate_uptake_rate=100,
                  spawn_length=3, spawn_radius_factor=0.1, min_radius=0.001,
-                 growth_factor=0.01,
+                 growth_factor=0.01, steps_till_death=50,
+                 glu_v_max=100, glu_k_m=0.5, trend_history=30,
                  repellent_volume_factor=0.00001, repellent_surface_factor=0.00001,
                  atp_cost_per_glutamate=- 18, atp_cost_per_unit_surface=1,
                  max_history: int = 1000, max_tries=5, molecules: dict = None, data_logger: DataLogger = None):
         
+        self.simulation = simulation
         self.environment_grid = environment_grid
         self.spatial_index = spatial_index
         self.data_logger = data_logger
         self.max_branch_radius = max_branch_radius
         self.children = []
         self.branches = []
+        self.death_counter = 0
+        self.num_branches = num_branches
+        self.steps_till_death = steps_till_death
         
         # computational parameters
         self.max_history = max_history
@@ -813,6 +823,7 @@ class Astrocyte:
         self.min_trend_amplitude = min_trend_amplitude  # minimum trend in ATP and glutamate to grow or shrink
         self.min_steepness = min_steepness  # minimum steepness for spawning
         self.spawn_angle_threshold = spawn_angle_threshold  # °
+        self.trend_history = trend_history
         
         # ion flow parameters
         self.diffusion_coefficient = diffusion_coefficient
@@ -822,6 +833,8 @@ class Astrocyte:
         # cost parameters
         self.atp_cost_per_glutamate = atp_cost_per_glutamate  # mol ATP / mol Glutamate  # 1/18
         self.atp_cost_per_unit_surface = atp_cost_per_unit_surface  # mol/m²
+        self.glu_V_max = glu_v_max
+        self.glu_K_m = glu_k_m
         
         # physical properties
         self.spawn_length = spawn_length  # m
@@ -834,6 +847,7 @@ class Astrocyte:
         self.id = uuid.uuid1()
         self.x, self.y = position
         self.radius = radius
+        self.volume = 4 / 3 * np.pi * radius ** 3
         self.pixels = self.get_pixels_within_cell()
         self.bbox = self.get_bbox()
         
@@ -861,15 +875,31 @@ class Astrocyte:
     def step(self, time_step=1):
         for i in range(time_step):
             
-            for child in self.children:
-                for molecule, concentration in self.molecules.items():
-                    child.set_concentration(molecule, concentration)
+            if self.death_counter > self.steps_till_death:
+                self.die()
+            
+            self.simulate_glutamate()
+            self.diffuse_molecules()
             
             for branch in self.branches:
                 branch.step()
             
-            # self.remove_molecules_from_cell_body()
             self.release_repellent()
+            
+            if len(self.branches) <= self.num_branches:
+                self.death_counter += 1
+            else:
+                self.death_counter = 0
+    
+    def die(self):
+        
+        if self.death_counter / 100 < np.random.random():
+            
+            for child in self.children:
+                child.action_prune()
+            
+            self.spatial_index.remove(self)
+            self.simulation.astrocytes.remove(self)
     
     def get_pixels_within_cell(self) -> List[Tuple[int, int]]:
         """
@@ -908,16 +938,62 @@ class Astrocyte:
                 self.environment_grid.set_concentration_at(pixel, molecule=self.repellent_name,
                                                            concentration=self.repellent_concentration)
     
+    def simulate_glutamate(self):
+        intra_glutamate = self.get_amount("glutamate")
+        
+        if self.atp_cost_per_glutamate > 0:
+            self.update_amount("glutamate", -intra_glutamate)
+        else:
+            atp_change = intra_glutamate * self.atp_cost_per_glutamate
+            self.update_amount('ATP', abs(atp_change))
+            self.update_amount("glutamate", -intra_glutamate)
+    
     def get_concentration(self, molecule: str):
         return self.molecules[molecule]
     
+    def diffuse_molecules(self):
+        for molecule, concentration in self.molecules.items():
+            for target in self.children:
+                
+                # Calculate the concentration difference between the branch and the target
+                concentration_difference = self.get_concentration(molecule) - target.get_concentration(molecule)
+                
+                if concentration_difference <= 0:
+                    continue
+                
+                # set radius
+                radius = target.start.radius
+                
+                # calculate ions/molecules to move
+                dt = 1  # one time step
+                ions_to_move = self._calculate_diffusion_rate(radius) * concentration_difference * dt
+                ions_to_move = min(ions_to_move, self.get_amount(molecule))
+                
+                # update new concentrations
+                self.update_amount(molecule, -ions_to_move)
+                target.update_amount(molecule, ions_to_move)
+    
+    def _calculate_diffusion_rate(self, radius):
+        return self.diffusion_coefficient / (np.pi * radius ** 2)
+    
     def update_concentration(self, molecule: str, concentration: float):
-        # cell body acts as infinite sink
-        pass
+        new_concentration = self.molecules[molecule] + concentration
+        
+        if new_concentration < 0:
+            
+            if new_concentration >= self.numerical_tolerance:
+                self.data_logger.add_message(f"Unstable branch simulation: {new_concentration} !> 0")
+                raise ArithmeticError(f"Unstable branch simulation: {new_concentration} !> 0")
+            
+            new_concentration = 0
+        
+        self.molecules[molecule] = new_concentration
     
     def update_amount(self, molecule: str, amount: float):
-        # cell body acts as infinite sink
-        pass
+        self.update_concentration(molecule, amount / self.volume)
+    
+    def get_amount(self, molecule):
+        return self.volume * self.get_concentration(molecule)
     
     def spawn_initial_branches(self, num_branches: int, max_branch_radius: float, spawn_radius: float,
                                spawn_length: float):
@@ -964,7 +1040,7 @@ class Astrocyte:
         if tries >= self.max_tries:
             logging.warning(f"Maximum astrocyte tries exceeded: {tries}")
     
-    def plot(self, line_thickness=2, line_scaling: Literal['log', 'sqrt'] = 'sqrt',
+    def plot(self, line_thickness=1, line_scaling: Literal['log', 'sqrt'] = 'sqrt',
              figsize=(5, 5), ax: plt.Axes = None):
         
         # create figure
@@ -980,14 +1056,14 @@ class Astrocyte:
             x0, y0 = branch.start.x, branch.start.y
             x1, y1 = branch.end.x, branch.end.y
             
-            width = self._scale_branch_thickness(np.mean([branch.start.radius, branch.end.radius]),
-                                                 line_thickness=line_thickness, line_scaling=line_scaling)
+            width = self._scale_branch_thickness(branch.end.radius, line_thickness=line_thickness,
+                                                 line_scaling=line_scaling)
             
             ax.plot([x0, x1], [y0, y1], color="black", linewidth=width)
     
     def _scale_branch_thickness(self, radius, line_thickness, line_scaling: Literal['log', 'sqrt'] = 'log'):
         
-        min_width = line_thickness * 0.1  # Minimum width for branches with very small radius
+        min_width = line_thickness * 0.005  # Minimum width for branches with very small radius
         if line_scaling == 'log':
             if radius > 0:
                 width = np.log10(radius) / np.log10(self.max_branch_radius) * line_thickness
@@ -1206,7 +1282,6 @@ class AstrocyteBranch:
         self.surface_area = None
         self.repellent_release = None
         self.environment = None
-        self.diffusion_rate = None
         self.glutamate_uptake_capacity = None
         self.current_time_step = 0
         self.pruned = False
@@ -1270,7 +1345,7 @@ class AstrocyteBranch:
         for molecule, concentration in self.environment.items():
             self.extracellular_history[molecule].append(concentration)
     
-    def get_trend(self, molecule: str, intra: bool, last_n=10) -> float:
+    def get_trend(self, molecule: str, intra: bool) -> float:
         """
         Perform linear regression on the history of a molecule's concentration.
 
@@ -1284,7 +1359,7 @@ class AstrocyteBranch:
         history = self.intracellular_history[molecule] if intra else self.extracellular_history[molecule]
         if not history or len(history) < 2:
             return 0.0  # No trend if history is empty
-        history = np.array(history)[:last_n].astype(float)
+        history = np.array(history)[:self.nucleus.trend_history].astype(float)
         
         # Create an array of time points (assuming equal time intervals)
         x = np.arange(len(history))
@@ -1350,22 +1425,20 @@ class AstrocyteBranch:
     def update_environment(self, molecule, amount):
         return self.nucleus.environment_grid.update_amount_at(self.interacting_pixels, molecule, amount)
     
-    def _calculate_diffusion_rate(self) -> float:
+    def _calculate_diffusion_rate(self, radius: float) -> float:
         """
         Calculate the diffusion rate of ions along the branch.
 
         Returns:
             The diffusion rate for the branch.
         """
-        # Calculate the average radius of the branch
-        average_radius = (self.start.radius + self.end.radius) / 2
         
         # Calculate the length of the branch
         length_of_branch = np.sqrt((self.end.x - self.start.x) ** 2 + (self.end.y - self.start.y) ** 2)
         
         # Apply the formula for diffusion rate
         diffusion_rate = self.nucleus.diffusion_coefficient * (1 / length_of_branch) * (
-                1 / (np.pi * average_radius ** 2))
+                1 / (np.pi * radius ** 2))
         
         return diffusion_rate
     
@@ -1380,9 +1453,15 @@ class AstrocyteBranch:
                 if concentration_difference <= 0:
                     continue
                 
+                # set radius
+                if target == self.parent:
+                    radius = self.start.radius
+                else:
+                    radius = self.end.radius
+                
                 # calculate ions/molecules to move
                 dt = 1  # one time step
-                ions_to_move = self.diffusion_rate * concentration_difference * dt
+                ions_to_move = self._calculate_diffusion_rate(radius) * concentration_difference * dt
                 ions_to_move = min(ions_to_move, self.get_amount(molecule))
                 
                 # update new concentrations
@@ -1408,15 +1487,17 @@ class AstrocyteBranch:
             
             self._log(
                     f"Removed GLU: {humanize.metric(to_remove, 'mol')}/{humanize.metric(abs(actually_removed), 'mol')} "
-                    f"({actually_removed / extracellular_glutamate * 100:.1f}%)")
+                    f"({actually_removed / extracellular_glutamate * 100:.1f}% from ext) "
+                    f"[GLU: {humanize.metric(self.get_concentration('glutamate'), 'mol/px')}]")
         
         # convert glutamate using up ATP
         intra_glutamate = self.get_amount("glutamate")
         if intra_glutamate > self.nucleus.numerical_tolerance:
-            atp_change = intra_glutamate * self.nucleus.atp_cost_per_glutamate
             
             # glutamate conversion costs energy
-            if atp_change > 0:
+            if self.nucleus.atp_cost_per_glutamate > 0:
+                
+                atp_change = intra_glutamate * self.nucleus.atp_cost_per_glutamate
                 atp_used = min(self.get_amount("ATP"), atp_change)
                 glu_converted = abs(atp_used / self.nucleus.atp_cost_per_glutamate)
                 self._log(f"Used {atp_used:.1f} ATP ({atp_change / self.get_amount('ATP') * 100:.1f}%) "
@@ -1431,13 +1512,22 @@ class AstrocyteBranch:
             
             # glutamate conversion generates energy
             else:
-                atp_generated = abs(atp_change)
+                
+                # calculate reaction rate according to Michaelis-Menten kinetics
+                glutamate_concentration = self.get_concentration("glutamate")
+                glutamate_rate = (self.nucleus.glu_V_max * glutamate_concentration) / (
+                        self.nucleus.glu_K_m + glutamate_concentration)
+                glutamate_converted = min(glutamate_rate, intra_glutamate)
+                
+                atp_generated = abs(glutamate_converted * self.nucleus.atp_cost_per_glutamate)
                 
                 self.update_amount("ATP", atp_generated)
-                self.update_amount("glutamate", -intra_glutamate)
+                self.update_amount("glutamate", -glutamate_converted)
                 
-                self._log(f"Generated {humanize.metric(atp_generated, 'mol')} ATP from "
-                          f"{humanize.metric(intra_glutamate, 'mol')} GLU")
+                self._log(f"GLU converted {humanize.metric(glutamate_converted, 'mol')} "
+                          f"({glutamate_converted / intra_glutamate * 100:.1f}%, "
+                          f"{humanize.metric(glutamate_concentration, 'mol/px')}) "
+                          f"and generated  {humanize.metric(atp_generated, 'mol')} ATP")
     
     def _simulate_repellent(self):
         # Release repellent into environment
@@ -1477,7 +1567,6 @@ class AstrocyteBranch:
         self.interacting_pixels = self.get_interacting_pixels()
         self.volume = self.calculate_branch_volume()
         self.surface_area = self.calculate_branch_surface()
-        self.diffusion_rate = self._calculate_diffusion_rate()
         self.glutamate_uptake_capacity = self.calculate_removal_capacity(self.nucleus.glutamate_uptake_rate)
         
         if self.nucleus.repellent_name is not None and self.repellent_release is not None:
@@ -1570,7 +1659,7 @@ class AstrocyteBranch:
         
         if new_end.radius < min_radius:
             self._log(f"Growth prune: {humanize.metric(new_end.radius, 'm')} ({growth})")
-            self._action_prune()
+            self.action_prune()
             return
         
         new_surface_area = self.calculate_branch_surface(start=self.start, end=new_end)
@@ -1672,7 +1761,7 @@ class AstrocyteBranch:
         
         return abs(angle)
     
-    def _action_prune(self):
+    def action_prune(self):
         """
         Prune the branch if it has no children.
         """
@@ -1732,15 +1821,27 @@ class AstrocyteBranch:
         """
         
         # Update the end node
-        self.end.x, self.end.y = new_branch.end.x, new_branch.end.y
+        surface_area_difference = new_branch.surface_area - self.surface_area
         
-        # Update the spatial index before changing the position
-        self.nucleus.spatial_index.update(self)
+        atp_cost = self.nucleus.atp_cost_per_unit_surface * surface_area_difference
         
-        # Update the physical properties of the branch
-        self.update_physical_properties()
+        if atp_cost <= self.get_amount("ATP"):
+            self.end.x, self.end.y = new_branch.end.x, new_branch.end.y
+            
+            # Update the spatial index before changing the position
+            self.nucleus.spatial_index.update(self)
+            
+            # remove atp
+            self.update_amount("ATP", -atp_cost)
+            
+            # Update the physical properties of the branch
+            self.update_physical_properties()
+            
+            self._log(f"Moved branch to {(self.end.x, self.end.y)}")
         
-        self._log(f"Moved branch to {(self.end.x, self.end.y)}")
+        else:
+            self._log(
+                    f"Insufficient ATP to move branch ({atp_cost:.2f} !< {self.get_amount('ATP'):.2f}).")
     
     def _find_best_spawn_location(self, num_candidates=8) -> Union[Tuple[AstrocyteBranch, float], None]:
         
