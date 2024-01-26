@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-import pickle
 import random
 import shutil
 import time
@@ -12,6 +11,7 @@ from multiprocessing import shared_memory
 from pathlib import Path
 from typing import Callable, List, Literal, Tuple, Union
 
+import dill as pickle
 import humanize
 import numpy as np
 import pandas as pd
@@ -44,17 +44,23 @@ class Loggable:
     def extract_settings(locals_dict, exclude_types=None):
         # Create a copy of the dict to avoid modifying the original
         settings = dict(locals_dict)
+        
         # Remove 'self' and any other keys that are not settings
         settings.pop('self', None)
         
         # Exclude parameters that are instances of specific types
-        if exclude_types:
-            if not isinstance(exclude_types, Tuple):
-                exclude_types = tuple([exclude_types])
+        for key, value in list(settings.items()):
             
-            for key, value in list(settings.items()):
-                if isinstance(value, exclude_types) or isinstance(value, (DataLogger, Simulation)) or callable(value):
-                    settings.pop(key)
+            exclude = False
+            if isinstance(value, (DataLogger, Simulation)) or callable(value) or "func" in key or "_param" in key:
+                exclude = True
+            
+            if exclude_types is not None:
+                if isinstance(value, exclude_types):
+                    exclude = True
+            
+            if exclude:
+                settings.pop(key)
         
         return settings
     
@@ -843,7 +849,7 @@ class Simulation(Loggable):
     
     def __init__(self, data_logger: DataLogger, num_astrocytes=1, grid_size=(100, 100), border=10,
                  print_messages=True, max_tries=5,
-                 environment_dict: dict = None, glutamate_release_param: dict = None, astrocyte_param: dict = None):
+                 environment_param: dict = None, glutamate_release_param: dict = None, astrocyte_param: dict = None):
         
         super().__init__(data_logger, message_logger=MessageLogger(print_messages=print_messages),
                          settings=Loggable.extract_settings(locals()))
@@ -854,12 +860,12 @@ class Simulation(Loggable):
         self.axx = None
         self.fig = None
         
-        environment_dict = {} if environment_dict is None else environment_dict
+        environment_param = {} if environment_param is None else environment_param
         glutamate_release_param = {} if glutamate_release_param is None else glutamate_release_param
         astrocyte_param = {} if astrocyte_param is None else astrocyte_param
         
         self.spatial_index = RtreeSpatialIndex(simulation=self)
-        self.environment_grid = EnvironmentGrid(simulation=self, grid_size=grid_size, **environment_dict)
+        self.environment_grid = EnvironmentGrid(simulation=self, grid_size=grid_size, **environment_param)
         self.glutamate_release_manager = GlutamateReleaseManager(simulation=self, **glutamate_release_param)
         
         self.astrocytes = []
@@ -2212,7 +2218,7 @@ class DataLogger:
                 "log_settings": self.log_settings,
                 }
             
-            # Save the data to a JSON file
+            # Save the settings to a pickle file
             with open(file_path.as_posix(), "wb") as file:
                 pickle.dump(checkpoint_data, file)
             
