@@ -25,12 +25,16 @@ avogadro = physical_constants['Avogadro constant']
 
 
 class Loggable:
-    def __init__(self, data_logger, settings: dict = None):
+    def __init__(self, data_logger, message_logger: MessageLogger = None, settings: dict = None):
         self.id = uuid.uuid4()
         self.steps = 0
+        
+        # register with data logger
         self.data_logger = data_logger
-        # Pass the settings to the register method
         self.data_logger.register(self, settings)
+        
+        # register message logger
+        self.message_logger = message_logger
     
     def __del__(self):
         self.data_logger.unregister(self.id)
@@ -59,9 +63,165 @@ class Loggable:
     def get_short_id(self):
         return xxhash.xxh32_hexdigest(self.id.hex)
     
+    def log(self, msg: str, level: int = logging.INFO, tag: str = "default"):
+        if self.message_logger:
+            self.message_logger.log(msg=msg, tag=tag, level=level, caller_id=self.id)
+        else:
+            msg = f"{self.id.hex}:{tag}:{msg}"
+            logging.log(level=level, msg=msg)
+    
     def log_state(self):
         """Override this method in the subclass to return the specific state of the object."""
         raise NotImplementedError("The log_state method must be implemented by the subclass.")
+
+
+class RtreeSpatialIndex:
+    def __init__(self, simulation):
+        # Create an R-tree index
+        self.rtree = index.Index()
+        self.branch_counter = 0
+        self.simulation = simulation
+    
+    def search(self, region: Union[Tuple[int, int, int, int], AstrocyteBranch]):
+        """
+        Search for branches intersecting with the given region.
+
+        Args:
+            region: The region to search in (xmin, ymin, xmax, ymax).
+
+        Returns:
+            A list of branch IDs that intersect with the region.
+        """
+        
+        if isinstance(region, (AstrocyteBranch, Astrocyte)):
+            region = region.get_bbox()
+        
+        return list(self.rtree.intersection(region))
+    
+    def insert(self, obj):
+        """
+        Insert a new branch into the R-tree.
+
+        Args:
+            obj: The branch to insert.
+        """
+        bbox = obj.get_bbox()
+        id_ = obj.id.int
+        self.rtree.insert(id_, bbox)
+        
+        self.branch_counter += 1
+    
+    def remove(self, obj):
+        """
+        Remove a branch from the R-tree.
+
+        Args:
+            obj: The branch to remove.
+        """
+        self.rtree.delete(obj.id.int, obj.get_bbox())
+    
+    def update(self, obj):
+        """
+        Update a branch in the R-tree.
+
+        Args:
+            obj: The branch to update.
+        """
+        self.remove(obj)
+        self.insert(obj)
+    
+    def check_collision(self, obj: Union[AstrocyteBranch, Astrocyte, Tuple[int, int, int, int]], border=3):
+        
+        if not isinstance(obj, tuple):
+            bbox = obj.get_bbox()
+        else:
+            bbox = obj
+        
+        # check collision with border
+        x0, y0, x1, y1 = bbox
+        
+        X, Y = self.simulation.grid_size
+        for x in [x0, x1]:
+            if x < border or x > X - border:
+                return True
+        for y in [y0, y1]:
+            if y < border or y > Y - border:
+                return True
+        
+        # check collision with other objects
+        collisions = self.search(bbox)
+        
+        return len(collisions) > 0
+    
+    @staticmethod
+    def plot_line_low(x0, y0, x1, y1):
+        """
+        Helper function for Bresenham's algorithm for lines with absolute slope less than 1.
+        """
+        points = []
+        dx = x1 - x0
+        dy = y1 - y0
+        yi = 1
+        if dy < 0:
+            yi = -1
+            dy = -dy
+        D = (2 * dy) - dx
+        y = y0
+        
+        for x in range(x0, x1 + 1):
+            points.append((x, y))
+            if D > 0:
+                y += yi
+                D += (2 * (dy - dx))
+            else:
+                D += 2 * dy
+        return points
+    
+    @staticmethod
+    def plot_line_high(x0, y0, x1, y1):
+        """
+        Helper function for Bresenham's algorithm for lines with absolute slope greater than 1.
+        """
+        points = []
+        dx = x1 - x0
+        dy = y1 - y0
+        xi = 1
+        if dx < 0:
+            xi = -1
+            dx = -dx
+        D = (2 * dx) - dy
+        x = x0
+        
+        for y in range(y0, y1 + 1):
+            points.append((x, y))
+            if D > 0:
+                x += xi
+                D += (2 * (dx - dy))
+            else:
+                D += 2 * dx
+        return points
+    
+    def rasterize_line(self, x0, y0, x1, y1):
+        """
+        Rasterize a line using Bresenham's line algorithm.
+
+        Args:
+            x0, y0: The starting point of the line.
+            x1, y1: The ending point of the line.
+
+        Returns:
+            A list of grid cells (x, y) that the line intersects.
+        """
+        if abs(y1 - y0) < abs(x1 - x0):
+            if x0 > x1:
+                return self.plot_line_low(x1, y1, x0, y0)
+            else:
+                return self.plot_line_low(x0, y0, x1, y1)
+        else:
+            if y0 > y1:
+                return self.plot_line_high(x1, y1, x0, y0)
+            else:
+                return self.plot_line_high(x0, y0, x1, y1)
 
 
 class EnvironmentGrid(Loggable):
@@ -157,37 +317,6 @@ class EnvironmentGrid(Loggable):
                 
                 # Update the shared_array with the changes
                 shared_array += self.diffusion_rate * change
-                
-                if np.min(shared_array) < 0:
-                    logging.warning(f"Concentration({molecule}) < 0: {np.min(shared_array)}."
-                                    f"Diffusion simulation is unstable, reduce 'diffusion_rate'.")
-    
-    def old_update_concentrations(self):
-        """
-        Update the concentrations in the grid using a vectorized approach with
-        Dirichlet boundary conditions (edges as sinks).
-        """
-        for molecule, (shared_array, _) in self.shared_arrays.items():
-            
-            for _ in range(int(self.dt)):
-                # Creating a copy of the current state of the grid
-                current_concentration = np.copy(shared_array)
-                
-                # Applying Dirichlet boundary conditions (setting edges to zero)
-                current_concentration[0, :] = current_concentration[-1, :] = 0
-                current_concentration[:, 0] = current_concentration[:, -1] = 0
-                
-                # Vectorized diffusion update
-                # Using slicing for interior cells and avoiding loop calculations
-                change = self.diffusion_rate * (  # >>> self.dt *
-                        current_concentration[:-2, 1:-1] -  # concentration from upper row
-                        2 * current_concentration[1:-1, 1:-1] +  # current cell concentration (doubled for laplacian)
-                        current_concentration[2:, 1:-1] +  # concentration from lower row
-                        current_concentration[1:-1, :-2] -  # concentration from left column
-                        2 * current_concentration[1:-1, 1:-1] +  # current cell concentration (doubled for laplacian)
-                        current_concentration[1:-1, 2:])  # concentration from right column
-                
-                shared_array[1:-1, 1:-1] = current_concentration[1:-1, 1:-1] + change
                 
                 if np.min(shared_array) < 0:
                     logging.warning(f"Concentration({molecule}) < 0: {np.min(shared_array)}."
@@ -1164,169 +1293,6 @@ class Astrocyte(Loggable):
             axx[i].set_title(m)
 
 
-class AstrocyteNode:
-    
-    def __init__(self, x, y, radius):
-        self.radius = radius
-        self.x = int(x)
-        self.y = int(y)
-    
-    def get_position(self):
-        return self.x, self.y
-    
-    def copy(self):
-        return AstrocyteNode(self.x, self.y, self.radius)
-
-
-class RtreeSpatialIndex:
-    def __init__(self, simulation):
-        # Create an R-tree index
-        self.rtree = index.Index()
-        self.branch_counter = 0
-        self.simulation = simulation
-    
-    def search(self, region: Union[Tuple[int, int, int, int], AstrocyteBranch]):
-        """
-        Search for branches intersecting with the given region.
-
-        Args:
-            region: The region to search in (xmin, ymin, xmax, ymax).
-
-        Returns:
-            A list of branch IDs that intersect with the region.
-        """
-        
-        if isinstance(region, (AstrocyteBranch, Astrocyte)):
-            region = region.get_bbox()
-        
-        return list(self.rtree.intersection(region))
-    
-    def insert(self, obj):
-        """
-        Insert a new branch into the R-tree.
-
-        Args:
-            obj: The branch to insert.
-        """
-        bbox = obj.get_bbox()
-        id_ = obj.id.int
-        self.rtree.insert(id_, bbox)
-        
-        self.branch_counter += 1
-    
-    def remove(self, obj):
-        """
-        Remove a branch from the R-tree.
-
-        Args:
-            obj: The branch to remove.
-        """
-        self.rtree.delete(obj.id.int, obj.get_bbox())
-    
-    def update(self, obj):
-        """
-        Update a branch in the R-tree.
-
-        Args:
-            obj: The branch to update.
-        """
-        self.remove(obj)
-        self.insert(obj)
-    
-    def check_collision(self, obj: Union[AstrocyteBranch, Astrocyte, Tuple[int, int, int, int]], border=3):
-        
-        if not isinstance(obj, tuple):
-            bbox = obj.get_bbox()
-        else:
-            bbox = obj
-        
-        # check collision with border
-        x0, y0, x1, y1 = bbox
-        
-        X, Y = self.simulation.grid_size
-        for x in [x0, x1]:
-            if x < border or x > X - border:
-                return True
-        for y in [y0, y1]:
-            if y < border or y > Y - border:
-                return True
-        
-        # check collision with other objects
-        collisions = self.search(bbox)
-        
-        return len(collisions) > 0
-    
-    @staticmethod
-    def plot_line_low(x0, y0, x1, y1):
-        """
-        Helper function for Bresenham's algorithm for lines with absolute slope less than 1.
-        """
-        points = []
-        dx = x1 - x0
-        dy = y1 - y0
-        yi = 1
-        if dy < 0:
-            yi = -1
-            dy = -dy
-        D = (2 * dy) - dx
-        y = y0
-        
-        for x in range(x0, x1 + 1):
-            points.append((x, y))
-            if D > 0:
-                y += yi
-                D += (2 * (dy - dx))
-            else:
-                D += 2 * dy
-        return points
-    
-    @staticmethod
-    def plot_line_high(x0, y0, x1, y1):
-        """
-        Helper function for Bresenham's algorithm for lines with absolute slope greater than 1.
-        """
-        points = []
-        dx = x1 - x0
-        dy = y1 - y0
-        xi = 1
-        if dx < 0:
-            xi = -1
-            dx = -dx
-        D = (2 * dx) - dy
-        x = x0
-        
-        for y in range(y0, y1 + 1):
-            points.append((x, y))
-            if D > 0:
-                x += xi
-                D += (2 * (dx - dy))
-            else:
-                D += 2 * dx
-        return points
-    
-    def rasterize_line(self, x0, y0, x1, y1):
-        """
-        Rasterize a line using Bresenham's line algorithm.
-
-        Args:
-            x0, y0: The starting point of the line.
-            x1, y1: The ending point of the line.
-
-        Returns:
-            A list of grid cells (x, y) that the line intersects.
-        """
-        if abs(y1 - y0) < abs(x1 - x0):
-            if x0 > x1:
-                return self.plot_line_low(x1, y1, x0, y0)
-            else:
-                return self.plot_line_low(x0, y0, x1, y1)
-        else:
-            if y0 > y1:
-                return self.plot_line_high(x1, y1, x0, y0)
-            else:
-                return self.plot_line_high(x0, y0, x1, y1)
-
-
 class AstrocyteBranch(Loggable):
     
     def __init__(self, parent, nucleus: Astrocyte, start: Union[Tuple[int, int, int], AstrocyteNode],
@@ -1402,7 +1368,7 @@ class AstrocyteBranch(Loggable):
         # run through actions
         self._act()
         if self.pruned:
-            self._log("I was pruned. Aborting simulation step.")
+            self.log("I was pruned. Aborting simulation step.", tag="branch")
             return
         
         # simulate molecule diffusion
@@ -1456,8 +1422,10 @@ class AstrocyteBranch(Loggable):
         if new_concentration < 0:
             
             if new_concentration >= self.nucleus.numerical_tolerance:
-                self._log(f"Unstable branch simulation: {new_concentration} !> 0")
+                self.log(f"Unstable branch simulation: {new_concentration} !> 0", level=logging.ERROR, tag="error")
                 raise ArithmeticError(f"Unstable branch simulation: {new_concentration} !> 0")
+            else:
+                self.log(f"Unstable branch simulation: {new_concentration} !> 0", level=logging.CRITICAL, tag="error")
             
             new_concentration = 0
         
@@ -1566,10 +1534,12 @@ class AstrocyteBranch(Loggable):
             # increase intracellular concentration with actually removed concentration
             self.update_amount("glutamate", abs(actually_removed))
             
-            self._log(
+            self.log(
                     f"Removed GLU: {humanize.metric(to_remove, 'mol')}/{humanize.metric(abs(actually_removed), 'mol')} "
                     f"({actually_removed / extracellular_glutamate * 100:.1f}% from ext) "
-                    f"[GLU: {humanize.metric(self.get_concentration('glutamate'), 'mol/px')}]")
+                    f"[GLU: {humanize.metric(self.get_concentration('glutamate'), 'mol/px')}]",
+                    tag="branch,ion"
+                    )
         
         # convert glutamate using up ATP
         intra_glutamate = self.get_amount("glutamate")
@@ -1581,15 +1551,17 @@ class AstrocyteBranch(Loggable):
                 atp_change = intra_glutamate * self.nucleus.atp_cost_per_glutamate
                 atp_used = min(self.get_amount("ATP"), atp_change)
                 glu_converted = abs(atp_used / self.nucleus.atp_cost_per_glutamate)
-                self._log(f"Used {atp_used:.1f} ATP ({atp_change / self.get_amount('ATP') * 100:.1f}%) "
-                          f"to convert {glu_converted:.1f} GLU ({glu_converted / intra_glutamate * 100:.1f}%)")
+                self.log(f"Used {atp_used:.1f} ATP ({atp_change / self.get_amount('ATP') * 100:.1f}%) "
+                         f"to convert {glu_converted:.1f} GLU ({glu_converted / intra_glutamate * 100:.1f}%)",
+                         tag="branch,ion")
                 
                 self.update_amount('ATP', atp_used)
                 self.update_amount('glutamate', -glu_converted)
                 
-                self._log(f"Converted "
-                          f"{humanize.metric(glu_converted, 'mol')} GLU using "
-                          f"{humanize.metric(atp_used, 'mol')} ATP")
+                self.log(f"Converted "
+                         f"{humanize.metric(glu_converted, 'mol')} GLU using "
+                         f"{humanize.metric(atp_used, 'mol')} ATP",
+                         tag="branch,ion")
             
             # glutamate conversion generates energy
             else:
@@ -1605,10 +1577,11 @@ class AstrocyteBranch(Loggable):
                 self.update_amount("ATP", atp_generated)
                 self.update_amount("glutamate", -glutamate_converted)
                 
-                self._log(f"GLU converted {humanize.metric(glutamate_converted, 'mol')} "
-                          f"({glutamate_converted / intra_glutamate * 100:.1f}%, "
-                          f"{humanize.metric(glutamate_concentration, 'mol/px')}) "
-                          f"and generated  {humanize.metric(atp_generated, 'mol')} ATP")
+                self.log(f"GLU converted {humanize.metric(glutamate_converted, 'mol')} "
+                         f"({glutamate_converted / intra_glutamate * 100:.1f}%, "
+                         f"{humanize.metric(glutamate_concentration, 'mol/px')}) "
+                         f"and generated  {humanize.metric(atp_generated, 'mol')} ATP",
+                         tag="branch,ion")
     
     def _simulate_repellent(self):
         # Release repellent into environment
@@ -1732,8 +1705,9 @@ class AstrocyteBranch(Loggable):
         if abs(combined_trend) < min_trend_amplitude:
             
             if combined_trend > self.nucleus.numerical_tolerance:
-                self._log(f"Growth trend too low: {combined_trend:.1E} "
-                          f"({combined_trend / min_trend_amplitude * 100:.1f}%)")
+                self.log(f"Growth trend too low: {combined_trend:.1E} "
+                         f"({combined_trend / min_trend_amplitude * 100:.1f}%)",
+                         tag="branch,growth,act")
             
             return
         
@@ -1747,7 +1721,7 @@ class AstrocyteBranch(Loggable):
         new_end.radius *= growth
         
         if new_end.radius < min_radius:
-            self._log(f"Growth prune: {humanize.metric(new_end.radius, 'm')} ({growth})")
+            self.log(f"Growth prune: {humanize.metric(new_end.radius, 'm')} ({growth})", tag="branch,growth,prune,act")
             self.action_prune()
             return
         
@@ -1755,9 +1729,10 @@ class AstrocyteBranch(Loggable):
         
         # Ensure the end node radius is not less than the start node radius after growth/shrinkage
         if new_end.radius >= self.start.radius:
-            self._log(f"Growth constrained by start node size: "
-                      f"{humanize.metric(new_end.radius, 'm')} vs. "
-                      f"{humanize.metric(self.start.radius, 'm')}")
+            self.log(f"Growth constrained by start node size: "
+                     f"{humanize.metric(new_end.radius, 'm')} vs. "
+                     f"{humanize.metric(self.start.radius, 'm')}",
+                     tag="branch,growth,act")
             return
         
         # Calculate the required ATP based on the change in surface area
@@ -1769,7 +1744,8 @@ class AstrocyteBranch(Loggable):
         
         # Check if there's enough ATP to support the growth, or if ATP needs to be added back for shrinkage
         if growth_factor > 1 and available_atp < required_atp:
-            self._log(f"Growth not supported by ATP: ({available_atp / required_atp * 100:.1f}%).")
+            self.log(f"Growth not supported by ATP: ({available_atp / required_atp * 100:.1f}%).",
+                     tag="branch,growth,act")
             return
         
         # Update new end node
@@ -1782,9 +1758,10 @@ class AstrocyteBranch(Loggable):
         # Update the physical properties of the branch (e.g., recalculate volume, surface area)
         self.update_physical_properties(location_updated=False)
         
-        self._log(f"Growth adjusted to "
-                  f"{humanize.metric(new_end.radius, 'm')} for "
-                  f"{humanize.metric(abs(required_atp), 'mol')} ATP")
+        self.log(f"Growth adjusted to "
+                 f"{humanize.metric(new_end.radius, 'm')} for "
+                 f"{humanize.metric(abs(required_atp), 'mol')} ATP",
+                 tag="branch,growth,act")
     
     def _action_spawn_or_move(self, min_steepness: float,
                               angle_threshold: float):
@@ -1805,7 +1782,7 @@ class AstrocyteBranch(Loggable):
         
         if spawn_locations is None:
             self.counter_failed_spawn += 1
-            self._log(f"No branch found.")
+            self.log(f"No branch found.", tag="branch,act,spawn,fail")
             return
         
         best_branch, steepness = spawn_locations
@@ -1822,12 +1799,13 @@ class AstrocyteBranch(Loggable):
             else:
                 # If direction is similar and branch has no children, move the branch
                 self._move_branch(best_branch)
-                self._log(f"Moving branch: {angle} < {angle_threshold}")
+                self.log(f"Moving branch: {angle} < {angle_threshold}", tag="branch,move,act")
         else:
             if steepness > self.nucleus.numerical_tolerance:
-                self._log(
+                self.log(
                         f"Branch spawning steepness low: {steepness:.1E} !> {min_steepness:.1E} "
-                        f"({steepness / min_steepness * 100:.1f}%)")
+                        f"({steepness / min_steepness * 100:.1f}%)",
+                        tag="branch,spawn,act,fail")
     
     @staticmethod
     def _get_angle_between_branches(branch1, branch2):
@@ -1858,7 +1836,7 @@ class AstrocyteBranch(Loggable):
             
             # Ensure no children exist; else skip
             if self.children:
-                self._log("Branch has children, cannot prune.")
+                self.log("Branch has children, cannot prune.", tag="branch,act,prune,fail")
                 return
             
             # Remove self from spatialIndexTree
@@ -1870,7 +1848,7 @@ class AstrocyteBranch(Loggable):
             
             # Additional cleanup if needed (e.g., freeing resources or nullifying references)
             self.pruned = True
-            self._log("Branch pruned successfully.")
+            self.log("Branch pruned successfully.", tag="branch,act,prune")
     
     def _spawn_new_branch(self, branch: AstrocyteBranch):
         """
@@ -1894,12 +1872,14 @@ class AstrocyteBranch(Loggable):
             # remove atp
             self.update_amount("ATP", -atp_cost)
             
-            self._log(f"Spawned new branch at: {(branch.end.x, branch.end.y)} for "
-                      f"{humanize.metric(atp_cost, 'mol')} ATP")
+            self.log(f"Spawned new branch at: {(branch.end.x, branch.end.y)} for "
+                     f"{humanize.metric(atp_cost, 'mol')} ATP",
+                     tag="branch,act,spawn")
         
         else:
-            self._log(
-                    f"Insufficient ATP available for branch spawning ({atp_cost:.2f} !< {self.get_amount('ATP'):.2f}).")
+            self.log(
+                    f"Insufficient ATP available for branch spawning ({atp_cost:.2f} !< {self.get_amount('ATP'):.2f}).",
+                    tag="branch,act,spawn,fail")
     
     def _move_branch(self, new_branch: AstrocyteBranch):
         """
@@ -1926,11 +1906,12 @@ class AstrocyteBranch(Loggable):
             # Update the physical properties of the branch
             self.update_physical_properties()
             
-            self._log(f"Moved branch to {(self.end.x, self.end.y)}")
+            self.log(f"Moved branch to {(self.end.x, self.end.y)}", tag="branch,act,spawn,move")
         
         else:
-            self._log(
-                    f"Insufficient ATP to move branch ({atp_cost:.2f} !< {self.get_amount('ATP'):.2f}).")
+            self.log(
+                    f"Insufficient ATP to move branch ({atp_cost:.2f} !< {self.get_amount('ATP'):.2f}).",
+                    tag="branch,act,spawn,move,fail")
     
     def _find_best_spawn_location(self, num_candidates=8) -> Union[Tuple[AstrocyteBranch, float], None]:
         
@@ -1938,15 +1919,17 @@ class AstrocyteBranch(Loggable):
         spawn_probability = 1 if self.counter_failed_spawn == 0 else 1 / self.counter_failed_spawn
         spawn_probability = max(0.01, spawn_probability)
         if spawn_probability <= np.random.random():
-            self._log(f"Spawn failed too many times: {self.counter_failed_spawn} ({spawn_probability * 100:.1f}%)")
+            self.log(f"Spawn failed too many times: {self.counter_failed_spawn} ({spawn_probability * 100:.1f}%)",
+                     tag="branch,act,spawn,fail")
             return None
         
         # New branch radius
         new_branch_radius = self.end.radius * self.nucleus.spawn_radius_factor
         if new_branch_radius < self.nucleus.min_radius:
-            self._log(f"Spawned branch would be below minimum radius "
-                      f"{humanize.metric(new_branch_radius, 'm')} !> "
-                      f"{humanize.metric(self.nucleus.min_radius, 'm')}")
+            self.log(f"Spawned branch would be below minimum radius "
+                     f"{humanize.metric(new_branch_radius, 'm')} !> "
+                     f"{humanize.metric(self.nucleus.min_radius, 'm')}",
+                     tag="branch,act,spawn,fail")
             return None
         
         # Generate a set of candidate directions
@@ -2055,31 +2038,41 @@ class AstrocyteBranch(Loggable):
             norm_direction = np.array([0, 0])
         
         return tuple(norm_direction)
+
+
+class AstrocyteNode:
     
-    def _log(self, msg: str) -> None:
-        if self.data_logger is not None:
-            self.data_logger.add_message(msg, self.get_short_id())
-        else:
-            logging.warning(msg)
+    def __init__(self, x, y, radius):
+        self.radius = radius
+        self.x = int(x)
+        self.y = int(y)
+    
+    def get_position(self):
+        return self.x, self.y
+    
+    def copy(self):
+        return AstrocyteNode(self.x, self.y, self.radius)
 
 
 class MessageLogger:
-    def __init__(self, print_messages: bool = True) -> None:
+    def __init__(self, print_messages: bool = True, timestamp_format="%d-%m-%Y %H:%M:%S") -> None:
         self.messages = []
         self.steps = 0
         self.print_messages = print_messages
+        self.timestamp_format = timestamp_format
     
     def step(self):
         self.steps += 1
     
-    def log(self, msg: str, tag: str = 'default', level: int = logging.INFO, caller_id: str = 'unknown'):
-        timestamp = datetime.now().strftime("%d-%m-%Y %H:%M:%S")
+    def log(self, msg: str, tag: str = 'default', level: int = logging.INFO,
+            caller_id: [str, int, uuid.UUID] = 'unknown'):
+        timestamp = datetime.now().strftime(self.timestamp_format)
         message = {
             "timestamp": timestamp,
             "step":      self.steps,
             "tag":       tag,
             "level":     level,
-            "caller_id": caller_id,
+            "caller_id": caller_id.hex if isinstance(caller_id, uuid.UUID) else caller_id,
             "message":   msg
             }
         self.messages.append(message)
