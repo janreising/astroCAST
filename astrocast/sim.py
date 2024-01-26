@@ -5,9 +5,8 @@ import random
 import time
 import uuid
 from collections import deque
-from functools import lru_cache
+from datetime import datetime
 from multiprocessing import shared_memory
-from pathlib import Path
 from typing import Callable, List, Literal, Tuple, Union
 
 import humanize
@@ -25,11 +24,50 @@ from scipy.ndimage import convolve
 avogadro = physical_constants['Avogadro constant']
 
 
-class EnvironmentGrid:
-    def __init__(self, grid_size: Tuple[int, int], diffusion_rate: float, dt: float, pixel_volume: float = 1.0,
-                 molecules: Union[List[str], str] = "glutamate",
-                 degrades: Union[str, List[str]] = None, degradation_factor: float = 0.75,
-                 dtype: str = np.float32):
+class Loggable:
+    def __init__(self, data_logger, settings: dict = None):
+        self.id = uuid.uuid4()
+        self.steps = 0
+        self.data_logger = data_logger
+        # Pass the settings to the register method
+        self.data_logger.register(self, settings)
+    
+    def __del__(self):
+        self.data_logger.unregister(self.id)
+    
+    @staticmethod
+    def extract_settings(locals_dict, exclude_types=None):
+        # Create a copy of the dict to avoid modifying the original
+        settings = dict(locals_dict)
+        # Remove 'self' and any other keys that are not settings
+        settings.pop('self', None)
+        
+        # Exclude parameters that are instances of specific types
+        if exclude_types:
+            if not isinstance(exclude_types, Tuple):
+                exclude_types = tuple(exclude_types)
+            
+            for key, value in list(settings.items()):
+                if isinstance(value, exclude_types) or isinstance(value, (DataLogger, Simulation)):
+                    settings.pop(key)
+        
+        return settings
+    
+    def get_hex_id(self):
+        return self.id.hex
+    
+    def get_short_id(self):
+        return xxhash.xxh32_hexdigest(self.id.hex)
+    
+    def log_state(self):
+        """Override this method in the subclass to return the specific state of the object."""
+        raise NotImplementedError("The log_state method must be implemented by the subclass.")
+
+
+class EnvironmentGrid(Loggable):
+    def __init__(self, simulation: Simulation, grid_size: Tuple[int, int], diffusion_rate: float, dt: float,
+                 pixel_volume: float = 1.0, molecules: Union[List[str], str] = "glutamate",
+                 degrades: Union[str, List[str]] = None, degradation_factor: float = 0.75, dtype: str = np.float32):
         """
         Initialize the environment grid with shared numpy arrays for each molecule.
 
@@ -41,6 +79,8 @@ class EnvironmentGrid:
             dtype: The data type of the arrays.
 
         """
+        
+        super().__init__(simulation.data_logger, settings=Loggable.extract_settings(locals()))
         
         if isinstance(molecules, list):
             self.molecules = molecules
@@ -58,6 +98,14 @@ class EnvironmentGrid:
         self.shared_arrays = self._create_shared_arrays(grid_size, molecules, dtype=dtype)
         
         self._check_cfl_condition(diffusion_rate=diffusion_rate, dt=dt)
+    
+    def log_state(self):
+        
+        state = {
+            "shared_arrays":         {molecule: arr[0] for molecule, arr in self.shared_arrays.items()},
+            "average_concentration": {molecule: np.mean(arr[0]) for molecule, arr in self.shared_arrays.items()}
+            }
+        return state
     
     @staticmethod
     def _create_shared_arrays(grid_size: Tuple[int, int], molecules: List[str], dtype=np.float32, parallel=False):
@@ -129,9 +177,6 @@ class EnvironmentGrid:
                 current_concentration[0, :] = current_concentration[-1, :] = 0
                 current_concentration[:, 0] = current_concentration[:, -1] = 0
                 
-                # todo: this is really unstable
-                #  maybe check if the np.sum(change) == 0?
-                
                 # Vectorized diffusion update
                 # Using slicing for interior cells and avoiding loop calculations
                 change = self.diffusion_rate * (  # >>> self.dt *
@@ -161,23 +206,20 @@ class EnvironmentGrid:
                 arr *= self.degradation_factor
                 self.shared_arrays[molecule] = arr, shm
     
-    def step(self, time_step: int = 1):
+    def step(self):
         """
-        Advance the simulation by a specified number of time steps.
+        Advance the simulation by one time steps.
 
         This method updates the molecular concentrations in the grid
         based on the diffusion rate, using the vectorized update approach.
         It applies the updates iteratively for the given number of time steps.
 
-        Args:
-            time_step: An integer representing the number of time steps
-                       to advance the simulation. Defaults to 1.
         """
-        for t in range(time_step):
-            self._update_concentrations()
-            self._degrade_molecules()
-            
-            self.update_history()
+        self._update_concentrations()
+        self._degrade_molecules()
+        
+        self.update_history()
+        self.steps += 1
     
     def update_history(self):
         total_amounts = self.get_total_amount()
@@ -337,6 +379,9 @@ class EnvironmentGrid:
         This method is automatically called when the object is garbage collected.
         """
         self.close()
+        
+        # Explicitly call the base class __del__ method
+        Loggable.__del__(self)
     
     def plot_history(self, molecule, figsize=(5, 5), ax=None):
         
@@ -386,8 +431,7 @@ class EnvironmentGrid:
         # Display the plot
         return ax
     
-    def interactive_plot(self, molecule: str, figsize: tuple = (5, 5), cmap: str = 'inferno', frames: int = 200,
-                         time_steps: int = 1):
+    def interactive_plot(self, molecule: str, figsize: tuple = (5, 5), cmap: str = 'inferno', frames: int = 200):
         """
         Create an interactive plot for Jupyter Notebooks to visualize the concentration changes
         of a specified molecule over time.
@@ -397,7 +441,6 @@ class EnvironmentGrid:
             figsize: Tuple representing the figure size (width, height).
             cmap: Colormap for the heatmap.
             frames: Number of frames.
-            time_steps: Number of time steps per frame
         """
         if molecule not in self.molecules:
             logging.error(f"Molecule {molecule} not found in the grid.")
@@ -412,7 +455,7 @@ class EnvironmentGrid:
         
         # Function to update the heatmap
         def update(frame):
-            self.step(time_step=time_steps)  # Advance the simulation by one time step
+            self.step()  # Advance the simulation by one time step
             _concentration_array, _ = self.shared_arrays[molecule]
             heatmap.set_data(_concentration_array)
             
@@ -430,8 +473,9 @@ class EnvironmentGrid:
         return HTML(anim.to_html5_video())
 
 
-class GlutamateReleaseManager:
-    def __init__(self, environment_grid: EnvironmentGrid, num_branches: int = 10, num_hotspots: int = 16,
+class GlutamateReleaseManager(Loggable):
+    def __init__(self, simulation: Simulation,
+                 num_branches: int = 10, num_hotspots: int = 16,
                  z_thickness: float = 3.0, border: int = 3, jitter: float = 0.1,
                  release_amplitude: float = 1,
                  stochastic_probability: float = 0, signal_function: Union[Callable, np.array] = lambda x: 0):
@@ -439,7 +483,7 @@ class GlutamateReleaseManager:
         Initialize the GlutamateReleaseManager with dendritic branches intersecting the imaging volume.
 
         Args:
-            environment_grid: Instance of the EnvironmentGrid class.
+            simulation: Instance of the Simulation class.
             num_branches: Number of dendritic branches to simulate.
             z_thickness: Thickness of the imaging plane in Z-dimension.
             jitter: Amount of jitter in the hotspot placement, default is 0.1.
@@ -447,7 +491,11 @@ class GlutamateReleaseManager:
             stochastic_probability: Probability of release at each hotspot.
             signal_function: Function to generate signal-based probabilities.
         """
-        self.environment_grid = environment_grid
+        
+        settings = Loggable.extract_settings(locals())
+        super().__init__(simulation.data_logger, settings=settings)
+        
+        self.environment_grid = simulation.environment_grid
         self.num_branches = num_branches
         self.num_hotspots = num_hotspots
         self.z_thickness = z_thickness
@@ -457,7 +505,16 @@ class GlutamateReleaseManager:
         self.stochastic_probability = stochastic_probability
         self.signal_function = signal_function
         self.lines, self.hotspots = self._generate_hotspots()
-        self.time_step = 0
+    
+    def log_state(self):
+        
+        if self.steps < 1:
+            state = {
+                "lines":    self.lines,
+                "hotspots": self.hotspots
+                }
+            return state
+        return None
     
     def _generate_hotspots(self) -> Tuple[np.array, np.array]:
         """
@@ -533,7 +590,7 @@ class GlutamateReleaseManager:
         
         return hotspots
     
-    def step(self, time_step: int = 1):
+    def step(self):
         """
         Advance the glutamate release simulation by one step.
 
@@ -542,24 +599,23 @@ class GlutamateReleaseManager:
 
         """
         
-        for i in range(time_step):
-            stochastic_vector = self._stochastic_release(self.stochastic_probability)
-            signal_vector = self._signal_based_release(self.signal_function)
-            
-            # Sum the probabilities and decide on release
-            combined_prob = stochastic_vector + signal_vector
-            random_vector = np.random.uniform(0, 1, size=combined_prob.shape)
-            release_decision = random_vector < combined_prob
-            release_difference = combined_prob - random_vector
-            
-            # Update the grid for each hotspot where release is decided
-            for (x, y, _), release, difference in zip(self.hotspots, release_decision, release_difference):
-                if release:
-                    release_amount = difference * self.release_amplitude
-                    
-                    self.environment_grid.update_amount_at((int(x), int(y)), "glutamate", release_amount)
-            
-            self.time_step += 1
+        stochastic_vector = self._stochastic_release(self.stochastic_probability)
+        signal_vector = self._signal_based_release(self.signal_function)
+        
+        # Sum the probabilities and decide on release
+        combined_prob = stochastic_vector + signal_vector
+        random_vector = np.random.uniform(0, 1, size=combined_prob.shape)
+        release_decision = random_vector < combined_prob
+        release_difference = combined_prob - random_vector
+        
+        # Update the grid for each hotspot where release is decided
+        for (x, y, _), release, difference in zip(self.hotspots, release_decision, release_difference):
+            if release:
+                release_amount = difference * self.release_amplitude
+                
+                self.environment_grid.update_amount_at((int(x), int(y)), "glutamate", release_amount)
+        
+        self.steps += 1
     
     def _stochastic_release(self, stochastic_probability: float) -> np.array:
         """
@@ -590,9 +646,9 @@ class GlutamateReleaseManager:
         
         signal_probability = np.zeros(len(self.hotspots))
         if isinstance(signal_function, Callable):
-            signal_probability[:] = signal_function(int(self.time_step))
+            signal_probability[:] = signal_function(int(self.steps))
         elif isinstance(signal_function, np.ndarray):
-            idx = self.time_step % len(signal_function)
+            idx = self.steps % len(signal_function)
             signal_probability[:] = signal_function[idx]
         else:
             raise ValueError("signal_function must be Callable or np.ndarray")
@@ -644,27 +700,26 @@ class GlutamateReleaseManager:
         return ax
 
 
-class Simulation:
+class Simulation(Loggable):
     
-    axx = None
-    fig = None
-    id = uuid.uuid1()
-    
-    def __init__(self, num_astrocytes=1, grid_size=(100, 100), border=10, max_astrocyte_placement_tries=5,
+    def __init__(self, data_logger: DataLogger, num_astrocytes=1, grid_size=(100, 100), border=10,
+                 max_astrocyte_placement_tries=5,
                  environment_dict: dict = None, glutamate_release_param: dict = None, astrocyte_param: dict = None):
+        
+        super().__init__(data_logger, settings=Loggable.extract_settings(locals()))
         
         self.grid_size = grid_size
         self.border = border
-        self.data_logger = DataLogger()
+        self.axx = None
+        self.fig = None
         
         environment_dict = {} if environment_dict is None else environment_dict
         glutamate_release_param = {} if glutamate_release_param is None else glutamate_release_param
         astrocyte_param = {} if astrocyte_param is None else astrocyte_param
         
         self.spatial_index = RtreeSpatialIndex(simulation=self)
-        self.environment_grid = EnvironmentGrid(grid_size=grid_size, **environment_dict)
-        self.glutamate_release_manager = GlutamateReleaseManager(environment_grid=self.environment_grid,
-                                                                 **glutamate_release_param)
+        self.environment_grid = EnvironmentGrid(simulation=self, grid_size=grid_size, **environment_dict)
+        self.glutamate_release_manager = GlutamateReleaseManager(simulation=self, **glutamate_release_param)
         
         self.astrocytes = []
         tries = 0
@@ -680,27 +735,32 @@ class Simulation:
             self.astrocytes.append(ast)
             tries = 0
     
-    def get_short_id(self):
-        return xxhash.xxh32_hexdigest(self.id.hex)
+    def log_state(self):
+        state = {
+            "astrocytes": [ast.id for ast in self.astrocytes]
+            }
+        return state
     
     def get_num_branches(self):
         return np.sum([len(ast.branches) for ast in self.astrocytes])
     
     def run_simulation_step(self, time_step=1):
         
-        t0 = time.time()
-        
-        self.glutamate_release_manager.step(time_step=time_step)
-        self.environment_grid.step(time_step=time_step)
-        
-        for astrocyte in self.astrocytes:
-            astrocyte.step(time_step=time_step)
-        
-        delta_step = time.time() - t0
-        self.data_logger.add_message(f"runtime {humanize.naturaldelta(delta_step)} for "
-                                     f"{humanize.intword(self.get_num_branches())} branches")
-        
-        self.data_logger.step()
+        for step in range(time_step):
+            
+            t0 = time.time()
+            
+            self.glutamate_release_manager.step()
+            self.environment_grid.step()
+            
+            for astrocyte in self.astrocytes:
+                astrocyte.step()
+            
+            delta_step = time.time() - t0
+            self.data_logger.add_message(f"runtime {humanize.naturaldelta(delta_step)} for "
+                                         f"{humanize.intword(self.get_num_branches())} branches")
+            
+            self.data_logger.step()
     
     def add_astrocyte(self, x=None, y=None, radius=3, astrocyte_param=None):
         
@@ -728,10 +788,7 @@ class Simulation:
         # place astrocyte
         if valid_placement:
             
-            ast = Astrocyte(simulation=self, position=(x, y), spatial_index=self.spatial_index,
-                            environment_grid=self.environment_grid,
-                            data_logger=self.data_logger,
-                            **astrocyte_param)
+            ast = Astrocyte(simulation=self, position=(x, y), **astrocyte_param)
             
             self.spatial_index.insert(ast)
             return ast
@@ -783,14 +840,13 @@ class Simulation:
         if last_n_messages is not None:
             from IPython.core.display import HTML
             html_content = "<br>".join(self.data_logger.get_messages(last_n_messages))
-            display(HTML(html_content))
+            return HTML(html_content)
 
 
-class Astrocyte:
+class Astrocyte(Loggable):
     
-    def __init__(self, simulation, position: Tuple[int, int], radius: int, num_branches: int,
+    def __init__(self, simulation: Simulation, position: Tuple[int, int], radius: int, num_branches: int,
                  max_branch_radius: float, start_spawn_radius: float,
-                 environment_grid: EnvironmentGrid, spatial_index: RtreeSpatialIndex,
                  repellent_name: str = None, repellent_concentration: float = 1,
                  numerical_tolerance=1e-6, allow_pruning=True,
                  min_trend_amplitude=0.5, min_steepness=0.05, spawn_angle_threshold=5,
@@ -800,12 +856,15 @@ class Astrocyte:
                  glu_v_max=100, glu_k_m=0.5, trend_history=30,
                  repellent_volume_factor=0.00001, repellent_surface_factor=0.00001,
                  atp_cost_per_glutamate=- 18, atp_cost_per_unit_surface=1,
-                 max_history: int = 1000, max_tries=5, molecules: dict = None, data_logger: DataLogger = None):
+                 max_history: int = 1000, max_tries=5, molecules: dict = None):
+        
+        settings = Loggable.extract_settings(locals(), exclude_types=Simulation)
+        super().__init__(simulation.data_logger, settings=settings)
         
         self.simulation = simulation
-        self.environment_grid = environment_grid
-        self.spatial_index = spatial_index
-        self.data_logger = data_logger
+        self.environment_grid = simulation.environment_grid
+        self.spatial_index = simulation.spatial_index
+        self.data_logger = simulation.data_logger
         self.max_branch_radius = max_branch_radius
         self.children = []
         self.branches = []
@@ -844,7 +903,6 @@ class Astrocyte:
         self.repellent_volume_factor = repellent_volume_factor  # mol/m³
         self.repellent_surface_factor = repellent_surface_factor  # mol/m²
         
-        self.id = uuid.uuid1()
         self.x, self.y = position
         self.radius = radius
         self.volume = 4 / 3 * np.pi * radius ** 3
@@ -859,8 +917,14 @@ class Astrocyte:
         self.molecules = dict(glutamate=0, calcium=0, ATP=10) if molecules is None else molecules
         self.repellent_concentration = repellent_concentration
     
-    def get_short_id(self):
-        return xxhash.xxh32_hexdigest(self.id.hex)
+    def log_state(self):
+        state = {
+            "molecules":     self.molecules,
+            "branches":      [branch.id for branch in self.branches],
+            "children":      [child.id for child in self.children],
+            "death_counter": self.death_counter
+            }
+        return state
     
     def get_bbox(self):
         x0, x1 = self.x - self.radius, self.x + self.radius
@@ -872,24 +936,25 @@ class Astrocyte:
         ymax = max(y0, y1)
         return xmin, ymin, xmax, ymax
     
-    def step(self, time_step=1):
-        for i in range(time_step):
-            
-            if self.death_counter > self.steps_till_death:
-                self.die()
-            
-            self.simulate_glutamate()
-            self.diffuse_molecules()
-            
-            for branch in self.branches:
-                branch.step()
-            
-            self.release_repellent()
-            
-            if len(self.branches) <= self.num_branches:
-                self.death_counter += 1
-            else:
-                self.death_counter = 0
+    def step(self):
+        
+        if self.death_counter > self.steps_till_death:
+            self.die()
+        
+        self.simulate_glutamate()
+        self.diffuse_molecules()
+        
+        for branch in self.branches:
+            branch.step()
+        
+        self.release_repellent()
+        
+        if len(self.branches) <= self.num_branches:
+            self.death_counter += 1
+        else:
+            self.death_counter = 0
+        
+        self.steps += 1
     
     def die(self):
         
@@ -1262,28 +1327,29 @@ class RtreeSpatialIndex:
                 return self.plot_line_high(x0, y0, x1, y1)
 
 
-class AstrocyteBranch:
+class AstrocyteBranch(Loggable):
     
     def __init__(self, parent, nucleus: Astrocyte, start: Union[Tuple[int, int, int], AstrocyteNode],
                  end: Union[Tuple[int, int, int], AstrocyteNode]):
         
+        super().__init__(nucleus.simulation.data_logger, settings=Loggable.extract_settings(locals()))
+        
         # Instances
-        self.id = uuid.uuid1()
         self.parent: AstrocyteBranch = parent
         self.nucleus = nucleus
         self.spatial_index = nucleus.spatial_index
-        self.data_logger = nucleus.data_logger
-        self.children: List[AstrocyteBranch] = []
+        
         self.start: AstrocyteNode = start if isinstance(start, AstrocyteNode) else AstrocyteNode(*start)
         self.end: AstrocyteNode = end if isinstance(end, AstrocyteNode) else AstrocyteNode(*end)
+        
+        self.children: List[AstrocyteBranch] = []
+        self.environment = {}
         
         self.interacting_pixels = None
         self.volume = None
         self.surface_area = None
         self.repellent_release = None
-        self.environment = None
         self.glutamate_uptake_capacity = None
-        self.current_time_step = 0
         self.pruned = False
         self.counter_failed_spawn = 0
         
@@ -1296,6 +1362,21 @@ class AstrocyteBranch:
         
         self.intracellular_history = {molecule: deque(maxlen=nucleus.max_history) for molecule in self.molecules}
         self.extracellular_history = {molecule: deque(maxlen=nucleus.max_history) for molecule in self.environment}
+    
+    def log_state(self):
+        state = {
+            "environment":               self.environment,
+            "molecules":                 self.molecules,
+            "children":                  self.children,
+            "counter_failed_spawn":      self.counter_failed_spawn,
+            "interacting_pixels":        self.interacting_pixels,
+            "volume":                    self.volume,
+            "surface_area":              self.surface_area,
+            "repellent_release":         self.repellent_release,
+            "glutamate_uptake_capacity": self.glutamate_uptake_capacity,
+            "pruned":                    self.pruned,
+            }
+        return state
     
     def get_bbox(self):
         
@@ -1329,7 +1410,7 @@ class AstrocyteBranch:
         
         # save new state
         self._update_history()
-        self.current_time_step += 1
+        self.steps += 1
     
     def _update_history(self):
         """
@@ -1563,15 +1644,23 @@ class AstrocyteBranch:
         surface = np.pi * (r1 + r2) * slant_height
         return surface
     
-    def update_physical_properties(self):
-        self.interacting_pixels = self.get_interacting_pixels()
-        self.volume = self.calculate_branch_volume()
-        self.surface_area = self.calculate_branch_surface()
-        self.glutamate_uptake_capacity = self.calculate_removal_capacity(self.nucleus.glutamate_uptake_rate)
+    def update_physical_properties(self, location_updated=True, radius_updated=True):
         
-        if self.nucleus.repellent_name is not None and self.repellent_release is not None:
-            self.repellent_release = self.calculate_repellent_release(self.nucleus.repellent_surface_factor,
-                                                                      self.nucleus.repellent_volume_factor)
+        if location_updated:
+            self.interacting_pixels = self.get_interacting_pixels()
+        
+        if location_updated or radius_updated:
+            
+            self.volume = self.calculate_branch_volume()
+            self.surface_area = self.calculate_branch_surface()
+        
+        if location_updated or radius_updated:
+            self.glutamate_uptake_capacity = self.calculate_removal_capacity(self.nucleus.glutamate_uptake_rate)
+        
+        if location_updated or radius_updated:
+            if self.nucleus.repellent_name is not None and self.repellent_release is not None:
+                self.repellent_release = self.calculate_repellent_release(self.nucleus.repellent_surface_factor,
+                                                                          self.nucleus.repellent_volume_factor)
     
     def calculate_removal_capacity(self, uptake_rate: float) -> float:
         """
@@ -1691,7 +1780,7 @@ class AstrocyteBranch:
             self.update_amount("ATP", -required_atp)
         
         # Update the physical properties of the branch (e.g., recalculate volume, surface area)
-        self.update_physical_properties()
+        self.update_physical_properties(location_updated=False)
         
         self._log(f"Growth adjusted to "
                   f"{humanize.metric(new_end.radius, 'm')} for "
@@ -1967,10 +2056,6 @@ class AstrocyteBranch:
         
         return tuple(norm_direction)
     
-    @lru_cache
-    def get_short_id(self):
-        return xxhash.xxh32_hexdigest(self.id.hex)
-    
     def _log(self, msg: str) -> None:
         if self.data_logger is not None:
             self.data_logger.add_message(msg, self.get_short_id())
@@ -1978,44 +2063,121 @@ class AstrocyteBranch:
             logging.warning(msg)
 
 
-class DataLogger:
-    
-    messages = []
-    steps = 0
-    
-    def __init__(self):
-        pass
+class MessageLogger:
+    def __init__(self, print_messages: bool = True) -> None:
+        self.messages = []
+        self.steps = 0
+        self.print_messages = print_messages
     
     def step(self):
         self.steps += 1
     
-    def add_message(self, msg: str, caller_id='unknown') -> None:
+    def log(self, msg: str, tag: str = 'default', level: int = logging.INFO, caller_id: str = 'unknown'):
+        timestamp = datetime.now().strftime("%d-%m-%Y %H:%M:%S")
+        message = {
+            "timestamp": timestamp,
+            "step":      self.steps,
+            "tag":       tag,
+            "level":     level,
+            "caller_id": caller_id,
+            "message":   msg
+            }
+        self.messages.append(message)
         
-        str_ = ""
-        str_ += f"step {self.steps: <3}: "
-        str_ += f"{caller_id}: "
-        str_ += msg
-        
-        self.messages.append(str_)
+        if self.print_messages:
+            logging.log(level, f"{caller_id} at step {self.steps}: {msg}")
     
-    def get_messages(self, n=None) -> list:
+    def get_messages(self, filter_criteria: dict = None, n=None):
+        """Retrieve filtered messages based on specified criteria.
+
+        Args:
+            filter_criteria: A dictionary where each key-value pair specifies a filter for the corresponding message
+                attribute.
+            n: The number of latest messages to retrieve. If None, all messages are retrieved.
+
+        Returns:
+            A list of filtered messages, each message is a dictionary.
+
+        Raises:
+            KeyError: If a filter_criteria key does not correspond to any message attribute.
+            ValueError: If 'n' is not a non-negative integer or None.
+        """
         
-        if n is None:
-            return self.messages
-        else:
-            return self.messages[-n:]
+        if n is not None and (not isinstance(n, int) or n < 0):
+            raise ValueError("'n' should be a non-negative integer or None.")
+        
+        if not self.messages:
+            return []
+        
+        filtered_messages = self.messages
+        possible_keys = filtered_messages[0].keys()
+        
+        if filter_criteria:
+            for key, item in filter_criteria.items():
+                if key not in possible_keys:
+                    raise KeyError(f"Please choose a filter from {possible_keys}")
+                
+                item = [item] if not isinstance(item, (list, tuple)) else item
+                filtered_messages = [msg for msg in filtered_messages if msg[key] in item]
+        
+        return filtered_messages[-n:]
     
-    def save(self, path: Path):
-        with open(path.as_posix(), "w") as txt:
+    def save_messages(self, path):
+        with open(path, "w") as txt:
             for msg in self.messages:
-                txt.writelines(msg)
-                txt.writelines("\n")
+                txt.write(
+                        f"{msg['timestamp']} - {msg['step']} - {msg['level']} - {msg['caller_id']}: {msg['message']}\n")
+
+
+class DataLogger:
+    def __init__(self, log_interval: int = 1, save_checkpoint_interval: int = 1):
+        
+        self.messages = []
+        self.steps = 0
+        
+        self.tracked_objects = {}
+        self.log_settings = {}
+        self.log_data = {}
+        self.log_interval = log_interval
+        self.save_checkpoint_interval = save_checkpoint_interval
     
-    def log_data(self, data):
+    def step(self):
+        self.steps += 1
+        self.log_state()
+    
+    def register(self, obj, settings: dict = None):
+        if settings is not None and not isinstance(settings, dict):
+            raise ValueError("Settings should be a dictionary or None.")
+        
+        obj_id = obj.id
+        self.tracked_objects[obj_id] = obj
+        
+        # Store settings as a copy to prevent accidental modifications
+        self.log_settings[obj_id] = settings.copy() if settings is not None else {}
+        
+        # Initialize log_data for the object
+        self.log_data[obj_id] = {}
+        
+        # Log the initial state
+        initial_state = obj.log_state()
+        self.log_data[obj_id][self.steps] = initial_state
+    
+    def unregister(self, obj_id):
+        del self.tracked_objects[obj_id]
+    
+    def log_state(self):
+        for obj_id, obj in self.tracked_objects.items():
+            if self.steps % self.log_interval == 0:
+                state = obj.log_state()
+                if state is not None and len(state) > 0:
+                    self.log_data[obj_id][self.steps] = state
+        
+        self.save_checkpoint()
+    
+    def save_checkpoint(self):
+        # Implement saving logic here
         pass
     
-    def retrieve_historical_data(self):
-        pass
-    
-    def export_data(self):
+    def load_checkpoint(self):
+        # Implement loading logic here
         pass
