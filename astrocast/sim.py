@@ -831,7 +831,7 @@ class GlutamateReleaseManager(Loggable):
 class Simulation(Loggable):
     
     def __init__(self, data_logger: DataLogger, num_astrocytes=1, grid_size=(100, 100), border=10,
-                 max_astrocyte_placement_tries=5,
+                 max_astrocyte_placement_tries=5, print_messages=True,
                  environment_dict: dict = None, glutamate_release_param: dict = None, astrocyte_param: dict = None):
         
         super().__init__(data_logger, settings=Loggable.extract_settings(locals()))
@@ -845,6 +845,7 @@ class Simulation(Loggable):
         glutamate_release_param = {} if glutamate_release_param is None else glutamate_release_param
         astrocyte_param = {} if astrocyte_param is None else astrocyte_param
         
+        self.message_logger = MessageLogger(print_messages=print_messages)
         self.spatial_index = RtreeSpatialIndex(simulation=self)
         self.environment_grid = EnvironmentGrid(simulation=self, grid_size=grid_size, **environment_dict)
         self.glutamate_release_manager = GlutamateReleaseManager(simulation=self, **glutamate_release_param)
