@@ -11,6 +11,7 @@ from typing import Callable, List, Literal, Tuple, Union
 
 import humanize
 import numpy as np
+import pandas as pd
 import seaborn as sns
 import xxhash
 from IPython.core.display import HTML
@@ -25,16 +26,16 @@ avogadro = physical_constants['Avogadro constant']
 
 
 class Loggable:
-    def __init__(self, data_logger, settings: dict = None):
+    def __init__(self, data_logger, message_logger=None, settings: dict = None):
         self.id = uuid.uuid4()
         self.steps = 0
         
         # register with data logger
         self.data_logger = data_logger
         self.data_logger.register(self, settings)
-    
-    def __del__(self):
-        self.data_logger.unregister(self.id)
+        
+        # register with message_logger
+        self.message_logger = message_logger
     
     @staticmethod
     def extract_settings(locals_dict, exclude_types=None):
@@ -46,7 +47,7 @@ class Loggable:
         # Exclude parameters that are instances of specific types
         if exclude_types:
             if not isinstance(exclude_types, Tuple):
-                exclude_types = tuple(exclude_types)
+                exclude_types = tuple([exclude_types])
             
             for key, value in list(settings.items()):
                 if isinstance(value, exclude_types) or isinstance(value, (DataLogger, Simulation)):
@@ -61,13 +62,12 @@ class Loggable:
         return xxhash.xxh32_hexdigest(self.id.hex)
     
     def log(self, msg: str, level: int = logging.INFO, tag: str = "default"):
-        sim = getattr(self, 'simulation', None)
         
-        if sim is not None and sim.message_logger is not None:
-            sim.message_logger.log(msg=msg, tag=tag, level=level, caller_id=self.id)
+        if self.message_logger is not None:
+            self.message_logger.log(msg=msg, tag=tag, level=level, caller_id=self.id)
         else:
             msg = f"{self.id.hex}:{tag}:{msg}"
-            logging.log(level=level, msg=msg)
+            print(msg)
     
     def log_state(self):
         """Override this method in the subclass to return the specific state of the object."""
@@ -507,9 +507,6 @@ class EnvironmentGrid(Loggable):
         This method is automatically called when the object is garbage collected.
         """
         self.close()
-        
-        # Explicitly call the base class __del__ method
-        Loggable.__del__(self)
     
     def plot_history(self, molecule, figsize=(5, 5), ax=None):
         
@@ -621,8 +618,9 @@ class GlutamateReleaseManager(Loggable):
         """
         
         settings = Loggable.extract_settings(locals())
-        super().__init__(simulation.data_logger, settings=settings)
+        super().__init__(simulation.data_logger, message_logger=simulation.message_logger, settings=settings)
         
+        self.simulation = simulation
         self.environment_grid = simulation.environment_grid
         self.num_branches = num_branches
         self.num_hotspots = num_hotspots
@@ -692,7 +690,8 @@ class GlutamateReleaseManager(Loggable):
         num_hotspots = np.random.randint(low=max(2, min_num_hotspots), high=max_num_hotspots)
         
         # Randomly distribute hotspot locations
-        while len(hotspots) < num_hotspots:
+        tries = 0
+        while len(hotspots) < num_hotspots and tries < self.simulation.max_tries:
             for i in range(num_hotspots):
                 # Interpolate along the line to get the hotspot position
                 t = i / float(num_hotspots - 1)
@@ -715,6 +714,8 @@ class GlutamateReleaseManager(Loggable):
                 x_jitter, y_jitter = int(x_jitter), int(y_jitter)
                 
                 hotspots.append((x_jitter, y_jitter, branch_id))
+                
+                # tries = 0
         
         return hotspots
     
@@ -831,11 +832,13 @@ class GlutamateReleaseManager(Loggable):
 class Simulation(Loggable):
     
     def __init__(self, data_logger: DataLogger, num_astrocytes=1, grid_size=(100, 100), border=10,
-                 max_astrocyte_placement_tries=5, print_messages=True,
+                 print_messages=True, max_tries=5,
                  environment_dict: dict = None, glutamate_release_param: dict = None, astrocyte_param: dict = None):
         
-        super().__init__(data_logger, settings=Loggable.extract_settings(locals()))
+        super().__init__(data_logger, message_logger=MessageLogger(print_messages=print_messages),
+                         settings=Loggable.extract_settings(locals()))
         
+        self.max_tries = max_tries
         self.grid_size = grid_size
         self.border = border
         self.axx = None
@@ -845,19 +848,18 @@ class Simulation(Loggable):
         glutamate_release_param = {} if glutamate_release_param is None else glutamate_release_param
         astrocyte_param = {} if astrocyte_param is None else astrocyte_param
         
-        self.message_logger = MessageLogger(print_messages=print_messages)
         self.spatial_index = RtreeSpatialIndex(simulation=self)
         self.environment_grid = EnvironmentGrid(simulation=self, grid_size=grid_size, **environment_dict)
         self.glutamate_release_manager = GlutamateReleaseManager(simulation=self, **glutamate_release_param)
         
         self.astrocytes = []
         tries = 0
-        while tries < max_astrocyte_placement_tries and len(self.astrocytes) < num_astrocytes:
+        while tries < self.max_tries and len(self.astrocytes) < num_astrocytes:
             
             ast = self.add_astrocyte(astrocyte_param=astrocyte_param)
             
             if ast is None:
-                logging.warning(f"placement failed (tries: {tries})")
+                self.log(f"Astrocyte placement failed (tries: {tries}/{self.max_tries})", tag="fail,tries,astrocyte")
                 tries += 1
                 continue
             
@@ -885,10 +887,10 @@ class Simulation(Loggable):
             for astrocyte in self.astrocytes:
                 astrocyte.step()
             
-            delta_step = time.time() - t0
-            self.data_logger.add_message(f"runtime {humanize.naturaldelta(delta_step)} for "
-                                         f"{humanize.intword(self.get_num_branches())} branches")
+            msg = f"runtime {humanize.naturaldelta(time.time() - t0)} for {humanize.intword(self.get_num_branches())} branches"
+            self.log(msg)
             
+            self.message_logger.step()
             self.data_logger.step()
     
     def add_astrocyte(self, x=None, y=None, radius=3, astrocyte_param=None):
@@ -967,9 +969,13 @@ class Simulation(Loggable):
         
         # Display the last N messages as HTML
         if last_n_messages is not None:
-            from IPython.core.display import HTML
-            html_content = "<br>".join(self.data_logger.get_messages(last_n_messages))
-            return HTML(html_content)
+            
+            messages = self.message_logger.get_messages(n=last_n_messages)
+            
+            # from IPython.core.display import HTML
+            # html_content = "<br>".join()
+            # return HTML(html_content)
+            print(pd.DataFrame(messages))
 
 
 class Astrocyte(Loggable):
@@ -988,7 +994,7 @@ class Astrocyte(Loggable):
                  max_history: int = 1000, max_tries=5, molecules: dict = None):
         
         settings = Loggable.extract_settings(locals(), exclude_types=Simulation)
-        super().__init__(simulation.data_logger, settings=settings)
+        super().__init__(simulation.data_logger, message_logger=simulation.message_logger, settings=settings)
         
         self.simulation = simulation
         self.environment_grid = simulation.environment_grid
@@ -1094,6 +1100,7 @@ class Astrocyte(Loggable):
             
             self.spatial_index.remove(self)
             self.simulation.astrocytes.remove(self)
+            self.simulation.data_logger.unregister(self.id)
     
     def get_pixels_within_cell(self) -> List[Tuple[int, int]]:
         """
@@ -1176,7 +1183,8 @@ class Astrocyte(Loggable):
         if new_concentration < 0:
             
             if new_concentration >= self.numerical_tolerance:
-                self.data_logger.add_message(f"Unstable branch simulation: {new_concentration} !> 0")
+                self.log(f"Unstable branch simulation: {new_concentration} !> 0",
+                         level=logging.CRITICAL, tag="error,fail,unstable")
                 raise ArithmeticError(f"Unstable branch simulation: {new_concentration} !> 0")
             
             new_concentration = 0
@@ -1232,7 +1240,8 @@ class Astrocyte(Loggable):
                 tries += 1
         
         if tries >= self.max_tries:
-            logging.warning(f"Maximum astrocyte tries exceeded: {tries}")
+            self.log(f"Maximum astrocyte tries exceeded: {tries}", level=logging.WARNING,
+                     tag="warning,tries,astrocyte")
     
     def plot(self, line_thickness=1, line_scaling: Literal['log', 'sqrt'] = 'sqrt',
              figsize=(5, 5), ax: plt.Axes = None):
@@ -1298,7 +1307,8 @@ class AstrocyteBranch(Loggable):
     def __init__(self, parent, nucleus: Astrocyte, start: Union[Tuple[int, int, int], AstrocyteNode],
                  end: Union[Tuple[int, int, int], AstrocyteNode]):
         
-        super().__init__(nucleus.simulation.data_logger, settings=Loggable.extract_settings(locals()))
+        super().__init__(nucleus.simulation.data_logger, message_logger=nucleus.simulation.message_logger,
+                         settings=Loggable.extract_settings(locals()))
         
         # Instances
         self.parent: AstrocyteBranch = parent
@@ -1424,8 +1434,6 @@ class AstrocyteBranch(Loggable):
             if new_concentration >= self.nucleus.numerical_tolerance:
                 self.log(f"Unstable branch simulation: {new_concentration} !> 0", level=logging.ERROR, tag="error")
                 raise ArithmeticError(f"Unstable branch simulation: {new_concentration} !> 0")
-            else:
-                self.log(f"Unstable branch simulation: {new_concentration} !> 0", level=logging.CRITICAL, tag="error")
             
             new_concentration = 0
         
@@ -1845,6 +1853,7 @@ class AstrocyteBranch(Loggable):
             # Delete self from parent
             self.parent.children.remove(self)
             self.nucleus.branches.remove(self)
+            self.nucleus.simulation.data_logger.unregister(self.id)
             
             # Additional cleanup if needed (e.g., freeing resources or nullifying references)
             self.pruned = True
@@ -2078,7 +2087,9 @@ class MessageLogger:
         self.messages.append(message)
         
         if self.print_messages:
-            logging.log(level, f"{caller_id} at step {self.steps}: {msg}")
+            pr_msg = f"{caller_id} at step {self.steps}: {msg}"
+            # logging.log(level, pr_msg)
+            print(pr_msg)
     
     def get_messages(self, filter_criteria: dict = None, n=None):
         """Retrieve filtered messages based on specified criteria.
@@ -2099,7 +2110,7 @@ class MessageLogger:
         if n is not None and (not isinstance(n, int) or n < 0):
             raise ValueError("'n' should be a non-negative integer or None.")
         
-        if not self.messages:
+        if self.messages is None or len(self.messages) < 1:
             return []
         
         filtered_messages = self.messages
@@ -2152,8 +2163,8 @@ class DataLogger:
         self.log_data[obj_id] = {}
         
         # Log the initial state
-        initial_state = obj.log_state()
-        self.log_data[obj_id][self.steps] = initial_state
+        # initial_state = obj.log_state()
+        # self.log_data[obj_id][self.steps] = initial_state
     
     def unregister(self, obj_id):
         del self.tracked_objects[obj_id]
