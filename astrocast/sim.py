@@ -25,16 +25,13 @@ avogadro = physical_constants['Avogadro constant']
 
 
 class Loggable:
-    def __init__(self, data_logger, message_logger: MessageLogger = None, settings: dict = None):
+    def __init__(self, data_logger, settings: dict = None):
         self.id = uuid.uuid4()
         self.steps = 0
         
         # register with data logger
         self.data_logger = data_logger
         self.data_logger.register(self, settings)
-        
-        # register message logger
-        self.message_logger = message_logger
     
     def __del__(self):
         self.data_logger.unregister(self.id)
@@ -64,8 +61,10 @@ class Loggable:
         return xxhash.xxh32_hexdigest(self.id.hex)
     
     def log(self, msg: str, level: int = logging.INFO, tag: str = "default"):
-        if self.message_logger:
-            self.message_logger.log(msg=msg, tag=tag, level=level, caller_id=self.id)
+        sim = getattr(self, 'simulation', None)
+        
+        if sim is not None and sim.message_logger is not None:
+            sim.message_logger.log(msg=msg, tag=tag, level=level, caller_id=self.id)
         else:
             msg = f"{self.id.hex}:{tag}:{msg}"
             logging.log(level=level, msg=msg)
