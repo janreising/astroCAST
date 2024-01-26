@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import logging
+import pickle
 import random
+import shutil
 import time
 import uuid
 from collections import deque
 from datetime import datetime
 from multiprocessing import shared_memory
+from pathlib import Path
 from typing import Callable, List, Literal, Tuple, Union
 
 import humanize
@@ -50,7 +53,7 @@ class Loggable:
                 exclude_types = tuple([exclude_types])
             
             for key, value in list(settings.items()):
-                if isinstance(value, exclude_types) or isinstance(value, (DataLogger, Simulation)):
+                if isinstance(value, exclude_types) or isinstance(value, (DataLogger, Simulation)) or callable(value):
                     settings.pop(key)
         
         return settings
@@ -603,7 +606,7 @@ class GlutamateReleaseManager(Loggable):
                  num_branches: int = 10, num_hotspots: int = 16,
                  z_thickness: float = 3.0, border: int = 3, jitter: float = 0.1,
                  release_amplitude: float = 1,
-                 stochastic_probability: float = 0, signal_function: Union[Callable, np.array] = lambda x: 0):
+                 stochastic_probability: float = 0, signal_function: Union[Callable, np.array, float] = lambda x: 0):
         """
         Initialize the GlutamateReleaseManager with dendritic branches intersecting the imaging volume.
 
@@ -651,13 +654,22 @@ class GlutamateReleaseManager(Loggable):
         """
         hotspots = []
         lines = []
-        for branch_id in range(self.num_branches):
+        tries = 0
+        branch_id = 0
+        while tries < self.simulation.max_tries and len(lines) < self.num_branches:
             # Generate a random line (dendritic branch) within the volume
             line = self._generate_random_line()
-            lines.extend([line])
             
             # Place hotspots along the line with some jitter
-            hotspots.extend(self._place_hotspots_on_line(line, self.num_hotspots, branch_id))
+            spots = self._place_hotspots_on_line(line, self.num_hotspots, branch_id)
+            
+            if spots is None:
+                tries += 1
+            else:
+                lines.extend([line])
+                hotspots.extend(spots)
+                branch_id += 1
+                tries = 0
         
         return np.array(lines), np.array(hotspots)
     
@@ -675,7 +687,7 @@ class GlutamateReleaseManager(Loggable):
     
     def _place_hotspots_on_line(self, line: Tuple[Tuple[float, float, float], Tuple[float, float, float]],
                                 num_hotspots: Union[Tuple[int, int], int] = 16,
-                                branch_id: int = 0) -> List[Tuple[int, int, int]]:
+                                branch_id: int = 0) -> Union[None, List[Tuple[int, int, int]]]:
         start_point, end_point = line
         hotspots = []
         
@@ -690,32 +702,28 @@ class GlutamateReleaseManager(Loggable):
         num_hotspots = np.random.randint(low=max(2, min_num_hotspots), high=max_num_hotspots)
         
         # Randomly distribute hotspot locations
-        tries = 0
-        while len(hotspots) < num_hotspots and tries < self.simulation.max_tries:
-            for i in range(num_hotspots):
-                # Interpolate along the line to get the hotspot position
-                t = i / float(num_hotspots - 1)
-                x = start_point[0] + t * (end_point[0] - start_point[0])
-                y = start_point[1] + t * (end_point[1] - start_point[1])
-                
-                X, Y = self.environment_grid.grid_size
-                if x < self.border or x > X - self.border or y < self.border or y > Y:
-                    continue
-                
-                # Apply jitter
-                x_jitter = x + np.random.uniform(-self.jitter, self.jitter)
-                y_jitter = y + np.random.uniform(-self.jitter, self.jitter)
-                
-                # Ensure the hotspot is still within the grid boundaries
-                x_jitter = max(0, min(x_jitter, self.environment_grid.grid_size[0] - 1))
-                y_jitter = max(0, min(y_jitter, self.environment_grid.grid_size[1] - 1))
-                
-                # ensure type int
-                x_jitter, y_jitter = int(x_jitter), int(y_jitter)
-                
-                hotspots.append((x_jitter, y_jitter, branch_id))
-                
-                # tries = 0
+        for i in range(num_hotspots):
+            # Interpolate along the line to get the hotspot position
+            t = i / float(num_hotspots - 1)
+            x = start_point[0] + t * (end_point[0] - start_point[0])
+            y = start_point[1] + t * (end_point[1] - start_point[1])
+            
+            X, Y = self.environment_grid.grid_size
+            if x < self.border or x > X - self.border or y < self.border or y > Y:
+                return None
+            
+            # Apply jitter
+            x_jitter = x + np.random.uniform(-self.jitter, self.jitter)
+            y_jitter = y + np.random.uniform(-self.jitter, self.jitter)
+            
+            # Ensure the hotspot is still within the grid boundaries
+            x_jitter = max(0, min(x_jitter, self.environment_grid.grid_size[0] - 1))
+            y_jitter = max(0, min(y_jitter, self.environment_grid.grid_size[1] - 1))
+            
+            # ensure type int
+            x_jitter, y_jitter = int(x_jitter), int(y_jitter)
+            
+            hotspots.append((x_jitter, y_jitter, branch_id))
         
         return hotspots
     
@@ -762,7 +770,7 @@ class GlutamateReleaseManager(Loggable):
         
         return stoch_probability
     
-    def _signal_based_release(self, signal_function: Union[Callable, np.array] = lambda x: 0) -> np.array:
+    def _signal_based_release(self, signal_function: Union[Callable, np.array, float] = lambda x: 0) -> np.array:
         """
         Generate a probability vector for signal-based release.
 
@@ -779,6 +787,8 @@ class GlutamateReleaseManager(Loggable):
         elif isinstance(signal_function, np.ndarray):
             idx = self.steps % len(signal_function)
             signal_probability[:] = signal_function[idx]
+        elif isinstance(signal_function, float):
+            signal_probability[:] = signal_function
         else:
             raise ValueError("signal_function must be Callable or np.ndarray")
         
@@ -865,6 +875,9 @@ class Simulation(Loggable):
             
             self.astrocytes.append(ast)
             tries = 0
+        
+        # log initial state
+        self.data_logger.log_state()
     
     def log_state(self):
         state = {
@@ -1341,16 +1354,15 @@ class AstrocyteBranch(Loggable):
     
     def log_state(self):
         state = {
-            "environment":               self.environment,
-            "molecules":                 self.molecules,
-            "children":                  self.children,
-            "counter_failed_spawn":      self.counter_failed_spawn,
-            "interacting_pixels":        self.interacting_pixels,
-            "volume":                    self.volume,
-            "surface_area":              self.surface_area,
-            "repellent_release":         self.repellent_release,
-            "glutamate_uptake_capacity": self.glutamate_uptake_capacity,
-            "pruned":                    self.pruned,
+            "environment":          self.environment,
+            "molecules":            self.molecules,
+            "children":             [child.id for child in self.children],
+            "parent":               self.parent.id,
+            "nucleus":              self.nucleus.id,
+            "counter_failed_spawn": self.counter_failed_spawn,
+            "start":                self.start.get_dimension(),
+            "end":                  self.end.get_dimension(),
+            "pruned":               self.pruned,
             }
         return state
     
@@ -2061,6 +2073,9 @@ class AstrocyteNode:
     
     def copy(self):
         return AstrocyteNode(self.x, self.y, self.radius)
+    
+    def get_dimension(self):
+        return self.x, self.y, self.radius
 
 
 class MessageLogger:
@@ -2134,10 +2149,19 @@ class MessageLogger:
 
 
 class DataLogger:
-    def __init__(self, log_interval: int = 1, save_checkpoint_interval: int = 1):
+    def __init__(self, save_path: Path, overwrite=False,
+                 log_interval: int = 1, save_checkpoint_interval: int = 1):
         
         self.messages = []
         self.steps = 0
+        self.last_checkpoint_save = 0
+        self.save_path = Path(save_path)
+        
+        if save_path.is_dir():
+            if overwrite:
+                shutil.rmtree(save_path)
+            else:
+                raise FileExistsError(f"{save_path} already exists. Use overwrite to ignore existing files.")
         
         self.tracked_objects = {}
         self.log_settings = {}
@@ -2161,10 +2185,6 @@ class DataLogger:
         
         # Initialize log_data for the object
         self.log_data[obj_id] = {}
-        
-        # Log the initial state
-        # initial_state = obj.log_state()
-        # self.log_data[obj_id][self.steps] = initial_state
     
     def unregister(self, obj_id):
         del self.tracked_objects[obj_id]
@@ -2179,8 +2199,55 @@ class DataLogger:
         self.save_checkpoint()
     
     def save_checkpoint(self):
-        # Implement saving logic here
-        pass
+        
+        # Define the base directory and file name pattern
+        if not self.save_path.exists():
+            self.save_path.mkdir()
+        
+        if self.steps == 0:
+            file_path = self.save_path.joinpath(f"settings_{self.steps}.p")
+            
+            # Prepare the data to be saved
+            checkpoint_data = {
+                "log_settings": self.log_settings,
+                }
+            
+            # Save the data to a JSON file
+            with open(file_path.as_posix(), "wb") as file:
+                pickle.dump(checkpoint_data, file)
+            
+            # Optionally, log that the checkpoint has been saved
+            print(f"Checkpoint saved at step {self.steps} to {file_path}")
+        
+        if self.steps % self.save_checkpoint_interval == 0:
+            
+            file_path = self.save_path.joinpath(f"checkpoint_{self.steps}.p")
+            
+            # steps since last save
+            steps_to_save = range(self.last_checkpoint_save, self.steps)
+            
+            # Prepare the data to be saved
+            checkpoint_data = {"steps": steps_to_save, "log_data": {}}
+            
+            # Extract only the data since the last checkpoint
+            for obj_id, data in self.log_data.items():
+                
+                selected = {}
+                for step in steps_to_save:
+                    if step in data:
+                        selected[step] = data[step]
+                
+                checkpoint_data["log_data"][obj_id] = selected
+            
+            # Save the data to a JSON file
+            with open(file_path.as_posix(), "wb") as file:
+                pickle.dump(checkpoint_data, file)
+            
+            # Update the last checkpoint save step
+            self.last_checkpoint_save = self.steps
+            
+            # Optionally, log that the checkpoint has been saved
+            print(f"Checkpoint saved at step {self.steps} to {file_path}")
     
     def load_checkpoint(self):
         # Implement loading logic here
