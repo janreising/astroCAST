@@ -849,7 +849,8 @@ class Simulation(Loggable):
     
     def __init__(self, data_logger: DataLogger, num_astrocytes=1, grid_size=(100, 100), border=10,
                  print_messages=True, max_tries=5,
-                 environment_param: dict = None, glutamate_release_param: dict = None, astrocyte_param: dict = None):
+                 environment_param: dict = None, glutamate_release_param: dict = None, astrocyte_param: dict = None,
+                 ion_flow_param: dict = None):
         
         super().__init__(data_logger, message_logger=MessageLogger(print_messages=print_messages),
                          settings=Loggable.extract_settings(locals()))
@@ -863,6 +864,7 @@ class Simulation(Loggable):
         environment_param = {} if environment_param is None else environment_param
         glutamate_release_param = {} if glutamate_release_param is None else glutamate_release_param
         astrocyte_param = {} if astrocyte_param is None else astrocyte_param
+        self.ion_flow_param = {} if ion_flow_param is None else ion_flow_param
         
         self.spatial_index = RtreeSpatialIndex(simulation=self)
         self.environment_grid = EnvironmentGrid(simulation=self, grid_size=grid_size, **environment_param)
@@ -872,7 +874,7 @@ class Simulation(Loggable):
         tries = 0
         while tries < self.max_tries and len(self.astrocytes) < num_astrocytes:
             
-            ast = self.add_astrocyte(astrocyte_param=astrocyte_param)
+            ast = self.add_astrocyte(astrocyte_param=astrocyte_param, ion_flow_param=ion_flow_param)
             
             if ast is None:
                 self.log(f"Astrocyte placement failed (tries: {tries}/{self.max_tries})", tag="fail,tries,astrocyte")
@@ -912,7 +914,7 @@ class Simulation(Loggable):
             self.message_logger.step()
             self.data_logger.step()
     
-    def add_astrocyte(self, x=None, y=None, radius=3, astrocyte_param=None):
+    def add_astrocyte(self, x=None, y=None, radius=3, astrocyte_param: dict = None, ion_flow_param: dict = None):
         
         # set parameters
         if astrocyte_param is None:
@@ -938,7 +940,7 @@ class Simulation(Loggable):
         # place astrocyte
         if valid_placement:
             
-            ast = Astrocyte(simulation=self, position=(x, y), **astrocyte_param)
+            ast = Astrocyte(simulation=self, position=(x, y), ion_flow_param=ion_flow_param, **astrocyte_param)
             
             self.spatial_index.insert(ast)
             return ast
@@ -1010,7 +1012,9 @@ class Astrocyte(Loggable):
                  glu_v_max=100, glu_k_m=0.5, trend_history=30,
                  repellent_volume_factor=0.00001, repellent_surface_factor=0.00001,
                  atp_cost_per_glutamate=- 18, atp_cost_per_unit_surface=1,
-                 max_history: int = 1000, max_tries=5, molecules: dict = None):
+                 max_history: int = 1000, max_tries=5,
+                 ion_flow_param: dict = None,
+                 molecules: dict = None):
         
         settings = Loggable.extract_settings(locals(), exclude_types=Simulation)
         super().__init__(simulation.data_logger, message_logger=simulation.message_logger, settings=settings)
@@ -1025,6 +1029,7 @@ class Astrocyte(Loggable):
         self.death_counter = 0
         self.num_branches = num_branches
         self.steps_till_death = steps_till_death
+        self.ion_flow_param = ion_flow_param
         
         # computational parameters
         self.max_history = max_history
@@ -1243,7 +1248,8 @@ class Astrocyte(Loggable):
             end = AstrocyteNode(end_x, end_y, spawn_radius)
             
             # Create the new branch
-            new_branch = AstrocyteBranch(parent=self, nucleus=self, start=start, end=end)
+            new_branch = AstrocyteBranch(parent=self, nucleus=self, start=start, end=end,
+                                         ion_flow_param=self.ion_flow_param)
             
             if not self.spatial_index.check_collision(new_branch):
                 
@@ -1324,7 +1330,7 @@ class Astrocyte(Loggable):
 class AstrocyteBranch(Loggable):
     
     def __init__(self, parent, nucleus: Astrocyte, start: Union[Tuple[int, int, int], AstrocyteNode],
-                 end: Union[Tuple[int, int, int], AstrocyteNode]):
+                 end: Union[Tuple[int, int, int], AstrocyteNode], ion_flow_param: dict = None):
         
         super().__init__(nucleus.simulation.data_logger, message_logger=nucleus.simulation.message_logger,
                          settings=Loggable.extract_settings(locals()))
@@ -1353,10 +1359,14 @@ class AstrocyteBranch(Loggable):
         
         # Establish initial concentrations
         self.get_environment()
-        self.molecules = {"glutamate": 0.0, "calcium": 0.0, "ATP": 0.0}
+        self.molecules = {"glutamate": 0.0, "calcium_er": 0.0, "calcium_cyt": 0.0, "IP3": 0.0, "ATP": 0.0}
         
         self.intracellular_history = {molecule: deque(maxlen=nucleus.max_history) for molecule in self.molecules}
         self.extracellular_history = {molecule: deque(maxlen=nucleus.max_history) for molecule in self.environment}
+        
+        # Create calcium flow model
+        ion_flow_param = {} if ion_flow_param is None else ion_flow_param
+        self.ion_flow_model = IonFlowModel(self, **ion_flow_param)
     
     def log_state(self):
         state = {
@@ -1543,9 +1553,8 @@ class AstrocyteBranch(Loggable):
                 self.update_amount(molecule, -ions_to_move)
                 target.update_amount(molecule, ions_to_move)
     
-    def _simulate_calcium(self):
-        # todo: implement
-        pass
+    def _simulate_calcium(self, dt: int = 1):
+        raise NotImplementedError
     
     def _simulate_glutamate(self):
         
@@ -2065,6 +2074,225 @@ class AstrocyteBranch(Loggable):
             norm_direction = np.array([0, 0])
         
         return tuple(norm_direction)
+
+
+class IonFlowModel:
+    def __init__(self, branch: AstrocyteBranch, total_cytosolic_ca_concentration: float = 2.0,
+                 er_cytosol_volume_ratio: float = 0.185, max_ca_channel_flux: float = 6.0,
+                 ca_leak_flux_constant: float = 0.11, max_ca_uptake: float = 2.2,
+                 max_ip3_production_rate: float = 0.3, ca_extrusion_rate_constant: float = 0.5,
+                 atp_ca_pump_activation_constant: float = 0.1, ip3_dissociation_constant: float = 0.13,
+                 ca_activation_constant: float = 82.0, ca_leak_rate_plasma_membrane: float = 0.025,
+                 max_activation_dependent_ca_influx: float = 0.2, half_saturation_constant_ca_entry: float = 1.0,
+                 ip3_coupling_coefficient: float = 0.8,
+                 ca_stimulation_ip3_production_dissociation_constant: float = 1.1,
+                 ip3_production_rate_glutamate: float = 0.062,
+                 glutamate_stimulation_ip3_production_dissociation_constant: float = 0.78,
+                 steady_state_ip3_concentration: float = 0.16, ip3_loss_rate_constant: float = 0.14):
+        """
+        Initialize the IonFlowModel which simulates the ion flows related to calcium ions and IP3 in astrocytes.
+
+        The model parameters are based on the differential equations provided in the referenced papers.
+
+        Args:
+            branch (AstrocyteBranch): The astrocyte branch for which the ion flows are being modeled.
+            total_cytosolic_ca_concentration (float): Total [Ca2+] in terms of cytosolic volume.
+            er_cytosol_volume_ratio (float): ER volume / cytosolic volume ratio.
+            max_ca_channel_flux (float): Maximum Ca2+ channel flux.
+            ca_leak_flux_constant (float): Ca2+ leak flux constant.
+            max_ca_uptake (float): Maximum Ca2+ uptake by the ATP-dependent pump.
+            max_ip3_production_rate (float): Maximum rate of IP3 production.
+            ca_extrusion_rate_constant (float): Rate constant of calcium extrusion.
+            atp_ca_pump_activation_constant (float): Activation constant for the ATP-Ca2+ pump.
+            ip3_dissociation_constant (float): Dissociation constant for IP3.
+            ca_activation_constant (float): Ca2+ activation constant.
+            ca_leak_rate_plasma_membrane (float): Rate of calcium leak across the plasma membrane.
+            max_activation_dependent_ca_influx (float): Maximal rate of activation-dependent calcium influx.
+            half_saturation_constant_ca_entry (float): Half-saturation constant for agonist-dependent calcium entry.
+            ip3_coupling_coefficient (float): Coupling coefficient for IP3.
+            ca_stimulation_ip3_production_dissociation_constant (float): Dissociation constant for Ca2+ stimulation of IP3 production.
+            ip3_production_rate_glutamate (float): Rate of IP3 production through glutamate.
+            glutamate_stimulation_ip3_production_dissociation_constant (float): Dissociation constant for glutamate stimulation of IP3 production.
+            steady_state_ip3_concentration (float): Steady state concentration of IP3.
+            ip3_loss_rate_constant (float): Rate constant for the loss of IP3.
+
+        Note:
+            Verisokin Andrey Yu., Verveyko Darya V., Postnov Dmitry E., Brazhe Alexey R., Modeling of Astrocyte Networks: Toward Realistic Topology and Dynamics, 2021, 10.3389/fncel.2021.645068
+            Ghanim Ullah, Peter Jung, A.H. Cornell-Bell, Anti-phase calcium oscillations in astrocytes via inositol (1, 4, 5)-trisphosphate regeneration, Cell Calcium, https://doi.org/10.1016/j.ceca.2005.10.009.
+        """
+        
+        # Assign parameters to class properties
+        self.branch = branch
+        self.total_cytosolic_ca_concentration = total_cytosolic_ca_concentration
+        self.er_cytosol_volume_ratio = er_cytosol_volume_ratio
+        self.max_ca_channel_flux = max_ca_channel_flux
+        self.ca_leak_flux_constant = ca_leak_flux_constant
+        self.max_ca_uptake = max_ca_uptake
+        self.max_ip3_production_rate = max_ip3_production_rate
+        self.ca_extrusion_rate_constant = ca_extrusion_rate_constant
+        self.atp_ca_pump_activation_constant = atp_ca_pump_activation_constant
+        self.ip3_dissociation_constant = ip3_dissociation_constant
+        self.ca_activation_constant = ca_activation_constant
+        self.ca_leak_rate_plasma_membrane = ca_leak_rate_plasma_membrane
+        self.max_activation_dependent_ca_influx = max_activation_dependent_ca_influx
+        self.half_saturation_constant_ca_entry = half_saturation_constant_ca_entry
+        self.ip3_coupling_coefficient = ip3_coupling_coefficient
+        self.ca_stimulation_ip3_production_dissociation_constant = ca_stimulation_ip3_production_dissociation_constant
+        self.ip3_production_rate_glutamate = ip3_production_rate_glutamate
+        self.glutamate_stimulation_ip3_production_dissociation_constant = glutamate_stimulation_ip3_production_dissociation_constant
+        self.steady_state_ip3_concentration = steady_state_ip3_concentration
+        self.ip3_loss_rate_constant = ip3_loss_rate_constant
+        
+        # Initialize variables
+        self.branch = branch
+        self.concentration = branch.molecules
+        
+        for req in ['CaCyt', 'CaER', 'IP3', 'glutamate']:
+            if req not in self.concentration:
+                raise KeyError(f"Molecule array does not contain {req}: {self.concentration.keys()}")
+    
+    def __getitem__(self, item):
+        return self.concentration[item]
+    
+    def ca_flow_er_ip3(self):
+        """
+        Calculate the flux of calcium ions from the endoplasmic reticulum (ER) to the cytosol through IP3 receptors (JIP3).
+
+        The flux is determined by the IP3 receptor activation (m_inf and n_inf), the maximum Ca2+ channel flux (v1),
+        and the difference in calcium concentration between the ER and the cytosol.
+
+        Returns:
+            The flux of calcium ions through IP3 receptors from the ER to the cytosol.
+        """
+        
+        # Steady-state value of the gating variable m
+        m_inf = self["IP3"] / (self["IP3"] + self.ip3_dissociation_constant)
+        
+        # Steady-state value of the gating variable n
+        n_inf = self["CaCyt"] / (self["CaCyt"] + self.ca_activation_constant)
+        return self.er_cytosol_volume_ratio * self.max_ca_channel_flux * m_inf ** 3 * n_inf ** 3 * (
+                self["CaER"] - self["CaCyt"])
+    
+    def ca_flow_er_leak(self):
+        """
+        Calculate the leakage flux of calcium ions from the endoplasmic reticulum (ER) to the cytosol (JLeak).
+
+        The leakage is proportional to the difference in calcium concentration between the ER and the cytosol and
+        is controlled by the leak flux constant (v2).
+
+        Returns:
+            The leakage flux of calcium ions from the ER to the cytosol.
+        """
+        return self.er_cytosol_volume_ratio * self.ca_leak_flux_constant * (self["CaER"] - self["CaCyt"])
+    
+    def ca_flow_er_pump(self):
+        """
+        Calculate the pump flux of calcium ions from the cytosol back into the endoplasmic reticulum (ER) through ATP-dependent pumps (JPump).
+
+        The pump flux depends on the cytosolic calcium concentration, the maximum Ca2+ uptake (v3), and the activation
+        constant for the ATP-Ca2+ pump (k3).
+
+        Returns:
+            The pump flux of calcium ions from the cytosol to the ER.
+        """
+        return (self.max_ca_uptake * self["CaCyt"] ** 2) / (
+                self["CaCyt"] ** 2 + self.atp_ca_pump_activation_constant ** 2)
+    
+    def ca_flow_pm_in(self):
+        """
+        Calculates the influx (Jin) of calcium ions through the plasma membrane.
+        """
+        
+        return self.ca_leak_rate_plasma_membrane + self.max_activation_dependent_ca_influx * (
+                self["IP3"] ** 2 / (self.half_saturation_constant_ca_entry ** 2 + self["IP3"] ** 2))
+    
+    def ca_flow_pm_glu(self):
+        """
+        Calculates the glutamate-induced influx (JGlu) of calcium ions through the plasma membrane.
+        """
+        return self.ip3_production_rate_glutamate * self["glutamate"] / (
+                self.glutamate_stimulation_ip3_production_dissociation_constant + self["glutamate"])
+    
+    def ca_flow_pm_out(self):
+        """
+        Calculates the extrusion (Jout) of calcium ions by the plasma membrane pump.
+        """
+        return self.ca_extrusion_rate_constant * self["CaCyt"]
+    
+    def ip3_eq(self):
+        """
+        Calculate the equilibration of IP3 to a resting level.
+        """
+        return (self["IP3"] - self.steady_state_ip3_concentration) / self.ip3_loss_rate_constant
+    
+    def ip3_glu(self):
+        """
+        Calculate the glutamate-driven IP3 production.
+        """
+        return self.ip3_production_rate_glutamate * self["glutamate"] / (
+                self.glutamate_stimulation_ip3_production_dissociation_constant + self["glutamate"])
+    
+    def ip3_ca(self):
+        """
+        Calculate the Ca2+-stimulated IP3 production.
+        """
+        return self.max_ip3_production_rate * (self["CaCyt"] + (
+                1 - self.ip3_coupling_coefficient) * self.ca_stimulation_ip3_production_dissociation_constant) / (
+                self["CaCyt"] + self.ca_stimulation_ip3_production_dissociation_constant)
+    
+    def update_concentrations(self, dt: float, use_physical_properties: bool = True):
+        """
+        Update the concentrations of calcium and IP3 within the astrocyte branch based on the calculated flows and diffusion terms.
+
+        Args:
+            dt (float): The time step for the simulation.
+            use_physical_properties (bool): Flag to determine whether to use physical properties for SVR calculation.
+                                           If True, use the branch's surface area and volume to calculate SVR.
+                                           If False, calculate SVR based on AVF as per Verisokin et al. 2021.
+
+        Returns:
+            None: The function updates the concentrations within the branch directly.
+        """
+        
+        if use_physical_properties:
+            # Calculate Surface-to-Volume Ratio based on branch's physical properties
+            SVR = self.branch.surface_area / self.branch.volume
+        else:
+            # Calculate Surface-to-Volume Ratio based on AVF as per Verisokin et al. 2021
+            external_space = len(self.branch.interacting_pixels) * self.branch.nucleus.environment_grid.pixel_volume
+            occupied_volume = self.branch.volume
+            
+            # Warning if occupied volume exceeds the external space
+            if occupied_volume > external_space:
+                logging.warning(
+                        f"Occupied volume ({occupied_volume}) is greater than external space ({external_space}).")
+            
+            AVF = occupied_volume / external_space
+            SVR = 1 / (1 - np.exp(0.1 * (AVF - 0.5)))  # Calculate SVR based on AVF
+        
+        # Calculate the total flow of calcium ions in exchange between the cytosol and endoplasmic reticulum
+        J_ER = self.ca_flow_er_ip3() + self.ca_flow_er_leak() - self.ca_flow_er_pump()
+        
+        # Calculate the total flow of calcium ions through the plasma membrane
+        J_pm = self.ca_flow_pm_in() + self.ca_flow_pm_glu() - self.ca_flow_pm_out()
+        
+        # Calculate the total flow of IP3
+        I_total_IP3 = self.ip3_glu() + self.ip3_ca() - self.ip3_eq()
+        
+        # Update concentrations based on the model equations
+        d_cytosol_ca_dt = (1 - SVR) * J_ER + SVR * J_pm
+        d_er_ca_dt = - ((1 - SVR) / self.er_cytosol_volume_ratio) * J_ER
+        d_ip3_dt = SVR * I_total_IP3
+        
+        # Calculate the change in concentration over the time step
+        diff_cytosol_ca = d_cytosol_ca_dt * dt
+        diff_er_ca = d_er_ca_dt * dt
+        diff_ip3 = d_ip3_dt * dt
+        
+        # Update concentration in the branch
+        self.branch.update_concentration("calcium_cyt", diff_cytosol_ca)
+        self.branch.update_concentration("calcium_er", diff_er_ca)
+        self.branch.update_concentration("IP3", diff_ip3)
 
 
 class AstrocyteNode:
