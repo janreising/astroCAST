@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-import random
 import shutil
 import time
 import uuid
@@ -14,18 +13,14 @@ from typing import Callable, List, Literal, Tuple, Union
 import dill as pickle
 import humanize
 import numpy as np
-import pandas as pd
 import seaborn as sns
 import xxhash
-from IPython.core.display import HTML
 from matplotlib import pyplot as plt
-from matplotlib.animation import FuncAnimation
+from matplotlib.colors import LogNorm
 from matplotlib.patches import Circle
 from rtree import index
-from scipy.constants import physical_constants
-from scipy.ndimage import convolve
-
-avogadro = physical_constants['Avogadro constant']
+from scipy.ndimage import convolve, gaussian_filter
+from tqdm import tqdm
 
 
 class Loggable:
@@ -81,6 +76,435 @@ class Loggable:
     def log_state(self):
         """Override this method in the subclass to return the specific state of the object."""
         raise NotImplementedError("The log_state method must be implemented by the subclass.")
+
+
+class Visualization:
+    
+    def __init__(self, simulation: Simulation, dpi: int = 160,
+                 display_interval: int = 1, save_interval: int = 1,
+                 img_folder: Path = Path("./imgs"), override=False):
+        
+        self.sim = simulation
+        self.X, self.Y = simulation.grid_size
+        self.dpi = dpi
+        self.display_interval = display_interval
+        self.save_interval = save_interval
+        
+        self.figures = {}
+        
+        # sanity check for image folder
+        if img_folder is not None and img_folder.exists():
+            
+            if override:
+                shutil.rmtree(img_folder)
+            else:
+                img_folder = img_folder.joinpath(self.sim.get_short_id())
+                logging.warning(f"img_folder exists and override is False. Choosing {img_folder}")
+        
+        self.img_folder = img_folder
+        
+        self.steps = 0
+    
+    def step(self, param: dict = None):
+        
+        if self.steps == 0:
+            self.plot_initial_state()
+        
+        if self.steps % self.display_interval == 0 or self.steps % self.save_interval == 0:
+            self.plot(params=param)
+        
+        self.steps += 1
+    
+    def save(self, fig, prefix="", force=False):
+        
+        if self.img_folder is not None and (self.steps % self.save_interval == 0 or force):
+            
+            if not self.img_folder.exists():
+                self.img_folder.mkdir()
+            
+            save_path = self.img_folder.joinpath(f"{prefix}_{self.steps}.png")
+            fig.savefig(save_path.as_posix(), dpi=(self.dpi))
+    
+    def plot_environment_grid_concentration(self, molecule: str, cmap: str = 'inferno',
+                                            figsize: tuple = (5, 5), ax: plt.axis = None):
+        """
+        Plot the concentration of a specified molecule across the grid using Matplotlib.
+
+        Args:
+            molecule: Name of the molecule to plot.
+            figsize: Tuple representing the figure size (width, height).
+            cmap: Colormap for the heatmap.
+            ax: Axes object to plot the heatmap.
+        """
+        
+        env_grid = self.sim.environment_grid
+        
+        if molecule not in env_grid.molecules:
+            logging.error(f"Molecule {molecule} not found in the grid.")
+        
+        # Retrieve the shared array for the specified molecule
+        concentration_array, _ = env_grid.shared_arrays[molecule]
+        
+        # Create a figure and axis for the heatmap
+        if ax is None:
+            fig, ax = plt.subplots(1, 1, figsize=figsize)
+        else:
+            # ax.get_figure().clear()
+            ax.clear()
+        
+        # Plotting the concentration heatmap
+        sns.heatmap(concentration_array.transpose(), vmin=0, cmap=cmap, cbar=False, robust=True, ax=ax)
+        
+        # Adding a colorbar and setting titles and labels
+        # plt.colorbar(heatmap, ax=ax)
+        ax.invert_yaxis()
+        ax.set_aspect('equal')
+        ax.set_title(f"{molecule} "
+                     f"({humanize.metric(np.sum(concentration_array) * env_grid.pixel_volume, 'mol')})")
+        ax.set_xlabel("X Coordinate")
+        ax.set_ylabel("Y Coordinate")
+        
+        # Display the plot
+        return ax
+    
+    def plot_environment_grid_history(self, molecule, figsize=(5, 5), ax=None):
+        
+        env_grid = self.sim.environment_grid
+        
+        if ax is None:
+            fig, ax = plt.subplots(1, 1, figsize=figsize)
+        
+        history = env_grid.history[molecule]
+        ax.plot(history, label=molecule)
+        ax.legend()
+        ax.set_title(f"Total concentration {molecule}")
+    
+    def plot_dendrites(self, line_thickness: int = 1, line_alpha: float = 0.7,
+                       marker: str = 'x', hotspot_alpha: float = 0.8, title: str = 'Dendrites and Hotspots',
+                       figsize: Tuple[int, int] = (5, 5), ax: plt.axis = None):
+        """
+        Plot dendritic lines and hotspots in a 2D image.
+
+        Args:
+            line_thickness: Thickness of the dendritic lines.
+            line_alpha: Alpha (transparency) of the dendritic lines.
+            marker: Marker style for hotspots.
+            hotspot_alpha: Alpha (transparency) of the hotspots.
+            title: Title of the figure.
+            figsize: Size of the figure.
+            ax: Matplotlib axis to plot the dendritic lines and hotspots in the 2D image.
+        """
+        
+        glu_manager = self.sim.glutamate_release_manager
+        
+        if ax is None:
+            fig, ax = plt.subplots(figsize=figsize)
+        
+        color_palette = sns.color_palette("husl", n_colors=glu_manager.num_dendrites)
+        for branch_id in range(glu_manager.num_dendrites):
+            line = glu_manager.lines[branch_id][:, :-1]
+            hotspots = glu_manager.hotspots
+            
+            # Extracting x, y coordinates for line and hotspots
+            x_hotspots, y_hotspots = zip(*[(x, y) for x, y, b_id in hotspots if b_id == branch_id])
+            
+            # Plot the line
+            px0, px1 = line[:, 0], line[:, 1]
+            ax.plot(px0, px1, color=color_palette[branch_id], linewidth=line_thickness, alpha=line_alpha)
+            
+            # Plot the hotspots
+            ax.scatter(x_hotspots, y_hotspots, marker=marker, color=color_palette[branch_id], alpha=hotspot_alpha)
+        
+        ax.set_xlabel('X Coordinate')
+        ax.set_ylabel('Y Coordinate')
+        ax.set_title(title)
+        
+        ax.set_xlim(0, self.X)
+        ax.set_ylim(0, self.Y)
+        
+        return ax
+    
+    def get_bodies_and_branches(self) -> Tuple[List[Astrocyte], List[AstrocyteBranch]]:
+        cell_bodies: List[Astrocyte] = []
+        branches: List[AstrocyteBranch] = []
+        for ast in self.sim.astrocytes:
+            cell_bodies.append(ast)
+            branches += ast.branches
+        
+        return cell_bodies, branches
+    
+    def plot_astrocyte_by_line(self, line_thickness=(0.2, 1.5), line_scaling: Literal['log', 'sqrt'] = 'log',
+                               figsize=(5, 5), ax: plt.Axes = None, molecule: str = None,
+                               normalize: Literal['max'] = None,
+                               cmap=plt.cm.viridis):
+        """
+        Plot the astrocyte with options to color-code by molecule concentration and simulate imaging blur.
+
+        The function plots the cell body and branches of a neuron. Branch thickness is scaled
+        and coloring can be applied based on the concentration of a specified molecule.
+        Additionally, a convolution can be applied to simulate the blur effect of a microscope.
+
+        Args:
+            line_thickness: Base thickness of the plotted lines.
+            line_scaling: Method to scale the line thickness ('log' or 'sqrt').
+            figsize: Size of the figure.
+            ax: Matplotlib Axes object to plot on. New axes are created if None.
+            molecule: Name of the molecule to color-code by its concentration. If None, no color-coding is applied.
+            normalize: Value to normalize the molecule concentrations. Can be 'max' or a specific float. If None, no normalization is applied.
+
+        Raises:
+            ValueError: If 'normalize' is set to a value other than 'max' or a non-negative number.
+
+        Example:
+            neuron.plot(line_thickness=2, line_scaling='log', molecule='serotonin', normalize='max', convolve=True)
+        """
+        # create figure
+        if ax is None:
+            fig, ax = plt.subplots(1, 1, figsize=figsize)
+        
+        # collect bodies and branches
+        cell_bodies, branches = self.get_bodies_and_branches()
+        
+        # normalize
+        if normalize == "max" and molecule is not None:
+            
+            cb_concentration = np.array([cb.get_concentration(molecule) for cb in cell_bodies])
+            b_concentration = np.array([b.get_concentration(molecule) for b in branches])
+            
+            max_concentration = max(np.max(cb_concentration), np.max(b_concentration))
+            cb_concentration /= max_concentration
+            b_concentration /= max_concentration
+        
+        # plot cell bodies
+        for i, cb in enumerate(cell_bodies):
+            # plot cell body
+            cell_body = Circle((cb.x, cb.y), cb.radius, color='blue', fill=False)
+            ax.add_patch(cell_body)
+        
+        # plot branches
+        for i, branch in enumerate(branches):
+            x0, y0 = branch.start.x, branch.start.y
+            x1, y1 = branch.end.x, branch.end.y
+            
+            width = self._scale_branch_thickness(max_branch_radius=cell_bodies[0].max_branch_radius,
+                                                 radius=branch.end.radius,
+                                                 line_thickness=line_thickness,
+                                                 line_scaling=line_scaling)
+            
+            # Determine color based on molecule concentration, if applicable
+            color = 'black'
+            if normalize == "max" and molecule is not None:
+                color = cmap(b_concentration[i])
+            
+            ax.plot([x0, x1], [y0, y1], color=color, linewidth=width)
+    
+    def plot_astrocyte_by_grid(self, figsize=(5, 5), ax: plt.Axes = None, molecule: str = None,
+                               blur_sigma: float = None, blur_radius: int = None,
+                               robust: bool = False, cmap='magma'):
+        """
+        Plot the neuron with options to color-code by molecule concentration and simulate imaging blur.
+
+        The function plots the cell body and branches of a neuron. Branch thickness is scaled
+        and coloring can be applied based on the concentration of a specified molecule.
+        Additionally, a convolution can be applied to simulate the blur effect of a microscope.
+
+        Args:
+            figsize: Size of the figure.
+            ax: Matplotlib Axes object to plot on. New axes are created if None.
+            molecule: Name of the molecule to color-code by its concentration. If None, no color-coding is applied.
+            robust: seaborn flag for robust plotting
+            blur_sigma: sigma kernel for blurring
+            blur_radius: radius of blurring
+            cmap: Color map for heatmap.
+        Raises:
+            ValueError: If 'normalize' is set to a value other than 'max' or a non-negative number.
+
+        Example:
+            neuron.plot(line_thickness=2, line_scaling='log', molecule='serotonin', normalize='max', convolve=True)
+        """
+        # create figure
+        if ax is None:
+            fig, ax = plt.subplots(1, 1, figsize=figsize)
+            ax.invert_yaxis()
+        
+        arr = np.zeros((self.X, self.Y), dtype=float)
+        
+        # get cell bodies and branches
+        cell_bodies, branches = self.get_bodies_and_branches()
+        
+        # plot cell_body
+        for cb in cell_bodies:
+            coordinates = cb.get_pixels_within_cell()
+            x_coords, y_coords = coordinates[0, :], coordinates[1, :]
+            arr[x_coords, y_coords] += cb.get_concentration(molecule)
+        
+        # plot branches
+        for branch in branches:
+            coordinates = branch.interacting_pixels
+            x_coords, y_coords = coordinates[0, :], coordinates[1, :]
+            arr[x_coords, y_coords] += branch.get_concentration(molecule)
+        
+        # transpose arr
+        arr = arr.transpose()
+        
+        # blur
+        if blur_sigma is not None:
+            arr = gaussian_filter(arr, sigma=blur_sigma, radius=blur_radius)
+        
+        # heatmap
+        sns.heatmap(arr, robust=robust, norm=LogNorm(), cmap=cmap, cbar=False, square=True,
+                    ax=ax)
+        
+        # title
+        ax.set_title(f"[{molecule}] "
+                     f"{humanize.metric(np.sum(arr), 'mol')}")
+    
+    def _scale_branch_thickness(self, radius, max_branch_radius: float,
+                                line_thickness: Union[float, Tuple[float, float]],
+                                line_scaling: Union[Literal['log', 'sqrt'], None] = 'log'):
+        
+        # define min and max thickness
+        min_width = 0.1
+        if isinstance(line_thickness, (tuple, list)):
+            min_width, max_width = line_thickness
+        else:
+            max_width = line_thickness
+        
+        # scale width
+        if line_scaling == 'log':
+            
+            ast0 = self.sim.astrocytes[0]
+            radius_min, radius_max = ast0.min_radius, ast0.max_branch_radius
+            
+            # Check if the ranges are valid
+            if radius_min <= 0 or radius_max <= 0 or min_width < 0 or max_width < 0:
+                raise ValueError("Minimum values of the ranges must be positive.")
+            
+            if not (radius_min <= radius <= radius_max):
+                raise ValueError(f"The value {radius} is not within the logarithmic range {(radius_min, radius_max)}.")
+            
+            # Normalize the value in the logarithmic scale
+            log_normalized = (np.log(radius) - np.log(radius_min)) / (np.log(radius_max) - np.log(radius_min))
+            
+            # Map the normalized value to the linear range
+            linear_value = log_normalized * (max_width - min_width) + min_width
+            
+            return linear_value
+        
+        elif line_scaling == 'sqrt':
+            width = np.sqrt(radius) / np.sqrt(max_branch_radius) * line_thickness
+            return width
+        
+        elif line_scaling is None:
+            width = line_thickness
+            return width
+        
+        else:
+            raise ValueError('Unknown line scaling use one of ["log", "sqrt"]')
+    
+    def plot_branch_history(self, branch_id: uuid.UUID):
+        
+        if isinstance(branch_id, uuid.UUID):
+            branch_id = [branch_id]
+        
+        _, branches = self.get_bodies_and_branches()
+        selected_branches = [branch for branch in branches if branch.id in branch_id]
+        
+        if len(selected_branches) != len(branch_id):
+            raise ValueError(f"Incorrect number of branches found ({len(selected_branches)}), "
+                             f"expected {len(branch_id)}.")
+        
+        M = selected_branches[0].intracellular_history.keys()
+        fig, axx = plt.subplots(len(M), 1, sharex=True)
+        
+        for ax in axx:
+            ax.set_yscale('log')
+        
+        colors = sns.color_palette("husl", len(selected_branches))
+        for m, branch in enumerate(selected_branches):
+            history = branch.intracellular_history
+            for i, (molecule, values) in enumerate(history.items()):
+                axx[i].plot(values, color=colors[m])
+        
+        for i, m in enumerate(M):
+            axx[i].set_title(m)
+    
+    def plot_initial_state(self, figsize=(10, 5), force=False):
+        
+        X, Y = self.X, self.Y
+        
+        fig, axx = plt.subplot_mosaic("AB", figsize=figsize,
+                                      gridspec_kw={
+                                          "wspace": 0.2,
+                                          "hspace": 0.2}
+                                      )
+        
+        ax = axx['A']
+        self.plot_astrocyte_by_line(ax=ax)
+        ax.set_xlim(0, X)
+        ax.set_ylim(0, Y)
+        ax.set_aspect('equal')
+        ax.set_title('Astrocytes')
+        
+        ax = axx['B']
+        self.plot_dendrites(ax=ax)
+        ax.set_xlim(0, X)
+        ax.set_ylim(0, Y)
+        ax.set_aspect('equal')
+        
+        self.save(fig, prefix="initial_", force=force)
+    
+    def plot(self, figsize=(15, 10), params=None, axx=None, force=False):
+        
+        X, Y = self.X, self.Y
+        
+        if axx is not None:
+            fig = axx['A'].get_figure()
+        
+        elif 'plot' in self.figures:
+            
+            fig, axx = self.figures['plot']
+            for k, ax in axx.items():
+                ax.clear()
+        
+        else:
+            fig, axx = plt.subplot_mosaic("AABB\nCDEF", figsize=figsize,
+                                          gridspec_kw={
+                                              "wspace": 0.2,
+                                              "hspace": 0.2}
+                                          )
+        
+        if params is None:
+            params = {k: {} for k in axx.keys()}
+        else:
+            params = {k: params[k] if k in params else {} for k in axx.keys()}
+        
+        k = 'A'
+        self.plot_environment_grid_concentration(molecule="glutamate", ax=axx[k], **params[k])
+        
+        k = 'B'
+        self.plot_environment_grid_history("glutamate", ax=axx[k], **params[k])
+        
+        for k, mol, grid in [('C', None, False),
+                             ('D', 'glutamate', True), ('E', 'ATP', True), ('F', 'CaCyt', True)]:
+            ax = axx[k]
+            
+            if grid:
+                self.plot_astrocyte_by_grid(molecule=mol, ax=ax, **params[k])
+                
+                ax.invert_yaxis()
+            else:
+                self.plot_astrocyte_by_line(ax=ax, **params[k])
+                
+                ax.set_xlim(0, X)
+                ax.set_ylim(0, Y)
+                ax.set_aspect('equal')
+        
+        fig.suptitle(f"Simulation step {self.steps}")
+        
+        self.figures['plot'] = fig, axx
+        
+        self.save(fig, prefix="overview_", force=force)
 
 
 class RtreeSpatialIndex:
@@ -166,7 +590,7 @@ class RtreeSpatialIndex:
         """
         Helper function for Bresenham's algorithm for lines with absolute slope less than 1.
         """
-        points = []
+        points_x, points_y = [], []
         dx = x1 - x0
         dy = y1 - y0
         yi = 1
@@ -177,20 +601,22 @@ class RtreeSpatialIndex:
         y = y0
         
         for x in range(x0, x1 + 1):
-            points.append((x, y))
+            points_x.append(x)
+            points_y.append(y)
+            
             if D > 0:
                 y += yi
                 D += (2 * (dy - dx))
             else:
                 D += 2 * dy
-        return points
+        return np.array([points_x, points_y])
     
     @staticmethod
     def plot_line_high(x0, y0, x1, y1):
         """
         Helper function for Bresenham's algorithm for lines with absolute slope greater than 1.
         """
-        points = []
+        points_x, points_y = [], []
         dx = x1 - x0
         dy = y1 - y0
         xi = 1
@@ -201,13 +627,14 @@ class RtreeSpatialIndex:
         x = x0
         
         for y in range(y0, y1 + 1):
-            points.append((x, y))
+            points_x.append(x)
+            points_y.append(y)
             if D > 0:
                 x += xi
                 D += (2 * (dx - dy))
             else:
                 D += 2 * dx
-        return points
+        return np.array([points_x, points_y])
     
     def rasterize_line(self, x0, y0, x1, y1):
         """
@@ -375,8 +802,7 @@ class EnvironmentGrid(Loggable):
     def get_tracked_molecules(self) -> List[str]:
         return self.molecules
     
-    def get_concentration_at(self, location: Union[Tuple[int, int], List[Tuple[int, int]]],
-                             molecule: str) -> Union[float, np.array]:
+    def get_concentration_at(self, location: np.ndarray, molecule: str) -> Union[float, np.array]:
         """
         Get the concentration of a specific molecule at a given location.
 
@@ -388,27 +814,25 @@ class EnvironmentGrid(Loggable):
             The concentration of the specified molecule at the given location.
         """
         
-        if location is None:
-            raise ValueError(f"Invalid location: {location}")
+        if len(location.shape) != 2:
+            raise ValueError(f"Invalid location ({len(location.shape)}: {location}")
         
-        if isinstance(location, tuple):
-            location = [location]
+        return_float = False
+        if len(location[0, :]) < 2:
             return_float = True
-        else:
-            return_float = False
         
         # Extracting x and y coordinates separately from the location tuples
-        x_coords, y_coords = zip(*location)
+        x_coords, y_coords = location
         
         # Accessing the specified elements in one go using NumPy advanced indexing
         concentrations = self.shared_arrays[molecule][0][x_coords, y_coords]
         
         if return_float:
-            return concentrations[0]
-        else:
-            return concentrations
+            concentrations = float(concentrations[0])
+        
+        return concentrations
     
-    def get_amount_at(self, location: Union[Tuple[int, int], List[Tuple[int, int]]],
+    def get_amount_at(self, location: np.ndarray,
                       molecule: str) -> Union[float, List[float]]:
         
         concentrations = self.get_concentration_at(location, molecule)
@@ -429,40 +853,53 @@ class EnvironmentGrid(Loggable):
         else:
             logging.error(f"Molecule {molecule} not found in the grid.")
     
-    def update_amount_at(self, location: Union[Tuple[int, int], List[Tuple[int, int]]],
-                         molecule: str,
-                         amount: float):
+    def update_amount_at(self, location: np.ndarray, molecule: str, amount: Union[float, np.ndarray]) -> float:
         """
-        Update the concentration of a specific molecule at a given location or multiple locations.
+        Update the concentration of a specific molecule at given location(s).
+
+        The function updates the concentration of a specified molecule at a single location
+        or multiple locations. If a single amount is provided, it's evenly distributed across all locations.
+        If an array of amounts is provided, each location is updated with the corresponding amount.
 
         Args:
-            location: A single tuple (x, y) representing the grid coordinates or a list of such tuples.
-            molecule: Name of the molecule.
-            amount: Amount to increment in mol.
+            location: A 2D numpy array of shape (num_locations, 2) representing the grid coordinates.
+            molecule: The name of the molecule to be updated.
+            amount: The total amount to be added or a numpy array of amounts for each location.
+
+        Raises:
+            ValueError: If the molecule is not found, or the shape of the location or amount is incorrect.
+            TypeError: If the type of amount is neither float nor np.ndarray.
+
+        Returns:
+            actually_removed: The actual total amount removed from the grid, considering the limits.
+
         """
         if molecule not in self.shared_arrays:
             raise ValueError(f"Molecule {molecule} not found in the grid.")
         
-        # If a single location is provided, wrap it in a list.
-        if isinstance(location, tuple):
-            location = [location]
+        if not (isinstance(location, np.ndarray) and location.ndim == 2 and location.shape[0] == 2):
+            raise ValueError(f"location must be a 2D numpy array with shape (num_locations, 2). Found {location.shape}")
         
-        # evenly distribute concentration across pixels
-        amount /= len(location)
+        location_x, location_y = location[0, :], location[1, :]
+        
+        if isinstance(amount, (float, int)):  # Single amount for all locations
+            amount /= location.shape[1]
+            # concentration_change = np.full(len(location), amount_per_location / self.pixel_volume)
+        elif isinstance(amount, np.ndarray):  # Individual amount for each location
+            if len(amount) != location.shape[1]:
+                raise ValueError(f"location length ({len(location)}) does not match amount length ({len(amount)}).")
+        else:
+            raise TypeError(f"Unknown data type for amount: {type(amount)}. Choose float or np.ndarray.")
+        
+        # convert amount to concentration
         concentration_change = amount / self.pixel_volume
         
-        # Update the concentration at each location by the specified amount.
-        actually_removed = 0
-        random.shuffle(location)
-        for x, y in location:
-            
-            self.shared_arrays[molecule][0][x, y] += concentration_change
-            
-            if self.shared_arrays[molecule][0][x, y] < 0:
-                actually_removed += concentration_change - self.shared_arrays[molecule][0][x, y]
-                self.shared_arrays[molecule][0][x, y] = 0
-            else:
-                actually_removed += concentration_change
+        # Update the concentration at each location
+        grid_values = self.shared_arrays[molecule][0][location_x, location_y]
+        before = np.sum(grid_values)
+        self.shared_arrays[molecule][0][location_x, location_y] = np.clip(grid_values + concentration_change, a_min=0,
+                                                                          a_max=None)
+        actually_removed = before - np.sum(self.shared_arrays[molecule][0][location_x, location_y])
         
         return actually_removed
     
@@ -516,100 +953,11 @@ class EnvironmentGrid(Loggable):
         This method is automatically called when the object is garbage collected.
         """
         self.close()
-    
-    def plot_history(self, molecule, figsize=(5, 5), ax=None):
-        
-        if ax is None:
-            fig, ax = plt.subplots(1, 1, figsize=figsize)
-        
-        history = self.history[molecule]
-        ax.plot(history, label=molecule)
-        ax.legend()
-        ax.set_title(f"Total concentration {molecule}")
-    
-    def plot_concentration(self, molecule: str, figsize: tuple = (5, 5), cmap: str = 'inferno', ax: plt.axis = None):
-        """
-        Plot the concentration of a specified molecule across the grid using Matplotlib.
-
-        Args:
-            molecule: Name of the molecule to plot.
-            figsize: Tuple representing the figure size (width, height).
-            cmap: Colormap for the heatmap.
-            ax: Axes object to plot the heatmap.
-        """
-        if molecule not in self.molecules:
-            logging.error(f"Molecule {molecule} not found in the grid.")
-        
-        # Retrieve the shared array for the specified molecule
-        concentration_array, _ = self.shared_arrays[molecule]
-        
-        # Create a figure and axis for the heatmap
-        if ax is None:
-            fig, ax = plt.subplots(1, 1, figsize=figsize)
-        else:
-            # ax.get_figure().clear()
-            ax.clear()
-        
-        # Plotting the concentration heatmap
-        sns.heatmap(concentration_array.transpose(), vmin=0, cmap=cmap, cbar=False, robust=True, ax=ax)
-        
-        # Adding a colorbar and setting titles and labels
-        # plt.colorbar(heatmap, ax=ax)
-        ax.invert_yaxis()
-        ax.set_aspect('equal')
-        ax.set_title(f"{molecule} "
-                     f"({humanize.metric(np.sum(concentration_array) * self.pixel_volume, 'mol')})")
-        ax.set_xlabel("X Coordinate")
-        ax.set_ylabel("Y Coordinate")
-        
-        # Display the plot
-        return ax
-    
-    def interactive_plot(self, molecule: str, figsize: tuple = (5, 5), cmap: str = 'inferno', frames: int = 200):
-        """
-        Create an interactive plot for Jupyter Notebooks to visualize the concentration changes
-        of a specified molecule over time.
-
-        Args:
-            molecule: Name of the molecule to plot.
-            figsize: Tuple representing the figure size (width, height).
-            cmap: Colormap for the heatmap.
-            frames: Number of frames.
-        """
-        if molecule not in self.molecules:
-            logging.error(f"Molecule {molecule} not found in the grid.")
-            return None
-        
-        # Create a figure and axis for the heatmap
-        fig, ax = plt.subplots(figsize=figsize)
-        
-        # Initialize the heatmap with the initial state of the grid
-        concentration_array, _ = self.shared_arrays[molecule]
-        heatmap = ax.imshow(concentration_array, cmap=cmap, interpolation='nearest')
-        
-        # Function to update the heatmap
-        def update(frame):
-            self.step()  # Advance the simulation by one time step
-            _concentration_array, _ = self.shared_arrays[molecule]
-            heatmap.set_data(_concentration_array)
-            
-            # Update the color scale based on the new data
-            new_min = np.min(concentration_array)
-            new_max = np.max(concentration_array)
-            heatmap.set_clim(new_min, new_max)
-            
-            return [heatmap]
-        
-        # Create the animation
-        anim = FuncAnimation(fig, update, frames=frames, )
-        
-        # Display the animation
-        return HTML(anim.to_html5_video())
 
 
 class GlutamateReleaseManager(Loggable):
     def __init__(self, simulation: Simulation,
-                 num_branches: int = 10, num_hotspots: int = 16,
+                 num_dendrites: int = 10, num_hotspots: int = 16,
                  z_thickness: float = 3.0, border: int = 3, jitter: float = 0.1,
                  release_amplitude: float = 1,
                  stochastic_probability: float = 0, signal_function: Union[Callable, np.array, float] = lambda x: 0):
@@ -618,7 +966,7 @@ class GlutamateReleaseManager(Loggable):
 
         Args:
             simulation: Instance of the Simulation class.
-            num_branches: Number of dendritic branches to simulate.
+            num_dendrites: Number of dendritic branches to simulate.
             z_thickness: Thickness of the imaging plane in Z-dimension.
             jitter: Amount of jitter in the hotspot placement, default is 0.1.
             release_amplitude: Maximum release amplitude of a glutamate event in mol.
@@ -631,7 +979,7 @@ class GlutamateReleaseManager(Loggable):
         
         self.simulation = simulation
         self.environment_grid = simulation.environment_grid
-        self.num_branches = num_branches
+        self.num_dendrites = num_dendrites
         self.num_hotspots = num_hotspots
         self.z_thickness = z_thickness
         self.border = border
@@ -662,7 +1010,7 @@ class GlutamateReleaseManager(Loggable):
         lines = []
         tries = 0
         branch_id = 0
-        while tries < self.simulation.max_tries and len(lines) < self.num_branches:
+        while tries < self.simulation.max_tries and len(lines) < self.num_dendrites:
             # Generate a random line (dendritic branch) within the volume
             line = self._generate_random_line()
             
@@ -742,21 +1090,22 @@ class GlutamateReleaseManager(Loggable):
 
         """
         
+        # collect probabilities and combine
         stochastic_vector = self._stochastic_release(self.stochastic_probability)
         signal_vector = self._signal_based_release(self.signal_function)
-        
-        # Sum the probabilities and decide on release
         combined_prob = stochastic_vector + signal_vector
-        random_vector = np.random.uniform(0, 1, size=combined_prob.shape)
-        release_decision = random_vector < combined_prob
-        release_difference = combined_prob - random_vector
         
-        # Update the grid for each hotspot where release is decided
-        for (x, y, _), release, difference in zip(self.hotspots, release_decision, release_difference):
-            if release:
-                release_amount = difference * self.release_amplitude
-                
-                self.environment_grid.update_amount_at((int(x), int(y)), "glutamate", release_amount)
+        # calculate release amount
+        release_amount = self.release_amplitude * combined_prob
+        
+        # compare to random vector and set release 0 for failed hotspots
+        random_vector = np.random.uniform(0, 1, size=combined_prob.shape)
+        release_amount[random_vector > combined_prob] = 0
+        
+        # update environment
+        location = np.array([self.hotspots[:, 0], self.hotspots[:, 1]])
+        self.environment_grid.update_amount_at(location=location, molecule="glutamate",
+                                               amount=release_amount)
         
         self.steps += 1
     
@@ -799,60 +1148,16 @@ class GlutamateReleaseManager(Loggable):
             raise ValueError("signal_function must be Callable or np.ndarray")
         
         return signal_probability
-    
-    def plot(self, line_thickness: int = 1, line_alpha: float = 0.7,
-             marker: str = 'x', hotspot_alpha: float = 0.8, title: str = 'Dendrites and Hotspots',
-             figsize: Tuple[int, int] = (5, 5), ax: plt.axis = None):
-        """
-        Plot dendritic lines and hotspots in a 2D image.
-
-        Args:
-            line_thickness: Thickness of the dendritic lines.
-            line_alpha: Alpha (transparency) of the dendritic lines.
-            marker: Marker style for hotspots.
-            hotspot_alpha: Alpha (transparency) of the hotspots.
-            title: Title of the figure.
-            figsize: Size of the figure.
-            ax: Matplotlib axis to plot the dendritic lines and hotspots in the 2D image.
-        """
-        
-        if ax is None:
-            fig, ax = plt.subplots(figsize=figsize)
-        
-        color_palette = sns.color_palette("husl", n_colors=self.num_branches)
-        for branch_id in range(self.num_branches):
-            line = self.lines[branch_id][:, :-1]
-            hotspots = self.hotspots
-            
-            # Extracting x, y coordinates for line and hotspots
-            x_hotspots, y_hotspots = zip(*[(x, y) for x, y, b_id in hotspots if b_id == branch_id])
-            
-            # Plot the line
-            px0, px1 = line[:, 0], line[:, 1]
-            ax.plot(px0, px1, color=color_palette[branch_id], linewidth=line_thickness, alpha=line_alpha)
-            
-            # Plot the hotspots
-            ax.scatter(x_hotspots, y_hotspots, marker=marker, color=color_palette[branch_id], alpha=hotspot_alpha)
-        
-        ax.set_xlabel('X Coordinate')
-        ax.set_ylabel('Y Coordinate')
-        ax.set_title(title)
-        
-        X, Y = self.environment_grid.grid_size
-        ax.set_xlim(0, X)
-        ax.set_ylim(0, Y)
-        
-        return ax
 
 
 class Simulation(Loggable):
     
     def __init__(self, data_logger: DataLogger, num_astrocytes=1, grid_size=(100, 100), border=10,
-                 print_messages=True, max_tries=5,
+                 max_tries=5,
                  environment_param: dict = None, glutamate_release_param: dict = None, astrocyte_param: dict = None,
-                 ion_flow_param: dict = None):
+                 ion_flow_param: dict = None, messenger_param: dict = {}, vis_param: dict = None):
         
-        super().__init__(data_logger, message_logger=MessageLogger(print_messages=print_messages),
+        super().__init__(data_logger, message_logger=MessageLogger(**messenger_param),
                          settings=Loggable.extract_settings(locals()))
         
         self.max_tries = max_tries
@@ -865,10 +1170,12 @@ class Simulation(Loggable):
         glutamate_release_param = {} if glutamate_release_param is None else glutamate_release_param
         astrocyte_param = {} if astrocyte_param is None else astrocyte_param
         self.ion_flow_param = {} if ion_flow_param is None else ion_flow_param
+        vis_param = {} if vis_param is None else vis_param
         
         self.spatial_index = RtreeSpatialIndex(simulation=self)
         self.environment_grid = EnvironmentGrid(simulation=self, grid_size=grid_size, **environment_param)
         self.glutamate_release_manager = GlutamateReleaseManager(simulation=self, **glutamate_release_param)
+        self.vis = Visualization(self, **vis_param)
         
         self.astrocytes = []
         tries = 0
@@ -877,7 +1184,6 @@ class Simulation(Loggable):
             ast = self.add_astrocyte(astrocyte_param=astrocyte_param, ion_flow_param=ion_flow_param)
             
             if ast is None:
-                self.log(f"Astrocyte placement failed (tries: {tries}/{self.max_tries})", tag="fail,tries,astrocyte")
                 tries += 1
                 continue
             
@@ -896,9 +1202,15 @@ class Simulation(Loggable):
     def get_num_branches(self):
         return np.sum([len(ast.branches) for ast in self.astrocytes])
     
-    def run_simulation_step(self, time_step=1):
+    @staticmethod
+    def _timedelta(t0):
+        return humanize.naturaldelta(time.time() - t0)
+    
+    def run_simulation_step(self, time_step=1, plot_param: dict = None):
         
-        for step in range(time_step):
+        t_total = time.time()
+        
+        for _ in (pbar := tqdm(range(time_step))):
             
             t0 = time.time()
             
@@ -908,11 +1220,17 @@ class Simulation(Loggable):
             for astrocyte in self.astrocytes:
                 astrocyte.step()
             
-            msg = f"runtime {humanize.naturaldelta(time.time() - t0)} for {humanize.intword(self.get_num_branches())} branches"
-            self.log(msg)
-            
             self.message_logger.step()
             self.data_logger.step()
+            self.vis.step(param=plot_param)
+            
+            self.log(msg=f"runtime {self._timedelta(t0)} for {humanize.intword(self.get_num_branches())} branches")
+            
+            self.steps += 1
+            pbar.set_description(f"#branches {self.get_num_branches()}")
+        
+        self.vis.plot(force=True, params=plot_param)
+        self.log(msg=f"Total runtime ({time_step} steps): {self._timedelta(t_total)}")
     
     def add_astrocyte(self, x=None, y=None, radius=3, astrocyte_param: dict = None, ion_flow_param: dict = None):
         
@@ -950,53 +1268,6 @@ class Simulation(Loggable):
     
     def remove_astrocyte(self, astrocyte):
         pass
-    
-    def plot(self, figsize=(10, 10), last_n_messages=10):
-        
-        X, Y = self.grid_size
-        
-        if self.axx is None:
-            self.fig, axx = plt.subplot_mosaic("AB\nCD", figsize=figsize,
-                                               gridspec_kw={
-                                                   "wspace": 0.2,
-                                                   "hspace": 0.2}
-                                               )
-            self.axx = axx
-        else:
-            axx = self.axx
-            
-            for k, ax in axx.items():
-                ax.clear()
-        
-        ax = axx['A']
-        self.environment_grid.plot_concentration(molecule="glutamate", ax=ax)
-        
-        ax = axx['B']
-        for astrocyte in self.astrocytes:
-            astrocyte.plot(ax=ax)
-        ax.set_xlim(0, X)
-        ax.set_ylim(0, Y)
-        ax.set_aspect('equal')
-        ax.set_title('Astrocytes')
-        
-        ax = axx['C']
-        self.glutamate_release_manager.plot(ax=ax)
-        ax.set_xlim(0, X)
-        ax.set_ylim(0, Y)
-        ax.set_aspect('equal')
-        
-        ax = axx['D']
-        self.environment_grid.plot_history("glutamate", ax=ax)
-        
-        # Display the last N messages as HTML
-        if last_n_messages is not None:
-            
-            messages = self.message_logger.get_messages(n=last_n_messages)
-            
-            # from IPython.core.display import HTML
-            # html_content = "<br>".join()
-            # return HTML(html_content)
-            print(pd.DataFrame(messages))
 
 
 class Astrocyte(Loggable):
@@ -1073,7 +1344,15 @@ class Astrocyte(Loggable):
                                     spawn_radius=start_spawn_radius, spawn_length=spawn_length)
         
         # Establish initial concentrations
-        self.molecules = dict(glutamate=0, calcium=0, ATP=10) if molecules is None else molecules
+        if molecules is None:
+            molecules = {
+                "glutamate": 0,
+                "CaER":      10e-6,
+                "CaCyt":     1e-6,
+                "IP3":       10e-6,
+                "ATP":       1e-6
+                }
+        self.molecules = molecules
         self.repellent_concentration = repellent_concentration
     
     def log_state(self):
@@ -1141,15 +1420,17 @@ class Astrocyte(Loggable):
         y_max = min(self.environment_grid.grid_size[1], self.y + self.radius)
         
         # Check each pixel within the bounding box to see if it's within the astrocyte's radius
+        pixels_x, pixels_y = [], []
         for x in range(x_min, x_max):
             for y in range(y_min, y_max):
                 # Calculate the distance from the center of the astrocyte to this pixel
                 distance = np.sqrt((x - self.x) ** 2 + (y - self.y) ** 2)
                 # If the distance is less than the radius, the pixel is within the astrocyte
                 if distance <= self.radius:
-                    pixels.append((x, y))
+                    pixels_x.append(x)
+                    pixels_y.append(y)
         
-        return pixels
+        return np.array([pixels_x, pixels_y])
     
     def remove_molecules_from_cell_body(self):
         
@@ -1267,64 +1548,6 @@ class Astrocyte(Loggable):
         if tries >= self.max_tries:
             self.log(f"Maximum astrocyte tries exceeded: {tries}", level=logging.WARNING,
                      tag="warning,tries,astrocyte")
-    
-    def plot(self, line_thickness=1, line_scaling: Literal['log', 'sqrt'] = 'sqrt',
-             figsize=(5, 5), ax: plt.Axes = None):
-        
-        # create figure
-        if ax is None:
-            fig, ax = plt.subplots(1, 1, figsize=figsize)
-        
-        # plot cell body
-        cell_body = Circle((self.x, self.y), self.radius, color='blue', fill=False)
-        ax.add_patch(cell_body)
-        
-        # plot branches
-        for branch in self.branches:
-            x0, y0 = branch.start.x, branch.start.y
-            x1, y1 = branch.end.x, branch.end.y
-            
-            width = self._scale_branch_thickness(branch.end.radius, line_thickness=line_thickness,
-                                                 line_scaling=line_scaling)
-            
-            ax.plot([x0, x1], [y0, y1], color="black", linewidth=width)
-    
-    def _scale_branch_thickness(self, radius, line_thickness, line_scaling: Literal['log', 'sqrt'] = 'log'):
-        
-        min_width = line_thickness * 0.005  # Minimum width for branches with very small radius
-        if line_scaling == 'log':
-            if radius > 0:
-                width = np.log10(radius) / np.log10(self.max_branch_radius) * line_thickness
-            else:
-                width = min_width
-        
-        elif line_scaling == 'sqrt':
-            width = np.sqrt(radius) / np.sqrt(self.max_branch_radius) * line_thickness
-        
-        else:
-            raise ValueError('Unknown line scaling use one of ["log", "sqrt"]')
-        
-        if width < min_width:
-            width = min_width
-        
-        return width
-    
-    def plot_branch_history(self):
-        
-        M = self.branches[0].intracellular_history.keys()
-        fig, axx = plt.subplots(len(M), 1, sharex=True)
-        
-        for ax in axx:
-            ax.set_yscale('log')
-        
-        colors = sns.color_palette("husl", len(self.branches))
-        for m, branch in enumerate(self.branches):
-            history = branch.intracellular_history
-            for i, (molecule, values) in enumerate(history.items()):
-                axx[i].plot(values, color=colors[m])
-        
-        for i, m in enumerate(M):
-            axx[i].set_title(m)
 
 
 class AstrocyteBranch(Loggable):
@@ -1359,7 +1582,7 @@ class AstrocyteBranch(Loggable):
         
         # Establish initial concentrations
         self.get_environment()
-        self.molecules = {"glutamate": 0.0, "calcium_er": 0.0, "calcium_cyt": 0.0, "IP3": 0.0, "ATP": 0.0}
+        self.molecules = {"glutamate": 0.0, "CaER": 0.0, "CaCyt": 0.0, "IP3": 0.0, "ATP": 0.0}
         
         self.intracellular_history = {molecule: deque(maxlen=nucleus.max_history) for molecule in self.molecules}
         self.extracellular_history = {molecule: deque(maxlen=nucleus.max_history) for molecule in self.environment}
@@ -1554,7 +1777,7 @@ class AstrocyteBranch(Loggable):
                 target.update_amount(molecule, ions_to_move)
     
     def _simulate_calcium(self, dt: int = 1):
-        raise NotImplementedError
+        self.ion_flow_model.update_concentrations(dt=dt, use_physical_properties=True)
     
     def _simulate_glutamate(self):
         
@@ -1837,6 +2060,7 @@ class AstrocyteBranch(Loggable):
                 self.log(f"Moving branch: {angle} < {angle_threshold}", tag="branch,move,act")
         else:
             if steepness > self.nucleus.numerical_tolerance:
+                
                 self.log(
                         f"Branch spawning steepness low: {steepness:.1E} !> {min_steepness:.1E} "
                         f"({steepness / min_steepness * 100:.1f}%)",
@@ -2033,9 +2257,14 @@ class AstrocyteBranch(Loggable):
             The gradient of the specified molecule along the branch.
         """
         # Get the molecule concentration at the start and end of the branch
+        
         concentration_start = self.nucleus.environment_grid.get_concentration_at(candidate.start.get_position(),
                                                                                  molecule)
         concentration_end = self.nucleus.environment_grid.get_concentration_at(candidate.end.get_position(), molecule)
+        
+        assert isinstance(concentration_start,
+                          float), f"{candidate.start.get_position().shape}, {candidate.start.get_position()}"
+        assert isinstance(concentration_end, float)
         
         # Calculate the concentration difference
         concentration_difference = concentration_end - concentration_start
@@ -2203,8 +2432,12 @@ class IonFlowModel:
         Calculates the influx (Jin) of calcium ions through the plasma membrane.
         """
         
-        return self.ca_leak_rate_plasma_membrane + self.max_activation_dependent_ca_influx * (
+        flow = 0
+        flow += self.ca_leak_rate_plasma_membrane
+        flow += self.max_activation_dependent_ca_influx * (
                 self["IP3"] ** 2 / (self.half_saturation_constant_ca_entry ** 2 + self["IP3"] ** 2))
+        
+        return flow
     
     def ca_flow_pm_glu(self):
         """
@@ -2290,8 +2523,8 @@ class IonFlowModel:
         diff_ip3 = d_ip3_dt * dt
         
         # Update concentration in the branch
-        self.branch.update_concentration("calcium_cyt", diff_cytosol_ca)
-        self.branch.update_concentration("calcium_er", diff_er_ca)
+        self.branch.update_concentration("CaCyt", diff_cytosol_ca)
+        self.branch.update_concentration("CaER", diff_er_ca)
         self.branch.update_concentration("IP3", diff_ip3)
 
 
@@ -2303,7 +2536,7 @@ class AstrocyteNode:
         self.y = int(y)
     
     def get_position(self):
-        return self.x, self.y
+        return np.array([[self.x], [self.y]])
     
     def copy(self):
         return AstrocyteNode(self.x, self.y, self.radius)
@@ -2313,13 +2546,20 @@ class AstrocyteNode:
 
 
 class MessageLogger:
-    def __init__(self, print_messages: bool = True, timestamp_format="%d-%m-%Y %H:%M:%S") -> None:
+    def __init__(self, print_messages: bool = True, log_path: Path = None, save_log_every: int = None,
+                 timestamp_format="%d-%m-%Y %H:%M:%S") -> None:
         self.messages = []
         self.steps = 0
         self.print_messages = print_messages
         self.timestamp_format = timestamp_format
+        self.log_path = log_path
+        self.save_log_every = save_log_every
     
     def step(self):
+        
+        if self.steps % self.save_log_every == 0:
+            self.save_messages()
+        
         self.steps += 1
     
     def log(self, msg: str, tag: str = 'default', level: int = logging.INFO,
@@ -2375,16 +2615,17 @@ class MessageLogger:
         
         return filtered_messages[-n:]
     
-    def save_messages(self, path):
-        with open(path, "w") as txt:
-            for msg in self.messages:
-                txt.write(
-                        f"{msg['timestamp']} - {msg['step']} - {msg['level']} - {msg['caller_id']}: {msg['message']}\n")
+    def save_messages(self):
+        if self.log_path is not None:
+            with open(self.log_path, "w") as txt:
+                for msg in self.messages:
+                    txt.write(
+                            f"{msg['timestamp']} - {msg['step']} - {msg['level']} - {msg['caller_id']}: {msg['message']}\n")
 
 
 class DataLogger:
-    def __init__(self, save_path: Path, overwrite=False,
-                 log_interval: int = 1, save_checkpoint_interval: int = 1):
+    def __init__(self, save_path: Union[Path, None], overwrite=False,
+                 log_interval: int = 1, save_checkpoint_interval: Union[int, None] = 1):
         
         self.messages = []
         self.steps = 0
@@ -2438,50 +2679,52 @@ class DataLogger:
         if not self.save_path.exists():
             self.save_path.mkdir()
         
-        if self.steps == 0:
-            file_path = self.save_path.joinpath(f"settings_{self.steps}.p")
+        if self.save_checkpoint_interval is not None and self.save_path is not None:
             
-            # Prepare the data to be saved
-            checkpoint_data = {
-                "log_settings": self.log_settings,
-                }
-            
-            # Save the settings to a pickle file
-            with open(file_path.as_posix(), "wb") as file:
-                pickle.dump(checkpoint_data, file)
-            
-            # Optionally, log that the checkpoint has been saved
-            print(f"Checkpoint saved at step {self.steps} to {file_path}")
-        
-        if self.steps % self.save_checkpoint_interval == 0:
-            
-            file_path = self.save_path.joinpath(f"checkpoint_{self.steps}.p")
-            
-            # steps since last save
-            steps_to_save = range(self.last_checkpoint_save, self.steps)
-            
-            # Prepare the data to be saved
-            checkpoint_data = {"steps": steps_to_save, "log_data": {}}
-            
-            # Extract only the data since the last checkpoint
-            for obj_id, data in self.log_data.items():
+            if self.steps == 0:
+                file_path = self.save_path.joinpath(f"settings_{self.steps}.p")
                 
-                selected = {}
-                for step in steps_to_save:
-                    if step in data:
-                        selected[step] = data[step]
+                # Prepare the data to be saved
+                checkpoint_data = {
+                    "log_settings": self.log_settings,
+                    }
                 
-                checkpoint_data["log_data"][obj_id] = selected
+                # Save the settings to a pickle file
+                with open(file_path.as_posix(), "wb") as file:
+                    pickle.dump(checkpoint_data, file)
+                
+                # Optionally, log that the checkpoint has been saved
+                print(f"Checkpoint saved at step {self.steps} to {file_path}")
             
-            # Save the data to a JSON file
-            with open(file_path.as_posix(), "wb") as file:
-                pickle.dump(checkpoint_data, file)
-            
-            # Update the last checkpoint save step
-            self.last_checkpoint_save = self.steps
-            
-            # Optionally, log that the checkpoint has been saved
-            print(f"Checkpoint saved at step {self.steps} to {file_path}")
+            if self.steps % self.save_checkpoint_interval == 0:
+                
+                file_path = self.save_path.joinpath(f"checkpoint_{self.steps}.p")
+                
+                # steps since last save
+                steps_to_save = range(self.last_checkpoint_save, self.steps)
+                
+                # Prepare the data to be saved
+                checkpoint_data = {"steps": steps_to_save, "log_data": {}}
+                
+                # Extract only the data since the last checkpoint
+                for obj_id, data in self.log_data.items():
+                    
+                    selected = {}
+                    for step in steps_to_save:
+                        if step in data:
+                            selected[step] = data[step]
+                    
+                    checkpoint_data["log_data"][obj_id] = selected
+                
+                # Save the data to a JSON file
+                with open(file_path.as_posix(), "wb") as file:
+                    pickle.dump(checkpoint_data, file)
+                
+                # Update the last checkpoint save step
+                self.last_checkpoint_save = self.steps
+                
+                # Optionally, log that the checkpoint has been saved
+                print(f"Checkpoint saved at step {self.steps} to {file_path}")
     
     def load_checkpoint(self):
         # Implement loading logic here
