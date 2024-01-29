@@ -627,7 +627,7 @@ class Detector:
         
         return time_map
     
-    def _custom_slim_features(self, time_map, event_path, split_events: bool = True, parallel=True,
+    def _custom_slim_features(self, time_map, event_path, split_events: bool = False, parallel=True,
                               dashboard_address=None):
         
         io = IO()
@@ -1008,7 +1008,7 @@ class Detector:
             return 2
         
         # buffer
-        t1 = t1 + 1
+        t1 += 1
         
         # get event map
         e_shape, e_dtype, e_name = event_info
