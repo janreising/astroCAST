@@ -1,13 +1,14 @@
 import logging
 from datetime import time
+from pathlib import Path
 
+import matplotlib.pyplot as plt
 import numpy as np
 from IPython.core.display_functions import clear_output, display
 from scipy.ndimage import affine_transform
-from tifffile import imsave
-from pathlib import Path
-import matplotlib.pyplot as plt
 from scipy.spatial import Voronoi, voronoi_plot_2d, Delaunay
+from scipy.stats import poisson
+from tifffile import imsave
 from tqdm import tqdm
 
 
@@ -43,7 +44,7 @@ class SimData:
             self.m_y = np.random.uniform(-max_drift, max_drift)
 
     def generate_gaussian_blob(self, x, y, x0, y0, sigma, amplitude):
-        return amplitude * np.exp(-((x-x0)**2 + (y-y0)**2) / (2 * sigma**2))
+        return amplitude * np.exp(-((x - x0) ** 2 + (y - y0) ** 2) / (2 * sigma ** 2))
 
     def generate_base_image(self, padding=0):
         X_padded = self.X + 2 * padding
@@ -68,8 +69,8 @@ class SimData:
             max_drift_x = self.m_x * self.frames
             max_drift_y = self.m_y * self.frames
         else:
-            max_drift_x = self.a_x * self.frames**2 + self.b_x * self.frames
-            max_drift_y = self.a_y * self.frames**2 + self.b_y * self.frames
+            max_drift_x = self.a_x * self.frames ** 2 + self.b_x * self.frames
+            max_drift_y = self.a_y * self.frames ** 2 + self.b_y * self.frames
         total_max_shift_x = max_drift_x + self.frames * self.max_jitter
         total_max_shift_y = max_drift_y + self.frames * self.max_jitter
         return int(max(total_max_shift_x, total_max_shift_y))
@@ -87,8 +88,8 @@ class SimData:
                 drift_x = self.m_x * t
                 drift_y = self.m_y * t
             else:
-                drift_x = self.a_x * t**2 + self.b_x * t
-                drift_y = self.a_y * t**2 + self.b_y * t
+                drift_x = self.a_x * t ** 2 + self.b_x * t
+                drift_y = self.a_y * t ** 2 + self.b_y * t
 
             shift_x = jitter_x + drift_x
             shift_y = jitter_y + drift_y
@@ -121,7 +122,7 @@ class SimData:
         axs[0].imshow(self.data[0], cmap='gray')
         axs[0].set_title('First Frame')
 
-        axs[1].imshow(self.data[self.frames//2], cmap='gray')
+        axs[1].imshow(self.data[self.frames // 2], cmap='gray')
         axs[1].set_title('Middle Frame')
 
         axs[2].imshow(self.data[-1], cmap='gray')
@@ -202,12 +203,12 @@ class SimData:
 
     def generator_voronoi(self):
 
-        i=0
+        i = 0
         while i < len(self.vor.point_region):
             yield self.get_voronoi(i)
             i += 1
 
-    def populate_astrocytes(self, branch_length=2, kill_range = 2.25, attraction_range=8, num_leaves=200,
+    def populate_astrocytes(self, branch_length=2, kill_range=2.25, attraction_range=8, num_leaves=200,
                             max_iterations=100, plot=False):
 
         astrocytes = []
@@ -221,7 +222,7 @@ class SimData:
 
             region, polygon, center = r
 
-            if len(region) > 0 and -1 not in region and np.min(polygon)>0 and np.max(polygon) < max(self.X, self.Y):
+            if len(region) > 0 and -1 not in region and np.min(polygon) > 0 and np.max(polygon) < max(self.X, self.Y):
 
                 ast = Astrocyte(voronoi_cell=polygon, cell_center=center, ax=None,
                                 num_leaves=num_leaves, max_iterations=max_iterations, plot_updates=False,
@@ -231,9 +232,9 @@ class SimData:
 
                 if plot:
                     ax = ast.plot(ax=ax,
-                                 line_color='green', linewidth=1, line_alpha=1, thickness_multiplier=0.04,
-                                 scatter_color="gray", scatter_size=1, scatter_marker="x", scatter_alpha=0.3,
-                                 plot_original_scatter=False)
+                                  line_color='green', linewidth=1, line_alpha=1, thickness_multiplier=0.04,
+                                  scatter_color="gray", scatter_size=1, scatter_marker="x", scatter_alpha=0.3,
+                                  plot_original_scatter=False)
 
                     ax.set_xlim(0, self.X)
                     ax.set_ylim(0, self.Y)
@@ -242,6 +243,7 @@ class SimData:
                     display(ax.get_figure())
 
         return astrocytes
+
 
 class Branch:
     def __init__(self, start, end, direction, parent=None, size=1.0):
@@ -252,7 +254,7 @@ class Branch:
         self.children = []
         self.attractors = []
         self.distance_from_root = 0 if parent is None else parent.distance_from_root + 1
-        self.num_children=0
+        self.num_children = 0
         self.size = size
         self.grown = False
 
@@ -279,15 +281,15 @@ class Branch:
                     attractor[0] - self.end[0],
                     attractor[1] - self.end[1]
                 )
-                magnitude = np.sqrt(dir_to_attractor[0]**2 + dir_to_attractor[1]**2)
+                magnitude = np.sqrt(dir_to_attractor[0] ** 2 + dir_to_attractor[1] ** 2)
                 avg_direction[0] += dir_to_attractor[0] / magnitude
                 avg_direction[1] += dir_to_attractor[1] / magnitude
 
-            avg_direction = [avg_direction[0]/len(self.attractors), avg_direction[1]/len(self.attractors)]
+            avg_direction = [avg_direction[0] / len(self.attractors), avg_direction[1] / len(self.attractors)]
 
             # Adding randomness to the growth direction
             random_vector = self.random_growth_vector()
-            random_magnitude = np.sqrt(random_vector[0]**2 + random_vector[1]**2)
+            random_magnitude = np.sqrt(random_vector[0] ** 2 + random_vector[1] ** 2)
             avg_direction[0] += randomness_factor * random_vector[0] / random_magnitude
             avg_direction[1] += randomness_factor * random_vector[1] / random_magnitude
 
@@ -295,7 +297,7 @@ class Branch:
 
     def random_growth_vector(self, magnitude=0.1):
         """Generate a random growth vector."""
-        theta = np.random.uniform(0, 2*np.pi)
+        theta = np.random.uniform(0, 2 * np.pi)
         x = magnitude * np.cos(theta)
         y = magnitude * np.sin(theta)
         return (x, y)
@@ -343,7 +345,7 @@ class Astrocyte:
 
     def random_growth_vector(self, magnitude=1):
         alpha = np.random.uniform(0, np.pi)
-        theta = np.random.uniform(0, 2*np.pi)
+        theta = np.random.uniform(0, 2 * np.pi)
         return np.array([np.cos(theta) * np.sin(alpha), np.sin(theta) * np.sin(alpha)]) * magnitude
 
     def grow_tree(self, branch_length=0.2, attraction_range=1.0, kill_range=0.1,
@@ -365,7 +367,9 @@ class Astrocyte:
                     branch.grown = True
 
                 # Remove attractors in kill range
-                leaves = [leaf for leaf in leaves if all(np.sqrt((leaf[0] - branch.end[0])**2 + (leaf[1] - branch.end[1])**2) > kill_range for branch in self.branches)]
+                leaves = [leaf for leaf in leaves if all(
+                    np.sqrt((leaf[0] - branch.end[0]) ** 2 + (leaf[1] - branch.end[1]) ** 2) > kill_range for branch in
+                    self.branches)]
                 if len(leaves) < 1:
                     break
 
@@ -379,7 +383,7 @@ class Astrocyte:
                     min_distance = np.inf
                     closest_branch = None
                     for branch in self.branches:
-                        distance = np.sqrt((leaf[0] - branch.end[0])**2 + (leaf[1] - branch.end[1])**2)
+                        distance = np.sqrt((leaf[0] - branch.end[0]) ** 2 + (leaf[1] - branch.end[1]) ** 2)
                         if distance < attraction_range and distance < min_distance:
                             min_distance = distance
                             closest_branch = branch
@@ -411,7 +415,6 @@ class Astrocyte:
                                              branch.end[1] + branch_length * direction[1])
 
                             if self.delaunay.find_simplex(new_end_point) >= 0:
-
                                 new_branch = Branch(branch.end, new_end_point, direction, parent=branch)
                                 new_branches.append(new_branch)
                                 self.extremities.append(new_branch)
@@ -439,7 +442,6 @@ class Astrocyte:
                                extremity.end[1] + branch_length * direction[1])
 
                         if self.delaunay.find_simplex(end) >= 0:
-
                             new_branch = Branch(start, end, direction, parent=extremity)
                             extremity.children.append(new_branch)
                             self.branches.append(new_branch)
@@ -453,7 +455,7 @@ class Astrocyte:
                     time.sleep(plot_sleep)
 
                 if not plot:
-                    pbar.n = n_leaves-len(leaves)
+                    pbar.n = n_leaves - len(leaves)
                     pbar.refresh()
 
         if plot:
@@ -486,7 +488,7 @@ class Astrocyte:
 
         for coord, num_children in branch_coords:
             ax.plot([coord[0][0], coord[1][0]], [coord[0][1], coord[1][1]],
-                    color=line_color, linewidth=linewidth+thickness_multiplier*num_children, alpha=line_alpha)
+                    color=line_color, linewidth=linewidth + thickness_multiplier * num_children, alpha=line_alpha)
 
         if plot_original_scatter:
             ax.scatter(leaves_x_o, leaves_y_o, color='gray', s=2, alpha=0.5)
@@ -512,14 +514,87 @@ class Astrocyte:
         ax.fill(polygon[:, 0], polygon[:, 1], edgecolor='k', facecolor='none')
 
 
-from scipy.integrate import odeint
-import numpy as np
-from scipy.stats import poisson
+class AstrocyteGrid:
+    def __init__(self, astrocyte, grid_resolution):
+        self.astrocyte = astrocyte
+        self.grid_resolution = grid_resolution
+        self.grid_size = self.calculate_grid_size()
+        self.grid = np.zeros(self.grid_size)
+
+        self.add_branches_to_grid()
+
+    def calculate_grid_size(self):
+        # Ensure voronoi_cell is a property of astrocyte and is a structure that supports min and max methods
+        if hasattr(self.astrocyte, 'voronoi_cell') and isinstance(self.astrocyte.voronoi_cell, np.ndarray):
+            min_x, min_y = np.min(self.astrocyte.voronoi_cell, axis=0)
+            max_x, max_y = np.max(self.astrocyte.voronoi_cell, axis=0)
+            size_x = int((max_x - min_x) / self.grid_resolution) + 1
+            size_y = int((max_y - min_y) / self.grid_resolution) + 1
+            return (size_x, size_y)
+        else:
+            raise AttributeError(
+                f"Astrocyte instance does not have a 'voronoi_cell' attribute or it's not a numpy array."
+                f" {type(self.astrocyte.voronoi_cell)}")
+
+    def add_branches_to_grid(self):
+        for branch in self.astrocyte.branches:
+            self.rasterize_branch(branch)
+
+    def rasterize_branch(self, branch, thickness_multiplier=0.04):
+        start_idx = self.point_to_grid_index(branch.start)
+        end_idx = self.point_to_grid_index(branch.end)
+
+        dx = abs(end_idx[0] - start_idx[0])
+        dy = abs(end_idx[1] - start_idx[1])
+        sx = -1 if start_idx[0] > end_idx[0] else 1
+        sy = -1 if start_idx[1] > end_idx[1] else 1
+        err = dx - dy
+
+        # Calculate thickness and ensure it is an integer
+        thickness = int(1 + thickness_multiplier * branch.num_children)
+
+        while True:
+            self.mark_grid_cell(start_idx[0], start_idx[1], thickness)  # Mark cell with thickness
+
+            if start_idx[0] == end_idx[0] and start_idx[1] == end_idx[1]:
+                break
+            e2 = 2 * err
+            if e2 > -dy:
+                err -= dy
+                start_idx[0] += sx
+            if e2 < dx:
+                err += dx
+                start_idx[1] += sy
+
+    def mark_grid_cell(self, x, y, thickness):
+        # Convert thickness to an integer, if it's not already
+        half_thickness = int(thickness // 2)
+        for i in range(-half_thickness, half_thickness + 1):
+            for j in range(-half_thickness, half_thickness + 1):
+                # Ensure x+i and y+j are within the grid bounds before marking the cell
+                if 0 <= x + i < self.grid_size[0] and 0 <= y + j < self.grid_size[1]:
+                    self.grid[y + j, x + i] = 1  # Mark the cell
+
+    def point_to_grid_index(self, point):
+        # Convert a point in space to a grid index
+        return (
+            int((point[0] - self.astrocyte.voronoi_cell.min(axis=0)[0]) / self.grid_resolution),
+            int((point[1] - self.astrocyte.voronoi_cell.min(axis=0)[1]) / self.grid_resolution)
+        )
+
+    def plot_grid(self):
+        plt.imshow(self.grid, cmap='Greys', interpolation='nearest', origin='lower')
+        plt.title('Astrocyte Branch Structure on Grid')
+        plt.xlabel('X-axis (grid units)')
+        plt.ylabel('Y-axis (grid units)')
+        # plt.gca().invert_yaxis()  # This inverts the y-axis to match the astrocyte plot's orientation
+        plt.show()
+
 
 def astrocyte_dynamics(y, t,
-                       A, psyn, D_Ca, delta_x, # check parameters
+                       A, psyn, D_Ca, delta_x,  # check parameters
                        r=0.5,
-                       gamma=1.0, IP3_0=1.0e-6, tau_IP3=1.0, # check values
+                       gamma=1.0, IP3_0=1.0e-6, tau_IP3=1.0,  # check values
                        c0=2.0e-6, c1=0.185, v1=6.0, v2=0.11, v3=2.2e-6,
                        v5=0.025e-6, v6=0.2e-6, k1=0.5, k2=1.0e-6, k3=0.1e-6,
                        a2=0.14e-6, d1=0.13e-6, d2=1.049e-6, d3=943.4e-9, d5=82.0e-9,
@@ -579,28 +654,28 @@ def astrocyte_dynamics(y, t,
 
     # IP3 turnover
     J_ip3_delta = v4 * ((Ca_c + (1 - alpha) * k4) / (Ca_c + k4))
-    J_ip3_glutamate = (v_g * Glu**n) / (k_g**n + Glu**n)
+    J_ip3_glutamate = (v_g * Glu ** n) / (k_g ** n + Glu ** n)
     I_diff = 0  # Placeholder for IP3 diffusion term (I_diff)
     # ?
-    I_ip3_Ca = J_ip3_delta # Ca2+-stimulated IP3 production
-    I_ip3_Glu = J_ip3_glutamate # Glutamate-driven IP3 production
+    I_ip3_Ca = J_ip3_delta  # Ca2+-stimulated IP3 production
+    I_ip3_Glu = J_ip3_glutamate  # Glutamate-driven IP3 production
     I_ip3_eq = (IP3 - IP3_0) / tau_IP3
 
     # Total flows across ER
-    J_leak = c1 * v1 * (Ca_ER - Ca_c) # leak from ER
-    J_pump = (v3 * Ca_c**2) / (Ca_c**2 + k3**2) # retrieval of Ca2+ into ER
-    J_IP3 = c1 * v1 * m_inf**3 * n_inf**3 * h**3 * (Ca_ER - Ca_c)
-    J_ER = J_IP3 + J_leak - J_pump # total flow of Ca2+ (cytosol > ER; ER membrane)
+    J_leak = c1 * v1 * (Ca_ER - Ca_c)  # leak from ER
+    J_pump = (v3 * Ca_c ** 2) / (Ca_c ** 2 + k3 ** 2)  # retrieval of Ca2+ into ER
+    J_IP3 = c1 * v1 * m_inf ** 3 * n_inf ** 3 * h ** 3 * (Ca_ER - Ca_c)
+    J_ER = J_IP3 + J_leak - J_pump  # total flow of Ca2+ (cytosol > ER; ER membrane)
 
     # Total flow across PM
-    J_in = v5 + v6 * (IP3**2 / (k2**2 + IP3**2)) # Constant Ca2+ influx + IP3 stimulated influx
-    J_out = k1 * Ca_c # Extrusion current
-    J_Glu = gamma * Glu # direct effect of Glutamate on Ca2+
-    J_pm = J_in + J_Glu - J_out # total flow of C2+ (cytosol > extracellular space; plasma membrane)
+    J_in = v5 + v6 * (IP3 ** 2 / (k2 ** 2 + IP3 ** 2))  # Constant Ca2+ influx + IP3 stimulated influx
+    J_out = k1 * Ca_c  # Extrusion current
+    J_Glu = gamma * Glu  # direct effect of Glutamate on Ca2+
+    J_pm = J_in + J_Glu - J_out  # total flow of C2+ (cytosol > extracellular space; plasma membrane)
 
     # Diffusion??
     D_star_Ca = r ** 2 * D_Ca / delta_x ** 2
-    sum_neighbors_Ca = 0 # Placeholder for sum over nearest neighbors; assume single astrocyte for now
+    sum_neighbors_Ca = 0  # Placeholder for sum over nearest neighbors; assume single astrocyte for now
     J_diff = D_star_Ca * (sum_neighbors_Ca - Ca_c)
 
     # Define the differential equations
@@ -612,10 +687,11 @@ def astrocyte_dynamics(y, t,
     dydt = [dCa_c_dt, dCa_ER_dt, dIP3_dt, dGlu_dt]
     return dydt
 
-# Example of how to use odeint to solve these equations
-initial_conditions = [0, 0, 0, 0]  # Placeholder initial conditions
-t = np.linspace(0, 10, 100)  # Time array
-r_value = 0.5  # Example value for r
-
-# Solve the differential equations
-solution = odeint(astrocyte_dynamics, initial_conditions, t, args=(r_value,))
+# # Example of how to use odeint to solve these equations
+# from scipy.integrate import odeint
+# initial_conditions = [0, 0, 0, 0]  # Placeholder initial conditions
+# t = np.linspace(0, 10, 100)  # Time array
+# r_value = 0.5  # Example value for r
+#
+# # Solve the differential equations
+# solution = odeint(astrocyte_dynamics, initial_conditions, t, args=(r_value,))
