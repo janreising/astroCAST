@@ -469,6 +469,10 @@ class Detector:
                 z0, z1 = i - depth, i + depth + 1
                 arr_s = arr[z0:z1, :, :]
                 
+                if arr_s.size == 0:
+                    logging.warning(f"Encountered 0-sized array. Skipping slice.")
+                    continue
+                
                 # calculate threshold
                 threshold = threshold_triangle(arr_s)
                 
