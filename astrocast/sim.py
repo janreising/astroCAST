@@ -1349,30 +1349,11 @@ class Astrocyte(Loggable):
             self.cytosol.update_amount('ATP', abs(atp_change))
             self.cytosol.update_amount("glutamate", -intra_glutamate)
     
-    def diffuse_molecules(self, dt=1):
-        for molecule in self.cytosol.get_tracked_molecules():
-            for target in self.children:
-                
-                # todo: maybe move to Compartment class? OR to IonFlowClass?
-                
-                # define source and target
-                source = self.cytosol
-                target = target.cytosol
-                
-                # Calculate the concentration difference between the branch and the target
-                source_concentration = source.get_concentration(molecule)
-                target_concentration = target.get_concentration(molecule)
-                concentration_difference = source_concentration - target_concentration
-                
-                if concentration_difference <= 0:
-                    continue
-                
-                # set radius
-                radius = target.start.radius
-                
-                # calculate ions/molecules to move
-                ions_to_move = self._calculate_diffusion_rate(radius) * concentration_difference * dt
-                source.move_amount(target=target, molecule=molecule, amount=ions_to_move)
+    def diffuse_molecules(self):
+        
+        targets = [child.cytosol for child in self.children]
+        diffusion_rate = self._calculate_diffusion_rate(self.max_branch_radius)
+        self.cytosol.diffuse(target=targets, diffusion_rate=diffusion_rate)
     
     def _calculate_diffusion_rate(self, radius):
         return self.diffusion_coefficient / (np.pi * radius ** 2)
@@ -1586,29 +1567,9 @@ class AstrocyteBranch(Loggable):
     
     def diffuse_molecules(self):
         
-        for molecule in self.molecules.items():
-            for target in self.children + [self.parent]:
-                
-                # Calculate the concentration difference between the branch and the target
-                concentration_difference = self.get_concentration(molecule) - target.get_concentration(molecule)
-                
-                if concentration_difference <= 0:
-                    continue
-                
-                # set radius
-                if target == self.parent:
-                    radius = self.start.radius
-                else:
-                    radius = self.end.radius
-                
-                # calculate ions/molecules to move
-                dt = 1  # one time step
-                ions_to_move = self._calculate_diffusion_rate(radius) * concentration_difference * dt
-                ions_to_move = min(ions_to_move, self.get_amount(molecule))
-                
-                # update new concentrations
-                self.update_amount(molecule, -ions_to_move)
-                target.update_amount(molecule, ions_to_move)
+        targets = [child.cytosol for child in self.children]
+        diffusion_rate = self._calculate_diffusion_rate(self.end.radius)
+        self.cytosol.diffuse(target=targets, diffusion_rate=diffusion_rate)
     
     def _simulate_calcium(self, dt: int = 1):
         self.ion_flow_model.update_concentrations(dt=dt, use_physical_properties=True)
@@ -2183,6 +2144,23 @@ class Compartment:
                  f"({moved_amount / (self.get_amount(molecule) + moved_amount) * 100:.1f}%). "
                  f"{moved_amount / amount * 100:.1f}% of capacity.",
                  tag="branch,ion,move")
+    
+    def diffuse(self, target: Union[Compartment, List[Compartment]], diffusion_rate: float):
+        
+        if isinstance(target, Compartment):
+            targets = [target]
+        else:
+            targets = target
+        
+        for target in targets:
+            for molecule in self.get_tracked_molecules():
+                
+                # Calculate the concentration difference between the branch and the target
+                concentration_difference = self.get_concentration(molecule) - target.get_concentration(molecule)
+                
+                # calculate amount of ions
+                capacity_to_move = diffusion_rate * concentration_difference
+                self.move_amount(target=target, molecule=molecule, amount=capacity_to_move)
     
     def convert(self, source_molecule: str, target_molecule: str, conversion_factor: float,
                 v_max: float, k_m: float):
