@@ -910,8 +910,8 @@ class GlutamateReleaseManager(Loggable):
         
         # create compartments from hotspots
         compartments = []
-        for x, y in hotspots:
-            pixel = np.array([[x, y]])
+        for x, y, _ in hotspots:
+            pixel = np.array([[x], [y]])
             hotspot = ExtracellularSpace(self.simulation, pixel=pixel)
             compartments.append(hotspot)
         
@@ -993,7 +993,7 @@ class GlutamateReleaseManager(Loggable):
         release_amount[random_vector > combined_prob] = 0
         
         # update environment
-        for i, hotspot in self.compartments:
+        for i, hotspot in enumerate(self.compartments):
             hotspot.update_amount(molecule="glutamate", amount=release_amount[i])
         
         self.steps += 1
