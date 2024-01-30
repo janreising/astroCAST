@@ -55,6 +55,7 @@ datashader = "^0.15.2"
 llvmlite = "~0.39"
 gdown = "^4.7.1"
 rtree = "^1.1.0"
+frozendict = "^2.4.0"
 
 [tool.poetry.scripts]
 astrocast = 'astrocast.cli_interfaces:cli'
