@@ -2809,7 +2809,7 @@ class MessageLogger:
     
     def step(self):
         
-        if self.steps % self.save_log_every == 0:
+        if self.save_log_every is not None and self.steps % self.save_log_every == 0:
             self.save_messages()
         
         self.steps += 1
@@ -2899,7 +2899,8 @@ class DataLogger:
     
     def step(self):
         self.steps += 1
-        self.log_state()
+        if self.log_interval is not None:
+            self.log_state()
     
     def register(self, obj, settings: dict = None):
         if settings is not None and not isinstance(settings, dict):
