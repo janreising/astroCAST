@@ -25,8 +25,8 @@ from tqdm import tqdm
 
 
 class Loggable:
-    def __init__(self, data_logger, message_logger=None, settings: dict = None):
-        self.id = uuid.uuid4()
+    def __init__(self, data_logger, message_logger=None, settings: dict = None, uid: Union[str, int, uuid.UUID] = None):
+        self.id = uuid.uuid4() if uid is None else uid
         self.steps = 0
         
         # register with data logger
@@ -63,8 +63,16 @@ class Loggable:
     def get_hex_id(self):
         return self.id.hex
     
-    def get_short_id(self):
-        return xxhash.xxh32_hexdigest(self.id.hex)
+    def get_short_id(self) -> str:
+        
+        if isinstance(self.id, uuid.UUID):
+            return xxhash.xxh32_hexdigest(self.id.hex)
+        elif isinstance(self.id, int):
+            return str(self.id)
+        elif isinstance(self.id, str):
+            return self.id
+        else:
+            raise ValueError(f"unknown id type: {self.id}, {type(self.id)}")
     
     def log(self, msg: str, level: int = logging.INFO, tag: str = "default"):
         
@@ -422,9 +430,9 @@ class Visualization:
         else:
             raise ValueError('Unknown line scaling use one of ["log", "sqrt"]')
     
-    def plot_branch_history(self, branch_id: uuid.UUID):
+    def plot_branch_history(self, branch_id: [uuid.UUID, str, int]):
         
-        if isinstance(branch_id, uuid.UUID):
+        if isinstance(branch_id, (uuid.UUID, str, int)):
             branch_id = [branch_id]
         
         _, branches = self.get_bodies_and_branches()
@@ -542,6 +550,18 @@ class RtreeSpatialIndex:
         self.branch_counter = 0
         self.simulation = simulation
     
+    @staticmethod
+    def convert_id_to_int(identifier: Union[int, str, uuid.UUID]):
+        
+        if isinstance(identifier, uuid.UUID):
+            return identifier.int
+        if isinstance(identifier, str):
+            return xxhash.xxh3_64_intdigest(identifier)
+        if isinstance(identifier, int):
+            return identifier
+        else:
+            raise ValueError(f"Unknown id type: {identifier}, {type(identifier)}")
+    
     def search(self, region: Union[Tuple[int, int, int, int], AstrocyteBranch]):
         """
         Search for branches intersecting with the given region.
@@ -566,7 +586,7 @@ class RtreeSpatialIndex:
             obj: The branch to insert.
         """
         bbox = obj.get_bbox()
-        id_ = obj.id.int
+        id_ = self.convert_id_to_int(obj.id)
         self.rtree.insert(id_, bbox)
         
         self.branch_counter += 1
@@ -578,7 +598,8 @@ class RtreeSpatialIndex:
         Args:
             obj: The branch to remove.
         """
-        self.rtree.delete(obj.id.int, obj.get_bbox())
+        id_ = self.convert_id_to_int(obj.id)
+        self.rtree.delete(id_, obj.get_bbox())
     
     def update(self, obj):
         """
@@ -1069,11 +1090,12 @@ class Simulation(Loggable):
     def __init__(self, data_logger: DataLogger, num_astrocytes=1, grid_size=(100, 100), border=10,
                  max_tries=5, max_history=100,
                  environment_param: dict = None, glutamate_release_param: dict = None, astrocyte_param: dict = None,
-                 ion_flow_param: dict = None, messenger_param: dict = None, vis_param: dict = None):
+                 ion_flow_param: dict = None, messenger_param: dict = None, vis_param: dict = None,
+                 uid: Union[str, int, uuid.UUID] = "S"):
         
         messenger_param = {} if messenger_param is None else messenger_param
         super().__init__(data_logger, message_logger=MessageLogger(**messenger_param),
-                         settings=Loggable.extract_settings(locals()))
+                         settings=Loggable.extract_settings(locals()), uid=uid)
         
         self.max_history = max_history
         self.max_tries = max_tries
@@ -1081,6 +1103,7 @@ class Simulation(Loggable):
         self.border = border
         self.axx = None
         self.fig = None
+        self.astrocyte_counter = 0
         
         environment_param = {} if environment_param is None else environment_param
         glutamate_release_param = {} if glutamate_release_param is None else glutamate_release_param
@@ -1173,10 +1196,11 @@ class Simulation(Loggable):
         
         # place astrocyte
         if valid_placement:
-            
-            ast = Astrocyte(simulation=self, position=(x, y), ion_flow_param=ion_flow_param, **astrocyte_param)
+            ast = Astrocyte(simulation=self, position=(x, y), ion_flow_param=ion_flow_param,
+                            uid=f"{self.get_short_id()}A{self.astrocyte_counter}x", **astrocyte_param)
             
             self.spatial_index.insert(ast)
+            self.astrocyte_counter += 1
             return ast
         
         else:
@@ -1204,11 +1228,12 @@ class Astrocyte(Loggable):
                  er_volume_ratio: float = 0.01,
                  cytosol_concentration: Union[dict, frozendict] = frozendict(calcium=1e-6, glutamate=0, ATP=1e-6),
                  er_concentration: Union[dict, frozendict] = frozendict(calcium=10e-6),
+                 uid: Union[str, int, uuid.UUID] = None
                  ):
         
         self.er_volume_ratio = er_volume_ratio
         settings = Loggable.extract_settings(locals(), exclude_types=Simulation)
-        super().__init__(simulation.data_logger, message_logger=simulation.message_logger, settings=settings)
+        super().__init__(simulation.data_logger, message_logger=simulation.message_logger, settings=settings, uid=uid)
         
         self.simulation = simulation
         self.environment_grid = simulation.environment_grid
@@ -1218,6 +1243,7 @@ class Astrocyte(Loggable):
         self.children = []
         self.branches = []
         self.death_counter = 0
+        self.branch_counter = 0
         self.num_branches = num_branches
         self.steps_till_death = steps_till_death
         self.ion_flow_param = ion_flow_param
@@ -1260,10 +1286,12 @@ class Astrocyte(Loggable):
         self.bbox = self.get_bbox()
         
         # create compartments
-        self.cytosol = Compartment(simulation=simulation, volume=self.volume, start_concentration=cytosol_concentration)
+        self.cytosol = Compartment(simulation=simulation, volume=self.volume,
+                                   start_concentration=cytosol_concentration, uid=f"{self.get_short_id()}.cyt")
         self.ER = Compartment(simulation=simulation, volume=er_volume_ratio * self.volume,
-                              start_concentration=er_concentration)
-        self.extracellular_space = ExtracellularSpace(simulation=simulation, pixel=self.pixels)
+                              start_concentration=er_concentration, uid=f"{self.get_short_id()}.er")
+        self.extracellular_space = ExtracellularSpace(simulation=simulation, pixel=self.pixels,
+                                                      uid=f"{self.get_short_id()}.ext")
         
         # spawn mother branches
         self.spawn_initial_branches(num_branches=num_branches, max_branch_radius=max_branch_radius,
@@ -1408,7 +1436,8 @@ class Astrocyte(Loggable):
             
             # Create the new branch
             new_branch = AstrocyteBranch(parent=self, nucleus=self, start=start, end=end,
-                                         ion_flow_param=self.ion_flow_param)
+                                         ion_flow_param=self.ion_flow_param,
+                                         uid=f"{self.get_short_id()}{self.branch_counter}")
             
             if not self.spatial_index.check_collision(new_branch):
                 
@@ -1417,6 +1446,8 @@ class Astrocyte(Loggable):
                 
                 # Add the new branch to the spatial index
                 self.spatial_index.insert(new_branch)
+                
+                self.branch_counter += 1
                 
                 tries = 0
             
@@ -1433,15 +1464,17 @@ class AstrocyteBranch(Loggable):
     def __init__(self, parent, nucleus: Astrocyte, start: Union[Tuple[int, int, int], AstrocyteNode],
                  end: Union[Tuple[int, int, int], AstrocyteNode], ion_flow_param: dict = None,
                  cytosol_concentration: Union[dict, frozendict] = frozendict(),
-                 er_concentration: Union[dict, frozendict] = frozendict()):
+                 er_concentration: Union[dict, frozendict] = frozendict(),
+                 uid: Union[int, str, uuid.UUID] = None):
         
         super().__init__(nucleus.simulation.data_logger, message_logger=nucleus.simulation.message_logger,
-                         settings=Loggable.extract_settings(locals()))
+                         settings=Loggable.extract_settings(locals()), uid=uid)
         
         # Instances
         self.parent: AstrocyteBranch = parent
         self.nucleus = nucleus
         self.spatial_index = nucleus.spatial_index
+        self.branch_counter = 0
         
         self.start: AstrocyteNode = start if isinstance(start, AstrocyteNode) else AstrocyteNode(*start)
         self.end: AstrocyteNode = end if isinstance(end, AstrocyteNode) else AstrocyteNode(*end)
@@ -1461,10 +1494,11 @@ class AstrocyteBranch(Loggable):
         # create compartments
         # todo: should the cytosol / ER concentration be dependent on the parent?
         self.cytosol = Compartment(simulation=nucleus.simulation, volume=self.volume,
-                                   start_concentration=cytosol_concentration)
+                                   start_concentration=cytosol_concentration, uid=f"{self.get_short_id()}.cyt")
         self.ER = Compartment(simulation=nucleus.simulation, volume=self.nucleus.er_volume_ratio * self.volume,
-                              start_concentration=er_concentration)
-        self.extracellular_space = ExtracellularSpace(simulation=nucleus.simulation, pixel=self.interacting_pixels)
+                              start_concentration=er_concentration, uid=f"{self.get_short_id()}.er")
+        self.extracellular_space = ExtracellularSpace(simulation=nucleus.simulation, pixel=self.interacting_pixels,
+                                                      uid=f"{self.get_short_id()}.ext")
         
         # Create calcium flow model
         ion_flow_param = {} if ion_flow_param is None else ion_flow_param
@@ -1899,6 +1933,9 @@ class AstrocyteBranch(Loggable):
         atp_cost = self.nucleus.atp_cost_per_unit_surface * branch.surface_area
         if atp_cost <= self.cytosol.get_amount("ATP"):
             
+            branch.id = f"{self.get_short_id()}-{self.branch_counter}"
+            self.branch_counter += 1
+            
             # Save the new branch to the list of children
             self.children.append(branch)
             self.nucleus.branches.append(branch)
@@ -2083,9 +2120,10 @@ class AstrocyteBranch(Loggable):
 class Compartment:
     
     def __init__(self, simulation: Simulation, volume: float = None,
-                 start_amount: dict = None, start_concentration: dict = None):
+                 start_amount: dict = None, start_concentration: dict = None,
+                 uid: [str, int, uuid.UUID] = None):
         
-        self.id = uuid.uuid4()
+        self.id = uuid.uuid4() if uid is None else uid
         self.simulation = simulation
         self.volume = volume
         self.concentration = {}
@@ -2174,7 +2212,7 @@ class Compartment:
         moved_amount = source.update_amount(molecule=molecule, amount=amount)
         target.update_amount(molecule=molecule, amount=abs(moved_amount))
         
-        self.log("Moved ", tag="branch,ion,move", values=(moved_amount, molecule))
+        self.log(f"Moved > {target.id}: ", tag="branch,ion,move", values=(moved_amount, molecule))
     
     def diffuse(self, target: Union[Compartment, List[Compartment]], diffusion_rate: float):
         
@@ -2194,7 +2232,7 @@ class Compartment:
                 capacity_to_move = diffusion_rate * concentration_difference
                 self.move_amount(target=target, molecule=molecule, amount=capacity_to_move)
                 
-                self.log("Diffused ", tag="diffuse,ion",
+                self.log(f"Diffused > {target.id}: ", tag="diffuse,ion",
                          values=[(capacity_to_move, molecule),
                                  (capacity_to_move / source_amount if source_amount != 0 else np.inf, "%")])
     
@@ -2266,6 +2304,10 @@ class Compartment:
                 
                 if metric == "%":
                     if v != np.inf:
+                        
+                        if msg[-1] == ",":
+                            msg = msg[:-1]
+                        
                         msg += f"({v * 100:.1f}%), "
                         # msg += f"({humanize.fractional(v)})"
                 else:
@@ -2292,8 +2334,8 @@ class Compartment:
 
 
 class ExtracellularSpace(Compartment):
-    def __init__(self, simulation: Simulation, pixel: np.ndarray):
-        super().__init__(simulation=simulation, volume=None, start_amount=None)
+    def __init__(self, simulation: Simulation, pixel: np.ndarray, uid: Union[str, int, uuid.UUID]):
+        super().__init__(simulation=simulation, volume=None, start_amount=None, uid=uid)
         
         self.environment_grid = simulation.environment_grid
         self.pixel = pixel
@@ -2674,7 +2716,8 @@ class MessageLogger:
             with open(self.log_path, "w") as txt:
                 for msg in self.messages:
                     txt.write(
-                            f"{msg['timestamp']} - {msg['step']} - {msg['level']} - {msg['caller_id']}: {msg['message']}\n")
+                            f"{msg['timestamp']} - S{msg['step']} - L{msg['level']} - {msg['caller_id']}:"
+                            f" {msg['message']}\n")
 
 
 class DataLogger:
