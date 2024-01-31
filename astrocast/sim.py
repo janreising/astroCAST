@@ -31,7 +31,7 @@ class Loggable:
         
         # register with data logger
         self.data_logger = data_logger
-        self.data_logger.register(self, settings)
+        self.data_logger.register(obj=self, settings=settings)
         
         # register with message_logger
         self.message_logger = message_logger
@@ -1404,7 +1404,7 @@ class Astrocyte(Loggable):
             
             self.spatial_index.remove(self)
             self.simulation.astrocytes.remove(self)
-            self.simulation.data_logger.unregister(self.id)
+            self.simulation.data_logger.unregister(self)
     
     def get_pixels_within_cell(self) -> np.ndarray:
         """
@@ -1632,11 +1632,13 @@ class AstrocyteBranch(Loggable):
         
         # check if molecule is tracked
         if molecule not in history:
+            self.log(f"Cannot find {molecule} in history.", level=logging.WARNING, tag="error,trend")
             return 0
         
         # check if more than one data pointed tracked
         history = history[molecule]
         if len(history) < 2:
+            self.log(f"Cannot find {molecule} in history.", level=logging.WARNING, tag="error,trend")
             return 0
         
         # extract relevant trend values
@@ -1976,7 +1978,7 @@ class AstrocyteBranch(Loggable):
             # Delete self from parent
             self.parent.children.remove(self)
             self.nucleus.branches.remove(self)
-            self.nucleus.simulation.data_logger.unregister(self.id)
+            self.nucleus.simulation.data_logger.unregister(self)
             
             # Additional cleanup if needed (e.g., freeing resources or nullifying references)
             self.pruned = True
@@ -1993,9 +1995,6 @@ class AstrocyteBranch(Loggable):
         # calculate cost
         atp_cost = self.nucleus.atp_cost_per_unit_surface * branch.surface_area
         if atp_cost <= self.cytosol.get_amount("ATP"):
-            
-            branch.id = f"{self.get_short_id()}-{self.branch_counter}"
-            self.branch_counter += 1
             
             # Save the new branch to the list of children
             self.children.append(branch)
@@ -2088,7 +2087,11 @@ class AstrocyteBranch(Loggable):
             
             # create candidate branch
             new_end_node = AstrocyteNode(x=end_x, y=end_y, radius=new_branch_radius)
-            candidate = AstrocyteBranch(parent=self, nucleus=self.nucleus, start=self.end, end=new_end_node)
+            
+            self.branch_counter += 1
+            candidate = AstrocyteBranch(parent=self, nucleus=self.nucleus, start=self.end, end=new_end_node,
+                                        uid=f"{self.get_short_id()}-{self.branch_counter}")
+            self.branch_counter += 1
             
             candidate_branches.append(candidate)
         
@@ -2545,6 +2548,12 @@ class ExtracellularSpace(Compartment):
         
         else:
             return 0
+    
+    def step(self):
+        for molecule in self.environment_grid.get_tracked_molecules():
+            self.concentration[molecule] = self.get_concentration(molecule)
+        
+        self._update_history()
 
 
 class IonFlowModel:
@@ -2896,7 +2905,7 @@ class DataLogger:
         if settings is not None and not isinstance(settings, dict):
             raise ValueError("Settings should be a dictionary or None.")
         
-        obj_id = obj.id
+        obj_id = obj.get_short_id()
         self.tracked_objects[obj_id] = obj
         
         # Store settings as a copy to prevent accidental modifications
@@ -2905,7 +2914,8 @@ class DataLogger:
         # Initialize log_data for the object
         self.log_data[obj_id] = {}
     
-    def unregister(self, obj_id):
+    def unregister(self, obj):
+        obj_id = obj.get_short_id()
         del self.tracked_objects[obj_id]
     
     def log_state(self):
