@@ -119,20 +119,22 @@ class Visualization:
         if self.steps == 0:
             self.plot_initial_state()
         
-        if self.steps % self.display_interval == 0 or self.steps % self.save_interval == 0:
+        if ((self.display_interval is not None and self.steps % self.display_interval == 0) or
+                (self.save_interval is not None and self.steps % self.save_interval == 0)):
             self.plot(params=param)
         
         self.steps += 1
     
     def save(self, fig, prefix="", force=False):
         
-        if self.img_folder is not None and (self.steps % self.save_interval == 0 or force):
-            
-            if not self.img_folder.exists():
-                self.img_folder.mkdir()
-            
-            save_path = self.img_folder.joinpath(f"{prefix}_{self.steps}.png")
-            fig.savefig(save_path.as_posix(), dpi=(self.dpi))
+        if self.img_folder is not None:
+            if (self.save_interval is not None and self.steps % self.save_interval == 0) or force:
+                
+                if not self.img_folder.exists():
+                    self.img_folder.mkdir()
+                
+                save_path = self.img_folder.joinpath(f"{prefix}_{self.steps}.png")
+                fig.savefig(save_path.as_posix(), dpi=(self.dpi))
     
     def plot_environment_grid_concentration(self, molecule: str, cmap: str = 'inferno',
                                             figsize: tuple = (5, 5), ax: plt.axis = None):
@@ -153,23 +155,23 @@ class Visualization:
         
         # Retrieve the shared array for the specified molecule
         concentration_array, _ = env_grid.shared_arrays[molecule]
+        amount_array = concentration_array * env_grid.pixel_volume
         
         # Create a figure and axis for the heatmap
         if ax is None:
             fig, ax = plt.subplots(1, 1, figsize=figsize)
         else:
-            # ax.get_figure().clear()
             ax.clear()
         
         # Plotting the concentration heatmap
-        sns.heatmap(concentration_array.transpose(), vmin=0, cmap=cmap, cbar=False, robust=True, ax=ax)
+        sns.heatmap(amount_array.transpose(), vmin=0, cmap=cmap, cbar=False, robust=True, ax=ax)
         
         # Adding a colorbar and setting titles and labels
         # plt.colorbar(heatmap, ax=ax)
         ax.invert_yaxis()
         ax.set_aspect('equal')
         ax.set_title(f"[{molecule}] "
-                     f"{humanize.metric(np.sum(concentration_array) * env_grid.pixel_volume, 'mol')}")
+                     f"{humanize.metric(np.sum(amount_array), 'mol')}")
         ax.get_xaxis().set_ticks([])
         ax.get_yaxis().set_ticks([])
         
@@ -355,7 +357,9 @@ class Visualization:
             
             compartment = getattr(cb, compartment_name, None)
             if compartment is not None:
-                arr[x_coords, y_coords] += compartment.get_concentration(molecule)
+                arr[x_coords, y_coords] += compartment.get_amount(molecule)
+            else:
+                logging.warning(f"couldn't find compartment {compartment_name} in nucleus.")
         
         # plot branches
         for branch in branches:
@@ -364,7 +368,9 @@ class Visualization:
             
             compartment = getattr(branch, compartment_name, None)
             if compartment is not None:
-                arr[x_coords, y_coords] += compartment.get_concentration(molecule)
+                arr[x_coords, y_coords] += compartment.get_amount(molecule)
+            else:
+                logging.warning(f"couldn't find compartment {compartment_name} in branch.")
         
         # transpose arr
         arr = arr.transpose()
@@ -710,7 +716,8 @@ class RtreeSpatialIndex:
 
 class EnvironmentGrid(Loggable):
     def __init__(self, simulation: Simulation, grid_size: Tuple[int, int], diffusion_rate: float, dt: float,
-                 pixel_volume: float = 1.0, molecules: Union[List[str], str] = ("glutamate", "calcium"),
+                 pixel_volume: float = 1.0,
+                 molecules: Union[dict, frozendict] = frozendict(glutamate=0, calcium=2e-3),
                  degrades: Union[str, List[str]] = None, degradation_factor: float = 0.75, dtype: str = np.float32):
         """
         Initialize the environment grid with shared numpy arrays for each molecule.
@@ -726,18 +733,16 @@ class EnvironmentGrid(Loggable):
         
         super().__init__(simulation.data_logger, settings=Loggable.extract_settings(locals()))
         
-        if isinstance(molecules, list):
-            self.molecules = molecules
-        else:
-            self.molecules = [molecules]
-        
+        self.simulation = simulation
         self.grid_size = grid_size
         self.degrades = degrades
         self.degradation_factor = degradation_factor
         self.pixel_volume = pixel_volume
         self.diffusion_rate = diffusion_rate
         self.dt = dt
-        self.history = {molecule: [] for molecule in molecules}
+        self.molecules = list(molecules.keys())
+        self.start_concentrations = molecules
+        self.history = {molecule: [] for molecule in molecules.keys()}
         
         self.shared_arrays = self._create_shared_arrays(grid_size, molecules, dtype=dtype)
         
@@ -752,7 +757,8 @@ class EnvironmentGrid(Loggable):
         return state
     
     @staticmethod
-    def _create_shared_arrays(grid_size: Tuple[int, int], molecules: List[str], dtype=np.float32, parallel=False):
+    def _create_shared_arrays(grid_size: Tuple[int, int], molecules: Union[dict, frozendict],
+                              dtype=np.float32, parallel=False):
         """
         Create shared numpy arrays for each molecule.
 
@@ -765,17 +771,19 @@ class EnvironmentGrid(Loggable):
             Dictionary of shared numpy arrays.
         """
         shared_arrays = {}
-        for molecule in molecules:
+        for molecule, concentration in molecules.items():
             
             if parallel:
                 # Create a new shared memory block
                 shm = shared_memory.SharedMemory(create=True, size=np.prod(grid_size) * np.dtype(dtype).itemsize)
                 # Create a numpy array using the shared memory
                 shared_array = np.ndarray(grid_size, dtype=dtype, buffer=shm.buf)
+                shared_array[:] = concentration
                 shared_arrays[molecule] = (shared_array, shm)
             
             else:
                 shared_array = np.zeros(grid_size, dtype=dtype)
+                shared_array[:] = concentration
                 shared_arrays[molecule] = (shared_array, None)
         
         return shared_arrays
@@ -792,9 +800,14 @@ class EnvironmentGrid(Loggable):
         
         for molecule, (shared_array, _) in self.shared_arrays.items():
             for _ in range(int(self.dt)):
+                
+                if self.simulation.debug and np.min(shared_array) < 0:
+                    logging.warning(f"Concentration({molecule}) < 0: {np.min(shared_array)}."
+                                    f"ERROR in simulation.")
+                
                 # Apply Dirichlet boundary conditions
-                shared_array[0, :] = shared_array[-1, :] = 0
-                shared_array[:, 0] = shared_array[:, -1] = 0
+                shared_array[0, :] = shared_array[-1, :] = self.start_concentrations[molecule]
+                shared_array[:, 0] = shared_array[:, -1] = self.start_concentrations[molecule]
                 
                 # Compute changes using convolution
                 change = convolve(shared_array, kernel, mode='constant', cval=0.0)
@@ -956,9 +969,9 @@ class GlutamateReleaseManager(Loggable):
         
         # create compartments from hotspots
         compartments = []
-        for x, y, _ in hotspots:
+        for i, (x, y, _) in enumerate(hotspots):
             pixel = np.array([[x], [y]])
-            hotspot = ExtracellularSpace(self.simulation, pixel=pixel)
+            hotspot = ExtracellularSpace(self.simulation, pixel=pixel, uid=f"H{i}")
             compartments.append(hotspot)
         
         return np.array(lines), np.array(hotspots), compartments
@@ -1088,10 +1101,10 @@ class GlutamateReleaseManager(Loggable):
 class Simulation(Loggable):
     
     def __init__(self, data_logger: DataLogger, num_astrocytes=1, grid_size=(100, 100), border=10,
-                 max_tries=5, max_history=100,
+                 max_tries=5, max_history=100, numerical_tolerance=1e-12,
                  environment_param: dict = None, glutamate_release_param: dict = None, astrocyte_param: dict = None,
                  ion_flow_param: dict = None, messenger_param: dict = None, vis_param: dict = None,
-                 uid: Union[str, int, uuid.UUID] = "S"):
+                 uid: Union[str, int, uuid.UUID] = "S", debug: bool = False):
         
         messenger_param = {} if messenger_param is None else messenger_param
         super().__init__(data_logger, message_logger=MessageLogger(**messenger_param),
@@ -1104,6 +1117,8 @@ class Simulation(Loggable):
         self.axx = None
         self.fig = None
         self.astrocyte_counter = 0
+        self.numerical_tolerance = numerical_tolerance
+        self.debug = debug
         
         environment_param = {} if environment_param is None else environment_param
         glutamate_release_param = {} if glutamate_release_param is None else glutamate_release_param
@@ -1215,7 +1230,7 @@ class Astrocyte(Loggable):
     def __init__(self, simulation: Simulation, position: Tuple[int, int], radius: int, num_branches: int,
                  max_branch_radius: float, start_spawn_radius: float,
                  repellent_name: str = None, repellent_concentration: float = 1,
-                 numerical_tolerance=1e-6, allow_pruning=True,
+                 allow_pruning=True,
                  min_trend_amplitude=0.5, min_steepness=0.05, spawn_angle_threshold=5,
                  diffusion_coefficient=50, glutamate_uptake_rate=100,
                  spawn_length=3, spawn_radius_factor=0.1, min_radius=0.001,
@@ -1223,6 +1238,7 @@ class Astrocyte(Loggable):
                  glu_v_max=100, glu_k_m=0.5, trend_history=30,
                  repellent_volume_factor=0.00001, repellent_surface_factor=0.00001,
                  atp_cost_per_glutamate=- 18, atp_cost_per_unit_surface=1,
+                 atp_degradation_rate=0.9,
                  max_history: int = 1000, max_tries=5,
                  ion_flow_param: dict = None,
                  er_volume_ratio: float = 0.01,
@@ -1251,7 +1267,7 @@ class Astrocyte(Loggable):
         # computational parameters
         self.max_history = max_history
         self.max_tries = max_tries
-        self.numerical_tolerance = numerical_tolerance
+        self.numerical_tolerance = simulation.numerical_tolerance
         
         # decision parameters
         self.allow_pruning = allow_pruning  # True
@@ -1263,7 +1279,9 @@ class Astrocyte(Loggable):
         # ion flow parameters
         self.diffusion_coefficient = diffusion_coefficient
         self.glutamate_uptake_rate = glutamate_uptake_rate  # mol/m² --> same as surface factor?
+        self.glutamate_uptake_capacity = 0  # todo: do we want the nucleus to take up glutamate?
         self.repellent_name = repellent_name
+        self.atp_degradation_rate = atp_degradation_rate
         
         # cost parameters
         self.atp_cost_per_glutamate = atp_cost_per_glutamate  # mol ATP / mol Glutamate  # 1/18
@@ -1325,6 +1343,7 @@ class Astrocyte(Loggable):
             self.die()
         
         self.simulate_glutamate()
+        self.simulate_atp()
         self.diffuse_molecules()
         
         self.cytosol.step()
@@ -1345,7 +1364,7 @@ class Astrocyte(Loggable):
     
     def die(self):
         
-        if self.death_counter / 100 < np.random.random():
+        if self.allow_pruning and self.death_counter / 100 < np.random.random():
             
             for child in self.children:
                 child.action_prune()
@@ -1388,16 +1407,17 @@ class Astrocyte(Loggable):
     
     def simulate_glutamate(self):
         
-        # todo: should there really be no rate for conversion?
+        # convert glutamate using up ATP
+        if self.atp_cost_per_glutamate < 0:
+            
+            # produce ATP from GLU
+            conversion_factor = abs(self.atp_cost_per_glutamate)
+            self.cytosol.convert(source_molecule="glutamate", target_molecule="ATP",
+                                 conversion_factor=conversion_factor,
+                                 v_max=self.glu_V_max, k_m=self.glu_K_m)
         
-        intra_glutamate = self.cytosol.get_amount("glutamate")
-        
-        if self.atp_cost_per_glutamate > 0:
-            self.cytosol.update_amount("glutamate", -intra_glutamate)
-        else:
-            atp_change = intra_glutamate * self.atp_cost_per_glutamate
-            self.cytosol.update_amount('ATP', abs(atp_change))
-            self.cytosol.update_amount("glutamate", -intra_glutamate)
+        elif self.atp_cost_per_glutamate >= 0:
+            self.cytosol.remove(molecule="glutamate", cost=self.atp_cost_per_glutamate)
     
     def diffuse_molecules(self):
         
@@ -1457,6 +1477,11 @@ class Astrocyte(Loggable):
         if tries >= self.max_tries:
             self.log(f"Maximum astrocyte tries exceeded: {tries}", level=logging.WARNING,
                      tag="warning,tries,astrocyte")
+    
+    def simulate_atp(self):
+        current_atp = self.cytosol.get_concentration("ATP")
+        new_atp = current_atp * self.atp_degradation_rate
+        self.cytosol.set_concentration("ATP", new_atp)
 
 
 class AstrocyteBranch(Loggable):
@@ -1535,6 +1560,7 @@ class AstrocyteBranch(Loggable):
         # simulate flow of molecules
         self._simulate_calcium()
         self._simulate_glutamate()
+        self._simulate_atp()
         self._simulate_repellent()
         
         # run through actions
@@ -1647,6 +1673,11 @@ class AstrocyteBranch(Loggable):
         
         elif self.nucleus.atp_cost_per_glutamate >= 0:
             self.cytosol.remove(molecule="glutamate", cost=self.nucleus.atp_cost_per_glutamate)
+    
+    def _simulate_atp(self):
+        current_atp = self.cytosol.get_concentration("ATP")
+        new_atp = current_atp * self.nucleus.atp_degradation_rate
+        self.cytosol.set_concentration("ATP", new_atp)
     
     def _simulate_repellent(self):
         # Release repellent into environment
@@ -2201,18 +2232,25 @@ class Compartment:
     
     def move_amount(self, target: Compartment, molecule: str, amount: float):
         
-        if amount > 0:
-            source = target
-            target = self
-        elif amount < 0:
-            source = self
-        else:
+        if amount < self.simulation.numerical_tolerance:
             return
         
-        moved_amount = source.update_amount(molecule=molecule, amount=amount)
-        target.update_amount(molecule=molecule, amount=abs(moved_amount))
+        if amount > 0:
+            
+            moved_amount = self.update_amount(molecule=molecule, amount=-amount)
+            target.update_amount(molecule=molecule, amount=abs(moved_amount))
+            
+            self.log(f"Moved > {target.id}: ", tag="branch,ion,move", values=(moved_amount, molecule))
         
-        self.log(f"Moved > {target.id}: ", tag="branch,ion,move", values=(moved_amount, molecule))
+        elif amount < 0:
+            
+            moved_amount = target.update_amount(molecule=molecule, amount=-amount)
+            self.update_amount(molecule=molecule, amount=abs(moved_amount))
+            
+            self.log(f"Received < {target.id}: ", tag="branch,ion,move", values=(moved_amount, molecule))
+        
+        else:
+            return
     
     def diffuse(self, target: Union[Compartment, List[Compartment]], diffusion_rate: float):
         
@@ -2226,6 +2264,9 @@ class Compartment:
                 
                 # Calculate the concentration difference between the branch and the target
                 source_amount = self.get_amount(molecule)
+                if source_amount < self.simulation.numerical_tolerance:
+                    continue
+                
                 concentration_difference = self.get_concentration(molecule) - target.get_concentration(molecule)
                 
                 # calculate amount of ions
@@ -2234,7 +2275,7 @@ class Compartment:
                 
                 self.log(f"Diffused > {target.id}: ", tag="diffuse,ion",
                          values=[(capacity_to_move, molecule),
-                                 (capacity_to_move / source_amount if source_amount != 0 else np.inf, "%")])
+                                 ((capacity_to_move, source_amount), "%")])
     
     def convert(self, source_molecule: str, target_molecule: str, conversion_factor: float,
                 v_max: float, k_m: float):
@@ -2248,6 +2289,11 @@ class Compartment:
         source_concentration = self.get_concentration(source_molecule)
         source_amount = self.get_amount(source_molecule)
         target_amount = self.get_amount(target_molecule)
+        
+        if source_concentration < self.simulation.numerical_tolerance:
+            return
+        
+        # todo: this should probably be linked to the volume
         
         # calculate rate
         rate = (v_max * source_concentration) / (k_m + source_concentration)
@@ -2263,8 +2309,8 @@ class Compartment:
         # logging
         self.log("Converted ", tag="conversion,branch,ion",
                  values=[
-                     (actual_rate, source_molecule), (actual_rate / source_amount, "%"),
-                     (converted_target, target_molecule), (converted_target / target_amount, "%")
+                     (actual_rate, source_molecule), ((actual_rate, source_amount), "%"),
+                     (converted_target, target_molecule), ((converted_target, target_amount), "%")
                      ])
     
     def remove(self, molecule: str, cost: float, max_amount: float = np.inf):
@@ -2272,7 +2318,9 @@ class Compartment:
         if cost < 0:
             raise ValueError(f"cost is negative: {cost}")
         
-        molecule_available = max(max_amount, self.get_amount(molecule))
+        molecule_available = min(max_amount, self.get_amount(molecule))
+        if molecule_available < self.simulation.numerical_tolerance:
+            return
         
         atp_available = self.get_amount("ATP")
         if atp_available == 0:
@@ -2303,13 +2351,15 @@ class Compartment:
             for v, metric in values:
                 
                 if metric == "%":
-                    if v != np.inf:
-                        
+                    
+                    v1, v2 = v
+                    if v2 != 0:
+                        msg = msg.rstrip()
                         if msg[-1] == ",":
                             msg = msg[:-1]
                         
-                        msg += f"({v * 100:.1f}%), "
-                        # msg += f"({humanize.fractional(v)})"
+                        msg += f" ({v1 / v2 * 100:.1f}%), "
+                
                 else:
                     if v > 0:
                         msg += f"+{humanize.metric(v, 'mol')} {metric}, "
@@ -2318,6 +2368,7 @@ class Compartment:
                     else:
                         msg += f"+-0 {metric}, "
         
+        msg = msg.rstrip()
         if msg[-1] == ",":
             msg = msg[:-1]
         
@@ -2381,21 +2432,68 @@ class ExtracellularSpace(Compartment):
     
     def update_concentration(self, molecule: str, concentration: float) -> float:
         
+        updated = self.update_amount(molecule=molecule, amount=self.get_concentration(molecule) * self.volume)
+        return updated / self.volume
+    
+    def update_amount(self, molecule: str, amount: float) -> float:
+        
         self.molecule_exists(molecule=molecule)
         
-        current_concentration = self.get_concentration(molecule)
-        if concentration < 0:
-            concentration = - min(current_concentration, abs(concentration))
-        elif concentration == 0:
+        x, y = self.get_xy_coordinates()
+        num_pixel = len(x)
+        
+        if amount < 0:
+            
+            amount = abs(amount)
+            
+            available = self.get_amount(molecule)
+            amount_change = min(available, amount)
+            
+            if amount_change < self.simulation.numerical_tolerance:
+                return 0
+            
+            remaining_amount = amount_change
+            flat_indices = np.argsort(self.environment_grid.shared_arrays[molecule][0][x, y].ravel())[
+                           ::-1]  # Descending sort
+            flat_grid = self.environment_grid.shared_arrays[molecule][0][x, y].ravel()
+            
+            for idx in flat_indices:
+                reduction = min(flat_grid[idx], remaining_amount)
+                flat_grid[idx] -= reduction
+                remaining_amount -= reduction
+                if remaining_amount < self.simulation.numerical_tolerance:
+                    break
+            
+            self.environment_grid.shared_arrays[molecule][0][x, y] = flat_grid.reshape(
+                    self.environment_grid.shared_arrays[molecule][0][x, y].shape)
+            
+            if self.simulation.debug:
+                pixel_below_0 = np.where(self.environment_grid.shared_arrays[molecule][0][x, y] < 0)[0]
+                if len(pixel_below_0) > 0:
+                    self.log(f"Debug glu pixel below 0: {pixel_below_0}")
+            
+            self.log("Imported ", tag="imported,ion",
+                     values=[(amount_change, molecule), ((amount_change, available), "%")])
+            
+            return amount_change
+        
+        elif amount > 0:
+            
+            available = self.get_concentration(molecule)
+            concentration_per_pixel = (amount / self.volume) / num_pixel
+            
+            concentration_change = np.zeros(num_pixel, dtype=float)
+            concentration_change[:] = concentration_per_pixel
+            
+            self.environment_grid.shared_arrays[molecule][0][x, y] += concentration_change
+            
+            self.log("Exported ", tag="exported,ion",
+                     values=[(amount, molecule), ((np.sum(concentration_change), available), "%")])
+            
+            return amount
+        
+        else:
             return 0
-        
-        self.log("Exported ", tag="exported,ion", values=(concentration, molecule))
-        
-        new_concentration = current_concentration + concentration
-        
-        self.set_concentration(molecule=molecule, concentration=new_concentration)
-        
-        return concentration
 
 
 class IonFlowModel:
@@ -2604,24 +2702,22 @@ class IonFlowModel:
             AVF = occupied_volume / external_space
             SVR = 1 / (1 - np.exp(0.1 * (AVF - 0.5)))  # Calculate SVR based on AVF
         
-        # Calculate the total flow of calcium ions in exchange between the cytosol and endoplasmic reticulum
+        # Ca2+ flow cytosol <-> ER
         J_ER = self.ca_flow_er_ip3() + self.ca_flow_er_leak() - self.ca_flow_er_pump()
         
         # todo: is this amount or concentration?
         self.CY.move_amount(target=self.ER, molecule="calcium",
                             amount=(1 - SVR) * J_ER * dt * (1 - 1 / self.er_cytosol_volume_ratio))
         
-        # Calculate the total flow of calcium ions through the plasma membrane
+        # Ca2+ flow cytosol <-> ext (plasma membrane)
         J_pm = self.ca_flow_pm_in() + self.ca_flow_pm_glu() - self.ca_flow_pm_out()
         # todo: is this amount or concentration?
-        self.CY.move_amount(target=self.ES, molecule="calcium",
-                            amount=SVR * J_pm * dt)
+        self.CY.move_amount(target=self.ES, molecule="calcium", amount=SVR * J_pm * dt)
         
         # Calculate the total flow of IP3
         I_total_IP3 = self.ip3_glu() + self.ip3_ca() - self.ip3_eq()
         # todo: is this amount or concentration?
-        self.CY.update_amount(molecule="IP3",
-                              amount=SVR * I_total_IP3 * dt)
+        self.CY.update_amount(molecule="IP3", amount=SVR * I_total_IP3 * dt)
 
 
 class AstrocyteNode:
