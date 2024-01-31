@@ -74,10 +74,43 @@ class Loggable:
         else:
             raise ValueError(f"unknown id type: {self.id}, {type(self.id)}")
     
-    def log(self, msg: str, level: int = logging.INFO, tag: str = "default"):
+    def log(self, msg: str, values: Union[Tuple[float, str], List[Tuple[float, str]]] = None,
+            level: int = logging.INFO, tag: str = "default"):
         
-        if self.message_logger is not None:
-            self.message_logger.log(msg=msg, tag=tag, level=level, caller_id=self.id)
+        if values is not None:
+            if isinstance(values, tuple):
+                values = [values]
+            
+            for v, metric in values:
+                
+                if metric == "%":
+                    
+                    v1, v2 = v
+                    if v2 != 0:
+                        msg = msg.rstrip()
+                        if msg[-1] == ",":
+                            msg = msg[:-1]
+                        
+                        msg += f" ({v1 / v2 * 100:.1f}%), "
+                    else:
+                        msg += f" (inf %)"
+                
+                else:
+                    if v > 0:
+                        msg += f"+{humanize.metric(v, 'mol')} {metric}, "
+                    elif v < 0:
+                        msg += f"{humanize.metric(v, 'mol')} {metric}, "
+                    else:
+                        msg += f"+-0 {metric}, "
+        
+        msg = msg.rstrip()
+        if msg[-1] == ",":
+            msg = msg[:-1]
+        
+        message_logger = self.message_logger
+        
+        if message_logger is not None:
+            message_logger.log(msg=msg, tag=tag, level=level, caller_id=self.id)
         else:
             msg = f"{self.id.hex}:{tag}:{msg}"
             print(msg)
@@ -1238,7 +1271,7 @@ class Astrocyte(Loggable):
                  glu_v_max=100, glu_k_m=0.5, trend_history=30,
                  repellent_volume_factor=0.00001, repellent_surface_factor=0.00001,
                  atp_cost_per_glutamate=- 18, atp_cost_per_unit_surface=1,
-                 atp_degradation_rate=0.9,
+                 atp_degradation_rate=0.99,
                  max_history: int = 1000, max_tries=5,
                  ion_flow_param: dict = None,
                  er_volume_ratio: float = 0.01,
@@ -1804,10 +1837,9 @@ class AstrocyteBranch(Loggable):
         
         if abs(combined_trend) < min_trend_amplitude:
             
-            if combined_trend > self.nucleus.numerical_tolerance:
-                self.log(f"Growth trend too low: {combined_trend:.1E} "
-                         f"({combined_trend / min_trend_amplitude * 100:.1f}%)",
-                         tag="branch,growth,act")
+            self.log(f"Growth trend too low: ", values=[
+                (combined_trend, 'trend'), ((combined_trend, min_trend_amplitude), "%")
+                ], tag="branch,growth,act")
             
             return
         
@@ -1881,8 +1913,6 @@ class AstrocyteBranch(Loggable):
         spawn_locations = self._find_best_spawn_location()
         
         if spawn_locations is None:
-            self.counter_failed_spawn += 1
-            self.log(f"No branch found.", tag="branch,act,spawn,fail")
             return
         
         best_branch, steepness = spawn_locations
@@ -2042,7 +2072,7 @@ class AstrocyteBranch(Loggable):
         candidate_branches = []
         angle_increment = 2 * np.pi / num_candidates
         
-        for i in range(num_candidates):
+        for i in range(num_candidates + int(np.floor(np.log10(1 + self.counter_failed_spawn)))):
             angle = i * angle_increment + np.random.random() * angle_increment
             dx = np.cos(angle)
             dy = np.sin(angle)
@@ -2053,6 +2083,7 @@ class AstrocyteBranch(Loggable):
             
             X, Y = self.nucleus.environment_grid.grid_size
             if end_x > X or end_x < 0 or end_y > Y or end_y < 0:
+                self.counter_failed_spawn += 1
                 continue
             
             # create candidate branch
@@ -2083,6 +2114,9 @@ class AstrocyteBranch(Loggable):
                 if combined_steepness > max_steepness:
                     max_steepness = combined_steepness
                     best_candidate = candidate
+            
+            else:
+                self.counter_failed_spawn += 1
         
         if best_candidate is not None:
             # Normalize the best direction vector
@@ -2241,6 +2275,7 @@ class Compartment:
             target.update_amount(molecule=molecule, amount=abs(moved_amount))
             
             self.log(f"Moved > {target.id}: ", tag="branch,ion,move", values=(moved_amount, molecule))
+            return moved_amount
         
         elif amount < 0:
             
@@ -2248,6 +2283,7 @@ class Compartment:
             self.update_amount(molecule=molecule, amount=abs(moved_amount))
             
             self.log(f"Received < {target.id}: ", tag="branch,ion,move", values=(moved_amount, molecule))
+            return moved_amount
         
         else:
             return
@@ -2264,6 +2300,7 @@ class Compartment:
                 
                 # Calculate the concentration difference between the branch and the target
                 source_amount = self.get_amount(molecule)
+                target_amount = target.get_amount(molecule)
                 if source_amount < self.simulation.numerical_tolerance:
                     continue
                 
@@ -2271,11 +2308,23 @@ class Compartment:
                 
                 # calculate amount of ions
                 capacity_to_move = diffusion_rate * concentration_difference
-                self.move_amount(target=target, molecule=molecule, amount=capacity_to_move)
+                if capacity_to_move < self.simulation.numerical_tolerance:
+                    continue
                 
-                self.log(f"Diffused > {target.id}: ", tag="diffuse,ion",
-                         values=[(capacity_to_move, molecule),
-                                 ((capacity_to_move, source_amount), "%")])
+                actually_moved = self.move_amount(target=target, molecule=molecule, amount=capacity_to_move)
+                
+                if concentration_difference < 0:
+                    self.log(f"Diffused < {target.id}: ", tag="diffuse,ion",
+                             values=[(actually_moved, molecule),
+                                     ((actually_moved, source_amount), "%"),
+                                     ((actually_moved, target_amount), "%")
+                                     ])
+                else:
+                    self.log(f"Diffused > {target.id}: ", tag="diffuse,ion",
+                             values=[(actually_moved, molecule),
+                                     ((actually_moved, source_amount), "%"),
+                                     ((actually_moved, target_amount), "%")
+                                     ])
     
     def convert(self, source_molecule: str, target_molecule: str, conversion_factor: float,
                 v_max: float, k_m: float):
@@ -2359,6 +2408,8 @@ class Compartment:
                             msg = msg[:-1]
                         
                         msg += f" ({v1 / v2 * 100:.1f}%), "
+                    else:
+                        msg += f" (inf %)"
                 
                 else:
                     if v > 0:
