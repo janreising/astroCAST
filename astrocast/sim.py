@@ -277,7 +277,7 @@ class Visualization:
         
         return cell_bodies, branches
     
-    def plot_astrocyte_by_line(self, line_thickness=(0.2, 1.5), line_scaling: Literal['log', 'sqrt'] = 'log',
+    def plot_astrocyte_by_line(self, line_thickness=(0.1, 2.5), line_scaling: Literal['log', 'sqrt'] = 'log',
                                figsize=(5, 5), ax: plt.Axes = None, molecule: str = None,
                                normalize: Literal['max'] = None,
                                cmap=plt.cm.viridis):
@@ -1274,9 +1274,10 @@ class Astrocyte(Loggable):
                  atp_degradation_rate=0.99,
                  max_history: int = 1000, max_tries=5,
                  ion_flow_param: dict = None,
-                 er_volume_ratio: float = 0.01,
-                 cytosol_concentration: Union[dict, frozendict] = frozendict(calcium=1e-6, glutamate=0, ATP=1e-6),
-                 er_concentration: Union[dict, frozendict] = frozendict(calcium=10e-6),
+                 er_volume_ratio: float = 1e-3,
+                 cytosol_concentration: Union[dict, frozendict] = frozendict(calcium=1e-9, glutamate=0, ATP=1e-6,
+                                                                             IP3=1e-6),
+                 er_concentration: Union[dict, frozendict] = frozendict(calcium=10e-3),
                  uid: Union[str, int, uuid.UUID] = None
                  ):
         
@@ -1529,7 +1530,7 @@ class AstrocyteBranch(Loggable):
                          settings=Loggable.extract_settings(locals()), uid=uid)
         
         # Instances
-        self.parent: AstrocyteBranch = parent
+        self.parent: Union[AstrocyteBranch, Astrocyte] = parent
         self.nucleus = nucleus
         self.spatial_index = nucleus.spatial_index
         self.branch_counter = 0
@@ -1545,16 +1546,26 @@ class AstrocyteBranch(Loggable):
         self.glutamate_uptake_capacity = self.calculate_removal_capacity(self.nucleus.glutamate_uptake_rate)
         self.pruned = False
         self.counter_failed_spawn = 0
+        self.er_volume_ratio = self.nucleus.er_volume_ratio
         if self.nucleus.repellent_name is not None and self.repellent_release is not None:
             self.repellent_release = self.calculate_repellent_release(self.nucleus.repellent_surface_factor,
                                                                       self.nucleus.repellent_volume_factor)
         
         # create compartments
-        # todo: should the cytosol / ER concentration be dependent on the parent?
         self.cytosol = Compartment(simulation=nucleus.simulation, volume=self.volume,
-                                   start_concentration=cytosol_concentration, uid=f"{self.get_short_id()}.cyt")
-        self.ER = Compartment(simulation=nucleus.simulation, volume=self.nucleus.er_volume_ratio * self.volume,
-                              start_concentration=er_concentration, uid=f"{self.get_short_id()}.er")
+                                   start_concentration=cytosol_concentration,
+                                   uid=f"{self.get_short_id()}.cyt")
+        self.cytosol.equalize_concentration(self.parent.cytosol)
+        self.log(f"Debug ", values=[
+            (self.cytosol.get_concentration("calcium"), 'M'),
+            (self.parent.cytosol.get_concentration('calcium'), 'M')
+            ])
+        
+        self.ER = Compartment(simulation=nucleus.simulation, volume=self.er_volume_ratio * self.volume,
+                              start_concentration=er_concentration,
+                              uid=f"{self.get_short_id()}.er")
+        self.cytosol.equalize_concentration(self.parent.ER)
+        
         self.extracellular_space = ExtracellularSpace(simulation=nucleus.simulation, pixel=self.interacting_pixels,
                                                       uid=f"{self.get_short_id()}.ext")
         
@@ -1641,16 +1652,9 @@ class AstrocyteBranch(Loggable):
             self.log(f"Cannot find {molecule} in history.", level=logging.WARNING, tag="error,trend")
             return 0
         
-        # extract relevant trend values
-        history = np.array(history)[:self.nucleus.trend_history].astype(float)
-        
-        # Create an array of time points (assuming equal time intervals)
-        x = np.arange(len(history))
-        
-        # Perform linear regression
-        slope, _ = np.polyfit(x, history, 1)
-        
-        return slope
+        # trend as differential
+        trend = np.sum(np.diff(history))
+        return trend
     
     def get_interacting_pixels(self) -> np.ndarray:
         """
@@ -1665,7 +1669,7 @@ class AstrocyteBranch(Loggable):
         
         return interacting_pixels
     
-    def _calculate_diffusion_rate(self, radius: float) -> float:
+    def _calculate_diffusion_rate(self, radius: float, alpha=0.75) -> float:
         """
         Calculate the diffusion rate of ions along the branch.
 
@@ -1677,10 +1681,13 @@ class AstrocyteBranch(Loggable):
         length_of_branch = np.sqrt((self.end.x - self.start.x) ** 2 + (self.end.y - self.start.y) ** 2)
         
         # Apply the formula for diffusion rate
-        diffusion_rate = self.nucleus.diffusion_coefficient * (1 / length_of_branch) * (
-                1 / (np.pi * radius ** 2))
         
-        return diffusion_rate
+        c1 = alpha
+        c2 = np.log10((self.nucleus.min_radius + self.nucleus.max_branch_radius) / 2)
+        x = np.log10(radius)
+        diffusion_rate = 1 / (1 + np.exp(-c1 * (x - c2)))
+        
+        return diffusion_rate * self.nucleus.diffusion_coefficient
     
     def diffuse_molecules(self):
         
@@ -1832,10 +1839,9 @@ class AstrocyteBranch(Loggable):
             min_radius: The minimum allowed radius of the end node to prevent over-shrinkage.
         """
         
-        # atp_trend = self.get_trend("ATP", intra=True)
+        atp_trend = self.get_trend("ATP", intra=True)
         glutamate_trend = self.get_trend("glutamate", intra=False)
-        # combined_trend = glutamate_trend - atp_trend
-        combined_trend = glutamate_trend
+        combined_trend = max(glutamate_trend, -atp_trend)
         
         if abs(combined_trend) < min_trend_amplitude:
             
@@ -1859,17 +1865,23 @@ class AstrocyteBranch(Loggable):
             self.action_prune()
             return
         
-        new_surface_area = self.calculate_branch_surface(start=self.start, end=new_end)
-        
         # Ensure the end node radius is not less than the start node radius after growth/shrinkage
         if new_end.radius >= self.start.radius:
-            self.log(f"Growth constrained by start node size: "
-                     f"{humanize.metric(new_end.radius, 'm')} vs. "
-                     f"{humanize.metric(self.start.radius, 'm')}",
+            self.log(f"Growth constrained by start node size: ",
+                     values=[(new_end.radius, "m"), (self.start.radius, "m")],
                      tag="branch,growth,act")
             return
         
+        elif len(self.children) > 0:
+            min_radius = np.min([child.end.radius for child in self.children])
+            if new_end.radius <= min_radius:
+                self.log(f"Growth constrained by children's node size: ",
+                         values=[(new_end.radius, "m"), (min_radius, "m")],
+                         tag="branch,growth,act")
+                return
+        
         # Calculate the required ATP based on the change in surface area
+        new_surface_area = self.calculate_branch_surface(start=self.start, end=new_end)
         delta_surface = new_surface_area - self.surface_area
         required_atp = delta_surface * atp_cost_per_unit_surface
         
@@ -2047,6 +2059,50 @@ class AstrocyteBranch(Loggable):
             self.log(
                     f"Insufficient ATP to move branch ({atp_cost:.2f} !< {self.cytosol.get_amount('ATP'):.2f}).",
                     tag="branch,act,spawn,move,fail")
+    
+    def _find_gradient_steep_direction(self, concentration_array: np.ndarray) -> np.ndarray:
+        """
+        Calculate the gradient of the concentration array and identify the steepest direction at each point.
+
+        The function computes the gradient in both x and y directions and then calculates the direction and magnitude of the steepest ascent.
+
+        Args:
+          concentration_array: A 2D numpy array of concentration values.
+
+        Returns:
+          A 2D numpy array where each element is a tuple (dx, dy) representing the direction of the steepest ascent at that point.
+
+        
+        """
+        
+        # check if too many fails
+        spawn_probability = 1 if self.counter_failed_spawn == 0 else 1 / self.counter_failed_spawn
+        spawn_probability = max(0.01, spawn_probability)
+        if spawn_probability <= np.random.random():
+            self.log(f"Spawn failed too many times: {self.counter_failed_spawn} ({spawn_probability * 100:.1f}%)",
+                     tag="branch,act,spawn,fail")
+            return None
+        
+        # New branch radius
+        new_branch_radius = self.end.radius * self.nucleus.spawn_radius_factor
+        if new_branch_radius < self.nucleus.min_radius:
+            self.log(f"Spawned branch would be below minimum radius "
+                     f"{humanize.metric(new_branch_radius, 'm')} !> "
+                     f"{humanize.metric(self.nucleus.min_radius, 'm')}",
+                     tag="branch,act,spawn,fail")
+            return None
+        
+        # Calculate the gradient in x and y direction
+        grad_x, grad_y = np.gradient(concentration_array)
+        
+        num_candidates = 1 + int(np.floor(np.log10(1 + self.counter_failed_spawn)))
+        
+        # todo continue here
+        
+        # Combine the direction arrays
+        direction_array = np.dstack((dir_x, dir_y))
+        
+        return direction_array
     
     def _find_best_spawn_location(self, num_candidates=8) -> Union[Tuple[AstrocyteBranch, float], None]:
         
@@ -2393,6 +2449,16 @@ class Compartment:
                      (to_remove_atp, "ATP"), (to_remove_atp / atp_available, "%"),
                      ])
     
+    def equalize_concentration(self, target: Compartment):
+        
+        for molecule in target.get_tracked_molecules():
+            if self.get_concentration(molecule) != 0:
+                logging.warning(f"Attempting to equalize compartment with non-zero concentration")
+            
+            target_concentration = target.get_concentration(molecule)
+            required_amount = target_concentration * self.volume
+            target.move_amount(target=self, molecule=molecule, amount=required_amount)
+    
     def log(self, msg: str, values: Union[Tuple[float, str], List[Tuple[float, str]]] = None,
             level: int = logging.INFO, tag: str = "default"):
         
@@ -2557,11 +2623,13 @@ class ExtracellularSpace(Compartment):
 
 
 class IonFlowModel:
-    def __init__(self, branch: AstrocyteBranch, total_cytosolic_ca_concentration: float = 2.0,
-                 er_cytosol_volume_ratio: float = 0.185, max_ca_channel_flux: float = 6.0,
-                 ca_leak_flux_constant: float = 0.11, max_ca_uptake: float = 2.2,
+    def __init__(self, branch: AstrocyteBranch,
+                 max_ca_channel_flux: float = 6.0,
+                 ca_leak_flux_constant: float = 0.11,
+                 max_ca_uptake: float = 2e2,  # 2.2
                  max_ip3_production_rate: float = 0.3, ca_extrusion_rate_constant: float = 0.5,
-                 atp_ca_pump_activation_constant: float = 0.1, ip3_dissociation_constant: float = 0.13,
+                 atp_ca_pump_activation_constant: float = 0.1,
+                 ip3_dissociation_constant: float = 0.13,
                  ca_activation_constant: float = 82.0, ca_leak_rate_plasma_membrane: float = 0.025,
                  max_activation_dependent_ca_influx: float = 0.2, half_saturation_constant_ca_entry: float = 1.0,
                  ip3_coupling_coefficient: float = 0.8,
@@ -2603,8 +2671,6 @@ class IonFlowModel:
         
         # Assign parameters to class properties
         self.branch = branch
-        self.total_cytosolic_ca_concentration = total_cytosolic_ca_concentration
-        self.er_cytosol_volume_ratio = er_cytosol_volume_ratio
         self.max_ca_channel_flux = max_ca_channel_flux
         self.ca_leak_flux_constant = ca_leak_flux_constant
         self.max_ca_uptake = max_ca_uptake
@@ -2619,7 +2685,7 @@ class IonFlowModel:
         self.ip3_coupling_coefficient = ip3_coupling_coefficient
         self.ca_stimulation_ip3_production_dissociation_constant = ca_stimulation_ip3_production_dissociation_constant
         self.ip3_production_rate_glutamate = ip3_production_rate_glutamate
-        self.glutamate_stimulation_ip3_production_dissociation_constant = glutamate_stimulation_ip3_production_dissociation_constant
+        self.glu_stimulated_ip3_production_diss_constant = glutamate_stimulation_ip3_production_dissociation_constant
         self.steady_state_ip3_concentration = steady_state_ip3_concentration
         self.ip3_loss_rate_constant = ip3_loss_rate_constant
         
@@ -2658,7 +2724,10 @@ class IonFlowModel:
         
         # Steady-state value of the gating variable n
         n_inf = self["CY.calcium"] / (self["CY.calcium"] + self.ca_activation_constant)
-        return self.er_cytosol_volume_ratio * self.max_ca_channel_flux * m_inf ** 3 * n_inf ** 3 * (
+        
+        # todo: missing h parameter
+        
+        return self.branch.er_volume_ratio * self.max_ca_channel_flux * m_inf ** 3 * n_inf ** 3 * (
                 self["ER.calcium"] - self["CY.calcium"])
     
     def ca_flow_er_leak(self):
@@ -2671,7 +2740,9 @@ class IonFlowModel:
         Returns:
             The leakage flux of calcium ions from the ER to the cytosol.
         """
-        return self.er_cytosol_volume_ratio * self.ca_leak_flux_constant * (self["ER.calcium"] - self["CY.calcium"])
+        # todo used to be er_cytosol_volume_ratio
+        return self.branch.er_volume_ratio * self.ca_leak_flux_constant * (self["ER.calcium"] - self[
+            "CY.calcium"])
     
     def ca_flow_er_pump(self):
         """
@@ -2698,13 +2769,6 @@ class IonFlowModel:
         
         return flow
     
-    def ca_flow_pm_glu(self):
-        """
-        Calculates the glutamate-induced influx (JGlu) of calcium ions through the plasma membrane.
-        """
-        return self.ip3_production_rate_glutamate * self["CY.glutamate"] / (
-                self.glutamate_stimulation_ip3_production_dissociation_constant + self["CY.glutamate"])
-    
     def ca_flow_pm_out(self):
         """
         Calculates the extrusion (Jout) of calcium ions by the plasma membrane pump.
@@ -2722,7 +2786,7 @@ class IonFlowModel:
         Calculate the glutamate-driven IP3 production.
         """
         return self.ip3_production_rate_glutamate * self["CY.glutamate"] / (
-                self.glutamate_stimulation_ip3_production_dissociation_constant + self["CY.glutamate"])
+                self.glu_stimulated_ip3_production_diss_constant + self["CY.glutamate"])
     
     def ip3_ca(self):
         """
@@ -2763,14 +2827,14 @@ class IonFlowModel:
             SVR = 1 / (1 - np.exp(0.1 * (AVF - 0.5)))  # Calculate SVR based on AVF
         
         # Ca2+ flow cytosol <-> ER
-        J_ER = self.ca_flow_er_ip3() + self.ca_flow_er_leak() - self.ca_flow_er_pump()
+        J_ER = - self.ca_flow_er_ip3() - self.ca_flow_er_leak() + self.ca_flow_er_pump()
         
         # todo: is this amount or concentration?
         self.CY.move_amount(target=self.ER, molecule="calcium",
-                            amount=(1 - SVR) * J_ER * dt * (1 - 1 / self.er_cytosol_volume_ratio))
+                            amount=(1 - SVR) * J_ER * dt * (1 - 1 / self.branch.er_volume_ratio))
         
         # Ca2+ flow cytosol <-> ext (plasma membrane)
-        J_pm = self.ca_flow_pm_in() + self.ca_flow_pm_glu() - self.ca_flow_pm_out()
+        J_pm = - self.ca_flow_pm_in() + self.ca_flow_pm_out()
         # todo: is this amount or concentration?
         self.CY.move_amount(target=self.ES, molecule="calcium", amount=SVR * J_pm * dt)
         
@@ -2869,16 +2933,17 @@ class MessageLogger:
     
     def save_messages(self):
         if self.log_path is not None:
-            with open(self.log_path, "w") as txt:
+            with open(self.log_path, "a") as txt:
                 for msg in self.messages:
                     txt.write(
                             f"{msg['timestamp']} - S{msg['step']} - L{msg['level']} - {msg['caller_id']}:"
                             f" {msg['message']}\n")
+            self.messages = []
 
 
 class DataLogger:
     def __init__(self, save_path: Union[Path, None], overwrite=False,
-                 log_interval: int = 1, save_checkpoint_interval: Union[int, None] = 1):
+                 log_interval: int = None, save_checkpoint_interval: Union[int, None] = 1):
         
         self.messages = []
         self.steps = 0
@@ -2920,13 +2985,14 @@ class DataLogger:
         del self.tracked_objects[obj_id]
     
     def log_state(self):
-        for obj_id, obj in self.tracked_objects.items():
-            if self.steps % self.log_interval == 0:
-                state = obj.log_state()
-                if state is not None and len(state) > 0:
-                    self.log_data[obj_id][self.steps] = state
-        
-        self.save_checkpoint()
+        if self.log_interval is not None:
+            for obj_id, obj in self.tracked_objects.items():
+                if self.steps % self.log_interval == 0:
+                    state = obj.log_state()
+                    if state is not None and len(state) > 0:
+                        self.log_data[obj_id][self.steps] = state
+            
+            self.save_checkpoint()
     
     def save_checkpoint(self):
         
