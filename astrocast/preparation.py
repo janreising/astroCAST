@@ -258,7 +258,6 @@ class Input:
                 tuple([int(c * rescale[1]) for c in chunks_original[2]]))
             
             logging.warning(f"Resizing {k} from {arr.shape} to {new_shape}")
-            logging.warning(f"Rescaling {k} from {chunks_original} to {new_chunks}")
             
             with warnings.catch_warnings():
                 warnings.filterwarnings("ignore", category=UserWarning)
