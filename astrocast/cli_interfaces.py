@@ -392,13 +392,10 @@ def motion_correction(
 @cli.command()
 @click.argument('input-path', type=click.Path())
 @click_custom_option('--output-path', type=None, help='Path to save the output data.')
-@click_custom_option(
-        '--loc-in', type=click.STRING, default="", help='Location of the data in the HDF5 file (if applicable).'
-        )
-@click_custom_option(
-        '--method', type=click.Choice(['background', 'dF', 'dFF']), default='dF',
-        help='Method to use for delta calculation.'
-        )
+@click_custom_option('--loc-in', type=click.STRING, default="",
+                     help='Location of the data in the HDF5 file (if applicable).')
+@click_custom_option('--method', type=click.Choice(['background', 'dF', 'dFF']), default='dF',
+                     help='Method to use for delta calculation.')
 @click_custom_option(
         '--chunk-strategy', type=click.STRING, default="balanced",
         help='Strategy to infer chunks: ["balanced", "Z", "XY"]'
