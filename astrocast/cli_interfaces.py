@@ -18,11 +18,7 @@ from colorama import Fore, init as init_colorama
 from prettytable import PrettyTable
 from tqdm import tqdm
 
-from astrocast.helper import is_docker
-from astrocast.preparation import Input
-
 init_colorama(autoreset=True)
-
 click_custom_option = partial(click.option, show_default=True)
 
 
@@ -711,16 +707,17 @@ def train_denoiser(
         help='Data type for the output. If "same", the data type of the input will be used.'
         )
 @click_custom_option(
-        "--infer-chunks", is_flag=True, default=False, help="Whether to infer the chunks in the output file."
+        '--chunk-strategy', type=click.Choice(["None", 'balanced', 'XY', 'Z']), default="balanced",
+        help='Infer chunks size.'
         )
 @click_custom_option(
         '--chunks', type=(click.INT, click.INT, click.INT), default=None,
-        help='Chunk size for saving the results in the output file. If not provided, a default chunk size will be used.'
+        help='Chunk size to use when saving to HDF5 or TileDB.'
         )
 @click_custom_option('--rescale', type=click.BOOL, default=True, help='Whether to rescale the output values.')
 def denoise(
         input_path, batch_size, input_size, pre_post_frames, gap_frames, z_select, logging_level, model, loc_out, dtype,
-        infer_chunks, chunks, rescale, overlap, padding, normalize, loc_in, in_memory, output_file
+        chunk_strategy, chunks, rescale, overlap, padding, normalize, loc_in, in_memory, output_file
         ):
     """
     Denoise the input data using the SubFrameGenerator class and infer method.
@@ -735,10 +732,7 @@ def denoise(
     
     from astrocast.denoising import SubFrameGenerator
     
-    # todo: this is actually superseded
-    chunks = parse_chunks(infer_chunks, chunks)
-    
-    with UserFeedback(params=locals(), logging_level=logging_level):
+    with (UserFeedback(params=locals(), logging_level=logging_level)):
         # Initializing the SubFrameGenerator instance
         sub_frame_generator = SubFrameGenerator(paths=input_path, batch_size=batch_size, input_size=input_size,
                                                 pre_post_frames=pre_post_frames, gap_frames=gap_frames,
@@ -749,8 +743,8 @@ def denoise(
         
         # Running the infer method
         result = sub_frame_generator.infer(
-                model=model, output=output_file, out_loc=loc_out, dtype=dtype, chunk_size=chunks, rescale=rescale
-                )
+                model=model, output=output_file, out_loc=loc_out, dtype=dtype,
+                chunks=chunks, chunk_strategy=chunk_strategy, rescale=rescale)
         
         logging.info(f"saved inference to: {output_file}")
 
@@ -843,6 +837,7 @@ def detect_events(
     """
     
     from astrocast.detection import Detector
+    from astrocast.helper import is_docker
     
     with UserFeedback(params=locals(), logging_level=logging_level):
         
@@ -1119,6 +1114,8 @@ def export_video(
     Example:
     export_video('input.h5', 'output.h5', loc_in='dataset1', loc_out='dataset2', z_select=(10, 20), lazy=True, chunk_size=(100, 100), compression='gzip', overwrite=True)
     """
+    
+    from astrocast.preparation import Input
     
     if Path(output_path).exists() and not overwrite:
         logging.error(

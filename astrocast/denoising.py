@@ -1204,8 +1204,8 @@ class SubFrameGenerator(tf.keras.utils.Sequence):
     
     def infer(
             self, model: Union[str, Path], output: Union[str, Path] = None, out_loc: str = None,
-            dtype: Union[Literal["same"], np.dtype] = "same", chunk_size: Union[str, Tuple[int, int, int]] = None,
-            rescale: bool = True
+            dtype: Union[Literal["same"], np.dtype] = "same", chunks: Tuple[int, int, int] = None,
+            chunk_strategy: Literal['balanced', 'XY', 'Z'] = 'balanced', rescale: bool = True
             ) -> Union[np.ndarray, Path, None]:
         """
         Performs inference on video data using a provided model and generates output in specified format.
@@ -1224,8 +1224,8 @@ class SubFrameGenerator(tf.keras.utils.Sequence):
             output: Path to the file where the output will be saved. If None, the output array is returned.
             out_loc: Location within the .h5 file to store the output. Required if output is an .h5 file.
             dtype: Data type of the output. 'same' uses the same dtype as the input data.
-            # TODO chunk_size should probably be updated
-            chunk_size: Size of chunks for .h5 file output. Can be 'infer', an integer, or None.
+            chunk_strategy: Strategy to use when inferring size of chunks.
+            chunks: Chunk size to use when saving to HDF5 or TileDB.
             rescale: Whether to rescale the output based on global descriptive statistics.
 
         Returns:
@@ -1292,9 +1292,9 @@ class SubFrameGenerator(tf.keras.utils.Sequence):
         items = self.items
         
         if "padding" in items.columns:
-            pad_z_max = items.padding.apply(lambda x: x[1]).max()
-            pad_x_max = items.padding.apply(lambda x: x[3]).max()
-            pad_y_max = items.padding.apply(lambda x: x[5]).max()
+            pad_z_max = items.padding.apply(lambda _x: _x[1]).max()
+            pad_x_max = items.padding.apply(lambda _x: _x[3]).max()
+            pad_y_max = items.padding.apply(lambda _x: _x[5]).max()
         else:
             pad_z_max, pad_x_max, pad_y_max = 0, 0, 0
         
@@ -1309,12 +1309,12 @@ class SubFrameGenerator(tf.keras.utils.Sequence):
             
             assert out_loc is not None, "when exporting results to .h5 file please provide 'out_loc' flag"
             
-            if chunk_size is None:
+            if chunks is None:
                 io = IO()
-                chunk_size = io.infer_chunks(output_shape, dtype, strategy="Z")
+                chunks = io.infer_chunks(output_shape, dtype, strategy=chunk_strategy)
             
             f = h5.File(output, "a")
-            rec = f.create_dataset(out_loc, shape=output_shape, chunks=chunk_size, dtype=dtype)
+            rec = f.create_dataset(out_loc, shape=output_shape, chunks=chunks, dtype=dtype)
         else:
             rec = np.zeros(output_shape, dtype=dtype)
         
@@ -1343,7 +1343,6 @@ class SubFrameGenerator(tf.keras.utils.Sequence):
             for _, row in x_items.iterrows():
                 
                 im = y[c, :, :, 0]
-                im_shape_orig = im.shape
                 
                 pad_z0, pad_z1, pad_x0, pad_x1, pad_y0, pad_y1 = row.padding
                 overlap_x_half, overlap_y_half = int(self.overlap / 2), int(self.overlap / 2)
@@ -1367,6 +1366,7 @@ class SubFrameGenerator(tf.keras.utils.Sequence):
                 if rescale:
                     mean, std = self.descr[self.items.iloc[0].path]
                     im = (im * std) + mean
+                    im = im.astype(dtype)
                 
                 gap = self.signal_frames[0] + self.gap_frames[0]
                 rec[row.z0 + gap, x0:x1, y0:y1] = im
