@@ -959,7 +959,7 @@ def move_h5_dataset(input_path, output_path, loc_in, loc_out, overwrite):
                     del out_[loc_out]
             
             data = in_[loc_in]
-            out_.create_dataset(loc_out, data=data)
+            out_.create_dataset(loc_out, data=data, compression=data.compression, chunks=data.chunks)
             print("done copying")
 
 
