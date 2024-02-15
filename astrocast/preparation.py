@@ -625,7 +625,9 @@ class IO:
             with h5py.File(path, "r") as data:
                 
                 if loc not in data:
-                    raise ValueError(f"cannot find dataset in file ({path}): {list(data.keys())}")
+                    from cli_interfaces import visualize_h5
+                    visualize_h5(path=Path(path))
+                    raise ValueError(f"cannot find dataset ({loc}) in file ({path}): {list(data.keys())}")
                 
                 if z_slice is not None:
                     data = data[loc][z0:z1]
