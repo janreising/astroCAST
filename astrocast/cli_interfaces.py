@@ -1329,7 +1329,12 @@ def push_slurm_tasks(log_path, cfg_path, data_path, tasks, base_command, account
                         
                         req_time = ""
                         for num in numbers:
-                            req_time += f"{int(int(num) * multiplier)}:"
+                            num = f"{int(int(num) * multiplier)}"
+                            
+                            if num == "0":
+                                num = "00"
+                            
+                            req_time += f"{num}:"
                         
                         req_time = req_time[:-1]
                         logging.warning(f"choosing dynamic runtime: {req_time}")
