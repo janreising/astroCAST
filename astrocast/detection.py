@@ -1206,20 +1206,20 @@ class Detector:
                 res[event_id_key]["v_noise_mask_std"] = temp_v_noise_mask_std
                 
                 # signal-to-noise characteristics
-                temp_v_signal_to_noise_ratio = abs(temp_v_max_height / temp_v_noise_mask_mean)
-                
-                if np.isnan(temp_v_signal_to_noise_ratio) or np.isinf(temp_v_signal_to_noise_ratio):
-                    temp_v_signal_to_noise_ratio = np.nan
-                
-                res[event_id_key]["v_signal_to_noise_ratio"] = temp_v_signal_to_noise_ratio
-                
-                if temp_v_noise_mask_std != 0:
-                    temp_v_signal_to_noise_ratio_fold = abs(
-                            (temp_v_max_height - temp_v_noise_mask_mean) / temp_v_noise_mask_std
-                            )
-                    res[event_id_key]["v_signal_to_noise_ratio_fold"] = temp_v_signal_to_noise_ratio_fold
+                if temp_v_noise_mask_mean == 0:
+                    SNR = None
                 else:
-                    res[event_id_key]["v_signal_to_noise_ratio_fold"] = np.nan
+                    SNR = abs(temp_v_max_height / temp_v_noise_mask_mean)
+                
+                if np.isinf(SNR):
+                    SNR = None
+                
+                res[event_id_key]["v_signal_to_noise_ratio"] = SNR
+                
+                if temp_v_noise_mask_std != 0 and SNR is not None:
+                    res[event_id_key]["v_signal_to_noise_ratio_fold"] = abs(SNR / temp_v_noise_mask_std)
+                else:
+                    res[event_id_key]["v_signal_to_noise_ratio_fold"] = None
                 
                 # clean up
                 del signal
