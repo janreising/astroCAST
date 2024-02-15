@@ -910,8 +910,6 @@ class SubFrameGenerator(tf.keras.utils.Sequence):
                         
                         padding = np.abs(padding)
                         
-                        # print(f"_padding: {padding}, 2: {min(0, -x0)}, 3: {max(0, x1-X)}, 4: {min(0, -y0)}, 5: {max(0, y1 - Y)},")
-                        
                         # cannot pad on empty axis
                         if (padding[0] >= stack_len) or (padding[1] >= stack_len) or (padding[2] >= dw) or (
                                 padding[3] >= dh):
@@ -930,7 +928,7 @@ class SubFrameGenerator(tf.keras.utils.Sequence):
             file_container = pd.DataFrame(file_container)
             
             if len(file_container) < 1:
-                raise ValueError("cannot find suitable data chunks.")
+                raise ValueError("cannot find suitable chunks of the data to infer.")
             
             if self.normalize == "global":
                 if len(file_container) > 1:
