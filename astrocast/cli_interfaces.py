@@ -1339,7 +1339,7 @@ def push_slurm_tasks(log_path, cfg_path, data_path, tasks, base_command, account
                         req_time = req_time[:-1]
                         logging.warning(f"choosing dynamic runtime: {req_time}")
                     
-                    slurm.add_arguments(time=req_time)
+                    slurm.add_arguments(time=str(req_time))
                     
                     if job_name is not None:
                         slurm.add_arguments(J=job_name)
