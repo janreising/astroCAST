@@ -1318,7 +1318,13 @@ def push_slurm_tasks(log_path, cfg_path, data_path, tasks, base_command, account
                         numbers = req_time.split(":")
                         
                         # calculate multiplier
-                        Z, X, Y = file[k].shape
+                        if "data" not in file:
+                            Z, X, Y = 10000, 512, 512
+                            logging.warning(f"couldn't find data size. Assuming {(Z, X, Y)}!")
+                        else:
+                            for data_key in file["data"].keys():
+                                Z, X, Y = file[f"data/{data_key}"].shape
+                        
                         multiplier = (Z * X * Y) / int(float(per_pixel))
                         
                         req_time = ""
@@ -1326,6 +1332,7 @@ def push_slurm_tasks(log_path, cfg_path, data_path, tasks, base_command, account
                             req_time += f"{int(int(num) * multiplier)}:"
                         
                         req_time = req_time[:-1]
+                        logging.warning(f"choosing dynamic runtime: {req_time}")
                     
                     slurm.add_arguments(time=req_time)
                     
