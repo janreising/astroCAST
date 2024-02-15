@@ -626,7 +626,7 @@ class IO:
                 
                 if loc not in data:
                     from astrocast.cli_interfaces import visualize_h5
-                    visualize_h5(path=Path(path))
+                    visualize_h5(path)
                     raise ValueError(f"cannot find dataset ({loc}) in file ({path}): {list(data.keys())}")
                 
                 if z_slice is not None:
