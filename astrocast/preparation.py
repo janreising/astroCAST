@@ -2076,7 +2076,7 @@ class Delta:
                                                                                                ref_values=downsized_chunk)
                             
                             total_error_pixels += num_errors
-                            if num_errors / len(values) * 100 > 0.1:
+                            if num_errors / len(values) * 100 > 0.5:
                                 logging.warning(f"encountered significant amount of pixels that could"
                                                 f"not be interpolated {num_errors}/{len(values)}"
                                                 f"({num_errors / len(values) * 100:.2f}%). "
