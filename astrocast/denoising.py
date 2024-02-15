@@ -863,25 +863,34 @@ class SubFrameGenerator(tf.keras.utils.Sequence):
                 pad_y1 = dh % Y
             
             # calculate ranges
-            zRange = list(range(Z0 + z_start - pad_z0, Z1 - stack_len - z_start + pad_z1, z_steps))
+            zRange = range(Z0 + z_start - pad_z0, Z1 - stack_len - z_start + pad_z1, z_steps)
             
             x_end = X - x_start + pad_x1 - dw
             x_step = dw - overlap_x if dw != X else dw
-            xRange = list(range(x_start, x_end, x_step))
+            xRange = range(x_start, x_end, x_step)
+            if x_end == 0:
+                xRange = [0]
             
             y_end = Y - y_start + pad_y1 - dh
             y_step = dh - overlap_y if dh != Y else dh
-            yRange = list(range(y_start, y_end, y_step))
+            yRange = range(y_start, y_end, y_step)
+            if y_end == 0:
+                yRange = [0]
             
-            logging.debug(f"\nz_range: {zRange}"
-                          f"\nx_range: {xRange}"
+            logging.debug(f"\nz_range: {zRange} ({len(list(zRange))})"
+                          f"\nx_range: {xRange} ({len(list(xRange))})"
                           f"\nx_range param > x_start:{x_start}, X:{X} pad_x1:{pad_x1}, dw:{dw}"
-                          f"\ny_range: {yRange}")
+                          f"\ny_range: {yRange} ({len(list(yRange))})")
             
             # shuffle indices
             if self.shuffle:
+                zRange = list(zRange)
                 random.shuffle(zRange)
+                
+                xRange = list(xRange)
                 random.shuffle(xRange)
+                
+                yRange = list(yRange)
                 random.shuffle(yRange)
             
             for z0 in zRange:
@@ -936,6 +945,12 @@ class SubFrameGenerator(tf.keras.utils.Sequence):
             file_container = pd.DataFrame(file_container)
             
             if len(file_container) < 1:
+                
+                logging.warning(f"\nz_range: {zRange} ({len(list(zRange))})"
+                                f"\nx_range: {xRange} ({len(list(xRange))})"
+                                f"\nx_range param > x_start:{x_start}, X:{X} pad_x1:{pad_x1}, dw:{dw}"
+                                f"\ny_range: {yRange} ({len(list(yRange))})")
+                
                 raise ValueError("cannot generate items. None of the data fits the criteria!")
             
             if self.normalize == "global":
