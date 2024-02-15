@@ -1307,8 +1307,27 @@ def push_slurm_tasks(log_path, cfg_path, data_path, tasks, base_command, account
                     
                     slurm = Slurm()
                     slurm.add_arguments(A=account)
-                    slurm.add_arguments(time=dict_["time"])
                     slurm.add_arguments(c=dict_["cores"])
+                    
+                    # set time dynamically
+                    req_time = dict_["time"]
+                    if "/" in req_time and k != "roi":
+                        
+                        # split requirement into parts
+                        req_time, per_pixel = req_time.split("/")
+                        numbers = req_time.split(":")
+                        
+                        # calculate multiplier
+                        Z, X, Y = file[k].shape
+                        multiplier = (Z * X * Y) / int(float(per_pixel))
+                        
+                        req_time = ""
+                        for num in numbers:
+                            req_time += f"{int(int(num) * multiplier)}:"
+                        
+                        req_time = req_time[:-1]
+                    
+                    slurm.add_arguments(time=req_time)
                     
                     if job_name is not None:
                         slurm.add_arguments(J=job_name)
