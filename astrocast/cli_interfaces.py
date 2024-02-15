@@ -924,6 +924,9 @@ def visualize_h5(input_path):
     visualize_h5('path/to/your/file.h5')
     """
     
+    if isinstance(input_path, Path):
+        input_path = input_path.as_posix()
+    
     file_size = humanize.naturalsize(os.path.getsize(input_path))
     print(f"> {os.path.basename(input_path)} ({file_size})")
     

@@ -608,7 +608,7 @@ class IO:
             z0, z1 = z_slice
         
         if lazy:
-            data = h5py.File(path, "r")
+            data = h5py.File(path.as_posix(), "r")
             
             if loc not in data:
                 raise ValueError(f"cannot find dataset in file ({path}): {list(data.keys())}")
@@ -622,11 +622,13 @@ class IO:
             data = da.from_array(data, chunks=chunks)
         
         else:
-            with h5py.File(path, "r") as data:
+            with h5py.File(path.as_posix(), "r") as data:
                 
                 if loc not in data:
-                    from astrocast.cli_interfaces import visualize_h5
-                    visualize_h5(path)
+                    
+                    from astrocast.cli_interfaces import visualize_h5_recursive
+                    visualize_h5_recursive(data['/'])
+                    
                     raise ValueError(f"cannot find dataset ({loc}) in file ({path}): {list(data.keys())}")
                 
                 if z_slice is not None:
