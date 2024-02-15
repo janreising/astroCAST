@@ -973,7 +973,7 @@ def move_h5_dataset(input_path, output_path, loc_in, loc_out, overwrite):
         '--z-select', type=(click.INT, click.INT), default=None,
         help='Range of frames to select in the Z dimension, given as a tuple (start, end).'
         )
-@click_custom_option('--lazy', type=click.BOOL, default=True, help='Whether to implement lazy loading.')
+@click_custom_option('--lazy', type=click.BOOL, default=False, help='Whether to implement lazy loading.')
 @click_custom_option('--testing', type=click.BOOL, default=False, help='Auto closes napari for testing purposes.')
 def view_data(input_path, loc, z_select, lazy, show_trace, window, colormap, testing):
     """

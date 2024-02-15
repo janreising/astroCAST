@@ -302,30 +302,36 @@ class SubFrameDataset(Dataset):
             else:
                 pad_z0 = pad_z1 = pad_x1 = pad_y1 = 0
             
-            zRange = list(
-                    range(
-                            Z0 + z_start - pad_z0, Z1 - stack_len - z_start + pad_z1, z_steps
-                            )
-                    )
-            xRange = list(
-                    range(
-                            x_start, X - x_start + pad_x1 - dw, dw - overlap_x
-                            )
-                    )
-            yRange = list(
-                    range(
-                            y_start, Y - y_start + pad_y1 - dh, dh - overlap_y
-                            )
-                    )
+            zRange = range(Z0 + z_start - pad_z0, Z1 - stack_len - z_start + pad_z1, z_steps)
             
-            logging.debug(f"\nz_range: {zRange}")
-            logging.debug(f"\nx_range: {xRange}")
+            x_end = X - x_start + pad_x1 - dw
+            x_step = dw - overlap_x
+            if x_end == 0:
+                xRange = [0]
+            else:
+                xRange = range(x_start, x_end, x_step)
+            
+            y_end = Y - y_start + pad_y1 - dh
+            y_step = dh - overlap_y
+            if y_end == 0:
+                yRange = [0]
+            else:
+                yRange = range(y_start, y_end, y_step)
+            
+            logging.debug(f"\nz_range: {zRange} (#{len(list(zRange))})")
+            logging.debug(f"\nx_range: {xRange} (#{len(list(xRange))})")
             logging.debug(f"\nx_range param > x_start:{x_start}, X:{X} pad_x1:{pad_x1}, dw:{dw}")
-            logging.debug(f"\ny_range: {yRange}")
+            logging.debug(f"\ny_range: {yRange} (#{len(list(yRange))})")
             
             if self.shuffle:
+                
+                zRange = list(zRange)
                 random.shuffle(zRange)
+                
+                xRange = list(xRange)
                 random.shuffle(xRange)
+                
+                yRange = list(yRange)
                 random.shuffle(yRange)
             
             for z0 in zRange:
@@ -336,6 +342,9 @@ class SubFrameDataset(Dataset):
                     
                     for y0 in yRange:
                         y1 = y0 + dh
+                        
+                        logging.log(level=int(logging.DEBUG / 2),
+                                    msg=f"processing z-x-y: ({z0, z1})-({x0, x1})-({y0, y1})-")
                         
                         # choose modification
                         rot = random.choice(allowed_rotation)
@@ -1745,7 +1754,7 @@ class PyTorchNetwork:
     def infer(self, dataset: SubFrameDataset, output: Union[str, Path] = None,
               out_loc: str = None, batch_size: int = 16, num_workers: int = 4,
               dtype: Union[Literal["same"], np.dtype] = "same", chunk_size: Union[str, Tuple[int, int, int]] = None,
-              rescale: bool = True
+              rescale: bool = True, overwrite: bool = False,
               ) -> Union[np.ndarray, Path, None]:
         """
         Performs inference on video data using a provided model and generates output in specified format.
@@ -1813,6 +1822,14 @@ class PyTorchNetwork:
                 chunk_size = io.infer_chunks(output_shape, dtype, strategy="Z")
             
             f = h5.File(output, "a")
+            
+            if out_loc in f:
+                if overwrite:
+                    del f[out_loc]
+                else:
+                    raise FileExistsError(f"Dataset {out_loc} already exists in {output}. "
+                                          f"Choose a different output file or set 'overwrite' to True.")
+            
             rec = f.create_dataset(out_loc, shape=output_shape, chunks=chunk_size, dtype=dtype)
         else:
             rec = np.zeros(output_shape, dtype=dtype)
@@ -1820,7 +1837,7 @@ class PyTorchNetwork:
         # infer frames
         dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers)
         
-        for i, (inputs, _) in tqdm(enumerate(dataloader)):
+        for i, (inputs, _) in tqdm(enumerate(dataloader), total=len(dataloader)):
             
             y = self.model.predict(inputs)  # denoised data
             
@@ -1865,6 +1882,9 @@ class PyTorchNetwork:
                 if rescale:
                     mean, std = dataset.descr[dataset.items.iloc[0].path]
                     im = (im * std) + mean
+                    
+                    if im.dtype != dtype:
+                        im = im.astype(dtype)
                 
                 gap = dataset.signal_frames[0] + dataset.gap_frames[0]
                 rec[row.z0 + gap, x0:x1, y0:y1] = im
