@@ -1311,7 +1311,7 @@ def push_slurm_tasks(log_path, cfg_path, data_path, tasks, base_command, account
                     
                     # set time dynamically
                     req_time = dict_["time"]
-                    if "/" in req_time and k != "roi":
+                    if "/" in req_time:
                         
                         # split requirement into parts
                         req_time, per_pixel = req_time.split("/")
