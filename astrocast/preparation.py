@@ -625,7 +625,7 @@ class IO:
             with h5py.File(path, "r") as data:
                 
                 if loc not in data:
-                    from cli_interfaces import visualize_h5
+                    from astrocast.cli_interfaces import visualize_h5
                     visualize_h5(path=Path(path))
                     raise ValueError(f"cannot find dataset ({loc}) in file ({path}): {list(data.keys())}")
                 
