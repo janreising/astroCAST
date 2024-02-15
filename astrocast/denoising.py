@@ -842,35 +842,34 @@ class SubFrameGenerator(tf.keras.utils.Sequence):
                 Z0, Z1 = 0, Z
             
             # Calculate padding (if applicable)
+            pad_z0 = 0
+            pad_z1 = 0
+            pad_x1 = 0
+            pad_y1 = 0
             if self.padding is not None:
                 pad_z0 = signal_frames[0] + gap_frames[0]
                 pad_z1 = signal_frames[1] + gap_frames[1] + 1
+                
                 pad_x1 = dw % X
                 pad_y1 = dh % Y
-            else:
-                pad_z0 = pad_z1 = pad_x1 = pad_y1 = 0
             
-            zRange = list(
-                    range(
-                            Z0 + z_start - pad_z0, Z1 - stack_len - z_start + pad_z1, z_steps
-                            )
-                    )
-            xRange = list(
-                    range(
-                            x_start, X - x_start + pad_x1 - dw, dw - overlap_x
-                            )
-                    )
-            yRange = list(
-                    range(
-                            y_start, Y - y_start + pad_y1 - dh, dh - overlap_y
-                            )
-                    )
+            # calculate ranges
+            zRange = list(range(Z0 + z_start - pad_z0, Z1 - stack_len - z_start + pad_z1, z_steps))
             
-            logging.debug(f"\nz_range: {zRange}")
-            logging.debug(f"\nx_range: {xRange}")
-            logging.debug(f"\nx_range param > x_start:{x_start}, X:{X} pad_x1:{pad_x1}, dw:{dw}")
-            logging.debug(f"\ny_range: {yRange}")
+            x_end = X - x_start + pad_x1 - dw
+            x_step = dw - overlap_x if dw != X else dw
+            xRange = list(range(x_start, x_end, x_step))
             
+            y_end = Y - y_start + pad_y1 - dh
+            y_step = dh - overlap_y if dh != Y else dh
+            yRange = list(range(y_start, y_end, y_step))
+            
+            logging.debug(f"\nz_range: {zRange}"
+                          f"\nx_range: {xRange}"
+                          f"\nx_range param > x_start:{x_start}, X:{X} pad_x1:{pad_x1}, dw:{dw}"
+                          f"\ny_range: {yRange}")
+            
+            # shuffle indices
             if self.shuffle:
                 random.shuffle(zRange)
                 random.shuffle(xRange)
@@ -928,7 +927,7 @@ class SubFrameGenerator(tf.keras.utils.Sequence):
             file_container = pd.DataFrame(file_container)
             
             if len(file_container) < 1:
-                raise ValueError("cannot find suitable chunks of the data to infer.")
+                raise ValueError("cannot generate items. None of the data fits the criteria!")
             
             if self.normalize == "global":
                 if len(file_container) > 1:
