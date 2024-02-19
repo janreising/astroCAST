@@ -74,7 +74,7 @@ sphinx-autodoc-typehints = { version = "^1.25.2", optional = true }
 tensorflow = "*"
 tensorflow-io-gcs-filesystem = { version = "0.31.0", platform = "windows" }
 pyqt5-qt5 = { version = "5.15.2", optional = true }
-build = "^1.0.3"
+build = "0.10.0"
 
 [tool.poetry.scripts]
 astrocast = 'astrocast.cli_interfaces:cli'
