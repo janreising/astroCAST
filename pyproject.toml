@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "astrocast"
-version = "0.4.0"
+version = "0.4.1"
 description = "Package to analyze calcium fluorescence events in astrocytes"
 authors = ["Jan Philipp Reising <jan.reising@ki.se>", "Ana Cristina González"]
 
