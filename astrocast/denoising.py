@@ -1591,7 +1591,7 @@ class PyTorchNetwork:
             self, train_dataset: SubFrameDataset, val_dataset: SubFrameDataset = None,
             test_dataset: SubFrameDataset = None, batch_size: int = 32, shuffle: bool = True, num_workers: int = 4,
             learning_rate: float = 0.0001, momentum: float = 0.9, decay_rate: float = 0.1, decay_steps: int = 30,
-            n_stacks: int = 3, kernels: int = 64, kernel_size: int = 3, batch_normalize: bool = False,
+            n_stacks: int = None, kernels: int = None, kernel_size: int = None, batch_normalize: bool = False,
             loss: PyTorchLoss = "annealed_loss",
             load_model: Union[str, Path] = None, use_cpu: bool = False):
         
@@ -1606,6 +1606,18 @@ class PyTorchNetwork:
         self.item_size = train_dataset.item_size
         self.input_size = train_dataset.input_size
         self.history = None
+        
+        # check input
+        if load_model is None:
+            if n_stacks is None:
+                raise ValueError(f"Please provide 'n_stacks' parameter or provide pretrained model with 'load_model'.")
+            
+            if kernels is None:
+                raise ValueError(f"Please provide 'kernels' parameter or provide pretrained model with 'load_model'.")
+            
+            if kernel_size is None:
+                raise ValueError(
+                        f"Please provide 'kernel_size' parameter or provide pretrained model with 'load_model'.")
         
         # define generators
         self.train_dataloader = DataLoader(train_dataset, batch_size=batch_size, shuffle=shuffle,
@@ -1623,14 +1635,13 @@ class PyTorchNetwork:
         else:
             self.test_dataloader = None
         
-        # Create fresh UNet
-        self.model = UNet(item_size=self.item_size, n_stacks=n_stacks,
-                          batch_normalize=batch_normalize,
-                          kernels=kernels, kernel_size=kernel_size)
-        
-        # load model
+        # Create model
         if load_model is not None:
             self._load_model(model_path=load_model)
+        else:
+            self.model = UNet(item_size=self.item_size, n_stacks=n_stacks,
+                              batch_normalize=batch_normalize,
+                              kernels=kernels, kernel_size=kernel_size)
         
         # Define loss
         self.loss = loss
@@ -1768,7 +1779,9 @@ class PyTorchNetwork:
     
     def infer(self, dataset: SubFrameDataset, output: Union[str, Path] = None,
               out_loc: str = None, batch_size: int = 16, num_workers: int = 4,
-              dtype: Union[Literal["same"], np.dtype] = "same", chunk_size: Union[str, Tuple[int, int, int]] = None,
+              dtype: Union[Literal["same"], np.dtype] = "same", chunks: Union[str, Tuple[int, int, int]] = None,
+              compression: str = None,
+              chunk_strategy: Literal['Z', 'XY', 'balanced'] = 'Z',
               rescale: bool = True, overwrite: bool = False,
               ) -> Union[np.ndarray, Path, None]:
         """
@@ -1832,9 +1845,9 @@ class PyTorchNetwork:
             if out_loc is None:
                 raise ValueError(f"when exporting results to .h5 file please provide 'out_loc' flag")
             
-            if chunk_size is None:
+            if chunks is None:
                 io = IO()
-                chunk_size = io.infer_chunks(output_shape, dtype, strategy="Z")
+                chunks = io.infer_chunks(output_shape, dtype, strategy=chunk_strategy)
             
             f = h5.File(output, "a")
             
@@ -1845,7 +1858,7 @@ class PyTorchNetwork:
                     raise FileExistsError(f"Dataset {out_loc} already exists in {output}. "
                                           f"Choose a different output file or set 'overwrite' to True.")
             
-            rec = f.create_dataset(out_loc, shape=output_shape, chunks=chunk_size, dtype=dtype)
+            rec = f.create_dataset(out_loc, shape=output_shape, chunks=chunks, dtype=dtype, compression=compression)
         else:
             rec = np.zeros(output_shape, dtype=dtype)
         
@@ -1920,9 +1933,13 @@ class PyTorchNetwork:
     def save(self, path, extras: dict = None):
         
         model_dict = {'model_state_dict':     self.model.state_dict(),
-                      'optimizer_state_dict': self.optimizer.state_dict(), 'item_size': self.item_size,
-                      'n_stacks':             self.n_stacks, 'kernels': self.kernels, 'kernel_size': self.kernel_size,
-                      'batch_normalize':      self.batch_normalize, 'input_size': self.input_size}
+                      'optimizer_state_dict': self.optimizer.state_dict(),
+                      'item_size':            self.item_size,
+                      'n_stacks':             self.n_stacks,
+                      'kernels':              self.kernels,
+                      'kernel_size':          self.kernel_size,
+                      'batch_normalize':      self.batch_normalize,
+                      'input_size':           self.input_size}
         
         if extras is not None:
             model_dict.update(extras)
@@ -1962,9 +1979,14 @@ class PyTorchNetwork:
             raise ValueError(f"loaded module expects a stack length of {item_size}, got {self.item_size}."
                              f"Stack length is defined by the pre and post frames during dataset initiation.")
         
-        if self.input_size != input_size:
+        if self.input_size is not None and self.input_size != input_size:
             raise ValueError(f"loaded module expects an input_size of {input_size}, got {self.input_size}."
                              f"Input size is defined during dataset initiation.")
+        
+        # Create fresh model
+        self.model = UNet(item_size=item_size, n_stacks=n_stacks,
+                          batch_normalize=batch_normalize,
+                          kernels=kernels, kernel_size=kernel_size)
         
         # Load the saved model weights
         if 'model_state_dict' in load_dict:

@@ -700,7 +700,7 @@ def train_denoiser(
         help='Location in the output file where the results will be saved.'
         )
 @click_custom_option(
-        '--dtype', type=click.STRING, default="same",
+        '--dtype', type=click.STRING, default="float32",
         help='Data type for the output. If "same", the data type of the input will be used.'
         )
 @click_custom_option(
@@ -711,10 +711,14 @@ def train_denoiser(
         '--chunks', type=(click.INT, click.INT, click.INT), default=None,
         help='Chunk size to use when saving to HDF5 or TileDB.'
         )
+@click_custom_option(
+        '--compression', type=click.STRING, default="gzip",
+        help='Compression algorithm to use.'
+        )
 @click_custom_option('--rescale', type=click.BOOL, default=True, help='Whether to rescale the output values.')
 def denoise(
         input_path, batch_size, input_size, pre_post_frames, gap_frames, z_select, logging_level, model, loc_out, dtype,
-        chunk_strategy, chunks, rescale, overlap, padding, normalize, loc_in, in_memory, output_file
+        chunk_strategy, chunks, rescale, overlap, padding, normalize, loc_in, in_memory, output_file, compression
         ):
     """
     Denoise the input data using the SubFrameGenerator class and infer method.
@@ -727,21 +731,25 @@ def denoise(
         output_file = input_path
         logging.warning(f"No output_file provided. Choosing input_file: {input_path}")
     
-    from astrocast.denoising import SubFrameGenerator
+    from astrocast.denoising import SubFrameDataset, PyTorchNetwork
     
-    with (UserFeedback(params=locals(), logging_level=logging_level)):
+    with ((UserFeedback(params=locals(), logging_level=logging_level))):
+        
         # Initializing the SubFrameGenerator instance
-        sub_frame_generator = SubFrameGenerator(paths=input_path, batch_size=batch_size, input_size=input_size,
-                                                pre_post_frames=pre_post_frames, gap_frames=gap_frames,
-                                                z_select=z_select, allowed_rotation=[0], allowed_flip=[-1],
-                                                overlap=overlap, padding=padding, shuffle=False, normalize=normalize,
-                                                loc=loc_in, in_memory=in_memory, save_global_descriptive=False,
-                                                logging_level=logging_level)
+        infer_dataset = SubFrameDataset(paths=input_path, loc=loc_in, input_size=input_size,
+                                        pre_post_frames=pre_post_frames, gap_frames=gap_frames,
+                                        z_select=z_select, allowed_rotation=[0], allowed_flip=[-1],
+                                        overlap=overlap, padding=padding, shuffle=False, normalize=normalize,
+                                        in_memory=in_memory, save_global_descriptive=False,
+                                        logging_level=logging_level)
+        
+        # Load model
+        net = PyTorchNetwork(infer_dataset, load_model=model, batch_size=batch_size)
         
         # Running the infer method
-        result = sub_frame_generator.infer(
-                model=model, output=output_file, out_loc=loc_out, dtype=dtype,
-                chunks=chunks, chunk_strategy=chunk_strategy, rescale=rescale)
+        net.infer(dataset=infer_dataset, output=output_file, out_loc=loc_out, dtype=dtype, chunks=chunks,
+                  chunk_strategy=chunk_strategy, compression=compression,
+                  rescale=rescale)
         
         logging.info(f"saved inference to: {output_file}")
 
