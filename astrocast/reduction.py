@@ -28,13 +28,20 @@ from astrocast.helper import CachedClass, wrapper_local_cache, experimental
 class FeatureExtraction(CachedClass):
     
     def __init__(self, events: Events, cache_path=None, logging_level=logging.INFO):
+        
+        if cache_path is None:
+            cache_path = events.cache_path
+        
         super().__init__(cache_path=cache_path, logging_level=logging_level)
         
         self.events = events
     
     @wrapper_local_cache
-    def all_features(self):
+    def all_features(self, dropna: bool = False) -> pd.DataFrame:
         """ Returns dictionary of all features in the module
+
+        Args:
+            dropna: Whether to drop NaN values from the dataframe
 
         """
         
@@ -65,6 +72,12 @@ class FeatureExtraction(CachedClass):
             unique = summary[col].unique()
             if (unique[0] is None) and (len(unique) == 1):
                 del summary[col]
+        
+        if dropna:
+            len_before = len(summary)
+            summary = summary.dropna(axis="rows")
+            logging.warning(f"Dropped {len_before - len(summary)} rows "
+                            f"({len(summary) / len_before * 100:.1f}%)")
         
         return summary
     
