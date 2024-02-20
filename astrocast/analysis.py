@@ -1806,7 +1806,7 @@ class Events(CachedClass):
         Example::
 
           # Assuming a class instance 'event_obj'
-          norm_instr = { 0: ["subtract", {"mode":"min"}], 1: ["divide", {"mode": "max"}]
+          norm_instr = { 0: ["subtract", {"mode":"min"}], 1: ["divide", {"mode": "max"}]}
           normalized_traces = event_obj.normalize(norm_instr, inplace=False)
           print(normalized_traces)
         """

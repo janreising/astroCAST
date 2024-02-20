@@ -958,9 +958,14 @@ class Normalization:
         mode_options = {
             "first":   lambda x: np.mean(x[:, 0] if axis else x[0, :]) if population_wide else x[:, 0] if axis else x[0,
                                                                                                                     :],
-            "mean":    lambda x: np.mean(x, axis=summary_axis), "min": lambda x: np.min(x, axis=summary_axis),
-            "min_abs": lambda x: np.min(np.abs(x), axis=summary_axis), "max": lambda x: np.max(x, axis=summary_axis),
-            "max_abs": lambda x: np.max(np.abs(x), axis=summary_axis), "std": lambda x: np.std(x, axis=summary_axis)}
+            "mean":    lambda x: np.mean(x, axis=summary_axis),
+            "min":     lambda x: np.min(x, axis=summary_axis),
+            "min_abs": lambda x: np.min(np.abs(x), axis=summary_axis),
+            "max":     lambda x: np.max(x, axis=summary_axis),
+            "max_abs": lambda x: np.max(np.abs(x), axis=summary_axis),
+            "std":     lambda x: np.std(x, axis=summary_axis),
+            "median":  lambda x: np.median(x, axis=summary_axis),
+            }
         assert mode in mode_options.keys(), f"please provide valid mode: {mode_options.keys()}"
         
         ret = mode_options[mode](data)
