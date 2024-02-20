@@ -1309,59 +1309,78 @@ def push_slurm_tasks(log_path, cfg_path, data_path, tasks, base_command, account
                 log_name = log_path.joinpath(f"slurm-%A-{base_name}-{k}.out").as_posix()
                 job_name = f"{k}_{base_name}"
                 
-                if (k == "roi" and "df" in file and not f.with_suffix(".roi").exists()) or (k not in file):
+                # roi output exists
+                skip_step = True
+                if k == "roi":
                     
-                    cmd += f"astrocast --config {cfg_path} {dict_['script']} {f};"
-                    print(f"\tcmd {k}>{base_name}:\n {cmd}")
-                    
-                    dependency = dict(afterok=last_jobid) if last_jobid is not None else None
-                    
-                    slurm = Slurm()
-                    slurm.add_arguments(A=account)
-                    slurm.add_arguments(c=dict_["cores"])
-                    
-                    # set time dynamically
-                    req_time = dict_["time"]
-                    if "/" in req_time:
+                    roi_output = f.with_suffix(".roi")
+                    if roi_output.exists():
                         
-                        # split requirement into parts
-                        req_time, per_pixel = req_time.split("/")
-                        numbers = req_time.split(":")
+                        expected_files = ["event_map.tiff", "events.npy"]
                         
-                        # calculate multiplier
-                        if "data" not in file:
-                            Z, X, Y = 10000, 512, 512
-                            logging.warning(f"couldn't find data size. Assuming {(Z, X, Y)}!")
-                        else:
-                            for data_key in file["data"].keys():
-                                Z, X, Y = file[f"data/{data_key}"].shape
+                        for exp in expected_files:
+                            if not roi_output.joinpath(exp).exists():
+                                skip_step = False
+                
+                # other outputs exist
+                elif k not in file:
+                    skip_step = False
+                
+                if skip_step:
+                    continue
+                
+                # push command
+                cmd += f"astrocast --config {cfg_path} {dict_['script']} {f};"
+                print(f"\tcmd {k}>{base_name}:\n {cmd}")
+                
+                dependency = dict(afterok=last_jobid) if last_jobid is not None else None
+                
+                slurm = Slurm()
+                slurm.add_arguments(A=account)
+                slurm.add_arguments(c=dict_["cores"])
+                
+                # set time dynamically
+                req_time = dict_["time"]
+                if "/" in req_time:
+                    
+                    # split requirement into parts
+                    req_time, per_pixel = req_time.split("/")
+                    numbers = req_time.split(":")
+                    
+                    # calculate multiplier
+                    if "data" not in file:
+                        Z, X, Y = 10000, 512, 512
+                        logging.warning(f"couldn't find data size. Assuming {(Z, X, Y)}!")
+                    else:
+                        for data_key in file["data"].keys():
+                            Z, X, Y = file[f"data/{data_key}"].shape
+                    
+                    multiplier = (Z * X * Y) / int(float(per_pixel))
+                    
+                    req_time = ""
+                    for num in numbers:
+                        num = f"{int(int(num) * multiplier)}"
                         
-                        multiplier = (Z * X * Y) / int(float(per_pixel))
+                        if num == "0":
+                            num = "00"
                         
-                        req_time = ""
-                        for num in numbers:
-                            num = f"{int(int(num) * multiplier)}"
-                            
-                            if num == "0":
-                                num = "00"
-                            
-                            req_time += f"{num}:"
-                        
-                        req_time = req_time[:-1]
-                        logging.warning(f"choosing dynamic runtime: {req_time}")
+                        req_time += f"{num}:"
                     
-                    slurm.add_arguments(time=str(req_time))
-                    
-                    if job_name is not None:
-                        slurm.add_arguments(J=job_name)
-                    
-                    if log_path is not None:
-                        slurm.add_arguments(output=log_name)
-                    
-                    if dependency is not None:
-                        slurm.add_arguments(dependency=dependency)
-                    
-                    last_jobid = slurm.sbatch(cmd)
+                    req_time = req_time[:-1]
+                    logging.warning(f"choosing dynamic runtime: {req_time}")
+                
+                slurm.add_arguments(time=str(req_time))
+                
+                if job_name is not None:
+                    slurm.add_arguments(J=job_name)
+                
+                if log_path is not None:
+                    slurm.add_arguments(output=log_name)
+                
+                if dependency is not None:
+                    slurm.add_arguments(dependency=dependency)
+                
+                last_jobid = slurm.sbatch(cmd)
 
 
 def save_projection(input_path_: Union[Path, str], loc: str, output_path_: Union[Path, str] = None,
