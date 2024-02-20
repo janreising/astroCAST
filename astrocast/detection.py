@@ -1211,7 +1211,7 @@ class Detector:
                 else:
                     SNR = abs(temp_v_max_height / temp_v_noise_mask_mean)
                 
-                if np.isinf(SNR):
+                if SNR is not None and np.isinf(SNR):
                     SNR = None
                 
                 res[event_id_key]["v_signal_to_noise_ratio"] = SNR
