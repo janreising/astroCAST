@@ -433,7 +433,7 @@ class Events(CachedClass):
         return len(self.events)
     
     def __getitem__(self, item):
-        return self.events[self.events.index == item]
+        return self.events[self.events.index == item].iloc[0]
     
     def __hash__(self):
         
@@ -1865,6 +1865,30 @@ class Plotting:
             self.events = events.events
         else:
             self.events = events
+    
+    def plot_events(self, idx: int, figsize=(10, 3)):
+        
+        # get event row
+        row = self.events[self.events.index == idx].iloc[0]
+        if len(row) == 0:
+            raise ValueError(f"can't find idx {idx}")
+        
+        # create figure
+        fig, axx = plt.subplot_mosaic(mosaic="AAB", figsize=figsize)
+        
+        # collect data
+        raw_trace = row.trace
+        noise_trace = row.noise_mask_trace
+        footprint = row.footprint
+        footprint = np.reshape(footprint, newshape=(row.dx, row.dy))
+        
+        # plot traces
+        ax = axx['A']
+        ax.plot(raw_trace, color="darkblue")
+        ax.plot(noise_trace, color="gray")
+        
+        ax = axx['B']
+        ax.imshow(footprint)
     
     @staticmethod
     def _get_factorials(nr):
