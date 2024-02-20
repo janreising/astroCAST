@@ -433,7 +433,7 @@ class Events(CachedClass):
         return len(self.events)
     
     def __getitem__(self, item):
-        return self.events.iloc[item]
+        return self.events[self.events.index == item]
     
     def __hash__(self):
         
