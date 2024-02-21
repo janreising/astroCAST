@@ -3,10 +3,12 @@ import logging
 import traceback
 from collections import defaultdict
 from functools import lru_cache
+from itertools import repeat
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Literal, Tuple, Union
 
 import dask.array as da
+import humanize
 
 try:
     import napari
@@ -299,13 +301,13 @@ class Events(CachedClass):
         """
     
     def __init__(
-            self, event_dir: Union[str, Path, List[str]] = None, lazy: bool = True,
+            self, event_dir: Union[str, Path] = None, lazy: bool = True,
             data: Union[np.ndarray, da.Array, str, Path, Video] = None,
             loc: str = None, group: Union[str, int] = None, subject_id: Union[str, int] = None,
             z_slice: Tuple[int, int] = None, index_prefix: str = None,
             custom_columns: Union[list, Tuple, Literal['v_area_norm', 'v_ara_footprint', 'cx', 'cy']] = (
                     "v_area_norm", "cx", "cy"), frame_to_time_mapping: Union[dict, list] = None,
-            frame_to_time_function: Union[Callable, list] = None, cache_path: Union[str, Path] = None, seed: int = 1
+            frame_to_time_function: Callable = None, cache_path: Union[str, Path] = None, seed: int = 1
             ):
         
         super().__init__(cache_path=cache_path)
@@ -313,133 +315,98 @@ class Events(CachedClass):
         self.seed = seed
         self.z_slice = z_slice
         
-        if not isinstance(event_dir, list):  # single file support
+        if event_dir is None:
+            logging.warning("event_dir is None. Creating empty Events instance!")
+            self.event_map = None
+            self.num_frames, self.X, self.Y = None, None, None
+            self.events = None
+        
+        else:
             
-            if event_dir is None:
-                logging.warning("event_dir is None. Creating empty Events instance!")
-                self.event_map = None
-                self.num_frames, self.X, self.Y = None, None, None
-                self.events = None
+            event_dir = Path(event_dir)
+            self.event_dir = event_dir
+            if not event_dir.is_dir():
+                raise FileNotFoundError(f"cannot find provided event directory: {event_dir}")
             
-            else:
+            # load event map
+            event_map, event_map_shape, event_map_dtype = self.get_event_map(event_dir, lazy=lazy, z_slice=z_slice)
+            self.event_map = event_map
+            self.num_frames, self.X, self.Y = event_map_shape
+            
+            # create time map
+            # time_map, events_start_frame, events_end_frame = self.get_time_map(event_dir=event_dir, event_map=event_map)
+            
+            # load events
+            self.events = self._load_events(
+                    event_dir, z_slice=z_slice, index_prefix=index_prefix, custom_columns=custom_columns
+                    )
+            
+            # z slicing
+            if z_slice is not None:
+                z_min, z_max = z_slice
+                self.events = self.events[(self.events.z0 >= z_min) & (self.events.z1 <= z_max)]
                 
-                event_dir = Path(event_dir)
-                self.event_dir = event_dir
-                if not event_dir.is_dir():
-                    raise FileNotFoundError(f"cannot find provided event directory: {event_dir}")
-                
-                # load event map
-                event_map, event_map_shape, event_map_dtype = self.get_event_map(event_dir, lazy=lazy, z_slice=z_slice)
-                self.event_map = event_map
-                self.num_frames, self.X, self.Y = event_map_shape
-                
-                # create time map
-                # time_map, events_start_frame, events_end_frame = self.get_time_map(event_dir=event_dir, event_map=event_map)
-                
-                # load events
-                self.events = self._load_events(
-                        event_dir, z_slice=z_slice, index_prefix=index_prefix, custom_columns=custom_columns
+                # TODO how does this effect:  # - time_map, events_start_frame, events_end_frame  # - data  # - indices in the self.events dataframe
+            
+            self.z_range = (self.events.z0.min(), self.events.z1.max())
+            
+            # align time
+            if frame_to_time_mapping is not None or frame_to_time_function is not None:
+                self.events["t0"] = self._convert_frame_to_time(
+                        self.events.z0.tolist(), mapping=frame_to_time_mapping, function=frame_to_time_function
                         )
                 
-                # z slicing
-                if z_slice is not None:
-                    z_min, z_max = z_slice
-                    self.events = self.events[(self.events.z0 >= z_min) & (self.events.z1 <= z_max)]
-                    
-                    # TODO how does this effect:  # - time_map, events_start_frame, events_end_frame  # - data  # - indices in the self.events dataframe
+                self.events["t1"] = self._convert_frame_to_time(
+                        self.events.z1.tolist(), mapping=frame_to_time_mapping, function=frame_to_time_function
+                        )
                 
-                self.z_range = (self.events.z0.min(), self.events.z1.max())
-                
-                # align time
-                if frame_to_time_mapping is not None or frame_to_time_function is not None:
-                    self.events["t0"] = self._convert_frame_to_time(
-                            self.events.z0.tolist(), mapping=frame_to_time_mapping, function=frame_to_time_function
-                            )
-                    
-                    self.events["t1"] = self._convert_frame_to_time(
-                            self.events.z1.tolist(), mapping=frame_to_time_mapping, function=frame_to_time_function
-                            )
-                    
-                    self.events.dt = self.events.t1 - self.events.t0
-                
-                # add group columns
-                self.events["group"] = group
-                self.events["subject_id"] = subject_id
-                self.events["file_name"] = event_dir.stem
+                self.events.dt = self.events.t1 - self.events.t0
             
-            # get data
-            if isinstance(data, (str, Path)):
-                
-                if data == "infer":
-                    parent = self.event_dir.parent
-                    root_guess = parent.joinpath(f"{self.event_dir.stem}")
-                    for suffix in (".h5", ".hdf5", ".tiff", ".tif", ".tdb"):
-                        
-                        video_path_guess = root_guess.with_suffix(suffix)
-                        if video_path_guess.exists():
-                            logging.info(f"inferring video file as: {video_path_guess}")
-                            data = video_path_guess
-                            break
-                    
-                    if data is None:
-                        logging.warning(f"unable to infer video path with {root_guess}.tiff/h5/tdb")
-                
-                if data is not None:
-                    self.data = Video(data, z_slice=z_slice, loc=loc, lazy=lazy)
-            
-            elif isinstance(data, (np.ndarray, da.Array)):
-                print("data instance is an np array")
-                if z_slice is not None:
-                    logging.warning("'data'::array > Please ensure array was not sliced before providing data flag")
-                
-                self.data = Video(data, z_slice=z_slice, lazy=lazy)
-            
-            elif isinstance(data, Video):
-                
-                if z_slice is not None:
-                    logging.warning("'data'::Video > Slice manually during Video object initialization")
-                
-                self.data: Video = data
-            
-            elif data is None:
-                self.data = None
-            
-            else:
-                logging.warning(f"data is not a valid type ({type(data)}). Defaulting to None")
-                self.data = None
+            # add group columns
+            self.events["group"] = group
+            self.events["subject_id"] = subject_id
+            self.events["file_name"] = event_dir.stem
         
-        else:  # multi file support
+        # get data
+        if isinstance(data, (str, Path)):
             
-            event_objects = []
-            for i in range(len(event_dir)):
+            if data == "infer":
+                parent = self.event_dir.parent
+                root_guess = parent.joinpath(f"{self.event_dir.stem}")
+                for suffix in (".h5", ".hdf5", ".tiff", ".tif", ".tdb"):
+                    
+                    video_path_guess = root_guess.with_suffix(suffix)
+                    if video_path_guess.exists():
+                        logging.info(f"inferring video file as: {video_path_guess}")
+                        data = video_path_guess
+                        break
                 
-                _data = data if not isinstance(data, list) else data[i]
-                _loc = loc if not isinstance(loc, list) else loc[i]
-                _z_slice = z_slice if not isinstance(z_slice, list) else z_slice[i]
-                _group = group if not isinstance(group, list) else group[i]
-                
-                if isinstance(frame_to_time_mapping, list):
-                    _frame_to_time_mapping = frame_to_time_mapping[i]
-                else:
-                    _frame_to_time_mapping = frame_to_time_mapping
-                
-                if isinstance(frame_to_time_function, list):
-                    _frame_to_time_function = frame_to_time_function[i]
-                else:
-                    _frame_to_time_function = frame_to_time_function
-                
-                event = Events(event_dir[i],
-                               data=_data, loc=_loc, z_slice=_z_slice, group=_group,
-                               lazy=lazy, index_prefix=f"{i}x",
-                               subject_id=i, custom_columns=custom_columns,
-                               frame_to_time_mapping=_frame_to_time_mapping)
-                
-                event_objects.append(event)
+                if data is None:
+                    logging.warning(f"unable to infer video path with {root_guess}.tiff/h5/tdb")
             
-            self.event_objects = event_objects
-            self.events = pd.concat([ev.events for ev in event_objects])
-            self.events.reset_index(drop=False, inplace=True, names="idx")
-            self.z_slice = z_slice
+            if data is not None:
+                self.data = Video(data, z_slice=z_slice, loc=loc, lazy=lazy)
+        
+        elif isinstance(data, (np.ndarray, da.Array)):
+            print("data instance is an np array")
+            if z_slice is not None:
+                logging.warning("'data'::array > Please ensure array was not sliced before providing data flag")
+            
+            self.data = Video(data, z_slice=z_slice, lazy=lazy)
+        
+        elif isinstance(data, Video):
+            
+            if z_slice is not None:
+                logging.warning("'data'::Video > Slice manually during Video object initialization")
+            
+            self.data: Video = data
+        
+        elif data is None:
+            self.data = None
+        
+        else:
+            logging.warning(f"data is not a valid type ({type(data)}). Defaulting to None")
+            self.data = None
         
         if self.events is not None:
             # make categorical
@@ -473,12 +440,6 @@ class Events(CachedClass):
     # def load(path):
     #     from joblib import load
     #     return load(path)
-    
-    def _is_multi_subject(self):
-        if len(self.events.subject_id.unique()) > 1:
-            return True
-        else:
-            return False
     
     def _is_ragged(self):
         return is_ragged(self.events.trace.tolist())
@@ -1384,6 +1345,7 @@ class Events(CachedClass):
             use_footprint: bool = False, extend: Union[int, Tuple[int, int]] = -1, ensure_min: int = None,
             ensure_max: int = None, pad_borders: bool = False, return_array: bool = False, in_place: bool = False,
             normalization_instructions: Dict[int, List[Union[str, Dict[str, str]]]] = None, show_progress: bool = True,
+            load_to_memory: bool = False,
             memmap_path: Union[str, Path] = None, save_path: Union[str, Path] = None, save_param: Dict[str, Any] = None
             ) -> Union[pd.DataFrame, Tuple[np.ndarray, List[int], List[int]]]:
         """
@@ -1460,6 +1422,12 @@ class Events(CachedClass):
         
         # get video dimensions
         n_frames, X, Y = video.shape
+        
+        if load_to_memory and isinstance(video, da.Array):
+            logging.warning(f"attempting to load data to RAM "
+                            f"({humanize.naturalsize(video.size * video.itemsize)}).")
+            video = video.compute()
+            logging.warning(f"loaded!")
         
         # create container to save extended events in
         arr_ext, extended = None, None
@@ -1873,6 +1841,216 @@ class Events(CachedClass):
         cluster_lookup_table.update({k: label for k, label in list(zip(self.events.index.tolist(), labels.tolist()))})
         
         return cluster_lookup_table
+
+
+class MultiEvents(Events):
+    
+    def __init__(self, event_dirs: List[Union[str, Path, Events]] = None, lazy: bool = True,
+                 data: Union[List[Union[np.ndarray, da.Array, str, Path, Video]], Literal['infer']] = None,
+                 loc: Union[str, List[str]] = None,
+                 group: Union[str, int, List[Union[str, int]]] = None,
+                 subject_id: Union[str, int, List[Union[str, int]]] = None,
+                 z_slice: Union[Tuple[int, int], List[Tuple[int, int]]] = None,
+                 custom_columns: Union[list, Tuple, Literal['v_area_norm', 'v_ara_footprint', 'cx', 'cy']] = (
+                         "v_area_norm", "cx", "cy"), frame_to_time_mapping: Union[dict, list] = None,
+                 frame_to_time_function: Union[Callable, List[Callable]] = None, cache_path: Union[str, Path] = None,
+                 seed: int = 1):
+        super().__init__()
+        
+        self.seed = seed
+        self.z_slice = z_slice
+        self.num_event_objects = len(event_dirs)
+        self.event_dirs = event_dirs
+        
+        # data
+        if data == "infer" or data is None:
+            self.data = [data for _ in range(self.num_event_objects)]
+        elif isinstance(data, list):
+            if len(data) != self.num_event_objects:
+                raise ValueError(f"Length of events and data is unequal: "
+                                 f"#data {len(data)} != #events {self.num_event_objects}")
+            self.data = data
+        else:
+            raise ValueError(f"'data' must be either list, 'infer' or None NOT {data}")
+        
+        # loc
+        if isinstance(loc, list):
+            if len(loc) != self.num_event_objects:
+                raise ValueError(f"Length of events and data is unequal: "
+                                 f"#loc {len(loc)} != #events {self.num_event_objects}")
+            self.loc = loc
+        else:
+            self.loc = [loc for _ in range(self.num_event_objects)]
+        
+        # z_slice
+        if isinstance(z_slice, list):
+            if len(z_slice) != self.num_event_objects:
+                raise ValueError(f"Length of events and data is unequal: "
+                                 f"#z_slice {len(z_slice)} != #events {self.num_event_objects}")
+            self.z_slice = z_slice
+        else:
+            self.z_slice = [z_slice for _ in range(self.num_event_objects)]
+        
+        # group
+        if isinstance(group, list):
+            if len(group) != self.num_event_objects:
+                raise ValueError(f"Length of events and data is unequal: "
+                                 f"#group {len(group)} != #events {self.num_event_objects}")
+            self.group = group
+        else:
+            self.group = [group for _ in range(self.num_event_objects)]
+        
+        # subject_id
+        if isinstance(subject_id, list):
+            if len(subject_id) != self.num_event_objects:
+                raise ValueError(f"Length of events and data is unequal: "
+                                 f"#subject_id {len(subject_id)} != #events {self.num_event_objects}")
+            self.subject_id = subject_id
+        elif subject_id is None:
+            self.subject_id = range(self.num_event_objects)
+        else:
+            self.subject_id = [subject_id for _ in range(self.num_event_objects)]
+        
+        # frame_to_time_mapping
+        if isinstance(frame_to_time_mapping, list):
+            if len(frame_to_time_mapping) != self.num_event_objects:
+                raise ValueError(f"Length of events and data is unequal: "
+                                 f"#frame_to_time_mapping {len(frame_to_time_mapping)} != #events {self.num_event_objects}")
+            self.frame_to_time_mapping = frame_to_time_mapping
+        else:
+            self.frame_to_time_mapping = [frame_to_time_mapping for _ in range(self.num_event_objects)]
+        
+        # frame_to_time_function
+        if isinstance(frame_to_time_function, list):
+            if len(frame_to_time_function) != self.num_event_objects:
+                raise ValueError(f"Length of events and data is unequal: "
+                                 f"#frame_to_time_function {len(frame_to_time_function)} != #events {self.num_event_objects}")
+            self.frame_to_time_function = frame_to_time_function
+        else:
+            self.frame_to_time_function = [frame_to_time_function for _ in range(self.num_event_objects)]
+        
+        # cache
+        if isinstance(cache_path, list):
+            if len(cache_path) != self.num_event_objects:
+                raise ValueError(f"Length of events and data is unequal: "
+                                 f"#cache_path {len(cache_path)} != #events {self.num_event_objects}")
+            self.cache_path = cache_path
+        else:
+            self.cache_path = [cache_path for _ in range(self.num_event_objects)]
+        
+        # create events
+        self.event_objects = []
+        for i in range(self.num_event_objects):
+            
+            idx = self.subject_id[i]
+            
+            event = Events(event_dir=self.event_dirs[i],
+                           data=self.data[i], loc=self.loc[i], z_slice=self.z_slice[i], group=self.group[i],
+                           lazy=lazy, index_prefix=f"{idx}x", subject_id=idx,
+                           frame_to_time_mapping=self.frame_to_time_mapping[i],
+                           frame_to_time_function=self.frame_to_time_function[i],
+                           custom_columns=custom_columns, seed=self.seed, cache_path=self.cache_path[i])
+            
+            self.event_objects.append(event)
+        
+        self.events = self.combine_events()
+    
+    def combine_events(self):
+        events = pd.concat([ev.events for ev in self.event_objects])
+        events.reset_index(drop=False, inplace=True, names="idx")
+        
+        # make categorical
+        for col in ('file_name', 'subject_id', 'group'):
+            if col in events.columns:
+                events[col] = events[col].astype("category")
+        
+        return events
+    
+    def __hash__(self):
+        raise NotImplementedError
+    
+    def add_clustering(self, cluster_lookup_table: dict, column_name: str = "cluster") -> None:
+        
+        for event in self.event_objects:
+            event.add_clustering(cluster_lookup_table=cluster_lookup_table, column_name=column_name)
+        
+        self.combine_events()
+    
+    def filter(self, filters: dict, inplace: bool = True) -> None:
+        
+        if not inplace:
+            raise NotImplementedError("currently MultiEvent objects can only be changed inplace.")
+        
+        for event in self.event_objects:
+            event.filter(filters=filters, inplace=inplace)
+        
+        self.combine_events()
+    
+    def to_numpy(self, events: pd.DataFrame = None, empty_as_nan: bool = True, ragged: bool = False) -> np.ndarray:
+        raise NotImplementedError("currently MultiEvent objects does not implement this function.")
+    
+    def show_event_map(
+            self, video: Union[Path, str] = None, loc: str = None, z_slice: Tuple[int, int] = None, lazy: bool = True
+            ):
+        raise NotImplementedError("currently MultiEvent objects does not implement this function.")
+    
+    def get_trials(
+            self, trial_timings: Union[np.ndarray, da.Array], trial_length: int = 30,
+            multi_timing_behavior: Literal['first', 'expand', 'exclude'] = "first",
+            output_format: Literal['array', 'dataframe'] = "array"
+            ) -> Union[np.ndarray, pd.DataFrame]:
+        raise NotImplementedError("currently MultiEvent objects does not implement this function.")
+    
+    @wrapper_local_cache
+    def get_extended_events(
+            self, events: pd.DataFrame = None, video: Union[np.ndarray, da.Array, Video] = None, dtype: type = float,
+            use_footprint: bool = False, extend: Union[int, Tuple[int, int]] = -1, ensure_min: int = None,
+            ensure_max: int = None, pad_borders: bool = False, return_array: bool = False, in_place: bool = False,
+            normalization_instructions: Dict[int, List[Union[str, Dict[str, str]]]] = None, show_progress: bool = True,
+            load_to_memory: bool = False,
+            memmap_path: Union[str, Path] = None, save_path: Union[str, Path] = None, save_param: Dict[str, Any] = None
+            ):
+        
+        if not in_place:
+            raise NotImplementedError("currently MultiEvent objects can only be changed inplace.")
+        
+        if return_array:
+            raise NotImplementedError("currently MultiEvent objects cannot return arrays.")
+        
+        if save_path is not None:
+            raise NotImplementedError("currently MultiEvent objects cannot save results.")
+        
+        if show_progress:
+            iterator = tqdm(self.event_objects)
+        else:
+            iterator = self.event_objects
+        
+        for event in iterator:
+            event.get_extended_events(events=events, video=video, dtype=dtype,
+                                      use_footprint=use_footprint, extend=extend, ensure_min=ensure_min,
+                                      ensure_max=ensure_max, pad_borders=pad_borders, return_array=return_array,
+                                      in_place=in_place, normalization_instructions=normalization_instructions,
+                                      show_progress=show_progress, memmap_path=memmap_path, save_path=save_path,
+                                      save_param=save_param, load_to_memory=load_to_memory
+                                      )
+        
+        self.combine_events()
+    
+    def enforce_length(
+            self, min_length: Union[int, None] = None, pad_mode: str = "edge", max_length: Union[int, None] = None,
+            inplace: bool = False
+            ) -> pd.DataFrame:
+        raise NotImplementedError("currently MultiEvent objects does not implement this function.")
+    
+    def normalize(self, normalize_instructions: dict, inplace: bool = True):
+        
+        if not inplace:
+            raise NotImplementedError("currently MultiEvent objects can only be changed inplace.")
+        
+        for event in self.event_objects:
+            event.normalize(normalize_instructions=normalize_instructions, inplace=inplace)
+        
+        self.combine_events()
 
 
 class Plotting:
