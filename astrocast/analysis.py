@@ -93,6 +93,15 @@ class Video:
     def __len__(self):
         return self.Z
     
+    def __sizeof__(self):
+        
+        data = self.data
+        if isinstance(data, da.Array):
+            logging.warning(f"data represented as da.Array. Not sure about size!")
+            return 0
+        else:
+            return data.size * data.itemsize
+    
     def get_data(self, in_memory=False):
         
         if in_memory and isinstance(self.data, da.Array):
@@ -376,14 +385,14 @@ class Events(CachedClass):
                         logging.warning(f"unable to infer video path with {root_guess}.tiff/h5/tdb")
                 
                 if data is not None:
-                    self.data = Video(data, z_slice=z_slice, loc=loc)
+                    self.data = Video(data, z_slice=z_slice, loc=loc, lazy=lazy)
             
             elif isinstance(data, (np.ndarray, da.Array)):
                 print("data instance is an np array")
                 if z_slice is not None:
                     logging.warning("'data'::array > Please ensure array was not sliced before providing data flag")
                 
-                self.data = Video(data, z_slice=z_slice)
+                self.data = Video(data, z_slice=z_slice, lazy=lazy)
             
             elif isinstance(data, Video):
                 
@@ -403,18 +412,27 @@ class Events(CachedClass):
             
             event_objects = []
             for i in range(len(event_dir)):
-                event = Events(
-                        event_dir[i], data=data if not isinstance(data, list) else data[i],
-                        loc=loc if not isinstance(loc, list) else loc[i],
-                        z_slice=z_slice if not isinstance(z_slice, list) else z_slice[i],
-                        group=group if not isinstance(group, list) else group[i], lazy=lazy, index_prefix=f"{i}x",
-                        subject_id=i, custom_columns=custom_columns,
-                        frame_to_time_mapping=frame_to_time_mapping if not isinstance(frame_to_time_mapping, list) else
-                        frame_to_time_mapping[i],
-                        frame_to_time_function=frame_to_time_function if not isinstance(frame_to_time_function,
-                                                                                        list) else
-                        frame_to_time_function[i]
-                        )
+                
+                _data = data if not isinstance(data, list) else data[i]
+                _loc = loc if not isinstance(loc, list) else loc[i]
+                _z_slice = z_slice if not isinstance(z_slice, list) else z_slice[i]
+                _group = group if not isinstance(group, list) else group[i]
+                
+                if isinstance(frame_to_time_mapping, list):
+                    _frame_to_time_mapping = frame_to_time_mapping[i]
+                else:
+                    _frame_to_time_mapping = frame_to_time_mapping
+                
+                if isinstance(frame_to_time_function, list):
+                    _frame_to_time_function = frame_to_time_function[i]
+                else:
+                    _frame_to_time_function = frame_to_time_function
+                
+                event = Events(event_dir[i],
+                               data=_data, loc=_loc, z_slice=_z_slice, group=_group,
+                               lazy=lazy, index_prefix=f"{i}x",
+                               subject_id=i, custom_columns=custom_columns,
+                               frame_to_time_mapping=_frame_to_time_mapping)
                 
                 event_objects.append(event)
             
@@ -1427,7 +1445,7 @@ class Events(CachedClass):
         # load data
         if video is not None:
             
-            if isinstance(video, Video):
+            if isinstance(video, (Video, astrocast.analysis.Video)):
                 video = video.get_data()
             elif not isinstance(video, (da.Array, np.ndarray)):
                 raise ValueError(f"'video' must be a astrocast.Video, numpy or dask array NOT {type(video)}")
