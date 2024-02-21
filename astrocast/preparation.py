@@ -611,7 +611,7 @@ class IO:
             data = h5py.File(path.as_posix(), "r")
             
             if loc not in data:
-                raise ValueError(f"cannot find dataset in file ({path}): {list(data.keys())}")
+                raise ValueError(f"cannot find dataset ({loc}) in file ({path}): {list(data.keys())}")
             
             data = data[loc]
             
