@@ -1430,7 +1430,7 @@ class Events(CachedClass):
             if isinstance(video, Video):
                 video = video.get_data()
             elif not isinstance(video, (da.Array, np.ndarray)):
-                raise ValueError(f"'video' must be a astrocast.Video, numpy or dask array")
+                raise ValueError(f"'video' must be a astrocast.Video, numpy or dask array NOT {type(video)}")
         
         elif self.data is not None:
             video = self.data.get_data()
@@ -1866,7 +1866,7 @@ class Plotting:
         else:
             self.events = events
     
-    def plot_events(self, idx: int, figsize=(10, 3)):
+    def plot_events(self, idx: int, show_noise: bool = False, figsize=(10, 3)):
         
         # get event row
         row = self.events[self.events.index == idx].iloc[0]
@@ -1885,7 +1885,8 @@ class Plotting:
         # plot traces
         ax = axx['A']
         ax.plot(raw_trace, color="darkblue")
-        ax.plot(noise_trace, color="gray")
+        if show_noise:
+            ax.plot(noise_trace, color="gray")
         
         ax = axx['B']
         ax.imshow(footprint)
