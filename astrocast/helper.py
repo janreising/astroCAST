@@ -1,4 +1,5 @@
 import glob
+import inspect
 import logging
 import pickle
 import platform
@@ -951,25 +952,136 @@ class Normalization:
         return self.run(instructions)
     
     @staticmethod
-    def get_value(data, mode, population_wide=False, axis=1):
+    def _first(x: Union[da.Array, np.ndarray, ak.Array], population_wide: bool = False, summary_axis: int = None):
+        """Calculate the first value along the specified axis."""
+        if population_wide:
+            values = np.mean(x[:, 0] if summary_axis else x[0, :])
+        else:
+            values = x[:, 0] if summary_axis else x[0, :]
         
+        if not population_wide:
+            values = values[:, None]  # broadcasting for downstream calculation
+        
+        return values
+    
+    @staticmethod
+    def _mean(x: Union[da.Array, np.ndarray, ak.Array], population_wide: bool = False, summary_axis: int = None):
+        """Calculate the mean value along the specified axis."""
+        values = np.mean(x, axis=summary_axis)
+        
+        if not population_wide:
+            values = values[:, None]  # broadcasting for downstream calculation
+        
+        return values
+    
+    @staticmethod
+    def _median(x: Union[da.Array, np.ndarray, ak.Array], population_wide: bool = False, summary_axis: int = None):
+        """Calculate the median value along the specified axis."""
+        values = np.median(x, axis=summary_axis)
+        if not population_wide:
+            values = values[:, None]  # Broadcasting for downstream calculation
+        return values
+    
+    @staticmethod
+    def _min(x: Union[da.Array, np.ndarray, ak.Array], population_wide: bool = False, summary_axis: int = None):
+        """Calculate the minimum value along the specified axis."""
+        values = np.min(x, axis=summary_axis)
+        if not population_wide:
+            values = values[:, None]  # Broadcasting for downstream calculation
+        return values
+    
+    @staticmethod
+    def _min_abs(x: Union[da.Array, np.ndarray, ak.Array], population_wide: bool = False, summary_axis: int = None):
+        """Calculate the minimum of absolute values along the specified axis."""
+        values = np.min(np.abs(x), axis=summary_axis)
+        if not population_wide:
+            values = values[:, None]  # Broadcasting for downstream calculation
+        return values
+    
+    @staticmethod
+    def _max(x: Union[da.Array, np.ndarray, ak.Array], population_wide: bool = False, summary_axis: int = None):
+        """Calculate the maximum value along the specified axis."""
+        values = np.max(x, axis=summary_axis)
+        if not population_wide:
+            values = values[:, None]  # Broadcasting for downstream calculation
+        return values
+    
+    @staticmethod
+    def _max_abs(x: Union[da.Array, np.ndarray, ak.Array], population_wide: bool = False, summary_axis: int = None):
+        """Calculate the maximum of absolute values along the specified axis."""
+        values = np.max(np.abs(x), axis=summary_axis)
+        if not population_wide:
+            values = values[:, None]  # Broadcasting for downstream calculation
+        return values
+    
+    @staticmethod
+    def _std(x: Union[da.Array, np.ndarray, ak.Array], population_wide: bool = False, summary_axis: int = None):
+        """Calculate the standard deviation along the specified axis."""
+        values = np.std(x, axis=summary_axis)
+        if not population_wide:
+            values = values[:, None]  # Broadcasting for downstream calculation
+    
+    @staticmethod
+    def _std_mean(x: Union[da.Array, np.ndarray, ak.Array], population_wide: bool = False, summary_axis: int = None):
+        """Calculate the standard deviation along the specified axis."""
+        
+        if not population_wide:
+            logging.warning(f"'_std_mean' can only be calculated for population wide characteristic; ignoring flag.")
+        
+        if summary_axis is None:
+            summary_axis = 1
+        
+        values = np.std(x, axis=summary_axis)
+        values = np.mean(values)
+        
+        return values
+    
+    @staticmethod
+    def _std_median(x: Union[da.Array, np.ndarray, ak.Array], population_wide: bool = False, summary_axis: int = None):
+        """Calculate the standard deviation along the specified axis."""
+        
+        if not population_wide:
+            logging.warning(f"'_std_mean' can only be calculated for population wide characteristic; ignoring flag.")
+        
+        if summary_axis is None:
+            summary_axis = 1
+        
+        values = np.std(x, axis=summary_axis)
+        values = np.median(values)
+        
+        return values
+    
+    @staticmethod
+    def _std_max(x: Union[da.Array, np.ndarray, ak.Array], population_wide: bool = False, summary_axis: int = None):
+        """Calculate the standard deviation along the specified axis."""
+        
+        if not population_wide:
+            logging.warning(f"'_std_mean' can only be calculated for population wide characteristic; ignoring flag.")
+        
+        if summary_axis is None:
+            summary_axis = 1
+        
+        values = np.std(x, axis=summary_axis)
+        values = np.max(values)
+        
+        return values
+    
+    @staticmethod
+    def get_value(data, mode, population_wide=False, axis=1):
         summary_axis = None if population_wide else axis
         
+        # Dynamically create the mode_options dictionary from methods
         mode_options = {
-            "first":   lambda x: np.mean(x[:, 0] if axis else x[0, :]) if population_wide else x[:, 0] if axis else x[0,
-                                                                                                                    :],
-            "mean":    lambda x: np.mean(x, axis=summary_axis),
-            "min":     lambda x: np.min(x, axis=summary_axis),
-            "min_abs": lambda x: np.min(np.abs(x), axis=summary_axis),
-            "max":     lambda x: np.max(x, axis=summary_axis),
-            "max_abs": lambda x: np.max(np.abs(x), axis=summary_axis),
-            "std":     lambda x: np.std(x, axis=summary_axis),
-            "median":  lambda x: np.median(x, axis=summary_axis),
+            method_name[1:]: method
+            for method_name, method in inspect.getmembers(Normalization, predicate=inspect.isfunction)
+            if method_name.startswith("_")
             }
-        assert mode in mode_options.keys(), f"please provide valid mode: {mode_options.keys()}"
         
-        ret = mode_options[mode](data)
-        return ret if population_wide else ret[:, None]  # broadcasting for downstream calculation
+        assert mode in mode_options.keys(), f"please provide valid mode: {list(mode_options.keys())}"
+        
+        ret = mode_options[mode](data, population_wide, summary_axis)
+        
+        return ret
     
     def subtract(self, data, mode="min", population_wide=False, rows=True):
         
