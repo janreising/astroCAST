@@ -259,7 +259,7 @@ def wrapper_local_cache(f):
                 logging.warning(f"trying to cache static method or class without 'cache_path': {f.__name__}")
                 cache_path = None
         
-        if cache_path is not None:
+        if cache_path is not None and isinstance(cache_path, (str, Path)):
             
             hash_string = get_string_from_args(f, args, kwargs)
             cache_path = cache_path.joinpath(hash_string)
