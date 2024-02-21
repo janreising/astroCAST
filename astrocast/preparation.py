@@ -785,16 +785,33 @@ class IO:
             # If the path is a file, load a single TIFF file
             
             if lazy:
-                stack = tifffile.imread(path.as_posix())
                 
-                chunks = self.infer_chunks_from_array(stack, strategy=infer_strategy, chunks=chunks)
-                stack = da.from_array(stack, chunks=chunks)
+                (Z, X, Y), _, dtype = get_data_dimensions(path, return_dtype=True)
+                
+                if z_slice is not None:
+                    z_range = range(z0, z1)
+                    Z = z1 - z0
+                else:
+                    z_range = range(Z)
+                
+                chunks = self.infer_chunks((Z, X, Y), dtype=dtype, strategy=infer_strategy,
+                                           chunks=chunks)
+                
+                def imread(key):
+                    return tifffile.imread(path.as_posix(), key=key)
+                
+                stack = [dask.delayed(imread)(z) for z in z_range]
+                stack = [da.from_delayed(x, shape=(X, Y), dtype=dtype) for x in stack]
+                stack = da.stack(stack)
+                
+                stack = da.rechunk(stack, chunks=chunks)
             
             else:
-                stack = tifffile.imread(path.as_posix())
-            
-            if z_slice is not None:
-                stack = stack[z0:z1]
+                
+                if z_slice is not None:
+                    stack = tifffile.imread(path.as_posix(), key=(z0, z1))
+                else:
+                    stack = tifffile.imread(path.as_posix())
         
         else:
             raise FileNotFoundError(f"cannot find directory or file: {path}")
