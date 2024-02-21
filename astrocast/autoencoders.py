@@ -639,6 +639,8 @@ class TimeSeriesRnnAE:
         
         patience_counter = 0
         losses = None
+        train_length = len(dataloader_train)
+        val_length = 1 if dataloader_val is None else len(dataloader_val)
         
         if show_mode == "progress":
             iterator = tqdm(range(num_epochs), total=num_epochs)
@@ -723,9 +725,11 @@ class TimeSeriesRnnAE:
                 
                 fig, axx = plt.subplots(1, 2, figsize=(9, 4))
                 
-                axx[0].plot(train_losses, color="black", label="training")
+                tloss = [t / train_length for t in train_losses]
+                axx[0].plot(tloss, color="black", label="training")
                 if dataloader_val is not None:
-                    axx[0].plot(np.array(val_losses).flatten(), color="green", label="validation")
+                    vloss = np.array(val_losses).flatten() / val_length
+                    axx[0].twinx().plot(vloss, color="green", label="validation")
                 
                 axx[0].set_title(f"losses")
                 axx[0].set_yscale("log")
@@ -875,7 +879,7 @@ class TimeSeriesRnnAE:
             batch_data = batch_data.unsqueeze(-1)
             batch_data = batch_data.to(
                     dtype=torch.float32
-                    )  # .to(self.device)  # Move to device and ensure it is a float
+                    ).to(self.device)  # Move to device and ensure it is a float
             batch_lengths = torch.tensor(batch_lengths, dtype=torch.float32)  # , device=self.device)
             
             # Pack the batch
