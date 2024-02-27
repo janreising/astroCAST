@@ -1,0 +1,62 @@
+\usepackage{mdframed}
+\usepackage{xcolor}
+\usepackage{etoolbox} % For conditional statements
+
+\newcommand{\missing}[1]{\textcolor{red}{\textbf{\MakeUppercase{#1}}}}
+
+%\newcommand{\lbash}[1]{\lstset{frame=single} \begin{lstlisting}[language=bash] #1 \end{lstlisting}}
+
+\newcommand{\fref}[1]{ (Figure~\ref{fig:#1})}
+
+\definecolor{colorJan}{RGB}{18, 179, 77}
+\definecolor{colorAthina}{RGB}{49, 133, 216}
+\definecolor{colorEric}{RGB}{208, 83, 38}
+\definecolor{colorWiktor}{RGB}{229, 209, 79}
+
+\newcommand{\todo}[3]{
+% Define the default color
+    \def\framecolor{orange}
+    \def\framebgcolor{orange!20}
+    \def\frametitlebgcolor{orange!40}
+
+    % Check the person and assign the color
+    \ifstrequal{#1}{Jan}{
+        \def\framecolor{colorJan}
+        \def\framebgcolor{colorJan!10}
+        \def\frametitlebgcolor{colorJan!40}
+    }{}
+    \ifstrequal{#1}{Athina}{
+        \def\framecolor{colorAthina}
+        \def\framebgcolor{colorAthina!10}
+        \def\frametitlebgcolor{colorAthina!40}
+    }{}
+    \ifstrequal{#1}{Eric}{
+        \def\framecolor{colorEric}
+        \def\framebgcolor{colorEric!10}
+        \def\frametitlebgcolor{colorEric!40}
+    }{}
+    \ifstrequal{#1}{Wiktor}{
+        \def\framecolor{colorWiktor}
+        \def\framebgcolor{colorWiktor!10}
+        \def\frametitlebgcolor{colorWiktor!40}
+    }{}
+
+    \begin{mdframed}[
+        backgroundcolor=\framebgcolor,
+        linewidth=1pt,
+        linecolor=\framecolor,
+        topline=true,
+        bottomline=true,
+        leftline=true,
+        rightline=true,
+        skipabove=\baselineskip,
+        skipbelow=\baselineskip,
+        frametitle={Todo @#1: #2},
+        frametitlerule=true,
+        frametitlebackgroundcolor=\frametitlebgcolor,
+        frametitlerulewidth=1pt
+    ]
+        \centering
+        #3
+    \end{mdframed}
+}

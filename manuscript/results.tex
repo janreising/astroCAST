@@ -1,0 +1,133 @@
+\subsection{Installing \ac{astroCAST}}
+
+\todo{Jan}{Functionality availability}{Table 1: Availability of different functionalities of astroCAST across
+operating systems. A check mark () denotes full compatibility and active support. An asterisk () indicates that the
+functionality is optional and can be installed upon user request (see below). A cross mark () signifies that the
+functionality is not supported or available on the operating system. A half bullet () indicates partial support,
+    indicating that the functionality is expected to be available but is not actively tested.  }
+
+To run the software, you need to install the astroCAST package and its dependencies. There are multiple options to
+install \ac{astroCAST} depending on how much control users would like to have over the installation. Of note, the
+following instructions install astroCAST with its full functionality. If that is not desired or possible remove the \lstinline[style=bashStyle]{-E all} or \lstinline[style=bashStyle]{[all]} flags.
+
+\subsubsection{Create conda environment}
+While not strictly necessary, we highly recommend to create a fresh anaconda environment for the installation. This
+prevents common installation errors and conflicts with existing environments.
+
+\begin{lstlisting}[style=bashStyle]
+    $ conda create -n astro python=3.9 poetry
+    $ conda activate astro
+\end{lstlisting}
+
+\subsubsection{Install from source (recommended)}
+\label{res:install-from-source}
+\begin{lstlisting}[style=bashStyle]
+    $ cd "/path/to/directory/"
+    $ git clone git@github.com:janreising/astroCAST.git
+    $ cd astroCAST
+    $ poetry install –E all
+\end{lstlisting}
+
+\subsubsection{Installation with pip (easiest)}
+\begin{lstlisting}[style=bashStyle]
+    $ pip install astrocast[all]
+\end{lstlisting}
+
+\subsubsection{Container installation (last resort)}
+
+To install docker and create an account, follow the instructions on the docker webpage: https://docs.docker
+.com/engine/install/
+
+\begin{lstlisting}[style=bashStyle]
+    $ docker pull anacgon/astrocast:latest
+    $ docker image ls
+    $ docker run -v /path/to/your/data:/home/data -it -p 8888:8888 astrocast:latest
+    # Optionally, start jupyter notebook from inside the docker container:
+    $ jupyter-lab --allow-root --no-browser --port=8888 --ip="*"
+\end{lstlisting}
+
+\subsubsection{Test installation}
+
+Both commands should run without any errors.
+
+\begin{lstlisting}[style=bashStyle]
+    $ python -c "import astrocast"
+    $ astrocast --help
+\end{lstlisting}
+
+\subsection{Running astroCAST}
+
+There are several ways to analyze data using \ac{astroCAST}, which we will reference throughout the protocol.
+
+\subsubsection{Using jupyter notebooks}
+
+Jupyter notebooks can be used to interactively run the analysis and visualize the results.
+If you have cloned the repository (\ref{res:install-from-source}), an example notebook is included with the necessary
+code to perform a basic analysis.
+
+\begin{lstlisting}[style=bashStyle]
+    $ cd "/path/to/astroCAST/notebooks/examples/"
+    $ jupyter lab
+    # on MacOS the command might be
+    $ jupyter-notebook
+\end{lstlisting}
+
+A browser window will open which displays the available examples or can be used to create custom notebooks.
+
+\subsubsection{Using the \ac{CLI}}
+\todo{Jan}{CLI}{write exlanation for the client interface}
+
+\subsubsection{Using the \ac{GUI}}
+\todo{Jan}{GUI}{write exlanation for the GUI interface}
+
+\subsection{Data showcase}
+
+In this protocol, we demonstrate the utility of our toolkit using publicly available datasets and our own data.
+The data represents astrocytes studied ex-vivo, in-vivo and in acute slices captured with One or Two Photon
+microscopy recording speeds of 1-16Hz.
+
+To ensure transparency and provide a practical starting point, we offer a collection of sensible, default settings
+within a YAML file.
+This file, designed to represent a first-approach configuration, is accessible in our GitHub repository.
+Additionally, we provide the download of the datasets used here through a convenience function.
+This repository serves as a comprehensive resource, aiding users in understanding and implementing the protocol with
+similar data characteristics.
+
+\todo{Jan}{1P and 2P acronyms}{}
+
+Optionally, the available sample and training datasets can be directly downloaded from astrocast:
+\begin{lstlisting}[style=bashStyle]
+    $ astrocast download-datasets "/path/to/download/directory"
+\end{lstlisting}
+
+\todo{Jan}{pretrained models}{}
+
+\begin{table}[ht]
+    \centering
+    \caption{Overview of Datasets Employed in Analysis}
+    \begin{tabular}{|l|l|l|l|l|l|}
+        \hline
+        \textbf{Dataset}       & \textbf{Publication} & \textbf{Experiment}   & \textbf{Imaging Type} & \textbf{
+            Imaging Speed} & \textbf{Number of files} \\ \hline
+        custom:train/test      & unpublished          & acute slices, Gcamp6f & One-Photon            & 8 Hz
+        & 49                       \\ \hline
+        public: ExVivo         & AQuA                 & acute slices, Gcamp6f & Two-Photon            & 1.1 Hz
+        & 1                        \\ \hline
+        public: Glusnfr        & AQuA                 & acute slices, GluSnFR & Two-Photon            & 4-100 Hz
+        & 1                        \\ \hline
+        public: InVivo         & AQuA                 & in vivo GCamp6f       & Two-Photon            & 2 Hz
+        & 1                        \\ \hline
+        public: cellscan\_scim & CHIPS                & blood vessels, N/A    & Two-Photon            & N/A
+        & 1                        \\ \hline
+    \end{tabular}
+\end{table}
+
+\subsection{Pipeline approach}
+The AstroCAST pipeline is structured into three major blocks: a) Preprocessing, b) Encoding and c) Exploratory Analysis.
+
+In the Preprocessing block (a), users can navigate the pipeline through a \ac{CLI} by utilizing commands such as \lstinline[style=bashStyle]{$ astrocast --help}. This section allows for the utilization of a predefined configuration file to streamline the process. Additionally, an "Argument Explorer" is integrated to facilitate quick testing of various parameters and seamless export of the configuration file. If users want to follow this protocol along, we prepared a jupyter notebook for convenience.
+
+During the Encoding (b) and Analysis (c) block, the approach varies based on the specificities of the experiment at
+hand, be it comparing drug treatments, model systems, correlating with stimuli, or analyzing changes over time. This
+segment of the pipeline now implements a separate GUI, offering a dynamic platform for detailed analysis and data
+visualization.

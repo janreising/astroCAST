@@ -1,0 +1,1 @@
+Screenshot of the \ac{GUI} displaying the converted video file of astrocytic calcium fluorescence (\ref{Tbl1}). The video has been downsampled and captured at a 20X magnification, focusing on the \ac{preBötC} region.
