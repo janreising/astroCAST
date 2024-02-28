@@ -1,1 +1,82 @@
-\subsection{Event detection}
+\subsection{Event Detection}
+%Timing: 1 min – 3h
+%Running time will increase linearly with the number of events in the recording. 
+
+AstroCAST employs an event-centric approach to event detection, adapted from the AQuA package\citep{wang_event
+-based_2018}. Building on the AquA algorithm, astroCAST incorporates both spatial and temporal thresholding
+techniques to identify and extract events effectively. Spatial thresholding is executed based on either a single
+frame or a small volume, facilitating the identification of significant patterns or features in space. Concurrently,
+temporal thresholding is implemented by scrutinizing individual pixels for peaks across the time dimension,
+essentially tracking fluorescence changes over time.
+
+Following the thresholding process, a binary mask is generated, which is used to label connected pixels, considering
+the full 3D volume of the video. This allows for the integration of different frames in the z-dimension to constitute
+a single event in a 3D context, ensuring a comprehensive analysis of the events captured in the video. Upon
+successful event detection, our protocol generates a folder with a .roi extension. This folder houses all files
+related to the detected events, offering an organized and accessible repository for the extracted data.
+
+The event detection step is the most critical aspect of astroCAST and is sensitive to the choice of parameters. We
+have therefore implemented an interactive interface to explore the performance of each step during event detection
+given the relevant options. The program will prompt a link to the browser-based interface. We recommend to select a
+short range of frames in the video file to keep processing time during exploration short.
+
+\begin{lstlisting}[style=bashStyle]
+    $ astrocast explorer -- input path "/path/to/file" -- h5-loc "/dataset/name"
+\end{lstlisting}
+
+Once users are satisfied with the chosen parameters, they can be exported to a YAML config file, that can be provided
+to the astrocast \ac{CLI}.
+
+\subsubsection{Detection Module Description}
+The detection module in AstroCAST applies a comprehensive approach to identify astrocytic events by smoothing,
+thresholding, and applying morphological operations on fluorescence imaging data. This section outlines the key steps
+and parameters used in the process.
+
+\paragraph{Smoothing}
+AstroCAST incorporates a Gaussian smoothing kernel to enhance event detection while preserving spatial features.
+Adjusting the \lstinline[style=bashStyle]{--sigma} and \lstinline[style=bashStyle]{--radius} parameters allows for
+the refinement of the smoothing effect, ensuring that events are emphasized without compromising the integrity of
+spatial characteristics. The smoothed data then serve as the basis for subsequent detection steps, although users can
+opt out of smoothing if desired.
+
+\paragraph{Thresholding}
+\todo{Jan}{Active pixels}{thresholding -> identifying active pixels}
+Thresholding in AstroCAST is executed in two phases, spatial and temporal, to classify pixels as active with high
+precision.
+
+Spatial thresholding evaluates the entire frame to distinguish active pixels, automatically determining a cutoff
+value. It incorporates the mean fluorescence ratio of active to inactive pixels to mitigate the misidentification of
+noise as events. The \lstinline[style=bashStyle]{--min-ratio} parameter sets the minimum ratio threshold, and the \lstinline[style=bashStyle]{--z-depth} parameter allows for the consideration of multiple frames to improve threshold accuracy.
+
+Temporal thresholding analyzes the video as a series of 1D time series, identifying peaks with a prominence above a
+user-defined threshold. Parameters such as \lstinline[style=bashStyle]{--prominence}, \lstinline[style=bashStyle]{--width}
+, \lstinline[style=bashStyle]{--rel-height}, and \lstinline[style=bashStyle]{--wlen} fine-tune the detection of
+events over time, enhancing the separation of true events from noise.
+
+Combining spatial and temporal thresholding, users can choose to merge or differentiate the active pixels identified
+by each method, optimizing event detection based on specific dataset characteristics.
+
+\paragraph{Morphological Operations}
+To address artifacts resulting from thresholding, such as holes (false negatives) and noise (false positives),
+AstroCAST employs morphological operations. Parameters like \lstinline[style=bashStyle]{--area-threshold} and \lstinline[style=bashStyle]{--min-size} adjust the maximum hole size to fill and the minimum size of active pixel clusters, respectively. These operations, which also consider connectivity and the \lstinline[style=bashStyle]{--z-depth} parameter, refine the detection outcome by smoothing gaps and removing minor artifacts, enhancing the clarity and segmentation of detected events.
+
+\paragraph{Additional options}
+Additionally, AstroCAST provides the option to exclude the video border from active pixel detection (\lstinline[style=bashStyle]{--exclude-border}) to mitigate motion correction artifacts. An experimental feature (\lstinline[style=bashStyle]{--split-events}) is available for separating incorrectly connected events, further improving the accuracy of event detection.
+
+\todo{Jan}{Figure}{Add figure combining several previous figures: overview???; Fig. 8 (temporal thresholding; Spatial
+thresholding??; Fig. 12: Detected events overlay )}
+
+\subsubsection{Evaluating Detection Quality}
+AstroCAST offers a streamlined approach for assessing the quality of event detection through its command-line interface.
+
+\begin{lstlisting}[style=bashStyle]
+    $ astrocast view-detection-results "/path/to/roi"
+\end{lstlisting}
+
+Researchers can visually inspect the detection outcomes. During this evaluation phase, it is crucial to determine
+whether the detection process has successfully identified all expected events, thereby minimizing false negatives,
+and to assess the correctness of these events to ensure that noise has not been misclassified as true events, which
+would indicate false positives. If the detection results are not satisfactory, revising the event detection
+parameters or adjusting settings in the preceding Delta calculation step may be necessary to achieve improved
+accuracy. For a dynamic visualization that illustrates the impact of parameter adjustments on detection outcomes,
+researchers are directed to consult Video S2 \missing{Video S2}.
