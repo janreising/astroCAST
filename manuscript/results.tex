@@ -1,10 +1,33 @@
 \subsection{Installing \ac{astroCAST}}
 
-\todo{Jan}{Functionality availability}{Table 1: Availability of different functionalities of astroCAST across
-operating systems. A check mark () denotes full compatibility and active support. An asterisk () indicates that the
-functionality is optional and can be installed upon user request (see below). A cross mark () signifies that the
-functionality is not supported or available on the operating system. A half bullet () indicates partial support,
+
+\begin{table}[h!]
+    \centering
+    \caption{Availability of different functionalities of astroCAST across
+    operating systems. A check mark (\cmark) denotes full compatibility and active support. An asterisk (\optional)
+        indicates that the
+    functionality is optional and can be installed upon user request (see below). A cross mark (\xmark) signifies
+        that the
+    functionality is not supported or available on the operating system. A half bullet (\halfbullet) indicates
+        partial support,
     indicating that the functionality is expected to be available but is not actively tested.  }
+    \label{tab:functionalities}
+    \begin{tabular}{|l|c|c|c|c|}
+        \hline
+        \textbf{Functionality} & \textbf{Linux} & \textbf{Windows} & \textbf{MacOS (Intel)} & \textbf{Docker} \\ \hline
+        Preprocessing          & \cmark         & \cmark           & \cmark                 & \cmark          \\ \hline
+        Motion correction      & \cmark         & \cmark           & \cmark                 & \cmark          \\ \hline
+        Denoising              & \cmark         & \halfbullet      & \cmark                 & \cmark          \\ \hline
+        Delta                  & \cmark         & \cmark           & \cmark                 & \cmark          \\ \hline
+        Detection              & \cmark         & \cmark           & \cmark                 & \cmark          \\ \hline
+        UMAP outlier detection & \cmark         & \cmark           & \xmark                 & \cmark          \\ \hline
+        Encoding - all         & \cmark         & \cmark           & \cmark                 & \cmark          \\ \hline
+        Analysis               &                &                  &                        &                 \\ \hline
+        DTW distance           & \cmark         & \cmark           & \xmark                 & \cmark          \\ \hline
+        Barycenters            & \cmark         & \cmark           & \xmark                 & \cmark          \\ \hline
+        Video player \optional & \cmark         & \cmark           & \cmark                 & \xmark          \\ \hline
+    \end{tabular}
+\end{table}
 
 To run the software, you need to install the astroCAST package and its dependencies. There are multiple options to
 install \ac{astroCAST} depending on how much control users would like to have over the installation. Of note, the
