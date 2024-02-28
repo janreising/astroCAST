@@ -222,7 +222,7 @@ Version Number: 3},
     doi = {10.7554/eLife.38173},
     abstract = {Advances in fluorescence microscopy enable monitoring larger brain areas in-vivo with finer time resolution. The resulting data rates require reproducible analysis pipelines that are reliable, fully automated, and scalable to datasets generated over the course of months. We present CaImAn, an open-source library for calcium imaging data analysis. CaImAn provides automatic and scalable methods to address problems common to pre-processing, including motion correction, neural activity identification, and registration across different sessions of data collection. It does this while requiring minimal user intervention, with good scalability on computers ranging from laptops to high-performance computing clusters. CaImAn is suitable for two-photon and one-photon imaging, and also enables real-time analysis on streaming data. To benchmark the performance of CaImAn we collected and combined a corpus of manual annotations from multiple labelers on nine mouse two-photon datasets. We demonstrate that CaImAn achieves near-human performance in detecting locations of active neurons.
  ,
- The human brain contains billions of cells called neurons that rapidly carry information from one part of the brain to another. Progress in medical research and healthcare is hindered by the difficulty in understanding precisely which neurons are active at any given time. New brain imaging techniques and genetic tools allow researchers to track the activity of thousands of neurons in living animals over many months. However, these experiments produce large volumes of data that researchers currently have to analyze manually, which can take a long time and generate irreproducible results.
+	The human brain contains billions of cells called neurons that rapidly carry information from one part of the brain to another. Progress in medical research and healthcare is hindered by the difficulty in understanding precisely which neurons are active at any given time. New brain imaging techniques and genetic tools allow researchers to track the activity of thousands of neurons in living animals over many months. However, these experiments produce large volumes of data that researchers currently have to analyze manually, which can take a long time and generate irreproducible results.
  There is a need to develop new computational tools to analyze such data. The new tools should be able to operate on standard computers rather than just specialist equipment as this would limit the use of the solutions to particularly well-funded research teams. Ideally, the tools should also be able to operate in real-time as several experimental and therapeutic scenarios, like the control of robotic limbs, require this. To address this need, Giovannucci et al. developed a new software package called CaImAn to analyze brain images on a large scale.
  Firstly, the team developed algorithms that are suitable to analyze large sets of data on laptops and other standard computing equipment. These algorithms were then adapted to operate online in real-time. To test how well the new software performs against manual analysis by human researchers, Giovannucci et al. asked several trained human annotators to identify active neurons that were round or donut-shaped in several sets of imaging data from mouse brains. Each set of data was independently analyzed by three or four researchers who then discussed any neurons they disagreed on to generate a ‘consensus annotation’. Giovannucci et al. then used CaImAn to analyze the same sets of data and compared the results to the consensus annotations. This demonstrated that CaImAn is nearly as good as human researchers at identifying active neurons in brain images.
  CaImAn provides a quicker method to analyze large sets of brain imaging data and is currently used by over a hundred laboratories across the world. The software is open source, meaning that it is freely-available and that users are encouraged to customize it and collaborate with other users to develop it further.},
@@ -242,7 +242,7 @@ Version Number: 3},
     url = {http://biorxiv.org/lookup/doi/10.1101/504217},
     abstract = {Abstract
 
- Recent work examining astrocytic physiology centers on fluorescence imaging approaches, due to development of sensitive fluorescent indicators and observation of spatiotemporally complex calcium and glutamate activity. However, the field remains hindered in fully characterizing these dynamics, both within single cells and at the population-level, because of the insufficiency of current region-of-interest-based approaches to describe activity that is often spatially unfixed, size-varying, and propagative. Here, we present a paradigm-shifting analytical framework that releases astrocyte biologists from ROI-based tools. Astrocyte Quantitative Analysis (AQuA) software enables users to take an event-based approach to accurately capture and quantify the irregular activity observed in astrocyte imaging datasets. We apply AQuA to a range of
+	Recent work examining astrocytic physiology centers on fluorescence imaging approaches, due to development of sensitive fluorescent indicators and observation of spatiotemporally complex calcium and glutamate activity. However, the field remains hindered in fully characterizing these dynamics, both within single cells and at the population-level, because of the insufficiency of current region-of-interest-based approaches to describe activity that is often spatially unfixed, size-varying, and propagative. Here, we present a paradigm-shifting analytical framework that releases astrocyte biologists from ROI-based tools. Astrocyte Quantitative Analysis (AQuA) software enables users to take an event-based approach to accurately capture and quantify the irregular activity observed in astrocyte imaging datasets. We apply AQuA to a range of
  ex vivo
  and
  in vivo
@@ -255,4 +255,48 @@ Version Number: 3},
     year = {2018},
     doi = {10.1101/504217},
     file = {Wang et al_2018_An event-based paradigm for analyzing fluorescent astrocyte activity uncovers.pdf:/home/janrei1@ad.cmm.se/snap/zotero-snap/common/Zotero/storage/CVPKQYZF/Wang et al_2018_An event-based paradigm for analyzing fluorescent astrocyte activity uncovers.pdf:application/pdf},
+}
+
+@misc{noauthor_astrocastnotebooksexamplestrain_denoiser_modelsipynb_nodate,
+    title = {{astroCAST}/notebooks/examples/train\_denoiser\_models.ipynb at 62c5086ef4a58e7f1a2bc1fee2c5b4c1731c25de · janreising/{astroCAST}},
+    url = {https://github.com/janreising/astroCAST/blob/62c5086ef4a58e7f1a2bc1fee2c5b4c1731c25de/notebooks/examples/train_denoiser_models.ipynb},
+    abstract = {Package to classify astrocytic calcium events. Contribute to janreising/astroCAST development by creating an account on GitHub.},
+    language = {english},
+    urldate = {2024-02-28},
+    journal = {GitHub},
+    file = {Snapshot:/home/janrei1@ad.cmm.se/snap/zotero-snap/common/Zotero/storage/UWCSHWI6/train_denoiser_models.html:text/html},
+}
+
+@misc{noauthor_alleninstitutedeepinterpolation_2024,
+    title = {{AllenInstitute}/deepinterpolation},
+    url = {https://github.com/AllenInstitute/deepinterpolation},
+    urldate = {2024-02-28},
+    publisher = {Allen Institute},
+    month = jan,
+    year = {2024},
+    note = {original-date: 2020-10-16T01:33:40Z},
+}
+
+@misc{noauthor_astrocastdenoiser_models_nodate,
+    title = {{astroCAST}/denoiser\_models at main · janreising/{astroCAST}},
+    url = {https://github.com/janreising/astroCAST/tree/main/denoiser_models},
+    urldate = {2024-02-28},
+    file = {astroCAST/denoiser_models at main · janreising/astroCAST:/home/janrei1@ad.cmm.se/snap/zotero-snap/common/Zotero/storage/6TW43HM9/denoiser_models.html:text/html},
+}
+
+@misc{noauthor_astrocastnotebooksdevexploring_deltaipynb_nodate,
+    title = {{astroCAST}/notebooks/dev/exploring\_delta.ipynb at 62c5086ef4a58e7f1a2bc1fee2c5b4c1731c25de · janreising/{astroCAST}},
+    url = {https://github.com/janreising/astroCAST/blob/62c5086ef4a58e7f1a2bc1fee2c5b4c1731c25de/notebooks/dev/exploring_delta.ipynb},
+    abstract = {Package to classify astrocytic calcium events. Contribute to janreising/astroCAST development by creating an account on GitHub.},
+    language = {english},
+    urldate = {2024-02-28},
+    journal = {GitHub},
+    file = {Snapshot:/home/janrei1@ad.cmm.se/snap/zotero-snap/common/Zotero/storage/HC37QT97/exploring_delta.html:text/html},
+}
+
+@misc{noauthor_scipyinterpolaterbfinterpolator_nodate,
+    title = {scipy.interpolate.{RBFInterpolator} — {SciPy} v1.12.0 {Manual}},
+    url = {https://docs.scipy.org/doc/scipy/reference/generated/scipy.interpolate.RBFInterpolator.html},
+    urldate = {2024-02-28},
+    file = {scipy.interpolate.RBFInterpolator — SciPy v1.12.0 Manual:/home/janrei1@ad.cmm.se/snap/zotero-snap/common/Zotero/storage/QSR9DQSE/scipy.interpolate.RBFInterpolator.html:text/html},
 }
