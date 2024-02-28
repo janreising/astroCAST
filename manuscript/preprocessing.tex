@@ -35,7 +35,7 @@ While the .h5 format is recommended for its efficiency, astroCAST also supports 
     # (optional) browse the available flags
     $ astrocast convert-input --help
     # '--config' flag can be ommited to use default settings
-    $ astrocast -–config "/path/to/config" convert-input "/path/to/file/or/folder"
+    $ astrocast --config "/path/to/config" convert-input "/path/to/file/or/folder"
 \end{lstlisting}
 
 Verify the conversion through a quick visual inspection using the built-in data viewer\fref{2} or an imaging software
@@ -53,12 +53,7 @@ float), the image dimensions (width and height) are as anticipated, all frames h
 % Timing: 1-15 min (10M – 10Gpixels)
 % Increasing the number of frames increases the processing time approximately linearly.
 
-During imaging, samples will drift or warp slightly which means that the location of the imaged astrocytes might
-change in the \ac{FOV}. Depending on the required analysis, this can have detrimental consequences to the results.
-The motion correction module of the https://github.com/flatironinstitute/CaImAn15, based on implementation in CaImAn\citep{3}, is used in the astroCAST protocol to correct these artifacts. Please see Supplementary Video 1 (S1) \ref{S1} for reference.
-
-We are including the commonly adjusted parameters here. We refer users to the the jnormcorre readme \ref{readme} for
-detailed information.
+During imaging, samples will drift or warp slightly which means that the location of the imaged astrocytes might change in the \ac{FOV}. Depending on the required analysis, this can have detrimental consequences to the results. The motion correction module of the \href{https://github.com/flatironinstitute/CaImAn}{CaImAn} package\citep{giovannucci_caiman_2019}, is used in the astroCAST protocol to correct these artifacts. Please see \missing{Supplementary Video S1} for reference. We are including the commonly adjusted parameters here. We refer users to the the \href{https://jnormcorre.readthedocs.io/en/latest/Algo.html#motion-correction-methods}{jnormcorre documentation} for detailed information.
 
 A cornerstone of this feature is the ability to set the maximum allowed rigid shift through the \lstinline[style=
 bashStyle]{--max-shifts} parameter, with a default value of 50 pixels in both the x and y dimensions. This parameter
@@ -88,7 +83,7 @@ subsequent analysis.
 
 \begin{lstlisting}[style=bashStyle]
     # '--config' flag can be ommited to use default settings
-    $ astrocast -–config "/path/to/config" motion-correction --h5-loc "dataset/name" "/path/to/file"
+    $ astrocast --config "/path/to/config" motion-correction --h5-loc "dataset/name" "/path/to/file"
 \end{lstlisting}
 
 \subsubsection{Denoising (optional)}
@@ -96,7 +91,7 @@ subsequent analysis.
 
 Denoising is an optional but often beneficial preprocessing step in image analysis, particularly in contexts where
 signal clarity is important. The denoising module is based on the architecture suggested in the DeepInterpolation
-publication\citep{lecoq_removing_2021, noauthor_alleninstitutedeepinterpolation_2024} and employs a \ac{CNN} designed
+publication\citep{lecoq_removing_2021} and employs a \ac{CNN} designed
 to clean a target frame.The \ac{CNN} uses adjacent frames as a reference without exposing it to the target frame
 itself. This approach enables the network to interpolate the desired signal from the contextual frames. Since the
 noise is stochastic, the network inherently learns to disregard it, effectively isolating and enhancing the signal in
@@ -109,8 +104,7 @@ data intricacy and available computational power. Subsequent application of the 
 , is considerably more expedient, usually requiring minutes for each file.
 
 For convenience, we offer a suite of pretrained models tailored to different imaging modalities. A curated list is
-accessible on our GitHub page \citep{noauthor_astrocastnotebooksexamplestrain_denoiser_modelsipynb_nodate}\missing{[
-    GitHubModelsLink]}, and a comprehensive collection of models can be downloaded via astroCAST.
+accessible on our GitHub page under \href{https://github.com/janreising/astroCAST/tree/main/denoiser_models}{denoiser models}, and a comprehensive collection of models can be downloaded via astroCAST.
 
 \begin{lstlisting}[style=bashStyle]
     $ astrocast download-models "/path/to/download/directory/"
@@ -151,9 +145,7 @@ within a given study.
 \end{lstlisting}
 
 The intricacies of training a custom model are beyond this protocol, and we refer to the original DeepInterpolation
-publication\citep{lecoq_removing_2021} and our example notebook\citep{
-    noauthor_astrocastnotebooksexamplestrain_denoiser_modelsipynb_nodate} for users interested in training their own
-model.
+publication\citep{lecoq_removing_2021} and our \href{https://github.com/janreising/astroCAST/blob/8451394bc0d810c4037011f0bcb9cba1f10d1e72/notebooks/examples/train_denoiser_models.ipynb}{example notebook} for users interested in training their own model.
 
 \todo{Jan}{Better notebook}{Maybe it makes sense to write a better tutorial.}
 
@@ -191,12 +183,10 @@ denoising process.
 % Running time will increase linearly with the number of frames and non-linearly with window size.
 
 Background subtraction, while optional, can significantly enhance event detection in fluorescence imaging by
-mitigating issues related to bright backgrounds, uneven lighting, or pronounced bleaching effects\fref{4}. AstroCAST
-leverages \ac{RBF} interpolation for background approximation, ensuring accurate background modeling even in
+mitigating issues related to bright backgrounds, uneven lighting, or pronounced bleaching effects\fref{4}. AstroCAST leverages \ac{RBF} interpolation for background approximation, ensuring accurate background modeling even in
 scenarios characterized by considerable signal fluctuations or missing data segments.
 
-To facilitate optimal subtraction outcomes without introducing artifacts such as false positives or negatives,
-default parameters are provided, but fine-tuning may be necessary. An exploratory Jupyter notebook is available\citep{noauthor_astrocastnotebooksdevexploring_deltaipynb_nodate} for guidance on how parameter adjustments influences the results.
+To facilitate optimal subtraction outcomes without introducing artifacts such as false positives or negatives, default parameters are provided, but fine-tuning may be necessary. An exploratory Jupyter \href{https://github.com/janreising/astroCAST/blob/8451394bc0d810c4037011f0bcb9cba1f10d1e72/notebooks/dev/exploring_delta.ipynb}{notebook} is available for guidance on how parameter adjustments influences the results.
 
 % Intuition behind the process
 The process begins with downsizing the video to manage computational load while preserving essential features. Peaks
@@ -217,7 +207,7 @@ bashStyle]{--width} of peaks, and \lstinline[style=bashStyle]{--rel-height} defi
 settings ensure precise identification of significant peaks, contributing to the accuracy of the background modeling.
 
 % RBF parameters explanation
-The RBF interpolator\citep{noauthor_scipyinterpolaterbfinterpolator_nodate} constructs a smooth function from
+The \href{https://docs.scipy.org/doc/scipy/reference/generated/scipy.interpolate.RBFInterpolator.html}{RBF interpolator} constructs a smooth function from
 scattered data points by combining radial basis functions centered at data locations with a polynomial term, adjusted
 by coefficients that solve linear equations to fit the data. Interpolation can be tunes with parameters such as \lstinline[style=bashStyle]{--neighbors} for the interpolation neighborhood, \lstinline[style=bashStyle]{--rbf-smoothing} for interpolation smoothness, \lstinline[style=bashStyle]{--rbf-kernel} to choose the kernel type, \lstinline[style=bashStyle]{--rbf-epsilon}, and \lstinline[style=bashStyle]{--rbf-degree} for kernel adjustment, facilitating a tailored approach to background modeling.
 
