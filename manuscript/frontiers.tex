@@ -25,21 +25,10 @@
 
 %\setcitestyle{square} % for articles in the journals "Frontiers in Physics" and "Frontiers in Applied Mathematics
 %and Statistics"
-\usepackage{url,hyperref,lineno,microtype,subcaption}
-\usepackage[onehalfspacing]{setspace}
-\usepackage[T1]{fontenc}
-\usepackage[english]{babel}
-\usepackage{textcomp}
 
-\input{custom_commands}
-\usepackage[nolist,nohyperlinks,printonlyused]{acronym}
+\include{packages}
 
-\usepackage{listings}
-\lstdefinestyle{bashStyle}{
-    language=bash,
-    frame=single,
-    basicstyle=\footnotesize
-}
+
 
 \linenumbers
 
@@ -89,10 +78,12 @@ Herlenius\,$^{1,2*}$}
     \section{Acronyms}
     \begin{acronym}
         \acro{astroCAST}{Astrocytic Calcium Signaling Toolkit}
+        \acro{CNN}{Convolutional Neural Network}
         \acro{preBötC}{pre-Bötzinger Complex}
         \acro{CLI}{command-line interface}
         \acro{GUI}{graphical user interface}
         \acro{FOV}{Field of View}
+        \acro{RBF}{ Radial Basis Function}
     \end{acronym}
 
 
@@ -129,8 +120,11 @@ Herlenius\,$^{1,2*}$}
     presentation of the study's findings.
 
     \section*{Use of Generative AI}
-    \todo{Jan}{Generative AI}{add section about the use of generative AI in the creation of this manuscript according
-    to Frontier's guidelines.}
+    During the preparation of this manuscript, we utilized the generative capabilities of OpenAI's ChatGPT-4. The AI
+    's primary role was to assist in proofreading and language refinement to ensure clarity, conciseness, and
+    readability of the text. While the AI provided suggestions for language adjustments, the final manuscript content
+    was thoroughly reviewed, curated, and approved by the authors. We, the authors, take full and complete
+    responsibility for the integrity and accuracy of the manuscript content.
 
     \section*{Funding}
     This study was supported by grants to EH from the Swedish Research Council (2016-01111 \& 2019-
@@ -139,6 +133,8 @@ Herlenius\,$^{1,2*}$}
     and 20210579), the Axel Tielmans, and the Freemasons Children’s House foundations.
     In addition, WSP, NR and AS were partly supported by the Freemasons Children’s House foundation scholarship and
     WSP was supported 1 year by the StratNeuro Karolinska Institutet Postdoc grant 2020.
+
+    \todo{Eric}{Check funding}{Eric, could you have a look at this section.}
 
     \section*{Acknowledgments}
     \todo{Jan}{Acknowledgments}{
@@ -167,8 +163,6 @@ Herlenius\,$^{1,2*}$}
 
     \section*{Figure captions}
     \include{figures}
-
-    \todo{Jan}{Add figures and captions}{}
 
 
 \end{document}
