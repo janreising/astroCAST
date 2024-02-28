@@ -1,30 +1,8 @@
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-% This is just an example/guide for you to refer to when submitting manuscripts to Frontiers, it is not mandatory to
-% use Frontiers .cls files nor frontiers.tex  %
-% This will only generate the Manuscript, the final article will be typeset by Frontiers after acceptance.   
-%                                              %
-%
-%%
-% When submitting your files, remember to upload this *tex file, the pdf generated with it, the *bib file (if
-% bibliography is not within the *tex) and all the figures.
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
-%%% Version 3.4 Generated 2022/06/14 %%%
-%%% You will need to have the following packages installed: datetime, fmtcount, etoolbox, fcprefix, which are
-%%% normally inlcuded in WinEdt. %%%
-%%% In http://www.ctan.org/ you can find the packages and how to install them, if necessary. %%%
-%%%  NB logo1.jpg is required in the path in order to correctly compile front page header %%%
-
 \documentclass[utf8]{FrontiersinHarvard}
-% for articles in journals using the Harvard Referencing Style (Author-Date), for Frontiers Reference Styles by
-% Journal: https://zendesk.frontiersin.org/hc/en-us/articles/360017860337-Frontiers-Reference-Styles-by-Journal
-%\documentclass[utf8]{FrontiersinVancouver} % for articles in journals using the Vancouver Reference Style (Numbered)
-%, for Frontiers Reference Styles by Journal: https://zendesk.frontiersin.org/hc/en-us/articles/360017860337-Frontiers-Reference-Styles-by-Journal
-%\documentclass[utf8]{frontiersinFPHY_FAMS} % Vancouver Reference Style (Numbered) for articles in the journals
-%"Frontiers in Physics" and "Frontiers in Applied Mathematics and Statistics"
+% for articles in journals using the Harvard Referencing Style (Author-Date), for Frontiers Reference Styles by Journal: https://zendesk.frontiersin.org/hc/en-us/articles/360017860337-Frontiers-Reference-Styles-by-Journal
+%\documentclass[utf8]{FrontiersinVancouver} % for articles in journals using the Vancouver Reference Style (Numbered), for Frontiers Reference Styles by Journal: https://zendesk.frontiersin.org/hc/en-us/articles/360017860337-Frontiers-Reference-Styles-by-Journal
 
-%\setcitestyle{square} % for articles in the journals "Frontiers in Physics" and "Frontiers in Applied Mathematics
-%and Statistics"
+\include{packages}
 
 \linenumbers
 
@@ -43,9 +21,6 @@ Herlenius\,$^{1,2*}$}
 \def\corrAuthor{Eric Herlenius, CMM Center for Molecular Medicine L8:05, 171 76 Stockholm, Sweden}
 \def\corrEmail{eric.herlenius@ki.se}
 
-
-\include{packages}
-
 \begin{document}
     \onecolumn
     \firstpage{1}
@@ -57,9 +32,10 @@ Herlenius\,$^{1,2*}$}
     \address{} %This field will be automatically populated
     \correspondance{} %This field will be automatically populated
 
-    \extraAuth{}% If there are more than 1 corresponding author, comment this line and uncomment the next one.
-%\extraAuth{corresponding Author2 \\ Laboratory X2, Institute X2, Department X2, Organization X2, Street X2, City X2
-%    , State XX2 (only USA, Canada and Australia), Zip Code2, X2 Country X2, email2@uni2.edu}
+    % If there are more than 1 corresponding author, comment this line and uncomment the next one.
+    \extraAuth{}
+
+    %\extraAuth{corresponding Author2 \\ Laboratory X2, Institute X2, Department X2, Organization X2, Street X2, City X2, State XX2 (only USA, Canada and Australia), Zip Code2, X2 Country X2, email2@uni2.edu}
 
     \maketitle
 
@@ -105,32 +81,16 @@ Herlenius\,$^{1,2*}$}
     \input{discussion}
 
     \section*{Conflict of Interest Statement}
-    The authors declare that the research was conducted in the absence of any commercial or financial relationships
-    that could be construed as a potential conflict of interest.
+    The authors declare that the research was conducted in the absence of any commercial or financial relationships that could be construed as a potential conflict of interest.
 
     \section*{Author Contributions}
-    The study was carried out through a collaborative effort, where each author contributed distinctly and
-    significantly.
-    WP and EH were responsible for the conceptualization and design of the experiments.
-    EH also provided the funding and laboratory resources necessary for conducting the research.
-    JPR conducted the experiments and performed the data analysis.
-    The manuscript was written by JPR, with critical revisions from AS and EH, ensuring a comprehensive and precise
-    presentation of the study's findings.
+    JPR and EH conceptualized the study and EH secured funding for the project. JPR designed the algorithms, conducted the data analysis, and contributed to the building of the astroCAST toolkit. ACGS collaborated with JPR in building the toolkit. JPR wrote the manuscript, with contributions from ACGS and AS. EH and AS provided supervision throughout the project. All authors reviewed and approved the final manuscript.
 
     \section*{Use of Generative AI}
-    During the preparation of this manuscript, we utilized the generative capabilities of OpenAI's ChatGPT-4. The AI
-    's primary role was to assist in proofreading and language refinement to ensure clarity, conciseness, and
-    readability of the text. While the AI provided suggestions for language adjustments, the final manuscript content
-    was thoroughly reviewed, curated, and approved by the authors. We, the authors, take full and complete
-    responsibility for the integrity and accuracy of the manuscript content.
+    During the preparation of this manuscript, we utilized the generative capabilities of OpenAI's ChatGPT-4. The AI's primary role was to assist in proofreading and language refinement to ensure clarity, conciseness, and readability of the text. While the AI provided suggestions for language adjustments, the final manuscript content was thoroughly reviewed, curated, and approved by the authors. We, the authors, take full and complete responsibility for the integrity and accuracy of the manuscript content.
 
     \section*{Funding}
-    This study was supported by grants to EH from the Swedish Research Council (2016-01111 \& 2019-
-    01157 and 2023-02613), the Stockholm County Council (2019-0400, 2019-0974), the Swedish Brain
-    (FO2017-0203, FO2019-0087, FO2021-0313 and FO2023-0231), the Swedish National Heart and Lung (2015-0558, 20180505
-    and 20210579), the Axel Tielmans, and the Freemasons Children’s House foundations.
-    In addition, WSP, NR and AS were partly supported by the Freemasons Children’s House foundation scholarship and
-    WSP was supported 1 year by the StratNeuro Karolinska Institutet Postdoc grant 2020.
+    This study was supported by grants to EH from the Swedish Research Council (2019–01157), the Stockholm County Council (2019–0400, 2019–0974 and FoUI-966 449), the Swedish Brain (FO2019-0087 and FO2021-0313), the Swedish National Heart and Lung (2018 0505 and 2021 0579), the Axel Tielmans, the Freemasons Children's House foundations and Karolinska Institutet. The funders did not participate in the design or conduct of the study.
 
     \todo{Eric}{Check funding}{Eric, could you have a look at this section.}
 
@@ -138,7 +98,7 @@ Herlenius\,$^{1,2*}$}
     \todo{Jan}{Acknowledgments}{
         \begin{itemize}
             \item Animal facility and Staff (KMB)
-            \item Uppmax Cloud Computing
+            \item The development of this toolkit was enabled by resources in projects SNIC 2022/22-1224  and SNIC 2022/23-638 provided by the National Academic Infrastructure for Supercomputing in Sweden (NAISS) at UPPMAX, funded by the Swedish Research Council through grant agreement no. 2022-06715.
         \end{itemize}
     }
 
@@ -148,15 +108,10 @@ Herlenius\,$^{1,2*}$}
     file as the figure. LaTeX Supplementary Material templates can be found in the Frontiers LaTeX folder.
 
     \section*{Data Availability Statement}
-    \todo{Jan}{Data Availability}{
-        The datasets [GENERATED/ANALYZED] for this study can be found in the [NAME OF REPOSITORY] [LINK].}
+    Further information and requests for resources and reagents should be directed to and will be fulfilled by the lead contact, Eric Herlenius [eric.herlenius@ki.se]. All original code has been deposited at \href{https://github.com/janreising/astroCAST}{astroCAST}.
 
-    \bibliographystyle{Frontiers-Harvard} %  Many Frontiers journals use the Harvard referencing system (Author-date)
-    , to find the style and resources for the journal you are submitting to: https://zendesk.frontiersin
-    .org/hc/en-us/articles/360017860337-Frontiers-Reference-Styles-by-Journal. For Humanities and Social Sciences
-    articles please include page numbers in the in-text citations
-%\bibliographystyle{Frontiers-Vancouver} % Many Frontiers journals use the numbered referencing system, to find the
-%    style and resources for the journal you are submitting to: https://zendesk.frontiersin.org/hc/en-us/articles/360017860337-Frontiers-Reference-Styles-by-Journal
+    \bibliographystyle{Frontiers-Harvard} %  Many Frontiers journals use the Harvard referencing system (Author-date), to find the style and resources for the journal you are submitting to: https://zendesk.frontiersin.org/hc/en-us/articles/360017860337-Frontiers-Reference-Styles-by-Journal. For Humanities and Social Sciences articles please include page numbers in the in-text citations
+    %\bibliographystyle{Frontiers-Vancouver} % Many Frontiers journals use the numbered referencing system, to find the style and resources for the journal you are submitting to: https://zendesk.frontiersin.org/hc/en-us/articles/360017860337-Frontiers-Reference-Styles-by-Journal
     \bibliography{astrocast}
 
     \section*{Figure captions}
