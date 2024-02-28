@@ -1,0 +1,28 @@
+\subsection{Expected outcomes}
+
+AstroCAST could facilitate several key outcomes for researchers working with astrocytic calcium imaging data analysis
+. On the technical front, the tool is designed to handle large-scale datasets effectively. For example, in time
+-lapse recordings of astrocytes at 20X magnification and 1024x1024 pixel resolution, astroCAST is equipped to
+identify up to 1,000 astrocytic events per 100 frames. As the analysis progresses, users should find that the
+software can comfortably manage up to 50,000 events using the encoding algorithms provided. This performance equates
+to the comparative analysis of around 15 time-lapse videos, each with a 20-minute recording time. Furthermore,
+astroCAST is designed to efficiently handle larger datasets, efficiently analyzing more events than previously
+possible in astrocyte-specific studies. This is achieved without compromising on computational time. From an
+innovation standpoint, astroCAST offers more than just event detection. Users can expect a cohesive, end-to-end
+analytical workflow that guides them from raw video data to insightful experimental conclusions. The software brings
+structure and flexibility to the often-challenging variable-length timeseries analysis, setting it apart as a unique
+tool in the field of astrocytic calcium imaging.
+
+\subsection{Limitations}
+
+The astroCAST protocol has proved to be effective in analyzing calcium events in fluorescence imaging data. We have
+tested the system in depth on acute slices, as well as available public data for in-vivo and cell culture recordings
+. There are, however, challenges that might be considered as limitations. For example, astroCAST can firmly attribute
+events to individual cells, but is agnostic to cell shape by design, enabling us to analyze recordings even when
+cells overlap or change morphology. Furthermore, issues that stem from the difficulty to distinguish close bordering
+events, the computational complexity, the event length and data dimensionality, and others, may also need fine-tuning
+. We acknowledge that users might encounter some of these, and we make suggestions for each in the troubleshooting
+section.
+
+We consider the fact that astroCAST is user customizable to be an asset that will aid researchers globally to
+decipher the enigmatic astrocytic calcium activity.
