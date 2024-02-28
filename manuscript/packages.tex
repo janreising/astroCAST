@@ -1,0 +1,24 @@
+\usepackage{url,hyperref,lineno,microtype,subcaption}
+\usepackage[onehalfspacing]{setspace}
+\usepackage[T1]{fontenc}
+\usepackage[english]{babel}
+\usepackage{textcomp}
+
+\input{custom_commands}
+\usepackage[nolist,nohyperlinks,printonlyused]{acronym}
+
+\usepackage{listings}
+\lstdefinestyle{bashStyle}{
+    language=bash,
+    frame=single,
+    basicstyle=\footnotesize
+}
+
+\usepackage{wasysym} % for half bullet
+\usepackage{pifont}
+
+% Define new commands for symbols to make the table cleaner
+\newcommand{\cmark}{\ding{51}} % Check mark
+\newcommand{\xmark}{\ding{55}} % Cross mark
+\newcommand{\halfbullet}{\LEFTcircle} % Half bullet
+\newcommand{\optional}{*} % Optional feature
