@@ -16,7 +16,8 @@ def format_caption(caption: str):
 # Start writing to the output file
 with open(output_filename, 'w') as output_file:
     
-    filenames = figures_directory.glob("*.png")
+    filenames = list(figures_directory.glob("*.png"))
+    filenames = sorted(filenames)
     for filename in filenames:
         
         name = filename.name
