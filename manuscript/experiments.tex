@@ -1,0 +1,41 @@
+
+\subsection{Evaluating outcomes of experiments}
+%Timing: 1 h – 6h
+%Running time will increase non-linearly with the number of events being clustered and varies substantially between approaches chosen.
+
+The last step of the protocol is to evaluate the outcomes of experiment. This section provides examples to inspire various ways datasets can be analyzed. The best analysis approach will depend on the specifics of the study, and therefore, exceeds the scope of this protocol. AstroCAST is designed to be flexible and modular, allowing for custom addition of analyses tailored to the specific dataset. The examples in this section focus on two primary types of analyses: comparing groups under different conditions (Conditional Contrasts) and detecting coincidences of independent stimuli (Coincidence Detection).
+
+\todo{Jan}{loading multiple experiments}{}
+\begin{lstlisting}[style=pyStyle]
+
+\end{lstlisting}
+
+\subsubsection{Conditional Contrasts}
+This module compares different experimental groups by assessing whether the observed effects are condition-dependent. Common examples include application of different drugs, samples from different animal models or different brain regions.
+
+\paragraph{Classifier (Predict the Condition)}
+Use classification algorithms to predict the condition of each event based on its features. This provides an indication of how effectively the conditions can be distinguished based on the observed events. Feature embedding is necessary.
+
+\todo{Jan}{add code}{}
+\todo{Jan}{add figure panel}{}
+
+\paragraph{Hierarchical Clustering (Overlap with Conditions)}
+Hierarchical clustering groups similar events together. Similarity between event traces is assessed by either Dynamic Time Warping (DTW) or Pearson Correlation. The aim is to see if these groups correspond to different experimental conditions, which would indicate that the conditions have distinct profiles. Hierarchical clustering does not depend on feature embedding and can be safely performed on the normalized event traces. Note: The set of counts shown in the heatmap is called a signature.
+
+\todo{Jan}{add code}{}
+\todo{Jan}{add figure panel}{}
+
+\subsubsection{Coincidence Detection}
+This module focuses on identifying whether certain conditions or events coincide with or predict other phenomena. Common examples would be neuronal bursts or observed animal behavior.
+
+\paragraph{Classifier (Predict Incidence Occurred)}
+Similar to the classifier used in conditional contrasts, this module predicts whether a specific incidence or event has occurred. This is particularly useful for identifying causal relationships or triggering events.
+
+\todo{Jan}{add code}{}
+\todo{Jan}{add figure panel}{}
+
+\paragraph{Regression (Timing of Incidence; Coinciding Events Only)}
+Regression analysis can be used to predict when an incidence occurred based on the event embedding. This analysis aims to establish whether astrocytic events correlate with the incident in question, or vice versa.
+
+\todo{Jan}{add code}{}
+\todo{Jan}{add figure panel}{}

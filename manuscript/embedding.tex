@@ -1,0 +1,181 @@
+\subsection{Embedding}\label{subsec:embedding}
+
+\subsubsection{Quality control and Standardization}\label{subsubsec:quality-control}
+
+After successful detection of events, users need to control the quality of the result to ensure data integrity for downstream analysis. In astroCAST this step optionally includes filtering and normalization. AstroCAST also features a dedicated GUI to guide selection of filter and normalization parameters.
+
+\begin{lstlisting}[style=bashStyle]
+    $  astrocast exploratory-analysis --input-path "/path/to/roi/" --h5-loc "/dataset/name"
+\end{lstlisting}
+
+Here, we are going to showcase the steps using the astroCAST python package directly. Users are directed to our \missing{example} notebook to follow along. Of note, large datasets might require significant computational time. Hence, we recommend to utilize dynamic disk caching via the \lstinline[language=python]{cache_path} parameter to mitigate redundant processing.
+
+\begin{lstlisting}[style=pyStyle]
+    from pathlib import Path
+    from astrocast.analysis import Events, Video
+
+    # load video data
+    video_path = 'path/to/processed/video.h5'
+    h5_loc = 'df/ch0'
+    lazy = False  # flag to toggle on-demand loading; slower but less memory
+    video = Video(data=video_path, loc=h5_loc, lazy=lazy)
+
+    # load event data
+    event_path = 'path/to/events.roi'
+    cache_path = Path(event_path).joinpath('cache')
+    eObj = Events(event_dir=event_path, data=video, cache_path=cache_path)
+
+\end{lstlisting}
+
+The events object has an \inlinepy{events} instance, which contains the extracted signal, as well as  their associated attributes (\inlinepy{'dz', 'x0', '...'}) and metrics (\inlinepy{'v\_area', 'v\_signal\_to\_noise\_ratio', '...'}). An explanation of all columns can be found in the \missing{supplementary table} or \missing{link to documentation}.
+
+\todo{Jan}{Include table of calculated parameters}{}
+
+\paragraph{Filtering}
+AstroCAST is engineered for versatility, facilitating the analysis of diverse experimental setups. Typically, datasets undergo filtering to adhere to experimental parameters or to eliminate outliers. Although a detailed discourse on filtering protocols is outside this document's scope, we address several prevalent scenarios. For astrocytic events, imposing a cutoff for event duration is beneficial, especially when distinguishing between rapid and protracted calcium events. Moreover, applying a threshold for the signal-to-noise ratio helps to discard events with negligible amplitude. While incorporating as many events as possible seems ideal, practical constraints like computational demands or the potential dilution of relevant events with extraneous data necessitate selectivity. Additionally, filtering aids in removing outliers, achieved either through manual adjustments or an unbiased clustering method. \missing{link}. It is vital to recognize that the concept of an outlier is not universal but intimately tied to the specifics of the experimental design. Rigorous, context-sensitive examination is crucial for accurate data interpretation. We  encourage users to venture beyond the preset analysis tools of AstroCAST, engaging with their data through custom analysis methods tailored to their unique experimental conditions. It is however essential to remember that what constitutes an outlier in one dataset may be critical data in another.
+
+\begin{lstlisting}[style=pyStyle]
+
+    from astrocast.analysis import Plotting
+    plot = Plotting(events=eObj)
+
+    # explore distribution
+    plot.plot_distribution(column='dz', outlier_deviation=3)
+
+    # filter based on user choice
+    #  here: events of length between 3 and 200 frames
+    filter_choice = {'dz': (3, 200)}
+    eObj.filter(filter_choice, inplace=True)
+
+\end{lstlisting}
+
+\todo{Jan}{Figures from GUI}{
+%
+%Considerations for Outlier Identification: Distinguish between technical (recording artifacts, irrelevant perturbations), biological (aberrant cells, mislabeling), and detection outliers (false positives).
+%
+%Distribution Visualization (Fig. 14): Provides insights into the overall data structure, highlighting anomalies in the spread of event characteristics. Panel ‘Summary statistics’ implements functionality to plot event characteristic distributions, aiding the identification of outliers. For instance, a boxplot might reveal events with unusually high ‘v_area’, suggesting potential artifacts or non-target cells. Comparison between groups of recordings can be made by using the “Category” dropdown menu.
+%
+%Characteristic Correlation (Fig. 15): Identifies dependencies or inconsistencies across different metrics that may suggest outlier properties. Assess interrelations, such as ‘dz’ versus ‘area’. Strong correlations or unexpected discrepancies can pinpoint outliers, guiding the refinement of detection parameters.
+%
+%Clustering Analysis (Fig 16): Integrates multiple characteristics to uncover subtle groupings, which could reveal nuanced outliers that single-variable analysis might miss. Panel “Outliers” implements UMAP reduction paired with HdbSCAN clustering to identify atypical events. Events persisting for only a single frame are prime candidates for exclusion. By selecting the cluster label in the ‘Clusters’ table, a selection of events is plotted to distinguish genuine events from outliers.
+%
+}
+
+\paragraph{Event extension}
+AstroCAST's event detection module is designed to pinpoint individual events with precise temporal accuracy. Often, this precision means that the peripheral regions, or shoulders, of the event peak might not be captured. Yet, these initial and concluding slopes of the event can reveal crucial information about its nature. To address this, astroCAST includes a feature that allows for the extension of detected events to include adjacent frames.
+
+\begin{lstlisting}[style=pyStyle]
+
+    # extend events
+    # use_footprint: toggles between maximum projection (footprint) or first/last event frame
+    # extend: either an int, (int, int) or -1 for extension across the full video
+    eObj.get_extended_events(use_footprint=True, extend=3, in_place=True, load_to_memory=True)
+
+\end{lstlisting}
+
+\paragraph{Enforcing fixed-lenth events}
+\label{par:enforcing-length}
+Enforcing a fixed event length is a requirement for some types of analysis. However, enforcing a length will significantly distort the actual event characteristics. Use length enforcement cautiously, as it can alter your data and even overlap with other nearby events. If required by your analysis, the toolkit will prompt you to unify event lengths (for example \ac{CNN} Autoencoders). For diverse event durations, consider filtering your data for similar lengths or analyzing short and long events separately to maintain data integrity.
+
+\begin{lstlisting}[style=pyStyle]
+
+    # extend events
+    eObj.get_extended_events(enforce length=15,
+                use_footprint=True, extend=8, in_place=True, load_to_memory=True)
+
+\end{lstlisting}
+
+\paragraph{Normalization and Standardization}
+The final step before clustering involves normalizing the signal. This process aims to mitigate the impact of variabilities encountered during recordings, such as fluorescence bleaching, and facilitating the comparison across multiple experiments. Normalization is particularly critical when employing machine learning algorithms, as it ensures data uniformity and comparability.
+
+AstroCAST offers a versatile normalization interface to accommodate various research needs. This dynamic system allows users to apply a series of operations such as subtraction, division, and first-order differentiation to standardize data. Operations can be tailored using common statistical functions like the mean, median, or standard deviation, enhancing the robustness of the analysis. Additionally, AstroCAST provides a \inlinepy{'population\_wide'} flag, offering users the choice to normalize signals either individually or across a collective dataset, thereby maximizing analytical precision and flexibility.
+
+\begin{lstlisting}[style=pyStyle]
+
+    # define normalization instructions
+    #  here: take the differential of each signal
+    #  and then divide by maximum value in the population
+    instructions = {
+        0: ["diff", {}],
+        1: ["divide", {"mode": "max", "population_wide": True}]
+    }
+
+    # apply the normalization
+    eObj.normalize(instructions, inplace=True)
+
+\end{lstlisting}
+
+
+\subsubsection{Event encoding}
+%Timing: 1 h – 6h
+%Running time will increase non-linearly with the number of events being clustered and varies substantially between approaches chosen.
+
+AstroCAST introduces a structured approach to address the challenge of varying event durations, detailed here with increasing complexity. The normalized timeseries are transformed into fixed-length feature vectors suitable for clustering and further analysis. This sequence of steps allows for a more focused analysis while balancing the need for data integrity and computational efficiency.
+
+\todo{Jan}{table of requirements for different algorithms.}{}
+
+\paragraph{Feature extraction}
+Feature extraction offers a simple yet powerful approach to reduce timeseries data into a manageable set of dimensions. The module employs a variety of metrics, including mean, median, and Shannon entropy, accessible through \inlinepy{help(astrocast.reduction.FeatureExtraction)}. While this method is length-agnostic, it may overlook key features, due to the inherent dimensional reduction. Further dimension reduction can be applied using techniques like PCA, t-SNE, or UMAP .
+
+\begin{lstlisting}[style=pyStyle]
+
+    import astrocast.reduction as red
+
+    # extract features
+    fe = red.FeatureExtraction(eObj)
+    features = fe.all_features(dropna=True)
+
+    # classify labels
+    hdb = clust.HdbScan()
+    lbls = hdb.fit(features)
+
+    # visualize with UMAP
+    umap = red.UMAP()
+    embedding = umap.train(features)
+    umap.plot(data=embedding, labels=lbls, use_napari=False)
+
+\end{lstlisting}
+
+\paragraph{\ac{CNN} Autoencoder}
+
+Using a \ac{CNN} Autoencoder provides an advanced way to maintain key features while reducing data complexity. The CNN Autoencoder consists of an encoder that maps the timeseries to a latent vector and a separately trained decoder, which performs the inverse operation. After training, only the encoder is utilized for event embedding. Note that this approach requires the input to have a fixed length (see\ref{par:enforcing-length}).
+
+\begin{lstlisting}[style=pyStyle]
+
+    ???
+
+\end{lstlisting}
+
+\todo{Jan}{Add code for CNN AE}{}
+
+\paragraph{\ac{RNN} Autoencoder}
+
+For encoding time series of variable lengths into consistent latent vectors, the \ac{RNN} Autoencoder stands out. It provides adaptability at the cost of increased computational demand and complexity in tuning. This approach is notably advantageous over CNN embeddings, as it eliminates the need for uniform input lengths, offering a more flexible and comprehensive encoding solution for diverse data sets.
+
+\begin{lstlisting}[style=pyStyle]
+
+    import astrocast.autoencoders as AE
+
+    # Prepare data
+    pdl = AE.PaddedDataLoader(data=eObj.events.trace)
+    X_train, X_val, X_test = pdl.get_datasets(batch_size=16, val_size=0.1, test_size=0.05)
+    model_path = "path/to/save/models/"
+
+    # train RNN
+    tRAE = AE.TimeSeriesRnnAE(use_cuda=True)
+    tRAE.train_epochs(dataloader_train=X_train,
+                      dataloader_val=X_val,
+                      num_epochs=10,  # number of training epochs
+                      patience=10,  # epochs to wait before early stopping
+                      safe_after_epoch=model_path
+                      )
+
+    # save model
+    tRAE.save_models("encoder.pth", "decoder.pth")
+
+    # evaluate embedding performance
+    fig, x_val, y_val, latent, losses = tRAE.plot_traces(dataloader=X_test, figsize=(20, 20))
+    fig.savefig("tRAE_performance.png")
+
+\end{lstlisting}
+
