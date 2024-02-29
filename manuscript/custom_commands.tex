@@ -1,19 +1,29 @@
-\usepackage{mdframed}
-\usepackage{xcolor}
-\usepackage{etoolbox} % For conditional statements
 
-\newcommand{\inlinepy}[1]{\bold{#1}}
+
+\definecolor{lightgray}{gray}{0.95} % Define light gray color
+\definecolor{colorJan}{RGB}{18, 179, 77}
+\definecolor{colorAthina}{RGB}{49, 133, 216}
+\definecolor{colorEric}{RGB}{208, 83, 38}
+\definecolor{colorWiktor}{RGB}{229, 209, 79}
+
+\newcommand{\inlineBash}[1]{%
+    \begingroup
+    \edef\temp{#1}%
+    \expandafter\StrSubstitute\expandafter{\temp}{--}{-{-}}[\temp]%
+    \colorbox{lightgray}{\texttt{\small \temp}}%
+    \endgroup
+}
+
+\newcommand{\inlinepy}[1]{\inlineBash{#1}}
+
+%\newcommand{\inlineBash}[1]{\colorbox{lightgray}{\texttt{\small #1}}} % Command definition
+%\newcommand{\inlineBash}[1]{\bold{#1}}
 
 \newcommand{\missing}[1]{\textcolor{red}{\textbf{\MakeUppercase{#1}}}}
 
 %\newcommand{\lbash}[1]{\lstset{frame=single} \begin{lstlisting}[language=bash] #1 \end{lstlisting}}
 
 \newcommand{\fref}[1]{ (Figure~\ref{fig:#1})}
-
-\definecolor{colorJan}{RGB}{18, 179, 77}
-\definecolor{colorAthina}{RGB}{49, 133, 216}
-\definecolor{colorEric}{RGB}{208, 83, 38}
-\definecolor{colorWiktor}{RGB}{229, 209, 79}
 
 \newcommand{\todo}[3]{
 % Define the default color
