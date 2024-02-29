@@ -106,8 +106,7 @@ A browser window will open which displays the available examples or can be used 
 \subsection{Data showcase}
 
 In this protocol, we demonstrate the utility of our toolkit using publicly available datasets and our own data.
-The data represents astrocytes studied ex-vivo, in-vivo and in acute slices captured with One or Two Photon
-microscopy recording speeds of 1-16Hz.
+The data represents astrocytes studied ex-vivo, in-vivo and in acute slices captured with \ac{1P} or \ac{2P} imaging at recording speeds of 1-16Hz.
 
 To ensure transparency and provide a practical starting point, we offer a collection of sensible, default settings
 within a YAML file.
@@ -130,27 +129,18 @@ Optionally, the available sample and training datasets can be directly downloade
     \caption{Overview of Datasets Employed in Analysis}
     \begin{tabular}{|l|l|l|l|l|l|}
         \hline
-        \textbf{Dataset}       & \textbf{Publication} & \textbf{Experiment}   & \textbf{Imaging Type} & \textbf{
-            Imaging Speed} & \textbf{Number of files} \\ \hline
-        custom:train/test      & unpublished          & acute slices, Gcamp6f & One-Photon            & 8 Hz
-        & 49                       \\ \hline
-        public: ExVivo         & AQuA                 & acute slices, Gcamp6f & Two-Photon            & 1.1 Hz
-        & 1                        \\ \hline
-        public: Glusnfr        & AQuA                 & acute slices, GluSnFR & Two-Photon            & 4-100 Hz
-        & 1                        \\ \hline
-        public: InVivo         & AQuA                 & in vivo GCamp6f       & Two-Photon            & 2 Hz
-        & 1                        \\ \hline
-        public: cellscan\_scim & CHIPS                & blood vessels, N/A    & Two-Photon            & N/A
-        & 1                        \\ \hline
+        \textbf{Dataset} & \textbf{Publication} & \textbf{Experiment} & \textbf{Imaging} \\ \hline
+        train/test & previously unpublished & acute slices, Gcamp6f & \ac{1P} (8 Hz) \\ \hline
+        ExVivo & AQuA\citep{wang_event-based_2018} & acute slices, Gcamp6f & \ac{2P} (1.1 Hz) \\ \hline
+        Glusnfr & AQuA\citep{wang_event-based_2018} & acute slices, GluSnFR & \ac{2P} (4-100 Hz) \\ \hline
+        InVivo & AQuA\citep{wang_event-based_2018} & in vivo GCamp6f & \ac{2P} (2 Hz) \\ \hline
+        cellscan\_scim & CHIPS\citep{barrett_chips_2018} & blood vessels & \ac{2P} \\ \hline
     \end{tabular}
 \end{table}
 
 \subsection{Pipeline approach}
 The AstroCAST pipeline is structured into three major blocks: a) Preprocessing, b) Encoding and c) Exploratory Analysis.
 
-In the Preprocessing block (a), users can navigate the pipeline through a \ac{CLI} by utilizing commands such as \lstinline[style=bashStyle]{$ astrocast --help}. This section allows for the utilization of a predefined configuration file to streamline the process. Additionally, an "Argument Explorer" is integrated to facilitate quick testing of various parameters and seamless export of the configuration file. If users want to follow this protocol along, we prepared a jupyter notebook for convenience.
+In the Preprocessing block (a), users can navigate the pipeline through a \ac{CLI} by utilizing commands such as \lstinline[style=bashStyle]{$ astrocast --help}. This section allows for the utilization of a predefined configuration file to streamline the process. Additionally, an 'Argument Explorer' is integrated to facilitate quick testing of various parameters and seamless export of the configuration file. If users want to follow this protocol along, we prepared a jupyter notebook for convenience.
 
-During the Encoding (b) and Analysis (c) block, the approach varies based on the specificities of the experiment at
-hand, be it comparing drug treatments, model systems, correlating with stimuli, or analyzing changes over time. This
-segment of the pipeline now implements a separate GUI, offering a dynamic platform for detailed analysis and data
-visualization.
+During the Encoding (b) and Analysis (c) block, the approach varies based on the specificities of the experiment at hand, be it comparing drug treatments, model systems, correlating with stimuli, or analyzing changes over time. This segment of the pipeline now implements a separate GUI, offering a dynamic platform for detailed analysis and data visualization.

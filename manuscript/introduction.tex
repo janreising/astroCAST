@@ -1,31 +1,10 @@
 %! suppress = LineBreak
 
-Astrocytes exhibit calcium fluctuations that are spatially and temporally diverse, reflecting their integration of a
-wide range of physiological signals\citep{semyanov_making_2020,smedler_frequency_2014}. Our protocol provides a
-detailed guide for extracting these astrocytic calcium events from video recordings, performing clustering analysis,
-and correlating astrocyte activity with other physiological signals\fref{1}. This analysis has been applied to
-astrocytes in various settings, including acute slices, cell cultures, and in vivo recordings. Specifically, we
-demonstrate the application of astroCAST, using a custom dataset from a postnatal transgenic mouse brainstem,
-focusing on the \ac{preBötC}, as well as utilizing publicly available data.
+Astrocytes exhibit calcium fluctuations that are spatially and temporally diverse, reflecting their integration of a wide range of physiological signals\citep{semyanov_making_2020,smedler_frequency_2014}. Our protocol provides a detailed guide for extracting these astrocytic calcium events from video recordings, performing clustering analysis, and correlating astrocyte activity with other physiological signals\fref{1}. This analysis has been applied to astrocytes in various settings, including acute slices, cell cultures, and in vivo recordings. Specifically, we demonstrate the application of astroCAST, using a custom dataset from a postnatal transgenic mouse brainstem, focusing on the \ac{preBötC}, as well as utilizing publicly available data.
 
 \subsection{Requirements}
-The initial step involves preparing the video recordings for analysis. Our protocol supports a range of file formats
-, including .avi, .h5, .tiff (either single or multipage), and .czi, accommodating videos with interleaved recording
-paradigms. To ensure reliable results, recordings should be captured at a frequency of 8Hz for 1-photon imaging and
-1-2Hz for 2-photon imaging. This frequency selection is crucial for capturing events of the expected duration
-effectively. It is imperative that the recordings specifically capture astrocytes labeled with calcium sensors,
-either through transgenic models or viral vectors. While the use of calcium dyes is possible, their application may
-not guarantee the exclusive detection of astrocytic events.
+The initial step involves preparing the video recordings for analysis. Our protocol supports a range of file formats, including .avi, .h5, .tiff (either single or multipage), and .czi, accommodating videos with interleaved recording paradigms. To ensure reliable results, recordings should be captured at a frequency of 8Hz for \ac{1P} imaging and 1-2Hz for \ac{2P} imaging. This frequency selection is crucial for capturing events of the expected duration effectively. It is imperative that the recordings specifically capture astrocytes labeled with calcium sensors, either through transgenic models or viral vectors. While the use of calcium dyes is possible, their application may not guarantee the exclusive detection of astrocytic events.
 
-Regarding hardware requirements, our protocol is adaptable to a variety of configurations, from personal computers to
-cloud infrastructures, with certain modules benefiting from GPU acceleration. At a minimum, we recommend using
-hardware equipped with a 1.6GHz quad-core processor and 16GB of RAM to efficiently handle the data analysis.
+Regarding hardware requirements, our protocol is adaptable to a variety of configurations, from personal computers to cloud infrastructures, with certain modules benefiting from GPU acceleration. At a minimum, we recommend using hardware equipped with a 1.6GHz quad-core processor and 16GB of RAM to efficiently handle the data analysis.
 
-On the software side, we advocate for the use of Linux operating systems, specifically Ubuntu or AlmaLinux, for
-optimal performance, although Windows or macOS can be used with some functional limitations. Be advised, the M1 and
-M2 Mac processors are currently not supported, and we recommend using the docker image instead. However, even using
-the docker image it is not guaranteed that astroCAST will perform as expected. Essential software
-includes Python version 3.9, along with Anaconda or Miniconda for managing Python environments, and git for version
-control. An optional recommendation is ImageJ or an equivalent image viewer for analyzing the output visually. This
-comprehensive approach ensures that researchers can accurately extract and analyze astrocytic calcium signals, paving
-the way for further understanding of their physiological roles.
+On the software side, we advocate for the use of Linux operating systems, specifically Ubuntu or AlmaLinux, for optimal performance, although Windows or macOS can be used with some functional limitations. Be advised, the M1 and M2 Mac processors are currently not supported, and we recommend using the docker image instead. However, even using the docker image it is not guaranteed that astroCAST will perform as expected. Essential software includes Python version 3.9, along with Anaconda or Miniconda for managing Python environments, and git for version control. An optional recommendation is ImageJ or an equivalent image viewer for analyzing the output visually. This comprehensive approach ensures that researchers can accurately extract and analyze astrocytic calcium signals, paving the way for further understanding of their physiological roles.
