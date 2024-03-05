@@ -21,7 +21,7 @@ from networkx.algorithms import community
 from scipy.cluster.hierarchy import fcluster
 from sklearn import cluster, ensemble, gaussian_process, linear_model, neighbors, neural_network, tree
 from sklearn.cluster import KMeans
-from sklearn.metrics import confusion_matrix
+from sklearn.metrics import ConfusionMatrixDisplay, confusion_matrix
 from tqdm import tqdm
 
 from astrocast.analysis import Events
@@ -1207,10 +1207,14 @@ class Discriminator(CachedClass):
         
         return self.clf.predict(X)
     
-    def evaluate(self, regression=False, cutoff=0.5, normalize=None):
+    def evaluate(self, regression=False, cutoff=0.5, normalize=None, show_plot: bool = True, figsize=(10, 5)):
+        
+        axx = None
+        if show_plot:
+            fig, axx = plt.subplots(1, 2, figsize=figsize)
         
         evaluations = []
-        for X, Y, lbl in [(self.X_train, self.Y_train, "train"), (self.X_test, self.Y_test, "test")]:
+        for i, (X, Y, lbl) in enumerate([(self.X_train, self.Y_train, "train"), (self.X_test, self.Y_test, "test")]):
             
             pred = np.squeeze(self.clf.predict(X))
             
@@ -1226,6 +1230,16 @@ class Discriminator(CachedClass):
                 
                 cm = confusion_matrix(pred, Y, normalize=normalize)
                 evaluations.append(cm)
+                
+                if show_plot:
+                    ax = axx[i]
+                    # sns.heatmap(cm, annot=True, fmt=".2f", cmap="Blues", cbar=True, ax=ax)
+                    fig, ax = plt.subplots()
+                    sns.heatmap(cm, annot=True, fmt=".2f", cmap="Blues", cbar=True)
+                    # sns.heatmap(cm, fmt=".2f", annot=True)
+                    ax.set_xlabel("Predicted")
+                    ax.set_ylabel("True")
+                    ax.set_title(f"Confusion Matrix ({lbl.capitalize()})")
         
         return evaluations
     
