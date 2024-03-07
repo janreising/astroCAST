@@ -8,7 +8,7 @@ After successful detection of events, users need to control the quality of the r
     $  astrocast exploratory-analysis --input-path "/path/to/roi/" --h5-loc "/dataset/name"
 \end{lstlisting}
 
-Here, we are going to showcase the steps using the astroCAST python package directly. Users are directed to our \missing{example} notebook to follow along. Of note, large datasets might require significant computational time. Hence, we recommend to utilize dynamic disk caching via the \lstinline[language=python]{cache_path} parameter to mitigate redundant processing.
+Here, we are going to showcase the steps using the astroCAST python package directly. Users are directed to our \missing{example notebook} to follow along. Of note, large datasets might require significant computational time. Hence, we recommend to utilize dynamic disk caching, via the \inlinepy{cache_path} parameter, to mitigate redundant processing.
 
 \begin{lstlisting}[style=pyStyle]
     from pathlib import Path
@@ -27,12 +27,12 @@ Here, we are going to showcase the steps using the astroCAST python package dire
 
 \end{lstlisting}
 
-The events object has an \inlinepy{events} instance, which contains the extracted signal, as well as  their associated attributes (\inlinepy{'dz', 'x0', '...'}) and metrics (\inlinepy{'v\_area', 'v\_signal\_to\_noise\_ratio', '...'}). An explanation of all columns can be found in the \missing{supplementary table} or \missing{link to documentation}.
+The events object has an \inlinepy{events} instance, which contains the extracted signal, as well as their associated attributes (\inlinepy{'dz', 'x0', '...'}) and metrics (\inlinepy{'v\_area', 'v\_signal\_to\_noise\_ratio', '...'}). An explanation of all columns can be found in the \missing{supplementary table} or \missing{link to documentation}.
 
-\todo{Jan}{Include table of calculated parameters}{}
+\todo{Jan}{Include supplementary table of calculated parameters}{}
 
 \paragraph{Filtering}
-AstroCAST is engineered for versatility, facilitating the analysis of diverse experimental setups. Typically, datasets undergo filtering to adhere to experimental parameters or to eliminate outliers. Although a detailed discourse on filtering protocols is outside this document's scope, we address several prevalent scenarios. For astrocytic events, imposing a cutoff for event duration is beneficial, especially when distinguishing between rapid and protracted calcium events. Moreover, applying a threshold for the signal-to-noise ratio helps to discard events with negligible amplitude. While incorporating as many events as possible seems ideal, practical constraints like computational demands or the potential dilution of relevant events with extraneous data necessitate selectivity. Additionally, filtering aids in removing outliers, achieved either through manual adjustments or an unbiased clustering method. \missing{link}. It is vital to recognize that the concept of an outlier is not universal but intimately tied to the specifics of the experimental design. Rigorous, context-sensitive examination is crucial for accurate data interpretation. We  encourage users to venture beyond the preset analysis tools of AstroCAST, engaging with their data through custom analysis methods tailored to their unique experimental conditions. It is however essential to remember that what constitutes an outlier in one dataset may be critical data in another.
+AstroCAST is engineered for versatility, facilitating the analysis of diverse experimental setups. Typically, datasets undergo filtering to adhere to experimental parameters or to eliminate outliers. Although a detailed discourse on filtering protocols is outside this document's scope, we address several prevalent scenarios. For astrocytic events, imposing a cutoff for event duration is beneficial, especially when distinguishing between rapid and protracted calcium events. Moreover, applying a threshold for the signal-to-noise ratio helps to discard events with negligible amplitude. While incorporating as many events as possible seems ideal, practical constraints like computational demands or the potential dilution of relevant events with extraneous data necessitate selectivity. Additionally, filtering aids in removing outliers, achieved either through manual adjustments or an unbiased clustering method. It is vital to recognize that the concept of an outlier is not universal but intimately tied to the specifics of the experimental design. Rigorous, context-sensitive examination is crucial for accurate data interpretation. We encourage users to venture beyond the preset analysis tools of AstroCAST, engaging with their data through custom analysis methods tailored to their unique experimental conditions.
 
 \begin{lstlisting}[style=pyStyle]
 
@@ -75,7 +75,7 @@ AstroCAST's event detection module is designed to pinpoint individual events wit
 
 \paragraph{Enforcing fixed-lenth events}
 \label{par:enforcing-length}
-Enforcing a fixed event length is a requirement for some types of analysis. However, enforcing a length will significantly distort the actual event characteristics. Use length enforcement cautiously, as it can alter your data and even overlap with other nearby events. If required by your analysis, the toolkit will prompt you to unify event lengths (for example \ac{CNN} Autoencoders). For diverse event durations, consider filtering your data for similar lengths or analyzing short and long events separately to maintain data integrity.
+Enforcing a fixed event length is a requirement for some modules of astroCAST. However, enforcing a length will significantly distort the actual event characteristics. Use length enforcement cautiously, as it can alter your data and even overlap with other nearby events. If required by your analysis, the toolkit will prompt you to unify event lengths (for example \ac{CNN} Autoencoders). For diverse event durations, consider filtering your data for similar lengths or analyzing short and long events separately to maintain data integrity.
 
 \begin{lstlisting}[style=pyStyle]
 
@@ -88,7 +88,7 @@ Enforcing a fixed event length is a requirement for some types of analysis. Howe
 \paragraph{Normalization and Standardization}
 The final step before clustering involves normalizing the signal. This process aims to mitigate the impact of variabilities encountered during recordings, such as fluorescence bleaching, and facilitating the comparison across multiple experiments. Normalization is particularly critical when employing machine learning algorithms, as it ensures data uniformity and comparability.
 
-AstroCAST offers a versatile normalization interface to accommodate various research needs. This dynamic system allows users to apply a series of operations such as subtraction, division, and first-order differentiation to standardize data. Operations can be tailored using common statistical functions like the mean, median, or standard deviation, enhancing the robustness of the analysis. Additionally, AstroCAST provides a \inlinepy{'population\_wide'} flag, offering users the choice to normalize signals either individually or across a collective dataset, thereby maximizing analytical precision and flexibility.
+AstroCAST offers a versatile normalization interface to accommodate various research needs. This dynamic system allows users to apply a series of operations such as subtraction, division, and first-order differentiation to standardize data. Operations can be tailored using common statistical functions like the mean, median, or standard deviation. Additionally, AstroCAST provides a \inlinepy{'population\_wide'} flag, offering users the choice to normalize signals either individually or across a collective dataset, thereby maximizing analytical precision and flexibility.
 
 \begin{lstlisting}[style=pyStyle]
 
@@ -105,7 +105,6 @@ AstroCAST offers a versatile normalization interface to accommodate various rese
 
 \end{lstlisting}
 
-
 \subsubsection{Event encoding}
 %Timing: 1 h – 6h
 %Running time will increase non-linearly with the number of events being clustered and varies substantially between approaches chosen.
@@ -115,7 +114,7 @@ AstroCAST introduces a structured approach to address the challenge of varying e
 \todo{Jan}{table of requirements for different algorithms.}{}
 
 \paragraph{Feature extraction}
-Feature extraction offers a simple yet powerful approach to reduce timeseries data into a manageable set of dimensions. The module employs a variety of metrics, including mean, median, and Shannon entropy, accessible through \inlinepy{help(astrocast.reduction.FeatureExtraction)}. While this method is length-agnostic, it may overlook key features, due to the inherent dimensional reduction. Further dimension reduction can be applied using techniques like PCA, t-SNE, or UMAP .
+Feature extraction offers a simple yet powerful approach to reduce timeseries data into a manageable set of dimensions. The module employs a variety of metrics, like mean, median, and Shannon entropy, accessible through \inlinepy{help(astrocast.reduction.FeatureExtraction)}. While this method is length-agnostic, it may overlook key features, due to the inherent dimensional reduction. Further dimension reduction can be applied using techniques like PCA, t-SNE, or UMAP .
 
 \begin{lstlisting}[style=pyStyle]
 
@@ -148,34 +147,36 @@ Using a \ac{CNN} Autoencoder provides an advanced way to maintain key features w
 
 \todo{Jan}{Add code for CNN AE}{}
 
-\paragraph{\ac{RNN} Autoencoder}
+\todo{Jan}{Decide on RNN}{RNN didn't perform well in testing. For now removed from the protocol.}
 
-For encoding time series of variable lengths into consistent latent vectors, the \ac{RNN} Autoencoder stands out. It provides adaptability at the cost of increased computational demand and complexity in tuning. This approach is notably advantageous over CNN embeddings, as it eliminates the need for uniform input lengths, offering a more flexible and comprehensive encoding solution for diverse data sets.
-
-\begin{lstlisting}[style=pyStyle]
-
-    import astrocast.autoencoders as AE
-
-    # Prepare data
-    pdl = AE.PaddedDataLoader(data=eObj.events.trace)
-    X_train, X_val, X_test = pdl.get_datasets(batch_size=16, val_size=0.1, test_size=0.05)
-    model_path = "path/to/save/models/"
-
-    # train RNN
-    tRAE = AE.TimeSeriesRnnAE(use_cuda=True)
-    tRAE.train_epochs(dataloader_train=X_train,
-                      dataloader_val=X_val,
-                      num_epochs=10,  # number of training epochs
-                      patience=10,  # epochs to wait before early stopping
-                      safe_after_epoch=model_path
-                      )
-
-    # save model
-    tRAE.save_models("encoder.pth", "decoder.pth")
-
-    # evaluate embedding performance
-    fig, x_val, y_val, latent, losses = tRAE.plot_traces(dataloader=X_test, figsize=(20, 20))
-    fig.savefig("tRAE_performance.png")
-
-\end{lstlisting}
+%\paragraph{\ac{RNN} Autoencoder}
+%
+%For encoding time series of variable lengths into consistent latent vectors, the \ac{RNN} Autoencoder stands out. It provides adaptability at the cost of increased computational demand and complexity in tuning. This approach is notably advantageous over CNN embeddings, as it eliminates the need for uniform input lengths, offering a more flexible and comprehensive encoding solution for diverse data sets.
+%
+%\begin{lstlisting}[style=pyStyle]
+%
+%    import astrocast.autoencoders as AE
+%
+%    # Prepare data
+%    pdl = AE.PaddedDataLoader(data=eObj.events.trace)
+%    X_train, X_val, X_test = pdl.get_datasets(batch_size=16, val_size=0.1, test_size=0.05)
+%    model_path = "path/to/save/models/"
+%
+%    # train RNN
+%    tRAE = AE.TimeSeriesRnnAE(use_cuda=True)
+%    tRAE.train_epochs(dataloader_train=X_train,
+%                      dataloader_val=X_val,
+%                      num_epochs=10,  # number of training epochs
+%                      patience=10,  # epochs to wait before early stopping
+%                      safe_after_epoch=model_path
+%                      )
+%
+%    # save model
+%    tRAE.save_models("encoder.pth", "decoder.pth")
+%
+%    # evaluate embedding performance
+%    fig, x_val, y_val, latent, losses = tRAE.plot_traces(dataloader=X_test, figsize=(20, 20))
+%    fig.savefig("tRAE_performance.png")
+%
+%\end{lstlisting}
 
