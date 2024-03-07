@@ -9,6 +9,9 @@ import pandas as pd
 import pyinform.shannon
 import pytest
 import seaborn as sns
+from typing import Tuple
+
+from matplotlib.lines import Line2D
 
 try:
     import umap
@@ -417,51 +420,105 @@ class UMAP:
     def embed(self, data):
         return self.reducer.transform(data)
     
-    @experimental
-    def plot(self, data=None, ax=None, labels=None, size=0.1, use_napari=True):
-        
-        if use_napari:
-            
-            napari = pytest.importorskip("napari")
-            
-            if data is None:
-                raise ValueError("please provide the data attribute or set 'use_napari' to False")
-            
-            viewer = napari.Viewer()
-            
-            points = data
-            
-            if labels is None:
-                viewer.add_points(points, size=size)
-            else:
-                labels_ = labels / np.max(labels)
-                viewer.add_points(
-                        points, properties={'labels': labels_}, face_color='labels', face_colormap='viridis', size=size
-                        )
-            
-            return viewer
-        
+    @staticmethod
+    def _plot_napari(data: np.ndarray, labels: np.ndarray = None, size: float = 0.1):
+        """Plot data using napari.
+
+        Args:
+          data: The data to plot.
+          labels: Optional labels for the data points.
+          size: The size of the points.
+
+        Returns:
+          A napari viewer instance displaying the plot.
+        """
+        napari = pytest.importorskip("napari")
+        viewer = napari.Viewer()
+        if labels is None:
+            viewer.add_points(data, size=size)
         else:
-            
-            if ax is None:
-                fig, ax = plt.subplots(1, 1, figsize=(10, 10))
-            
-            if data is None:
-                umap.plot.points(self.reducer, labels=labels, ax=ax)
-            
-            else:
-                
-                if labels is not None:
-                    
-                    palette = sns.color_palette("husl", len(np.unique(labels)) + 1)
-                    ax.scatter(
-                            data[:, 0], data[:, 1], alpha=0.1, s=size, color=[palette[v] for v in labels]
-                            )
-                
-                else:
-                    ax.scatter(data[:, 0], data[:, 1], alpha=0.1, s=size)
-                
-                return ax
+            labels_ = labels / np.max(labels)
+            viewer.add_points(data, properties={'labels': labels_}, face_color='labels', face_colormap='viridis',
+                              size=size)
+        return viewer
+    
+    @staticmethod
+    def _plot_matplotlib(data: np.ndarray, alpha=0.1, ax: plt.Axes = None, labels: np.ndarray = None,
+                         true_labels: np.ndarray = None,
+                         size: float = 0.1) -> plt.Axes:
+        """Plot data using UMAP and matplotlib.
+
+        Args:
+          data: The data to plot.
+          ax: The matplotlib axes to plot on.
+          labels: Optional labels for the data points.
+          size: The size of the points.
+
+        Returns:
+          The matplotlib axes with the plot.
+        """
+        
+        df = pd.DataFrame(dict(x=data[:, 0], y=data[:, 1], c=labels, s=true_labels))
+        sns.scatterplot(data=df, x="x", y="y", alpha=alpha, size=size, style="s", hue="c", ax=ax)
+        
+        return ax
+    
+    def _plot_umap(self, ax: plt.Axes, labels: np.ndarray = None):
+        """ Method to use umap package plotting
+
+        Args:
+          ax: The matplotlib axes to plot on.
+          labels: Optional labels for the data points.
+
+        Returns:
+          The matplotlib axes with the plot.
+        """
+        
+        if ax is None:
+            fig, ax = plt.subplots(1, 1, figsize=(10, 10))
+        
+        umap.plot.points(self.reducer, labels=labels, ax=ax)
+    
+    @experimental
+    def plot(self, data: np.ndarray = None, ax: plt.Axes = None,
+             labels: np.ndarray = None, true_labels: np.ndarray = None,
+             size: float = 0.1, plot_type: str = 'napari', alpha: float = 0.1,
+             figsize: Tuple[int, int] = (10, 10)):
+        """Plot data using specified plotting type.
+
+        Supports plotting with napari, UMAP via matplotlib, or matplotlib directly.
+
+        Args:
+          data: The data to plot. Must be provided if `plot_type` is not 'napari'.
+          ax: The matplotlib axes to plot on, required if `plot_type` is 'matplotlib' or 'umap'.
+          labels: Optional labels for the data points.
+          true_labels: Optional true labels
+          size: The size of the points.
+          plot_type: The type of plot to produce, options are 'napari', 'umap', 'matplotlib'.
+          figsize: Size of the figure.
+        
+        Returns:
+          A napari viewer or matplotlib axes displaying the plot, depending on `plot_type`.
+
+        Raises:
+          ValueError: If required arguments are missing for the chosen `plot_type`.
+        """
+        
+        if plot_type in ['napari', 'matplotlib'] and data is None:
+            raise ValueError("Please provide the data attribute for plotting with napari and matplotlib.")
+        
+        if plot_type == 'napari':
+            return self._plot_napari(data, labels, size)
+        
+        if ax is None:
+            fig, ax = plt.subplots(1, 1, figsize=figsize)
+        
+        if plot_type == 'umap':
+            return self._plot_umap(ax=ax, labels=labels)
+        
+        elif plot_type == 'matplotlib':
+            return self._plot_matplotlib(data=data, ax=ax, alpha=alpha, labels=labels, true_labels=true_labels,
+                                         size=size)
     
     def save(self, path):
         

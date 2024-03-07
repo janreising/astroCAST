@@ -76,10 +76,12 @@ class CNN_Autoencoder(nn.Module):
     """
     
     def __init__(
-            self, target_length: int, dropout: float = 0.15, l1_reg: float = 0.0001, latent_size=64 * 6, add_noise=None
+            self, target_length: int, dropout: float = 0.15, l1_reg: float = 0.0001, latent_size=64 * 6, add_noise=None,
+            use_cuda: bool = False
             ):
         super(CNN_Autoencoder, self).__init__()
         
+        self.use_cuda = use_cuda
         self.losses = None
         self.l1_reg = l1_reg
         self.latent_size = latent_size
@@ -87,6 +89,9 @@ class CNN_Autoencoder(nn.Module):
         self.encoder, self.decoder = self.define_layers(
                 dropout=dropout, add_noise=add_noise, target_length=target_length
                 )
+        
+        if self.use_cuda and torch.cuda.is_available():
+            self.cuda()  # Move the model to GPU if CUDA is enabled and available
         
         # Manually defining a linear layer to serve as the dense layer for the encoder output
         self.latent_size = latent_size
@@ -120,6 +125,10 @@ class CNN_Autoencoder(nn.Module):
         return encoder, decoder
     
     def forward(self, x):
+        
+        if self.use_cuda:
+            x = x.cuda()  # Ensure input data is moved to GPU
+        
         x = self.encoder(x)
         
         shape_before_flatten = x.shape[1:]
@@ -192,20 +201,28 @@ class CNN_Autoencoder(nn.Module):
         
         # Create DataLoader
         train_data = torch.FloatTensor(X_train)
+        if self.use_cuda:
+            train_data = train_data.cuda()
         train_dataset = TensorDataset(train_data, train_data)  # autoencoders use same data for input and output
         train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
         
         if X_val is not None:
             val_data = torch.FloatTensor(X_val)
+            if self.use_cuda:
+                val_data = val_data.cuda()
             val_dataset = TensorDataset(val_data, val_data)
             val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
+        
         else:
             val_loader = None
         
         if X_test is not None:
             test_data = torch.FloatTensor(X_test)
+            if self.use_cuda:
+                test_data = test_data.cuda()
             test_dataset = TensorDataset(test_data, test_data)
             test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
+        
         else:
             test_loader = None
         
@@ -291,22 +308,31 @@ class CNN_Autoencoder(nn.Module):
     
     def embed(self, data, batch_size=64):
         
-        # Create DataLoader
-        train_data = torch.FloatTensor(data)
-        train_dataset = TensorDataset(train_data, train_data)  # autoencoders use same data for input and output
-        train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
-        
-        # Initialize model
-        model = self
-        encoded_traces = []
-        for batch_data, _ in train_loader:
-            batch_data = batch_data.unsqueeze(1)
-            _, _, encoded = model(batch_data)
-            encoded = encoded.detach().numpy()
+        with torch.no_grad():
+            # Create DataLoader
+            train_data = torch.FloatTensor(data)
+            if self.use_cuda:
+                train_data = train_data.cuda()
+            train_dataset = TensorDataset(train_data, train_data)  # autoencoders use same data for input and output
+            train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=False)
             
-            encoded_traces.append(encoded)
-        
-        encoded_traces = np.vstack(encoded_traces)
+            # Initialize model
+            model = self
+            encoded_traces = []
+            for batch_data, _ in train_loader:
+                batch_data = batch_data.unsqueeze(1)
+                if self.use_cuda and torch.cuda.is_available():
+                    batch_data = batch_data.cuda()  # Ensure batch data is on GPU
+                
+                _, _, encoded = model(batch_data)
+                
+                if self.use_cuda:
+                    encoded = encoded.cpu()  # Move encoded data back to CPU before converting to numpy
+                
+                encoded = encoded.detach().numpy()
+                encoded_traces.append(encoded)
+            
+            encoded_traces = np.vstack(encoded_traces)
         
         return encoded_traces
     
@@ -333,9 +359,10 @@ class CNN_Autoencoder(nn.Module):
         
         return reshaped_matrix
     
-    def plot_examples_pytorch(
-            self, X_test, Y_test=None, show_diff=False, num_samples=9, figsize=(10, 6)
-            ):
+    def plot_examples_pytorch(self, X_test, Y_test=None,
+                              show_diff=False, trim_zeros=True,
+                              num_samples=9, figsize=(10, 6)
+                              ):
         
         model = self
         
@@ -348,6 +375,9 @@ class CNN_Autoencoder(nn.Module):
             with torch.no_grad():
                 input_tensor = torch.FloatTensor(X_test).unsqueeze(1)  # add channel dimension
                 output_tensor, l1_loss, encoder_output = model(input_tensor)
+            if self.use_cuda:
+                output_tensor = output_tensor.cpu()  # Move encoded data back to CPU before converting to numpy
+                encoder_output = encoder_output.cpu()
             Y_test = output_tensor.numpy().squeeze()
             encoder_output = encoder_output.numpy().squeeze()
         
@@ -364,7 +394,7 @@ class CNN_Autoencoder(nn.Module):
                 Y_test = np.squeeze(Y_test)
         
         num_rounds = 1
-        if not isinstance(num_samples, int):
+        if isinstance(num_samples, tuple):
             num_rounds, num_samples = num_samples
         
         fig = None
@@ -375,8 +405,9 @@ class CNN_Autoencoder(nn.Module):
                 inp = X_test[idx, :]
                 out = Y_test[idx, :]
                 
-                inp = np.trim_zeros(inp, trim="b")
-                out = out[0:len(inp)]
+                if trim_zeros:
+                    inp = np.trim_zeros(inp, trim="b")
+                    out = out[0:len(inp)]
                 
                 axx[0, i].plot(inp, alpha=0.75, color="black")
                 axx[0, i].plot(out, alpha=0.75, linestyle="--", color="darkgreen")

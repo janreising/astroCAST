@@ -3,7 +3,6 @@ import logging
 import traceback
 from collections import defaultdict
 from functools import lru_cache
-from itertools import repeat
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Literal, Tuple, Union
 
@@ -2192,22 +2191,29 @@ class Plotting:
         
         return fig, new_axx
     
-    def _get_random_sample(self, num_samples):
+    def _get_random_sample(self, num_samples: int, by: str = None):
         """
-        Get a random sample of traces from the events.
+        Get a random sample of traces from the events, optionally grouped by a specified column.
 
         Args:
             num_samples (int): Number of samples to retrieve.
+            by (str, optional): Column name to group and sample traces by. Defaults to None.
 
         Returns:
-            list: List of sampled traces.
+            dict or list: If 'by' is specified, returns a dictionary of lists of sampled traces grouped by unique column values.
+                          Otherwise, returns a list of sampled traces.
 
         Raises:
             ValueError: If the events data type is not one of pandas.DataFrame, numpy.ndarray, or list.
-
         """
         
         events = self.events
+        
+        if by is not None and isinstance(events, pd.DataFrame):
+            unique_values = events[by].unique()
+            sampled_traces = {val: events[events[by] == val].sample(min(num_samples, len(events[events[by] == val])))
+                              for val in unique_values}
+            return {val: sampled_traces[val]['trace'].values for val in unique_values}
         
         if num_samples == -1:
             return events
@@ -2236,21 +2242,39 @@ class Plotting:
         
         return traces
     
-    # todo clustering
-    def plot_traces(self, num_samples=-1, ax=None, figsize=(5, 5)):
+    def plot_traces(self, num_samples=-1, by=None, ax=None, figsize=(5, 5)):
+        """
+        Plot sampled traces, optionally grouped and color-coded by a specified column.
+
+        Args:
+            num_samples (int): Number of samples to plot. Defaults to -1.
+            by (str, optional): Column name to group and sample traces by. Also used for color coding. Defaults to None.
+            ax (matplotlib.axes.Axes, optional): Axes object to plot on. If None, a new figure is created. Defaults to None.
+            figsize (tuple, optional): Figure size. Defaults to (5, 5).
+
+        Returns:
+            matplotlib.figure.Figure: The figure object containing the plot.
+        """
         
-        traces = self._get_random_sample(num_samples=num_samples)
+        traces = self._get_random_sample(num_samples=num_samples, by=by)
         
         if ax is None:
             fig, ax = plt.subplots(figsize=figsize)
         else:
             fig = ax.get_figure()
         
-        for i, trace in enumerate(traces):
-            ax.plot(trace, label=i)
+        if by is not None and isinstance(traces, dict):
+            
+            colors = sns.color_palette("husl", len(traces))
+            
+            for i, (val, selected_traces) in enumerate(traces.items()):
+                for trace in selected_traces:
+                    ax.plot(trace, color=colors[i])
+        else:
+            for i, trace in enumerate(traces):
+                ax.plot(trace, label=i)
         
         plt.tight_layout()
-        
         return fig
     
     def plot_distribution(

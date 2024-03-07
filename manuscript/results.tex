@@ -1,5 +1,6 @@
 \subsection{Installing \ac{astroCAST}}
 
+\todo{Jan}{There was something about where to put tables!?}{}
 
 \begin{table}[h!]
     \centering
@@ -29,9 +30,7 @@
     \end{tabular}
 \end{table}
 
-To run the software, you need to install the astroCAST package and its dependencies. There are multiple options to
-install \ac{astroCAST} depending on how much control users would like to have over the installation. Of note, the
-following instructions install astroCAST with its full functionality. If that is not desired or possible remove the \inlinepy{-E all} or \inlinepy{[all]} flags.
+To run the software, you need to install the astroCAST package and its dependencies. There are multiple options to install \ac{astroCAST} depending on how much control users would like to have over the installation. Of note, the following instructions install astroCAST with its full functionality. If that is not desired or possible remove the \inlineBash{-E all} or \inlineBash{[all]} flags.
 
 \subsubsection{Create conda environment}
 While not strictly necessary, we highly recommend to create a fresh anaconda environment for the installation. This
@@ -97,23 +96,50 @@ If you have cloned the repository (\ref{res:install-from-source}), an example no
 A browser window will open which displays the available examples or can be used to create custom notebooks.
 
 \subsubsection{Using the \ac{CLI}}
-\todo{Jan}{CLI}{write exlanation for the client interface}
+
+The \ac{CLI} is a useful selection of commands that enables users to perform common analysis steps directly from the terminal. Especially in the context of cluster or slurm environment this way of interacting with astroCAST is convenient. All parameters can either be provided manually in the terminal or through a configuration YAML file. We recommend using a configuration when preprocessing many video files to ensure continuity between settings.
+
+\begin{lstlisting}[style=bashStyle]
+    # get list of all available commands
+    $ astrocast --help
+    # get help for individual commands
+    $ astrocast COMMAND --help
+    # use manual settings
+    $ astrocast COMMAND --PARAM-1 VALUE1 [...]
+    # use a configuration file
+    $ astrocast --config '/path/to/config' COMMAND [...]
+\end{lstlisting}
+
+The configuration file has to adhere to the YAML format and can contain settings for multiple commands. A default configuration file can be found in the \href{https://github.com/janreising/astroCAST/blob/3ad41d03068732419df7fdde9b2a0f449898d4e2/config.yaml}{GitHub repository}.
+
+\begin{lstlisting}[style=yaml]
+    COMMAND-NAME:
+      PARAMETER_1: VALUE1
+      PARAMETER_2: VALUE2
+
+    COMMAND-NAME-2:
+      PARAMETER_3: VALUE3
+\end{lstlisting}
 
 \subsubsection{Using the \ac{GUI}}
-\todo{Jan}{GUI}{write exlanation for the GUI interface}
+
+AstroCAST implements two \ac{GUI}s to simplify the selection of suitable parameters for the analysis. The commands below will either automatically open a browser page to the interface or provide a link that can be copied to a browser.
+
+\begin{lstlisting}[style=bashStyle]
+    # Identify correct settings for the event detection
+    $ astrocast explorer -- input path /path/to/file -- h5-loc /dataset/name
+    # Explore detected events, including filtering, embedding and experiments
+    $ astrocast exploratory-analysis -- input path /path/to/roi/ -- h5-loc /dataset/name
+\end{lstlisting}
 
 \subsection{Data showcase}
 
-In this protocol, we demonstrate the utility of our toolkit using publicly available datasets and our own data. The data represents astrocytes studied ex-vivo, in-vivo and in acute slices captured with \ac{1P} or \ac{2P} imaging at recording speeds of 1-16Hz. To ensure transparency and provide a practical starting point, we offer a collection of sensible, default settings within a YAML file. This file, designed to represent a first-approach configuration, is accessible in our \href{https://github.com/janreising/astroCAST}{GitHub repository}. Additionally, we provide the download of the datasets used here through a convenience function. This repository serves as a comprehensive resource, aiding users in understanding and implementing the protocol with similar data characteristics.
+In this protocol, we demonstrate the utility of our toolkit using publicly available datasets and our own data. The data represents astrocytes studied ex-vivo, in-vivo and in acute slices captured with \ac{1P} or \ac{2P} \missing{ref for table below}. To ensure transparency and provide a practical starting point, we offer a collection of sensible, default settings within a YAML file. This file, designed to represent a first-approach configuration, is accessible in our \href{https://github.com/janreising/astroCAST}{GitHub repository}. Additionally, we provide the datasets used in this manuscript, as well as pretrained models. This repository serves as a comprehensive resource, aiding users in understanding and implementing the protocol with similar data characteristics.
 
-\todo{Jan}{1P and 2P acronyms}{}
-
-Optionally, the available sample and training datasets can be directly downloaded from astrocast:
 \begin{lstlisting}[style=bashStyle]
     $ astrocast download-datasets "/path/to/download/directory"
+    $ astrocast download-models "/path/to/download/directory"
 \end{lstlisting}
-
-\todo{Jan}{pretrained models}{}
 
 \begin{table}[ht]
     \centering
@@ -132,6 +158,6 @@ Optionally, the available sample and training datasets can be directly downloade
 \subsection{Pipeline approach}
 The AstroCAST pipeline is structured into three major blocks: Preprocessing, Encoding and Exploratory Analysis.
 
-In the Preprocessing block , users can navigate the pipeline through a \ac{CLI} by utilizing commands such as \inlinepy{$ astrocast --help}. This section allows for the utilization of a predefined configuration file to streamline the process. Additionally, an 'Argument Explorer' is integrated to facilitate quick testing of various parameters and seamless export of the configuration file. If users want to follow this protocol along, we prepared a jupyter notebook for convenience.
+In the Preprocessing block, users can navigate the pipeline through a \ac{CLI} by utilizing commands such as \inlineBash{astrocast --help}. This section allows for the utilization of a predefined configuration file to streamline the process. Additionally, an 'Argument Explorer' is integrated to facilitate quick testing of various parameters and seamless export of the configuration file. If users want to follow this protocol along, we prepared a jupyter notebook for convenience.
 
 During the Encoding and Analysis block, the approach varies based on the specificities of the experiment at hand, be it comparing drug treatments, model systems, correlating with stimuli, or analyzing changes over time. This segment of the pipeline implements a separate GUI, offering a dynamic platform for detailed analysis and data visualization.
