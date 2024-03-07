@@ -390,13 +390,14 @@ def get_data_dimensions(
 
 class SignalGenerator:
     
-    def __init__(self, parameter_fluctuations: float = 1,
+    def __init__(self, parameter_fluctuations: float = 0,
                  signal_amplitude: float = None, noise_amplitude: float = 0.05,
                  allow_negative_values: bool = False, trace_length: Union[int, List[int], Tuple[int, int]] = None,
-                 offset: Union[int, Tuple[int], Tuple[float], Tuple[None]] = None, ragged_allowed: bool = True,
-                 oscillation_frequency: int = 4, oscillation_amplitude: float = 0.1, plateau_duration: int = 1,
-                 a: float = 1, k: float = 0, b: float = 1, v: float = 1, m_0: float = 0,
-                 leaky_k: float = 0.1, leaky_n: float = 2,
+                 offset: Union[int, Tuple[int, int], Tuple[float, float], Tuple[None]] = None,
+                 ragged_allowed: bool = True,
+                 oscillation_frequency: int = 4, oscillation_amplitude: float = 1, plateau_duration: int = 1,
+                 a: float = 0, k: float = 1, b: float = 1, v: float = 1, m_0: float = 0,
+                 leaky_k: float = 0.1, leaky_n: float = 1,
                  ):
         """
         Initializes the SignalGenerator with parameters for the signal phases and noise level.
@@ -438,35 +439,35 @@ class SignalGenerator:
         self.parameter_fluctuations = parameter_fluctuations
     
     @staticmethod
-    def _richards_curve(t: Union[float, np.ndarray, int] = None, a: float = 1, k: float = 0, c: float = 1, b: float = 1,
-                        v: float = 1, m_0: float = 6):
-        
+    def _richards_curve(t: Union[float, np.ndarray, int] = None, a: float = 0, k: float = 1,
+                        c: float = 1, b: float = 1, v: float = 1, m_0: float = 6):
         """
-        Calculate the value of the Richards curve at time t or returns the Richards curve function.
-    
-        The Richards curve is a generalized logistic growth model that is capable of fitting a variety of sigmoidal growth forms.
-    
+        Calculate the first derivative of the Richards curve at time t or returns the derivative function of the Richards curve.
+
+        The derivative of the Richards curve represents the rate of change of the growth process at time t.
+
         Args:
-            t: Time point(s) at which the curve is evaluated. If None, returns the function itself.
+            t: Time point(s) at which the curve's derivative is evaluated. If None, returns the derivative function itself.
             a: Left horizontal asymptote, representing the curve's minimum value.
             k: Right horizontal asymptote, representing the curve's maximum value.
             c: Affects the rate of growth; often set to 1.
             b: Growth rate; negative for inverted behavior.
             v: Shape parameter, biases the slope of the maximum growth rate.
             m_0: The value of `t` at which the maximum growth rate occurs; adjusts the curve's position along the x-axis.
-    
+
         Raises:
             ValueError: If `v` is not greater than 0.
-    
+
         Returns:
-            The Richards curve value(s) at time t, or the curve function if t is None.
+            The first derivative of the Richards curve value(s) at time t, or the derivative function if t is None.
         """
         
         if v <= 0:
             raise ValueError(f"v={v} must be greater than 0.")
         
         def func(x):
-            return a + (k - a) / (c + np.exp(-b * (x - m_0))) ** (1 / v)
+            exponent = np.exp(-b * (x - m_0))
+            return ((k - a) * b * exponent) / (v * (c + exponent) ** ((1 / v) + 1))
         
         if t is None:
             return func
@@ -478,7 +479,7 @@ class SignalGenerator:
             raise ValueError(f"t must be float, int, np.ndarray or None")
     
     @staticmethod
-    def _oscillatory_plateau(t: Union[float, np.ndarray, int] = None, plateau_duration: float = 4,
+    def _oscillatory_plateau(t: Union[float, np.ndarray, int] = None, a=1, plateau_duration: float = 4,
                              oscillation_frequency: float = 1.0, oscillation_amplitude: float = 0.1):
         """
         Generates an oscillatory plateau based on given parameters.
@@ -495,10 +496,11 @@ class SignalGenerator:
         
         def func(x):
             
-            if x > plateau_duration:
+            if x > plateau_duration or plateau_duration == 0:
                 return 0
             else:
-                return np.sin(2 * np.pi * oscillation_frequency * x) * oscillation_amplitude
+                plateau = a + np.cos(2 * np.pi * oscillation_frequency * x) * oscillation_amplitude
+                return plateau
         
         if t is None:
             return func
@@ -510,7 +512,7 @@ class SignalGenerator:
             raise ValueError(f"t must be float, int, np.ndarray or None")
     
     @staticmethod
-    def leaky_integrator(k: float = 0.1, n: float = 2):
+    def leaky_integrator(k: float = 0.1, n: float = 1):
         """
         Calculate the next state of a leaky integrator system where the leak rate increases with the state's value.
 
@@ -525,13 +527,21 @@ class SignalGenerator:
         """
         
         # Calculate the rate of change of Y
-        def func(x):
-            return -k * x ** n
+        def func(x, reduce: float = 1):
+            return -k * x ** n * reduce
         
         return func
     
     def noise_floor(self):
-        return np.random.normal(-self.noise_amplitude / 2, self.noise_amplitude / 2)
+        noise = np.random.normal() * self.noise_amplitude
+        return noise
+    
+    def _fluctuate_parameter(self, param):
+        
+        if param in [0, 1]:
+            return param
+        else:
+            return np.random.normal(loc=param, scale=self.parameter_fluctuations)
     
     def generate_signal(self) -> Union[np.ndarray, None]:
         """
@@ -542,22 +552,22 @@ class SignalGenerator:
         """
         
         # rise parameters
-        a = self.a * self.parameter_fluctuations
-        k = self.k * self.parameter_fluctuations
-        c = self.c * self.parameter_fluctuations
-        b = self.b * self.parameter_fluctuations
-        v = self.v * self.parameter_fluctuations
-        m_0 = self.m_0 * self.parameter_fluctuations
+        a = self._fluctuate_parameter(self.a)
+        k = self._fluctuate_parameter(self.k)
+        c = self._fluctuate_parameter(self.c)
+        b = self._fluctuate_parameter(self.b)
+        v = self._fluctuate_parameter(self.v)
+        m_0 = self._fluctuate_parameter(self.m_0)
         
         # plateau parameters
-        plateau_duration = self.plateau_duration * self.parameter_fluctuations
-        oscillation_frequency = self.oscillation_frequency * self.parameter_fluctuations
-        oscillation_amplitude = self.oscillation_amplitude * self.parameter_fluctuations
+        plateau_duration = self._fluctuate_parameter(self.plateau_duration)
+        oscillation_frequency = self._fluctuate_parameter(self.oscillation_frequency)
+        oscillation_amplitude = self._fluctuate_parameter(self.oscillation_amplitude)
         
         # define functions
         rise = self._richards_curve(a=a, k=k, c=c, b=b, v=v, m_0=m_0)
-        leaky_integrator = self.leaky_integrator(k=self.leaky_k * self.parameter_fluctuations,
-                                                 n=self.leaky_n * self.parameter_fluctuations)
+        leaky_integrator = self.leaky_integrator(k=self._fluctuate_parameter(self.leaky_k),
+                                                 n=self._fluctuate_parameter(self.leaky_n))
         plateau = self._oscillatory_plateau(plateau_duration=plateau_duration,
                                             oscillation_frequency=oscillation_frequency,
                                             oscillation_amplitude=oscillation_amplitude)
@@ -570,7 +580,7 @@ class SignalGenerator:
             min_length, max_length = length if isinstance(length, (tuple, list)) else (length, length)
             
             if max_length is not None and min_length != max_length:
-                raise ValueError(f"min_length != max_length allthough ragged is not allowed:"
+                raise ValueError(f"min_length != max_length although ragged is not allowed:"
                                  f" {min_length} vs. {max_length}")
         
         if min_length is None:
@@ -582,69 +592,79 @@ class SignalGenerator:
         # generate signal
         signal = []
         event_occurred = False
-        v = np.inf
+        v = 0
         t = 0
-        plateau_start = None
-        while not event_occurred or v > self.noise_amplitude:
+        plateau_start = 0
+        phase = 0
+        while True:
             
             # add noise
-            v = self.noise_floor()
+            v += self.noise_floor()
             
             # burst up
             r = rise(t)
             v += r
-            print(f"{t}: {r:.4f}")
-            
-            # wait for burst to pick up speed
-            if r > self.noise_amplitude:
-                event_occurred = True
-            
-            # wait for burst to lose speed
-            if event_occurred and plateau_start is None and r < self.noise_amplitude / 2:
-                plateau_start = t
             
             # plateau
-            # if plateau_start is not None:
-            #     v += plateau(t - plateau_start)
+            if phase == 2 and plateau_duration > 0:
+                v += plateau(t - plateau_start)
+                v += leaky_integrator(v, reduce=abs(t - plateau_duration) / plateau_duration)
             
             # subtract leak
-            v += leaky_integrator(v)
+            else:
+                v += leaky_integrator(v)
             
             # deal with negative values
             if not self.allow_negative_values and v < 0:
                 v = 0
             
+            # wait for burst to pick up speed
+            if phase == 0 and v > k / 4:
+                phase += 1
+            
+            # wait for burst to lose speed
+            if phase == 1 and len(signal) > 1 and signal[-1] > v + self.noise_amplitude:
+                phase += 1
+                plateau_start = t
+            
+            # wait for plateau to end
+            if phase == 2 and t > plateau_start + plateau_duration:
+                phase += 1
+            
+            # abort conditions
+            if max_length is not None and len(signal) >= max_length:
+                break
+            
+            if phase >= 3 and abs(v) < self.noise_amplitude * 2:
+                break
+            
+            # save value
             signal.append(v)
             t += 1
-            
-            if len(signal) >= max_length:
-                break
         
         signal = np.array(signal)
         
         # add offset
         if offset_0 is not None:
-            offset_0 = np.array([self.noise_floor() for _ in range(offset_0)])
+            offset_0 = np.array([abs(self.noise_floor()) for _ in range(offset_0)])
             signal = np.concatenate((offset_0, signal), axis=0)
         
         if offset_1 is not None:
-            offset_1 = np.array([self.noise_floor() for _ in range(offset_1)])
-            signal = np.concatenate((offset_1, signal), axis=0)
+            offset_1 = np.array([abs(self.noise_floor()) for _ in range(offset_1)])
+            signal = np.concatenate((signal, offset_1), axis=0)
         
         # enforce signal length
         if len(signal) < min_length:
             diff = min_length - len(signal)
             diff_0, diff_1 = int(diff / 2) + diff % 2, int(diff / 2)
             
-            logging.warning(f"Encountered too short signal, extending by {(diff_0, diff_1)}")
-            
-            diff_0 = np.array([self.noise_floor() for _ in range(diff_0)])
-            diff_1 = np.array([self.noise_floor() for _ in range(diff_1)])
+            diff_0 = np.array([abs(self.noise_floor()) for _ in range(diff_0)])
+            diff_1 = np.array([abs(self.noise_floor()) for _ in range(diff_1)])
             signal = np.concatenate((diff_0, signal, diff_1), axis=0)
         
         if max_length is not None and len(signal) > max_length:
             logging.warning(f"Generated signal is too long: {len(signal)} !<=  {max_length}")
-            return None
+            return signal[:max_length]
         
         # scale to signal amplitude
         if self.signal_amplitude is not None:
@@ -708,8 +728,7 @@ class DummyGenerator:
         # signal populations
         else:
             self.data, self.groups = self._get_signal_population(generators=self.generators,
-                                                                 num_rows=num_rows, trace_length=trace_length,
-                                                                 ragged=ragged, offset=offset,
+                                                                 num_rows=num_rows,
                                                                  ratios=self.ratios)
             
             # todo: implement differences between groups and clusters
@@ -732,7 +751,7 @@ class DummyGenerator:
         return data
     
     @staticmethod
-    def _get_signal_population(generators, num_rows, trace_length, ragged, offset, ratios: List[Tuple] = None,
+    def _get_signal_population(generators, num_rows, ratios: List[Tuple] = None,
                                shuffle: bool = True):
         """
         Generates a population of signals according to specified ratios for each generator.
@@ -763,6 +782,9 @@ class DummyGenerator:
         population = []
         identifiers = []
         for gen_idx, gen in enumerate(generators):
+            
+            print(f"{gen_idx}: {gen.plateau_duration}")
+            
             num_signals = int(num_rows * ratios[gen_idx])
             signals = gen.generate_signal_population(num_signals)
             population.extend(signals)
