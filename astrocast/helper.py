@@ -718,7 +718,10 @@ class DummyGenerator:
     
     def __init__(
             self, num_rows=25, trace_length=12, ragged=False, offset=0, min_length=2,
-            n_groups=None, n_clusters=None,
+            n_groups: int = 1, n_clusters=None,
+            timings: List[List[int]] = None, timing_jitter: Union[int, Tuple[float, float]] = None,
+            timing_offset: int = 0,
+            z_range: Tuple[int, int] = None,
             generators: Union[SignalGenerator, List[SignalGenerator]] = None, ratios: List[float] = None
             ):
         
@@ -727,6 +730,11 @@ class DummyGenerator:
         self.ragged = True if (isinstance(ragged, str) and ragged == "ragged") else ragged
         self.groups = n_groups
         self.clusters = n_clusters
+        
+        self.timings = timings
+        self.z_range = z_range
+        self.timing_jitter = timing_jitter
+        self.timing_offset = timing_offset
         
         # random traces
         if self.generators is None:
@@ -797,8 +805,6 @@ class DummyGenerator:
         identifiers = []
         for gen_idx, gen in enumerate(generators):
             
-            print(f"{gen_idx}: {gen.plateau_duration}")
-            
             num_signals = int(num_rows * ratios[gen_idx])
             signals = gen.generate_signal_population(num_signals)
             population.extend(signals)
@@ -814,6 +820,65 @@ class DummyGenerator:
         
         return population, identifiers
     
+    def _create_z_boundaries(self, df: pd.DataFrame) -> pd.DataFrame:
+        
+        timings = self.timings
+        timing_jitter = self.timing_jitter
+        timing_offset = self.timing_offset
+        
+        # create event length column
+        df["dz"] = df.trace.apply(lambda x: len(x))
+        
+        # calculate z_range
+        if self.z_range is None:
+            z_range = (0, max(df.dz.sum() / 2, 1))
+        else:
+            z_range = self.z_range
+        
+        if timings is None:
+            logging.info(f"Creating random z boundaries.")
+            
+            # create random boundaries
+            dz_sum = int(df.dz.sum() / 2)
+            df["z0"] = [np.random.randint(low=z_range[0], high=z_range[1]) for _ in range(len(df))]
+            df["z1"] = df.z0 + df.dz
+        
+        else:
+            
+            if len(timings) != len(df.group.unique()):
+                raise ValueError(f"Length of timings ({len(timings)}) does not equal "
+                                 f"unique group ({len(df.group.unique())})")
+            
+            def apply_timings(row):
+                
+                # select timings associated with group
+                group = int(row.group)
+                timing = timings[group]
+                
+                if timing is None:
+                    z0 = np.random.randint(low=z_range[0], high=z_range[1])
+                else:
+                    
+                    if isinstance(timing_jitter, int):
+                        jitter = np.random.randint(low=0, high=timing_jitter)
+                    elif isinstance(timing_jitter, Tuple):
+                        jitter = int(np.random.normal(loc=timing_jitter[0], scale=timing_jitter[1]))
+                    else:
+                        jitter = 0
+                    
+                    z0 = np.random.choice(timing) + jitter + timing_offset
+                
+                return z0
+            
+            # create boundaries
+            df["z0"] = df.apply(func=apply_timings, axis='columns')
+            df["z1"] = df.z0 + df.dz
+        
+        # create fake index
+        df["idx"] = df.index
+        
+        return df
+    
     def get_dataframe(self):
         
         data = self.data
@@ -826,15 +891,17 @@ class DummyGenerator:
         else:
             raise TypeError
         
-        # create dz, z0 and z1
-        df["dz"] = df.trace.apply(lambda x: len(x))
+        if self.groups is not None:
+            df["group"] = self.groups
+        else:
+            df["group"] = 0
         
-        dz_sum = int(df.dz.sum() / 2)
-        df["z0"] = [np.random.randint(low=0, high=max(dz_sum, 1)) for _ in range(len(df))]
-        df["z1"] = df.z0 + df.dz
+        if self.clusters is not None:
+            df["clusters"] = self.clusters
+        else:
+            df["cluster"] = 0
         
-        # create fake index
-        df["idx"] = df.index
+        df = self._create_z_boundaries(df=df)
         
         return df
     
@@ -892,12 +959,6 @@ class DummyGenerator:
         
         ev = Events(event_dir=None)
         df = self.get_dataframe()
-        
-        if self.groups is not None:
-            df["group"] = self.groups
-        
-        if self.clusters is not None:
-            df["clusters"] = self.clusters
         
         ev.events = df
         ev.seed = 1
