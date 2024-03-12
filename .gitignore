@@ -130,11 +130,13 @@ dmypy.json
 
 # Pycharm files
 .idea
+.hypothesis
 
 # temporary
 testdata/*
 notebooks/*
 temp_*
+.ipynb_checkpoints
 
 # lock files
 dask-worker-space/*.lock
