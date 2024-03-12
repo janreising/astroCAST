@@ -35,14 +35,14 @@ Herlenius\,$^{1,2*}$}
     % If there are more than 1 corresponding author, comment this line and uncomment the next one.
     \extraAuth{}
 
-    %\extraAuth{corresponding Author2 \\ Laboratory X2, Institute X2, Department X2, Organization X2, Street X2, City X2, State XX2 (only USA, Canada and Australia), Zip Code2, X2 Country X2, email2@uni2.edu}
+    \extraAuth{corresponding Author2 \\ Laboratory X2, Institute X2, Department X2, Organization X2, Street X2, City X2, State XX2 (only USA, Canada and Australia), Zip Code2, X2 Country X2, email2@uni2.edu}
 
     \maketitle
 
     \begin{abstract}
 
         \section{}
-        \input{abstract}
+        \input{content/1-abstract}
 
         \tiny
         \keyFont{ \section{Keywords:} astrocytes, toolkit, calcium, timeseries, detection, events} % 4 > tags < 9
@@ -64,21 +64,24 @@ Herlenius\,$^{1,2*}$}
     \input{todos} % todo: delete me later
 
     \section{Introduction}
-    \input{introduction}
+    \input{content/2-introduction}
 
 
     \section{Methods}
-    \input{methods}
+    \input{content/3-methods}
 
 
     \section{Results}
-    \input{results}
+    \input{content/4-results}
 
-    \input{protocol}
+    \input{content/5-preprocessing}
+    \input{content/6-event_detection}
+    \input{content/7-embedding}
+    \input{content/8-experiments}
 
 
     \section{Discussion}
-    \input{discussion}
+    \input{content/9-discussion}
 
     \section*{Conflict of Interest Statement}
     The authors declare that the research was conducted in the absence of any commercial or financial relationships that could be construed as a potential conflict of interest.
@@ -114,8 +117,11 @@ Herlenius\,$^{1,2*}$}
     %\bibliographystyle{Frontiers-Vancouver} % Many Frontiers journals use the numbered referencing system, to find the style and resources for the journal you are submitting to: https://zendesk.frontiersin.org/hc/en-us/articles/360017860337-Frontiers-Reference-Styles-by-Journal
     \bibliography{astrocast}
 
+    \section*{Tables}
+    \include{content/10-tables}
+
     \section*{Figure captions}
-    \include{figures}
+    \include{content/11-figures}
 
 
 \end{document}
