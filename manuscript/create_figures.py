@@ -2,7 +2,7 @@ import re
 from pathlib import Path
 
 figures_directory = Path("./figures")
-output_filename = "figures.tex"
+output_filename = "content/11-figures.tex"
 
 
 # Function to format captions
