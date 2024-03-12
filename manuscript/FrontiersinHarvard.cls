@@ -29,9 +29,8 @@
 \ProcessOptions
 
 % Load all necessary packages
-\RequirePackage{inputenc,crop,graphicx,amsmath,array,color,amssymb,flushend,stfloats,amsthm,chngpage,times,datetime,
-    epstopdf}
-\usepackage{parskip}[=v1]
+\RequirePackage{inputenc,crop,graphicx,amsmath,array,color,amssymb,flushend,stfloats,amsthm,chngpage,times,datetime,epstopdf} 
+\usepackage{parskip}[=v1] 
 \def\helvetica{\fontfamily{phv}\selectfont}
 \def\helveticaitalic{\fontfamily{phv}\itshape\selectfont}
 \def\helveticabold{\fontfamily{phv}\bfseries\selectfont}
@@ -51,12 +50,12 @@
 \reversemarginpar
 
 \renewcommand\normalsize{%
-    \@setfontsize\normalsize{12}{12}%
-    \abovedisplayskip 10\p@ \@plus2\p@ \@minus5\p@
-    \abovedisplayshortskip \z@ \@plus3\p@
-    \belowdisplayshortskip 6\p@ \@plus3\p@ \@minus3\p@
-    \belowdisplayskip \abovedisplayskip
-    \let\@listi\@listI}
+   \@setfontsize\normalsize{12}{12}%
+   \abovedisplayskip 10\p@ \@plus2\p@ \@minus5\p@
+   \abovedisplayshortskip \z@ \@plus3\p@
+   \belowdisplayshortskip 6\p@ \@plus3\p@ \@minus3\p@
+   \belowdisplayskip \abovedisplayskip
+   \let\@listi\@listI}
 \normalsize
 \let\@bls\baselineskip
 
@@ -68,8 +67,8 @@
     \abovedisplayshortskip \z@ plus 2\p@
     \belowdisplayshortskip 4\p@ plus 2\p@ minus2\p@
     \def\@listi{\topsep 4.5\p@ plus 2\p@ minus 1\p@
-    \itemsep \parsep
-    \topsep 4\p@ plus 2\p@ minus 2\p@}}
+       \itemsep \parsep
+       \topsep 4\p@ plus 2\p@ minus 2\p@}}
 
 \newcommand\footnotesize{%
     \@setfontsize\footnotesize{8}{10}%
@@ -78,7 +77,7 @@
     \abovedisplayshortskip \z@ plus 3\p@
     \belowdisplayshortskip 6\p@ plus 3\p@ minus 3\p@
     \def\@listi{\topsep 3\p@ plus 1\p@ minus 1\p@
-    \parsep 2\p@ plus 1\p@ minus 1\p@\itemsep \parsep}}
+       \parsep 2\p@ plus 1\p@ minus 1\p@\itemsep \parsep}}
 
 \def\scriptsize{\@setfontsize\scriptsize{11pt}{11pt}}
 \def\tiny{\@setfontsize\tiny{10pt}{11pt}}
@@ -154,7 +153,7 @@
 
 \setlength\textheight{56\baselineskip} % 54 lines on a full page,
 \addtolength\textheight{\topskip}      %   including the first
-%   line on the page
+                                       %   line on the page
 
 % Set the margins
 \setlength\marginparsep{3\p@}
@@ -231,84 +230,84 @@
 
 % Page styles
 \def\ps@headings
-{%
-    \def\@oddfoot{\vbox to 12.5\p@{\rule{\textwidth}{0.5\p@}\vss
-    \hbox to \textwidth{\helveticabold\small {Frontiers}\hfill \thepage}%
-    }}%
-    \def\@evenfoot{\vbox to 12.5\p@{\rule{\textwidth}{0.5\p@}\vss
-    \hbox to \textwidth{\helveticabold\small {Frontiers}\hfill \thepage}%
-    }}%
-    \def\@evenhead{\vbox{\hbox to \textwidth{\fontsize{11}{10}\selectfont
-    \helveticabold{\fontshape{it}\selectfont
-    \strut\firstAuthorLast}\hfill\strut\rightmark}\vspace{6.5\p@}\rule{\textwidth}{0.5\p@}}}%
-    \def\@oddhead{\vbox{\hbox to \textwidth{\fontsize{11}{10}\selectfont
-    \helveticabold{\fontshape{it}\selectfont
-    \strut\firstAuthorLast}\hfill\strut\rightmark}\vspace{6.5\p@}\rule{\textwidth}{0.5\p@}}}%
-    \def\titlemark##1{\markboth{##1}{##1}}%
-    \def\authormark##1{\gdef\leftmark{##1}}%
-}
+  {%
+  \def\@oddfoot{\vbox to 12.5\p@{\rule{\textwidth}{0.5\p@}\vss
+        \hbox to \textwidth{\helveticabold\small {Frontiers}\hfill \thepage}%
+        }}%
+  \def\@evenfoot{\vbox to 12.5\p@{\rule{\textwidth}{0.5\p@}\vss
+        \hbox to \textwidth{\helveticabold\small {Frontiers}\hfill \thepage}%
+        }}%
+  \def\@evenhead{\vbox{\hbox to \textwidth{\fontsize{11}{10}\selectfont
+        \helveticabold{\fontshape{it}\selectfont
+        \strut\firstAuthorLast}\hfill\strut\rightmark}\vspace{6.5\p@}\rule{\textwidth}{0.5\p@}}}%
+  \def\@oddhead{\vbox{\hbox to \textwidth{\fontsize{11}{10}\selectfont
+        \helveticabold{\fontshape{it}\selectfont
+        \strut\firstAuthorLast}\hfill\strut\rightmark}\vspace{6.5\p@}\rule{\textwidth}{0.5\p@}}}%
+  \def\titlemark##1{\markboth{##1}{##1}}%
+  \def\authormark##1{\gdef\leftmark{##1}}%
+  }
 
 \def\ps@opening
-{%
-    \def\@oddfoot{\vbox to 13\p@{\hbox{\rule{\textwidth}{1\p@}}\vss
-    \hbox to \textwidth{\helvetica
-    \fontsize{7}{9}\fontshape{n}\selectfont \space %
-    \hfill\small\helveticabold\thepage}%
-    }}%
-    \def\@evenfoot{\vbox to 13\p@{\rule{\textwidth}{1\p@}\vss
-    \hbox to \textwidth{\helvetica\thepage\hfill
-    \fontsize{7}{9}\fontshape{n}\selectfont \space }%
-    }}%
-    \let\@evenhead\relax
-    \let\@oddhead\relax}
+  {%
+  \def\@oddfoot{\vbox to 13\p@{\hbox{\rule{\textwidth}{1\p@}}\vss
+        \hbox to \textwidth{\helvetica
+        \fontsize{7}{9}\fontshape{n}\selectfont \space %
+          \hfill\small\helveticabold\thepage}%
+        }}%
+  \def\@evenfoot{\vbox to 13\p@{\rule{\textwidth}{1\p@}\vss
+        \hbox to \textwidth{\helvetica\thepage\hfill
+          \fontsize{7}{9}\fontshape{n}\selectfont \space }%
+        }}%
+  \let\@evenhead\relax
+  \let\@oddhead\relax}
 
 % Page range
 \newif\iflastpagegiven   \lastpagegivenfalse
 \newcommand\firstpage[1]{%
-    \gdef\@firstpage{#1}%
-    \ifnum\@firstpage>\c@page
+  \gdef\@firstpage{#1}%
+  \ifnum\@firstpage>\c@page
     \setcounter{page}{#1}%
     \ClassWarning{BIO}{Increasing pagenumber to \@firstpage}%
-    \else \ifnum\@firstpage<\c@page
+  \else \ifnum\@firstpage<\c@page
     \ClassWarning{BIO}{Firstpage lower than pagenumber}\fi\fi
     \xdef\@firstpage{\the\c@page}%
-}
+    }
 \def\@firstpage{1}
 \def\pagenumbering#1{%
     \global\c@page \@ne
     \gdef\thepage{\csname @#1\endcsname \c@page}%
     \gdef\thefirstpage{%
-        \csname @#1\endcsname \@firstpage}%
+            \csname @#1\endcsname \@firstpage}%
     \gdef\thelastpage{%
-        \csname @#1\endcsname \@lastpage}%
-}
+            \csname @#1\endcsname \@lastpage}%
+    }
 
 \newcommand\lastpage[1]{\xdef\@lastpage{#1}%
-\global\lastpagegiventrue}
+  \global\lastpagegiventrue}
 \def\@lastpage{0}
 \def\setlastpage{\iflastpagegiven\else
-\edef\@tempa{@lastpage@}%
-\expandafter
-\ifx \csname \@tempa \endcsname \relax
-\gdef\@lastpage{0}%
-\else
-\xdef\@lastpage{\@nameuse{@lastpage@}}%
-\fi
-\fi }
+    \edef\@tempa{@lastpage@}%
+    \expandafter
+    \ifx \csname \@tempa \endcsname \relax
+        \gdef\@lastpage{0}%
+    \else
+        \xdef\@lastpage{\@nameuse{@lastpage@}}%
+        \fi
+    \fi }
 \def\writelastpage{%
     \iflastpagegiven \else
     \immediate\write\@auxout%
     {\string\global\string\@namedef{@lastpage@}{\the\c@page}}%
     \fi
-}
+    }
 \def\thepagerange{%
-    \ifnum\@lastpage =0 {\ \bf ???} \else
-    \ifnum\@lastpage = \@firstpage \ \thefirstpage\else
-    \thefirstpage--\thelastpage \fi\fi}
+  \ifnum\@lastpage =0 {\ \bf ???} \else
+  \ifnum\@lastpage = \@firstpage \ \thefirstpage\else
+  \thefirstpage--\thelastpage \fi\fi}
 
 \AtBeginDocument{\setlastpage
-\pagenumbering{arabic}%
-}
+     \pagenumbering{arabic}%
+   }
 \AtEndDocument{%
     \writelastpage
     \if@final
@@ -362,21 +361,21 @@
 \newif\if@mainmatter \@mainmattertrue
 
 \newcommand\frontmatter{%
-    \clearpage
-    \@mainmatterfalse
-    \pagenumbering{roman}}
+  \clearpage
+  \@mainmatterfalse
+  \pagenumbering{roman}}
 
 \newcommand\mainmatter{%
-    \clearpage
-    \@mainmattertrue
-    \pagenumbering{arabic}}
+  \clearpage
+  \@mainmattertrue
+  \pagenumbering{arabic}}
 
 \newcommand\backmatter{%
-    \clearpage
-    \@mainmatterfalse}
+  \clearpage
+  \@mainmatterfalse}
 
-\newdateformat{mydate}{\THEDAY \ \monthname[\THEMONTH] \THEYEAR}
-\newdateformat{mydate2}{\monthname[\THEMONTH] \THEYEAR}
+  \newdateformat{mydate}{\THEDAY \ \monthname[\THEMONTH] \THEYEAR}
+  \newdateformat{mydate2}{\monthname[\THEMONTH] \THEYEAR}
 
 %********
 % TITLE *
@@ -388,7 +387,7 @@
 \newif\if@appnotes
 \newcommand{\application}{%
 %  \setlength{\dropfromtop}{-2.25pc}%
-    \global\@appnotestrue}
+  \global\@appnotestrue}
 
 % Short Title is for the Title of the Article
 % Title is for the Title of the Journal
@@ -426,102 +425,101 @@
 \setlength{\extraspace}{\z@}
 
 \newcommand\maketitle{\par
-\begingroup
-\renewcommand\thefootnote{\@fnsymbol\c@footnote}%
-\def\@makefnmark{\rlap{\@textsuperscript{\normalfont\@thefnmark}}}%
-\long\def\@makefntext##1{\parindent 3mm\noindent
+  \begingroup
+    \renewcommand\thefootnote{\@fnsymbol\c@footnote}%
+    \def\@makefnmark{\rlap{\@textsuperscript{\normalfont\@thefnmark}}}%
+    \long\def\@makefntext##1{\parindent 3mm\noindent
 %      \@textsuperscript{\normalfont\@thefnmark}\raggedright##1}%
-\@textsuperscript{\normalfont\@thefnmark}##1}%
+      \@textsuperscript{\normalfont\@thefnmark}##1}%
     \if@twocolumn
-    \ifnum \col@number=\@ne
-    \@maketitle
+      \ifnum \col@number=\@ne
+        \@maketitle
+      \else
+        \twocolumn[\@maketitle]%
+      \fi
     \else
-    \twocolumn[\@maketitle]%
-    \fi
-    \else
-    \newpage
-    \global\@topnum\z@   % Prevents figures from going at top of page.
-    \@maketitle
+      \newpage
+      \global\@topnum\z@   % Prevents figures from going at top of page.
+      \@maketitle
     \fi
     \thispagestyle{opening}\@thanks
-    \endgroup
-    \setcounter{footnote}{0}%
-    \global\let\thanks\relax
-    \global\let\maketitle\relax
-    \global\let\@maketitle\relax
-    \global\let\@address\@empty
-    \global\let\@history\@empty
-    \global\let\@extraAuth\@empty
-    \global\let\@topic\@empty
-    \global\let\@thanks\@empty
-    \global\let\@author\@empty
-    \global\let\@date\@empty
-    \global\let\@title\@empty
-    \global\let\@pubyear\@empty
-    \global\let\address\relax
-    \global\let\topic\relax
-    \global\let\extraAuth\relax
-    \global\let\title\relax
-    \global\let\author\relax
-    \global\let\date\relax
-    \global\let\pubyear\relax
-    \global\let\@copyrightline\@empty
-    \global\let\and\relax
-    \@afterindentfalse\@afterheading
+  \endgroup
+  \setcounter{footnote}{0}%
+  \global\let\thanks\relax
+  \global\let\maketitle\relax
+  \global\let\@maketitle\relax
+  \global\let\@address\@empty
+  \global\let\@history\@empty
+  \global\let\@extraAuth\@empty
+  \global\let\@topic\@empty
+  \global\let\@thanks\@empty
+  \global\let\@author\@empty
+  \global\let\@date\@empty
+  \global\let\@title\@empty
+  \global\let\@pubyear\@empty
+  \global\let\address\relax
+  \global\let\topic\relax
+  \global\let\extraAuth\relax
+  \global\let\title\relax
+  \global\let\author\relax
+  \global\let\date\relax
+  \global\let\pubyear\relax
+  \global\let\@copyrightline\@empty
+  \global\let\and\relax
+  \@afterindentfalse\@afterheading
 }
 
 \newlength{\aboveskipchk}%for checking oddpage or evenpage top skip
 \setlength{\aboveskipchk}{\z@}%
 
 \def\@maketitle{%
-    \let\footnote\thanks
-    \clearemptydoublepage
-    \checkoddpage\ifcpoddpage\setlength{\aboveskipchk}{-7pc}\else\setlength{\aboveskipchk}{-3pc}\fi%for checking
-    oddpage or evenpage top skip%%
-    \vspace*{\aboveskipchk}%
-    \vspace{\dropfromtop}%
-    \hbox to \textwidth{%
+  \let\footnote\thanks
+  \clearemptydoublepage
+    \checkoddpage\ifcpoddpage\setlength{\aboveskipchk}{-7pc}\else\setlength{\aboveskipchk}{-3pc}\fi%for checking oddpage or evenpage top skip%%
+  \vspace*{\aboveskipchk}%
+  \vspace{\dropfromtop}%
+  \hbox to \textwidth{%
 
-        \parbox[t]{15pc}{%
-            \helvetica
-            \hfil
-            \flushleft  \includegraphics[width=12pc,angle=0]{./logo1.eps}
-
-
-        }}
-
-    \rule{\textwidth}{1\p@}\par%
+  \parbox[t]{15pc}{%
     \helvetica
-    \hbox to \textwidth{%
-        \parbox[t]{36.5pc}{%
-            \vspace*{1sp}
-            {\helveticabold\fontsize{20}{21}\color{black}\selectfont\raggedright \@title \par}%
-            \vspace{4.5\p@}
-            {\helveticabold\fontsize{12}{15}\selectfont\raggedright \@author \par}%
-            \vspace{4\p@}
-            {\helvetica\fontsize{12}{12}\selectfont\raggedright\slshape\@address \Address \\ \par}%
-            \vspace{6\p@}
-            {\helvetica\fontsize{12}{10}\selectfont\raggedright {Correspondence*:\\ }\@correspondance \corrAuthor \\  \corrEmail \par}
-            \vspace{4\p@}
-            {\helvetica\fontsize{12}{12}\selectfont\raggedright\@extraAuth \par}%
-            \vspace{8\p@}
-        }%
-    }
-    \vspace{14.5\p@}%
-}
+    \hfil
+    \flushleft  \includegraphics[width=12pc,angle=0]{./logo1.eps}
+
+
+}}
+
+ \rule{\textwidth}{1\p@}\par%
+  \helvetica
+  \hbox to \textwidth{%
+  \parbox[t]{36.5pc}{%
+    \vspace*{1sp}
+    {\helveticabold\fontsize{20}{21}\color{black}\selectfont\raggedright \@title \par}%
+    \vspace{4.5\p@}
+    {\helveticabold\fontsize{12}{15}\selectfont\raggedright \@author \par}%
+        \vspace{4\p@}
+    {\helvetica\fontsize{12}{12}\selectfont\raggedright\slshape\@address \Address \\ \par}%
+      \vspace{6\p@}
+  {\helvetica\fontsize{12}{10}\selectfont\raggedright {Correspondence*:\\ }\@correspondance \corrAuthor \\  \corrEmail \par}
+        \vspace{4\p@}
+    {\helvetica\fontsize{12}{12}\selectfont\raggedright\@extraAuth \par}%
+    \vspace{8\p@}
+    }%
+  }
+  \vspace{14.5\p@}%
+  }
 
 %***********
 % Abstract *
 %***********
 \newcommand{\absection}[1]{%
-    \par\noindent{\bfseries #1}\space\ignorespaces}
+  \par\noindent{\bfseries #1}\space\ignorespaces}
 
 \newenvironment{abstract}{%
-    \begingroup
-    \let\section\absection
-    \fontfamily{\sfdefault}\fontsize{12}{12}\sffamily\selectfont
-    {\fontseries{b}\selectfont ABSTRACT}\par}
-    {\endgroup\smallskip\@afterheading\@afterindentfalse\vskip 12pt plus -2pt minus 2pt}
+  \begingroup
+  \let\section\absection
+  \fontfamily{\sfdefault}\fontsize{12}{12}\sffamily\selectfont
+  {\fontseries{b}\selectfont ABSTRACT}\par}
+{\endgroup\smallskip\@afterheading\@afterindentfalse\vskip 12pt plus -2pt minus 2pt}
 
 % Section macros
 
@@ -531,29 +529,29 @@
 \renewcommand{\@seccntformat}[1]{\csname the#1\endcsname\quad}
 
 \def\section{%
-    \@startsection{section}{1}{\z@}
-    {-10\p@ plus -3\p@}{3\p@}
-    {\reset@font\raggedright\helveticabold\fontsize{13}{13}\color{black}\selectfont\MakeUppercase}}
+  \@startsection{section}{1}{\z@}
+  {-10\p@ plus -3\p@}{3\p@}
+  {\reset@font\raggedright\helveticabold\fontsize{13}{13}\color{black}\selectfont\MakeUppercase}}
 
 \def\subsection{%
-    \@startsection{subsection}{2}{\z@}
-    {4\p@ plus 2\p@}{2\p@}
-    {\reset@font\raggedright\mathversion{bold}\helveticabold\fontsize{11.5}{12}}}
+  \@startsection{subsection}{2}{\z@}
+  {4\p@ plus 2\p@}{2\p@} 
+  {\reset@font\raggedright\mathversion{bold}\helveticabold\fontsize{11.5}{12}}}
 
 \def\subsubsection{%
-    \@startsection{subsubsection}{3}{\z@}
-    {2\p@ plus 2\p@}{1\p@}
-    {\reset@font\raggedright\mathversion{bold}\helvetica\fontsize{11.5}{12}}}
+  \@startsection{subsubsection}{3}{\z@}
+  {2\p@ plus 2\p@}{1\p@}
+  {\reset@font\raggedright\mathversion{bold}\helvetica\fontsize{11.5}{12}}}
 
-\def\paragraph{%
-    \@startsection{paragraph}{4}{\z@}
-    {2\p@ plus 1\p@}{1\p@}
-    {\reset@font\itshape\helveticabold\fontsize{11.5}{12}}}
+ \def\paragraph{%
+   \@startsection{paragraph}{4}{\z@}
+   {2\p@ plus 1\p@}{1\p@}
+   {\reset@font\itshape\helveticabold\fontsize{11.5}{12}}}
 
-\def\subparagraph{%
-    \@startsection{subparagraph}{5}{\z@}
-    {2\p@ plus 1\p@}{1\p@}
-    {\reset@font\itshape\helvetica\fontsize{11.5}{12}}}
+ \def\subparagraph{%
+   \@startsection{subparagraph}{5}{\z@}
+   {2\p@ plus 1\p@}{1\p@}
+   {\reset@font\itshape\helvetica\fontsize{11.5}{12}}}
 
 \def\textcolon{\text{\rm :}}
 
@@ -575,19 +573,19 @@
 %\setlength{\belowcaptionskip}{10.5pt}
 
 \long\def\@makecaption#1#2{\vspace{\abovecaptionskip}%
-\begingroup
-\normalsize
-\textbf{#1.}\enskip{#2}\par
-\endgroup}
+  \begingroup
+  \normalsize
+  \textbf{#1.}\enskip{#2}\par
+  \endgroup}
 
 
 % Table rules
 \def\toprule{\noalign{\ifnum0=`}\fi\hrule \@height 0.5pt \hrule \@height 6pt \@width 0pt \futurelet
-\@tempa\@xhline}
+   \@tempa\@xhline}
 \def\midrule{\noalign{\ifnum0=`}\fi \hrule \@height 6.75pt \@width 0pt \hrule \@height 0.5pt
-\hrule \@height 6pt \@width 0pt \futurelet \@tempa\@xhline}
+    \hrule \@height 6pt \@width 0pt \futurelet \@tempa\@xhline}
 \def\botrule{\noalign{\ifnum0=`}\fi \hrule \@height 5.75pt \@width 0pt \hrule \@height 0.5pt \futurelet
-\@tempa\@xhline}
+   \@tempa\@xhline}
 \def\hrulefill{\leavevmode\leaders\hrule height .5pt\hfill\kern\z@}
 
 \def\thefigure{\@arabic\c@figure}
@@ -617,14 +615,14 @@
 \def\endrotate{\global\@rotatefalse}
 \newdimen\rotdimen
 \def\rotstart#1{\special{ps: gsave currentpoint currentpoint translate
-#1 neg exch neg exch translate}}
+    #1 neg exch neg exch translate}}
 \def\rotfinish{\special{ps: currentpoint grestore moveto}}
 \def\rotl#1{\rotdimen=\ht#1\advance\rotdimen by \dp#1
-\hbox to \rotdimen{\vbox to\wd#1{\vskip \wd#1
-\rotstart{270 rotate}\box #1\vss}\hss}\rotfinish}
+    \hbox to \rotdimen{\vbox to\wd#1{\vskip \wd#1
+    \rotstart{270 rotate}\box #1\vss}\hss}\rotfinish}
 \def\rotr#1{\rotdimen=\ht #1\advance\rotdimen by \dp#1
-\hbox to \rotdimen{\vbox to \wd#1{\vskip \wd#1
-\rotstart{90 rotate}\box #1\vss}\hss}\rotfinish}
+    \hbox to \rotdimen{\vbox to \wd#1{\vskip \wd#1
+    \rotstart{90 rotate}\box #1\vss}\hss}\rotfinish}
 
 \newif\ifsub@@figure   \sub@@figuretrue
 \def\thesubfigure{\@arabic\c@figure\alph{subfigure}}
@@ -633,10 +631,10 @@
 \def\ext@subfigure{lof}
 \def\fnum@subfigure{Figure \thesubfigure}
 \def\subfigure{\ifsub@@figure\global\sub@@figurefalse\stepcounter{figure}\fi%
-\@float{subfigure}}
+ \@float{subfigure}}
 \let\endsubfigure\end@float
 \@namedef{subfigure*}{\ifsub@@figure\global\sub@@figurefalse%
-\stepcounter{figure}\fi \@dblfloat{subfigure}}
+ \stepcounter{figure}\fi \@dblfloat{subfigure}}
 \@namedef{endsubfigure*}{\end@dblfloat}
 
 \def\endfigure{\global\sub@@figuretrue\end@float}
@@ -661,21 +659,21 @@
 {\relax}
 
 \newcommand{\@processtable}[4]{%
-    \if@rotate
-    \setbox4=\vbox to \hsize{\vss\hbox to \textheight{%
-        \begin{minipage}{#4}%
-            \@ifmtarg{#1}{}{\caption{#1}}{\tablesize #2}%
-            \vskip7\p@\noindent
-            \parbox{#4}{\fontsize{10}{10}\selectfont #3\par}%
-        \end{minipage}}\vss}%
-    \rotr{4}
-    \else
-    \hbox to \hsize{\hss\begin{minipage}[t]{#4}%
-                            \vskip2.9pt
-                            \@ifmtarg{#1}{}{\caption{#1}}{\tablesize #2}%
-                            \vskip6\p@\noindent
-                            \parbox{#4}{\fontsize{8}{9}\selectfont #3\par}%
-    \end{minipage}\hss}\fi}%
+\if@rotate
+\setbox4=\vbox to \hsize{\vss\hbox to \textheight{%
+\begin{minipage}{#4}%
+\@ifmtarg{#1}{}{\caption{#1}}{\tablesize #2}%
+\vskip7\p@\noindent
+\parbox{#4}{\fontsize{10}{10}\selectfont #3\par}%
+\end{minipage}}\vss}%
+\rotr{4}
+\else
+\hbox to \hsize{\hss\begin{minipage}[t]{#4}%
+\vskip2.9pt
+\@ifmtarg{#1}{}{\caption{#1}}{\tablesize #2}%
+\vskip6\p@\noindent
+\parbox{#4}{\fontsize{8}{9}\selectfont #3\par}%
+\end{minipage}\hss}\fi}%
 
 \newcolumntype{P}[1]{>{\raggedright\let\\\@arraycr\hangindent1em}p{#1}}
 
@@ -714,86 +712,86 @@
 
 % Changes to the list parameters for enumerate
 \def\enumargs{%
-    \partopsep     \z@
-    \itemsep       3\p@
-    \parsep        \z@
-    \labelsep      0.5em
-    \listparindent \parindent
-    \itemindent    \z@
-    \topsep 2\p@
+   \partopsep     \z@
+   \itemsep       3\p@
+   \parsep        \z@
+   \labelsep      0.5em
+   \listparindent \parindent
+   \itemindent    \z@
+   \topsep 2\p@
 }
 
 \def\enumerate{%
     \@ifnextchar[{\@numerate}{\@numerate[0]}}
 
 \def\@numerate[#1]{%
-    \ifnum \@enumdepth >3 \@toodeep\else
-    \advance\@enumdepth \@ne
-    \edef\@enumctr{enum\romannumeral\the\@enumdepth}
-    \list{\csname label\@enumctr\endcsname}{%
-        \enumargs
-        \setlength{\leftmargin}{\csname leftmargin\romannumeral\the\@enumdepth\endcsname}
-        \usecounter{\@enumctr}
-        \settowidth\labelwidth{#1}
-        \addtolength{\leftmargin}{\labelwidth}
-        \addtolength{\leftmargin}{\labelsep}
-        \def\makelabel##1{\hss \llap{##1}}}%
-    \fi
-}
+     \ifnum \@enumdepth >3 \@toodeep\else
+     \advance\@enumdepth \@ne
+     \edef\@enumctr{enum\romannumeral\the\@enumdepth}
+     \list{\csname label\@enumctr\endcsname}{%
+       \enumargs
+       \setlength{\leftmargin}{\csname leftmargin\romannumeral\the\@enumdepth\endcsname}
+       \usecounter{\@enumctr}
+       \settowidth\labelwidth{#1}
+       \addtolength{\leftmargin}{\labelwidth}
+       \addtolength{\leftmargin}{\labelsep}
+       \def\makelabel##1{\hss \llap{##1}}}%
+     \fi
+   }
 \let\endenumerate\endlist
 
 % Changes to the list parameters for itemize
 \def\itemargs{%
-    \partopsep     \z@
-    \itemsep       3\p@
-    \parsep        \z@
-    \labelsep      0.5em
-    \rightmargin   \z@
-    \listparindent \parindent
-    \itemindent    \z@
-    \topsep 2\p@
+   \partopsep     \z@
+   \itemsep       3\p@
+   \parsep        \z@
+   \labelsep      0.5em
+   \rightmargin   \z@
+   \listparindent \parindent
+   \itemindent    \z@
+   \topsep 2\p@
 }
 
 \def\itemize{%
     \@ifnextchar[{\@itemize}{\@itemize[$\bullet$]}}
 
 \def\@itemize[#1]{%
-    \ifnum \@itemdepth >3 \@toodeep\else
-    \advance\@itemdepth \@ne
-    \edef\@itemctr{item\romannumeral\the\@itemdepth}
-    \list{\csname label\@itemctr\endcsname}{%
-        \itemargs
-        \setlength{\leftmargin}{\csname leftmargin\romannumeral\the\@itemdepth\endcsname}
-        \settowidth\labelwidth{#1}
-        \addtolength{\leftmargin}{\labelwidth}
-        \addtolength{\leftmargin}{\labelsep}
-        \def\makelabel##1{\hss \llap{##1}}}%
-    \fi
-}
+     \ifnum \@itemdepth >3 \@toodeep\else
+     \advance\@itemdepth \@ne
+     \edef\@itemctr{item\romannumeral\the\@itemdepth}
+     \list{\csname label\@itemctr\endcsname}{%
+       \itemargs
+       \setlength{\leftmargin}{\csname leftmargin\romannumeral\the\@itemdepth\endcsname}
+       \settowidth\labelwidth{#1}
+       \addtolength{\leftmargin}{\labelwidth}
+       \addtolength{\leftmargin}{\labelsep}
+       \def\makelabel##1{\hss \llap{##1}}}%
+     \fi
+   }
 \let\enditemize\endlist
 
 \newenvironment{unlist}{%
-    \begin{list}{}%
+  \begin{list}{}%
     {\setlength{\labelwidth}{\z@}%
-    \setlength{\labelsep}{\z@}%
-    \setlength{\topsep}{\medskipamount}%
-    \setlength{\itemsep}{3\p@}%
-    \setlength{\leftmargin}{2em}%
-    \setlength{\itemindent}{-2em}}}
-    {\end{list}}
+     \setlength{\labelsep}{\z@}%
+     \setlength{\topsep}{\medskipamount}%
+     \setlength{\itemsep}{3\p@}%
+     \setlength{\leftmargin}{2em}%
+     \setlength{\itemindent}{-2em}}}
+{\end{list}}
 
 
 % ***********************
 % Quotes and Quotations *
 % ***********************
 \def\quotation{\par\begin{list}{}{
-    \setlength{\topsep}{\medskipamount}
-    \setlength{\leftmargin}{2em}%
-    \setlength{\rightmargin}{\z@}%
-    \setlength\labelwidth{0pt}%
-    \setlength\labelsep{0pt}%
-    \listparindent\parindent}%
-                       \item[]}
+      \setlength{\topsep}{\medskipamount}
+      \setlength{\leftmargin}{2em}%
+      \setlength{\rightmargin}{\z@}%
+      \setlength\labelwidth{0pt}%
+      \setlength\labelsep{0pt}%
+      \listparindent\parindent}%
+  \item[]}
 \def\endquotation{\end{list}}
 \let\quote\quotation
 \let\endquote\endquotation
@@ -813,27 +811,28 @@
 \def\numberline#1{\hbox to \@tempdima{{#1}}}
 
 \def\@authortocline#1#2#3#4#5{%
-\vskip 1.5\p@
-\ifnum #1>\c@tocdepth \else
-{\leftskip #2\relax \rightskip \@tocrmarg \parfillskip -\rightskip
-\parindent #2\relax\@afterindenttrue
-\interlinepenalty\@M
-\leavevmode
-\@tempdima #3\relax
-\advance\leftskip \@tempdima \null\nobreak\hskip -\leftskip
-{\itshape #4}\nobreak
-\leaders\hbox{$\m@th
-\mkern \@dotsep mu\hbox{.}\mkern \@dotsep
-mu$}\hfill
-\nobreak
-\hb@xt@\@pnumwidth{\hfil}%
-\par}%
-\fi}
+  \vskip 1.5\p@
+  \ifnum #1>\c@tocdepth \else
+    {\leftskip #2\relax \rightskip \@tocrmarg \parfillskip -\rightskip
+     \parindent #2\relax\@afterindenttrue
+     \interlinepenalty\@M
+     \leavevmode
+     \@tempdima #3\relax
+     \advance\leftskip \@tempdima \null\nobreak\hskip -\leftskip
+     {\itshape #4}\nobreak
+     \leaders\hbox{$\m@th
+        \mkern \@dotsep mu\hbox{.}\mkern \@dotsep
+        mu$}\hfill
+     \nobreak
+     \hb@xt@\@pnumwidth{\hfil}%
+     \par}%
+  \fi}
 
 \newcommand*\l@author{\@authortocline{2}{0pt}{30pt}}
 \newcommand*\l@section{\@dottedtocline{3}{11pt}{20pt}}
 \newcommand*\l@subsection{\@dottedtocline{4}{31pt}{29pt}}
 \newcommand*\l@subsubsection[2]{}
+
 
 
 % ***********
@@ -850,15 +849,15 @@ mu$}\hfill
 
 \providecommand{\newblock}{}
 \newenvironment{thebibliography}{%
-\section{\bibname}%
-\begingroup
-\small
-\begin{list}{}{%
-\setlength{\topsep}{\z@}%
-\setlength{\labelsep}{\z@}%
-\settowidth{\labelwidth}{\z@}%
-\setlength{\leftmargin}{4mm}%
-\setlength{\itemindent}{-4mm}}\small}
+  \section{\bibname}%
+  \begingroup
+  \small
+  \begin{list}{}{%
+      \setlength{\topsep}{\z@}%
+      \setlength{\labelsep}{\z@}%
+      \settowidth{\labelwidth}{\z@}%
+      \setlength{\leftmargin}{4mm}%
+      \setlength{\itemindent}{-4mm}}\small}
 {\end{list}\endgroup}
 
 \RequirePackage{natbib}
@@ -867,11 +866,11 @@ mu$}\hfill
 % **********
 % Appendix *
 % **********
-\newif\ifappend
+\newif\ifappend 
 \def\appendix{\par
-\setcounter{section}{0}
-\setcounter{subsection}{0}
-\appendtrue
+        \setcounter{section}{0}
+        \setcounter{subsection}{0}
+        \appendtrue
 }
 
 %Math parameters
@@ -880,7 +879,7 @@ mu$}\hfill
 \mathchardef\@m=1500   % adapted value
 
 \def\frenchspacing{\sfcode`\.\@m \sfcode`\?\@m \sfcode`\!\@m
-\sfcode`\:\@m \sfcode`\;\@m \sfcode`\,\@m}
+  \sfcode`\:\@m \sfcode`\;\@m \sfcode`\,\@m}
 
 % Theorems
 \def\th@plain{%
@@ -905,26 +904,26 @@ mu$}\hfill
 
 % Screen PDF compatability
 \newcommand{\medline}[1]{%
-\unskip\unskip\ignorespaces}
+  \unskip\unskip\ignorespaces}
 
 
 %%%%for smaller size text
 \newenvironment{methods}{%
-\begingroup
+  \begingroup
 \def\section{%
-\@startsection{section}{1}{\z@}
-{-24\p@ plus -3\p@}{4\p@}
-{\reset@font\raggedright\helveticabold\fontsize{10}{12}\selectfont\MakeUppercase}}
-\def\subsection{%
-\@startsection{subsection}{2}{\z@}
-{-5\p@ plus -2\p@}{4\p@}
-{\reset@font\raggedright\mathversion{bold}\fontseries{b}\fontsize{10}{12}\selectfont}}
-\def\subsubsection{%
-\@startsection{subsubsection}{3}{\z@}
-{-6\p@ plus -1\p@}{-1em}
-{\reset@font\normalfont\normalsize\itshape}}
+  \@startsection{section}{1}{\z@}
+  {-24\p@ plus -3\p@}{4\p@}
+  {\reset@font\raggedright\helveticabold\fontsize{10}{12}\selectfont\MakeUppercase}}
+ \def\subsection{%
+  \@startsection{subsection}{2}{\z@}
+  {-5\p@ plus -2\p@}{4\p@}
+  {\reset@font\raggedright\mathversion{bold}\fontseries{b}\fontsize{10}{12}\selectfont}}
+ \def\subsubsection{%
+  \@startsection{subsubsection}{3}{\z@}
+  {-6\p@ plus -1\p@}{-1em}
+  {\reset@font\normalfont\normalsize\itshape}}
 \footnotesize
-\par}
+  \par}
 {\par\endgroup\bigskip\@afterheading\@afterindentfalse}
 
 
@@ -938,10 +937,10 @@ mu$}\hfill
 \newcommand{\href}[2]{#2}
 
 \renewenvironment{proof}[1][\proofname]{\par
-\normalfont \topsep6\p@\@plus6\p@\relax
-\labelsep 0.5em
-\trivlist
-\item[\hskip\labelsep\hskip1em\textsc{#1}.]\ignorespaces
+  \normalfont \topsep6\p@\@plus6\p@\relax
+  \labelsep 0.5em
+  \trivlist
+  \item[\hskip\labelsep\hskip1em\textsc{#1}.]\ignorespaces
 }{\endtrivlist\@endpefalse}
 
 %%Different Bonds
