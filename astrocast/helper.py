@@ -391,7 +391,7 @@ def get_data_dimensions(
 class SignalGenerator:
     
     def __init__(self, parameter_fluctuations: float = 0,
-                 signal_amplitude: float = None, noise_amplitude: float = 0.05,
+                 signal_amplitude: float = None, noise_amplitude: float = 0.05, abort_amplitude=None,
                  allow_negative_values: bool = False, trace_length: Union[int, List[int], Tuple[int, int]] = None,
                  offset: Union[int, Tuple[int, int], Tuple[float, float], Tuple[None]] = None,
                  ragged_allowed: bool = True,
@@ -416,6 +416,7 @@ class SignalGenerator:
         """
         self.signal_amplitude = signal_amplitude
         self.noise_amplitude = noise_amplitude
+        self.abort_amplitude = abort_amplitude
         self.allow_negative_values = allow_negative_values
         
         self.oscillation_frequency = oscillation_frequency
@@ -586,6 +587,8 @@ class SignalGenerator:
         if min_length is None:
             min_length = 1
         
+        abort_amplitude = self.abort_amplitude if self.abort_amplitude is not None else self.noise_amplitude * 4
+        
         # define offset
         offset_0, offset_1 = self.offset if isinstance(self.offset, (tuple, list)) else (self.offset, self.offset)
         
@@ -635,7 +638,7 @@ class SignalGenerator:
             if max_length is not None and len(signal) >= max_length:
                 break
             
-            if phase >= 3 and abs(v) < self.noise_amplitude * 2:
+            if phase >= 3 and abs(v) < abort_amplitude:
                 break
             
             # save value
@@ -668,7 +671,7 @@ class SignalGenerator:
         
         # scale to signal amplitude
         if self.signal_amplitude is not None:
-            signal = signal / np.max(signal) * self.signal_amplitude * self.parameter_fluctuations
+            signal = (signal / np.max(signal) * self._fluctuate_parameter(self.signal_amplitude))
         
         return signal
     
@@ -687,7 +690,18 @@ class SignalGenerator:
             signal = self.generate_signal()
             
             if signal is not None:
-                signals.append(signal)
+                
+                if self.trace_length is None:
+                    signals.append(signal)
+                
+                elif isinstance(self.trace_length, (int, float)):
+                    if len(signal) <= self.trace_length:
+                        signals.append(signal)
+                
+                elif isinstance(self.trace_length, (tuple, list)):
+                    min_, max_ = self.trace_length
+                    if len(signal) >= min_ and len(signal) <= max_:
+                        signals.append(signal)
         
         return signals
 
