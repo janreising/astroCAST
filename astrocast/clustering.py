@@ -13,6 +13,8 @@ import networkx as nx
 import numpy as np
 import pandas as pd
 import seaborn as sns
+from astrocast.analysis import Events
+from astrocast.helper import CachedClass, Normalization, is_ragged, wrapper_local_cache
 from dask import array as da
 from dtaidistance import dtw, dtw_barycenter
 from matplotlib import pyplot as plt
@@ -21,11 +23,8 @@ from networkx.algorithms import community
 from scipy.cluster.hierarchy import fcluster
 from sklearn import cluster, ensemble, gaussian_process, linear_model, neighbors, neural_network, tree
 from sklearn.cluster import KMeans
-from sklearn.metrics import ConfusionMatrixDisplay, confusion_matrix
+from sklearn.metrics import confusion_matrix
 from tqdm import tqdm
-
-from astrocast.analysis import Events
-from astrocast.helper import CachedClass, Normalization, is_ragged, wrapper_local_cache
 
 
 class HdbScan:
@@ -262,8 +261,11 @@ class Linkage(CachedClass):
         
         """ Calculate consensus trace (barycenter) for each cluster"""
         
-        traces = events.events.trace.tolist()
-        indices = events.events.index.tolist()
+        if not isinstance(events, pd.DataFrame):
+            events = events.events
+        
+        traces = events.trace.tolist()
+        indices = events.index.tolist()
         
         c_idx_, c_bc, c_num, c_cluster = list(), list(), list(), list()
         iterator = tqdm(
@@ -479,7 +481,11 @@ class Distance(CachedClass):
                             a pair of time series.
 
                     """
-        traces = [np.array(t) for t in events.events.trace.tolist()]
+        
+        if not isinstance(events, pd.DataFrame):
+            events = events.events
+        
+        traces = [np.array(t) for t in events.trace.tolist()]
         N = len(traces)
         
         if not use_mmap:
@@ -1207,15 +1213,56 @@ class Discriminator(CachedClass):
         
         return self.clf.predict(X)
     
-    def evaluate(self, regression=False, cutoff=0.5, normalize=None, show_plot: bool = True, figsize=(10, 5)):
+    @staticmethod
+    def compute_scores(true_labels, predicted_labels, scoring: Literal['classification', 'clustering'] =
+    'classification'):
+        """Compute performance metrics between true and predicted labels.
+
+        Args:
+          true_labels: Ground truth (correct) labels.
+          predicted_labels: Predicted labels, as returned by a classifier.
+          scoring: type of scoring
+
+        Returns:
+          A dictionary with accuracy, precision, recall, and F1 score.
+        """
         
-        axx = None
-        if show_plot:
+        if scoring == 'classification':
+            
+            from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
+            
+            return {
+                'accuracy':  accuracy_score(true_labels, predicted_labels),
+                'precision': precision_score(true_labels, predicted_labels, average='macro'),
+                'recall':    recall_score(true_labels, predicted_labels, average='macro'),
+                'f1':        f1_score(true_labels, predicted_labels, average='macro')
+                }
+        
+        elif scoring == 'clustering':
+            
+            from sklearn.metrics import adjusted_mutual_info_score, adjusted_rand_score, homogeneity_score, rand_score
+            
+            return {
+                'adjusted_mutual_info_score': adjusted_mutual_info_score(true_labels, predicted_labels),
+                'adjusted_rand_score':        adjusted_rand_score(true_labels, predicted_labels),
+                'homogeneity_score':          homogeneity_score(true_labels, predicted_labels),
+                'rand_score':                 rand_score(true_labels, predicted_labels)
+                }
+        
+        else:
+            raise ValueError(f"for scoring choose one of: classifcation, clustering")
+    
+    def evaluate(self, regression=False, cutoff=0.5, normalize=None, show_plot: bool = True,
+                 title: str = None, figsize=(10, 5), axx=None):
+        
+        fig = None
+        if show_plot and axx is None:
             fig, axx = plt.subplots(1, 2, figsize=figsize)
         
-        evaluations = []
+        evaluations = {}
         for i, (X, Y, lbl) in enumerate([(self.X_train, self.Y_train, "train"), (self.X_test, self.Y_test, "test")]):
             
+            results = {}
             pred = np.squeeze(self.clf.predict(X))
             
             if pred.dtype != int and not regression and cutoff is not None:
@@ -1228,18 +1275,28 @@ class Discriminator(CachedClass):
             
             else:
                 
+                # create confusion matrix
                 cm = confusion_matrix(pred, Y, normalize=normalize)
-                evaluations.append(cm)
+                results["cm"] = cm
                 
+                # create score
+                for k, v in self.compute_scores(Y, pred).items():
+                    results[k] = v
+                
+                # plot result
                 if show_plot:
                     ax = axx[i]
-                    # sns.heatmap(cm, annot=True, fmt=".2f", cmap="Blues", cbar=True, ax=ax)
-                    fig, ax = plt.subplots()
-                    sns.heatmap(cm, annot=True, fmt=".2f", cmap="Blues", cbar=True)
-                    # sns.heatmap(cm, fmt=".2f", annot=True)
+                    sns.heatmap(cm, annot=True, fmt=".2f", cmap="Blues", cbar=False, ax=ax)
                     ax.set_xlabel("Predicted")
                     ax.set_ylabel("True")
                     ax.set_title(f"Confusion Matrix ({lbl.capitalize()})")
+                
+                evaluations[lbl] = results
+        
+        if show_plot and title is not None:
+            if fig is None:
+                fig = axx[0].get_figure()
+            fig.suptitle(title)
         
         return evaluations
     
