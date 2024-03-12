@@ -8,7 +8,7 @@ After successful detection of events, users need to control the quality of the r
     $  astrocast exploratory-analysis --input-path "/path/to/roi/" --h5-loc "/dataset/name"
 \end{lstlisting}
 
-Here, we are going to showcase the steps using the astroCAST python package directly. Users are directed to our \missing{example notebook} to follow along. Of note, large datasets might require significant computational time. Hence, we recommend to utilize dynamic disk caching, via the \inlinepy{cache_path} parameter, to mitigate redundant processing.
+Here, we are going to showcase the steps using the astroCAST python package directly. Users are directed to our \missing{example notebook} to follow along. Of note, large datasets might require significant computational time. Hence, we recommend to utilize dynamic disk caching, via the \inlinepy{cache\_path} parameter, to mitigate redundant processing.
 
 \begin{lstlisting}[style=pyStyle]
     from pathlib import Path
@@ -27,7 +27,7 @@ Here, we are going to showcase the steps using the astroCAST python package dire
 
 \end{lstlisting}
 
-The events object has an \inlinepy{events} instance, which contains the extracted signal, as well as their associated attributes (\inlinepy{'dz', 'x0', '...'}) and metrics (\inlinepy{'v\_area', 'v\_signal\_to\_noise\_ratio', '...'}). An explanation of all columns can be found in the \missing{supplementary table} or \missing{link to documentation}.
+The events object has an \inlinepy{events} instance, which contains the extracted signal, as well as their associated attributes (for example \inlinepy{'dz', 'x0'}) and metrics ( for example \inlinepy{'v\_area', 'v\_signal\_to\_noise\_ratio'}). An explanation of all columns can be found in the \missing{supplementary table} or \missing{link to documentation}.
 
 \todo{Jan}{Include supplementary table of calculated parameters}{}
 
@@ -73,7 +73,7 @@ AstroCAST's event detection module is designed to pinpoint individual events wit
 
 \end{lstlisting}
 
-\paragraph{Enforcing fixed-lenth events}
+\paragraph{Enforcing fixed-length events}
 \label{par:enforcing-length}
 Enforcing a fixed event length is a requirement for some modules of astroCAST. However, enforcing a length will significantly distort the actual event characteristics. Use length enforcement cautiously, as it can alter your data and even overlap with other nearby events. If required by your analysis, the toolkit will prompt you to unify event lengths (for example \ac{CNN} Autoencoders). For diverse event durations, consider filtering your data for similar lengths or analyzing short and long events separately to maintain data integrity.
 
@@ -137,46 +137,61 @@ Feature extraction offers a simple yet powerful approach to reduce timeseries da
 
 \paragraph{\ac{CNN} Autoencoder}
 
-Using a \ac{CNN} Autoencoder provides an advanced way to maintain key features while reducing data complexity. The CNN Autoencoder consists of an encoder that maps the timeseries to a latent vector and a separately trained decoder, which performs the inverse operation. After training, only the encoder is utilized for event embedding. Note that this approach requires the input to have a fixed length (see\ref{par:enforcing-length}).
+Using a \ac{CNN} Autoencoder provides an advanced way to maintain key features while reducing data complexity. The CNN Autoencoder consists of an encoder that maps the timeseries to a latent vector and a separately trained decoder, which performs the inverse operation. After training, only the encoder is utilized for event embedding. Note that this approach requires the input to have a fixed length (see \ref{par:enforcing-length}).
 
 \begin{lstlisting}[style=pyStyle]
 
-    ???
+    import astrocast.autoencoders as AE
+
+    # check that traces have fixed length
+    if eObj._is_ragged():
+        raise ValueError()
+    target_length = len(eObj.events.iloc[0].trace)
+
+    # Prepare data
+    data = np.array(eObj.events.trace.tolist())
+    X_train, X_val, X_test = cnn.split_dataset(data=data)
+
+    # create and train model
+    cnn = AE.CNN_Autoencoder(target_length=target_length)
+    cnn.train_autoencoder(X_train=X_train, X_val=X_val, epochs=25)
+
+    # save model
+    cnn.save("cnn.pth")
+
+    # evaluate embedding performance
+    cnn.plot_examples_pytorch(X_test, show_diff=True)
 
 \end{lstlisting}
 
-\todo{Jan}{Add code for CNN AE}{}
+\paragraph{\ac{RNN} Autoencoder}
 
-\todo{Jan}{Decide on RNN}{RNN didn't perform well in testing. For now removed from the protocol.}
+For encoding time series of variable lengths into consistent latent vectors, the \ac{RNN} Autoencoder stands out. This approach is notably advantageous over CNN embeddings, as it eliminates the need for uniform input lengths, offering a more flexible and comprehensive encoding solution for diverse data sets. However, this flexibility comes at the cost of increased computational demand, complexity in parameter tuning and an overall decrease in embedding quality.
 
-%\paragraph{\ac{RNN} Autoencoder}
-%
-%For encoding time series of variable lengths into consistent latent vectors, the \ac{RNN} Autoencoder stands out. It provides adaptability at the cost of increased computational demand and complexity in tuning. This approach is notably advantageous over CNN embeddings, as it eliminates the need for uniform input lengths, offering a more flexible and comprehensive encoding solution for diverse data sets.
-%
-%\begin{lstlisting}[style=pyStyle]
-%
-%    import astrocast.autoencoders as AE
-%
-%    # Prepare data
-%    pdl = AE.PaddedDataLoader(data=eObj.events.trace)
-%    X_train, X_val, X_test = pdl.get_datasets(batch_size=16, val_size=0.1, test_size=0.05)
-%    model_path = "path/to/save/models/"
-%
-%    # train RNN
-%    tRAE = AE.TimeSeriesRnnAE(use_cuda=True)
-%    tRAE.train_epochs(dataloader_train=X_train,
-%                      dataloader_val=X_val,
-%                      num_epochs=10,  # number of training epochs
-%                      patience=10,  # epochs to wait before early stopping
-%                      safe_after_epoch=model_path
-%                      )
-%
-%    # save model
-%    tRAE.save_models("encoder.pth", "decoder.pth")
-%
-%    # evaluate embedding performance
-%    fig, x_val, y_val, latent, losses = tRAE.plot_traces(dataloader=X_test, figsize=(20, 20))
-%    fig.savefig("tRAE_performance.png")
-%
-%\end{lstlisting}
+\begin{lstlisting}[style=pyStyle]
+
+    import astrocast.autoencoders as AE
+
+    # Prepare data
+    pdl = AE.PaddedDataLoader(data=eObj.events.trace)
+    X_train, X_val, X_test = pdl.get_datasets(batch_size=16, val_size=0.1, test_size=0.05)
+    model_path = "path/to/save/models/"
+
+    # train RNN
+    tRAE = AE.TimeSeriesRnnAE(use_cuda=True)
+    tRAE.train_epochs(dataloader_train=X_train,
+                      dataloader_val=X_val,
+                      num_epochs=10,  # number of training epochs
+                      patience=10,  # epochs to wait before early stopping
+                      safe_after_epoch=model_path
+                      )
+
+    # save model
+    tRAE.save_models("encoder.pth", "decoder.pth")
+
+    # evaluate embedding performance
+    fig, x_val, y_val, latent, losses = tRAE.plot_traces(dataloader=X_test, figsize=(20, 20))
+    fig.savefig("tRAE_performance.png")
+
+\end{lstlisting}
 

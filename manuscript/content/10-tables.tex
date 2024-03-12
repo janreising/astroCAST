@@ -1,0 +1,48 @@
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% Table 1: functionality comparison
+
+\begin{table}[h!]
+    \centering
+    \caption{Availability of different functionalities of astroCAST across
+    operating systems. A check mark (\cmark) denotes full compatibility and active support. An asterisk (\optional)
+        indicates that the
+    functionality is optional and can be installed upon user request (see below). A cross mark (\xmark) signifies
+        that the
+    functionality is not supported or available on the operating system. A half bullet (\halfbullet) indicates
+        partial support,
+    indicating that the functionality is expected to be available but is not actively tested.  }
+    \label{tab:functionalities}
+    \begin{tabular}{|l|c|c|c|c|}
+        \hline
+        \textbf{Functionality} & \textbf{Linux} & \textbf{Windows} & \textbf{MacOS (Intel)} & \textbf{Docker} \\ \hline
+        Preprocessing          & \cmark         & \cmark           & \cmark                 & \cmark          \\ \hline
+        Motion correction      & \cmark         & \cmark           & \cmark                 & \cmark          \\ \hline
+        Denoising              & \cmark         & \halfbullet      & \cmark                 & \cmark          \\ \hline
+        Delta                  & \cmark         & \cmark           & \cmark                 & \cmark          \\ \hline
+        Detection              & \cmark         & \cmark           & \cmark                 & \cmark          \\ \hline
+        UMAP outlier detection & \cmark         & \cmark           & \xmark                 & \cmark          \\ \hline
+        Encoding - all         & \cmark         & \cmark           & \cmark                 & \cmark          \\ \hline
+        Analysis               &                &                  &                        &                 \\ \hline
+        DTW distance           & \cmark         & \cmark           & \xmark                 & \cmark          \\ \hline
+        Barycenters            & \cmark         & \cmark           & \xmark                 & \cmark          \\ \hline
+        Video player \optional & \cmark         & \cmark           & \cmark                 & \xmark          \\ \hline
+    \end{tabular}
+\end{table}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% Table 2: Datasets
+
+\begin{table}[ht]
+    \centering
+    \caption{Overview of Datasets Employed in Analysis}
+    \label{tab:datasets}
+    \begin{tabular}{|l|l|l|l|l|l|}
+        \hline
+        \textbf{Dataset} & \textbf{Publication} & \textbf{Experiment} & \textbf{Imaging} \\ \hline
+        train/test & previously unpublished & acute slices, Gcamp6f & \ac{1P} (8 Hz) \\ \hline
+        ExVivo & AQuA\citep{wang_event-based_2018} & acute slices, Gcamp6f & \ac{2P} (1.1 Hz) \\ \hline
+        Glusnfr & AQuA\citep{wang_event-based_2018} & acute slices, GluSnFR & \ac{2P} (4-100 Hz) \\ \hline
+        InVivo & AQuA\citep{wang_event-based_2018} & in vivo GCamp6f & \ac{2P} (2 Hz) \\ \hline
+        cellscan\_scim & CHIPS\citep{barrett_chips_2018} & blood vessels & \ac{2P} \\ \hline
+    \end{tabular}
+\end{table}
