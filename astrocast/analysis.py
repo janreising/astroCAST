@@ -2242,7 +2242,8 @@ class Plotting:
         
         return traces
     
-    def plot_traces(self, num_samples=-1, by=None, ax=None, figsize=(5, 5)):
+    def plot_traces(self, num_samples=-1, by=None, ax=None, figsize=(5, 5), alpha=1, linestyle='-',
+                    title: str = None):
         """
         Plot sampled traces, optionally grouped and color-coded by a specified column.
 
@@ -2269,10 +2270,19 @@ class Plotting:
             
             for i, (val, selected_traces) in enumerate(traces.items()):
                 for trace in selected_traces:
-                    ax.plot(trace, color=colors[i])
+                    ax.plot(trace, color=colors[i], alpha=alpha, linestyle=linestyle,
+                            label=f"group {i}")
+            
+            handles, labels = ax.get_legend_handles_labels()
+            by_label = dict(zip(labels, handles))
+            ax.legend(by_label.values(), by_label.keys())
+        
         else:
             for i, trace in enumerate(traces):
-                ax.plot(trace, label=i)
+                ax.plot(trace, label=i, alpha=alpha, linestyle=linestyle)
+        
+        if title is not None:
+            ax.set_title(title)
         
         plt.tight_layout()
         return fig
