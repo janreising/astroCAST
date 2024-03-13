@@ -845,9 +845,12 @@ class DummyGenerator:
         
         else:
             
-            if len(timings) != len(df.group.unique()):
+            num_groups = len(df.group.unique())
+            if len(timings) < num_groups:
                 raise ValueError(f"Length of timings ({len(timings)}) does not equal "
-                                 f"unique group ({len(df.group.unique())})")
+                                 f"unique group ({num_groups})")
+            elif len(timings) > num_groups:
+                logging.warning(f"Number of timings ({len(timings)}) exceeds number of groups ({num_groups}).")
             
             def apply_timings(row):
                 

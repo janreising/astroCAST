@@ -1271,7 +1271,7 @@ class Discriminator(CachedClass):
             
             if regression:
                 score = self.clf.score(X, Y)
-                evaluations.append(score)
+                evaluations["score"] = score
             
             else:
                 
@@ -1415,9 +1415,9 @@ class CoincidenceDetection:
         self.normalization_instructions = normalization_instructions
         
         # align incidences
-        self.aligned = self.align_events_and_incidences()
+        self.aligned = self._align_events_and_incidences()
     
-    def align_events_and_incidences(self):
+    def _align_events_and_incidences(self):
         
         id_event_ = []
         num_events_ = []
@@ -1449,7 +1449,9 @@ class CoincidenceDetection:
         return aligned
     
     def _train(
-            self, embedding, category_vector, classifier, regression=False, normalize_confusion_matrix=False, **kwargs
+            self, embedding, category_vector, classifier, regression=False, normalize_confusion_matrix=False,
+            show_plot: bool = False,
+            **kwargs
             ):
         
         discr = Discriminator(self.events)
@@ -1464,13 +1466,14 @@ class CoincidenceDetection:
                 self, embedding, split=None, classifier=classifier, **kwargs
                 )
         
-        evaluation = discr.evaluate(cutoff=0.5, normalize=normalize_confusion_matrix, regression=regression)
+        evaluation = discr.evaluate(cutoff=0.5, normalize=normalize_confusion_matrix, regression=regression,
+                                    show_plot=show_plot)
         
         return clf, evaluation
     
     def predict_coincidence(
-            self, binary_classification=True, classifier="RandomForestClassifier", normalize_confusion_matrix=False,
-            **kwargs
+            self, binary_classification=True, classifier="RandomForestClassifier", normalize_confusion_matrix=None,
+            show_plot: bool = False, **kwargs
             ):
         
         aligned = self.aligned.copy()
@@ -1489,12 +1492,14 @@ class CoincidenceDetection:
         
         clf, confusion_matrix = self._train(
                 embedding, category_vector, classifier, regression=False,
-                normalize_confusion_matrix=normalize_confusion_matrix, **kwargs
+                normalize_confusion_matrix=normalize_confusion_matrix, show_plot=show_plot,
+                **kwargs
                 )
         
         return clf, confusion_matrix
     
-    def predict_incidence_location(self, classifier="RandomForestRegressor", single_event_prediction=True, **kwargs):
+    def predict_incidence_location(self, classifier="RandomForestRegressor", single_event_prediction=True,
+                                   show_plot: bool = False, **kwargs):
         
         aligned = self.aligned.copy()
         aligned = aligned.reset_index()
@@ -1517,7 +1522,8 @@ class CoincidenceDetection:
             raise ValueError(f"currently multi event prediction is not implemented.")
         
         clf, score = self._train(
-                embedding, category_vector, classifier=classifier, regression=True, **kwargs
+                embedding, category_vector, classifier=classifier, regression=True,
+                show_plot=False, **kwargs
                 )
         
         return clf, score
