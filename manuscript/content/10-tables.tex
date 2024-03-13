@@ -1,7 +1,10 @@
+
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % Table 1: functionality comparison
 
-\begin{table}[h!]
+\bgroup
+\def\arraystretch{1.5}
+\begin{table}[htb]
     \centering
     \caption{Availability of different functionalities of astroCAST across
     operating systems. A check mark (\cmark) denotes full compatibility and active support. An asterisk (\optional)
@@ -10,7 +13,7 @@
         that the
     functionality is not supported or available on the operating system. A half bullet (\halfbullet) indicates
         partial support,
-    indicating that the functionality is expected to be available but is not actively tested.  }
+    indicating that the functionality is expected to be available but is not actively tested. \newline}
     \label{tab:functionalities}
     \begin{tabular}{|l|c|c|c|c|}
         \hline
@@ -28,13 +31,16 @@
         Video player \optional & \cmark         & \cmark           & \cmark                 & \xmark          \\ \hline
     \end{tabular}
 \end{table}
+\egroup
 
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%
 % Table 2: Datasets
 
-\begin{table}[ht]
+\bgroup
+\def\arraystretch{1.5}
+\begin{table}[htb]
     \centering
-    \caption{Overview of Datasets Employed in Analysis}
+    \caption{Overview of Datasets Employed in Analysis. \newline}
     \label{tab:datasets}
     \begin{tabular}{|l|l|l|l|l|l|}
         \hline
@@ -46,3 +52,46 @@
         cellscan\_scim & CHIPS\citep{barrett_chips_2018} & blood vessels & \ac{2P} \\ \hline
     \end{tabular}
 \end{table}
+\egroup
+
+%%%%%%%%%%%%%%%%%%%%
+% Table 3: embedding
+
+\bgroup
+\def\arraystretch{1.5}
+\begin{table}[htb]
+    \centering
+    \caption{Evaluation of different methodologies for Embedding and Distance calculations. Highlights the requirements and limitations. A (\cmark) indicates a necessary requirement, items with (\xmark) are optional and a (\halfbullet) indicates a difference between operating systems.\newline}
+    \label{tab:embedding}
+    \begin{tabular}{|l|c|c|c|c|c|}
+        \hline
+        & \textbf{Feature Extraction (FExt)} & \textbf{Convolutional Autoencoder (CNN)} & \textbf{Recurrent Autoencoder (RNN)} & \textbf{Pearson Correlation} & \textbf{Dynamic Time Warping (DTW)} \\ \hline
+        Fixed length & \xmark & \cmark & \xmark & \xmark & \xmark \\ \hline
+        Normalization required & \xmark & \cmark & \cmark & \xmark & \xmark \\ \hline
+        Training required & \xmark & \cmark & \cmark & \xmark & \xmark \\ \hline
+        Memory limited & \xmark & \xmark & \xmark & \cmark & \cmark \\ \hline
+        Wall time limited & \cmark & \xmark & \xmark & \cmark & \cmark \\ \hline
+        Parallelized & \xmark & \xmark & \xmark & \cmark & \halfbullet \\ \hline
+    \end{tabular}
+\end{table}
+\egroup
+
+%%%%%%%%%%%%%%%%%%%%%%
+% Table 4: Experiments
+
+\bgroup
+\def\arraystretch{1.5}
+\begin{table}[htb]
+    \centering
+    \caption{Comprehensive overview of experiment types that are included in astroCAST, with their respective requirements.\newline}
+    \label{tab:experiments}
+    \begin{tabular}{|l|c|c|c|c|}
+        \hline
+        & \multicolumn{2}{c|}{\textbf{Conditional Contrasts}} & \multicolumn{2}{c|}{\textbf{Coincidence Detection}} \\ \hline
+        & \textbf{Classifier} & \textbf{Hierarchical} & \textbf{Classifier} & \textbf{Regression} \\ \hline
+        Training required & \cmark & \xmark & \cmark & \cmark \\ \hline
+        User labels & group & group & timing & timing \\ \hline
+        Input type & embedding & distance & embedding & embedding \\ \hline
+    \end{tabular}
+\end{table}
+\egroup

@@ -34,7 +34,7 @@ with open(output_filename, 'w') as output_file:
         
         # Write the figure inclusion code to the output file
         output_file.write(
-                f"\\begin{{figure}}[h!]\n"
+                f"\\begin{{figure}}[!htb]\n"
                 f"\\begin{{center}}\n"
                 f"\\includegraphics[width=\\linewidth]{{figures/{name}}}\n"  # Adjust path if necessary
                 f"\\end{{center}}\n"
