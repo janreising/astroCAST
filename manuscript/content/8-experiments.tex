@@ -4,7 +4,7 @@
 
 \todo{Jan}{finalize this section}{this section is still under construction and will change during the next iteration}
 
-The last step of the protocol is to evaluate the outcomes of experiment\tref{experiments}. This section provides examples to inspire various ways datasets can be analyzed. The best analysis approach will depend on the specifics of the study, and therefore, here we include examples of common types of experiments. AstroCAST is designed to be flexible and modular, allowing for custom addition of analyses tailored to the specific dataset. The examples in this section focus on two primary types of analyses: comparing groups under different conditions (Conditional Contrasts) and detecting coincidences of independent stimuli (Coincidence Detection).
+The last step of the protocol is to evaluate the outcomes of experiment\tref{experiments}. This section provides examples to inspire various ways datasets can be analyzed. The best analysis approach will depend on the specifics of the study, and therefore, here we include examples of common types of experiments\fref{6}. AstroCAST is designed to be flexible and modular, allowing for custom addition of analyses tailored to the specific dataset. The examples in this section focus on two primary types of analyses: comparing groups under different conditions (Conditional Contrasts) and detecting coincidences of independent stimuli (Coincidence Detection).
 
 When analyzing data from multiple experiments (for example, different conditions) the datasets can be combined with the \inlinepy{MultiEvents} class.
 
@@ -25,7 +25,7 @@ When analyzing data from multiple experiments (for example, different conditions
 \end{lstlisting}
 
 \subsubsection{Conditional Contrasts}
-This module compares different experimental groups by assessing whether the observed effects are condition-dependent. Common examples include application of different drugs, samples from different animal models or different brain regions.
+This module compares different experimental groups by assessing whether the observed effects are condition-dependent\fref{6}[B]. Common examples include application of different drugs, samples from different animal models or different brain regions.
 
 \paragraph{Classifier (Predict the Condition)}
 Use classification algorithms to predict the condition of each event based on its features. This provides an indication of how effectively the conditions can be distinguished based on the observed events. Feature embedding is necessary.
@@ -40,7 +40,7 @@ Hierarchical clustering groups similar events together. Similarity between event
 \todo{Jan}{add figure panel}{}
 
 \subsubsection{Coincidence Detection}
-This module focuses on identifying whether certain conditions or events coincide with or predict other phenomena. Common examples would be neuronal bursts or observed animal behavior.
+This module focuses on identifying whether certain conditions or events coincide with or predict other phenomena\fref{6}[C]. Common examples would be neuronal bursts or observed animal behavior.
 
 \paragraph{Classifier (Predict Incidence Occurred)}
 Similar to the classifier used in conditional contrasts, this module predicts whether a specific incidence or event has occurred. This is particularly useful for identifying causal relationships or triggering events.
