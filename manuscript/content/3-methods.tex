@@ -1,1 +1,66 @@
-\todo{Athina}{Section name: 'Results' vs. 'Methods'}{I am not sure where to put the bulk of the previous protocol section. Should all the explanation of the toolkit steps go into the Methods or the Results. If it goes into the Results, what would go into the Methods?}
+\subsection{Requirements}
+The initial step involves preparing the video recordings for analysis. Our protocol supports a range of file formats, including .avi, .h5, .tiff (either single or multipage), and .czi, accommodating videos with interleaved recording paradigms. To ensure reliable results, recordings should be captured at a frequency of at least 8Hz for \ac{1P} imaging and 1-2Hz for \ac{2P} imaging. This frequency selection is crucial for capturing events of the expected duration effectively. It is imperative that the recordings specifically capture astrocytes labeled with calcium sensors, either through transgenic models or viral vectors. While the use of calcium dyes is possible, their application may not guarantee the exclusive detection of astrocytic events.
+
+Regarding hardware requirements, our protocol is adaptable to a variety of configurations, from personal computers to cloud infrastructures, with certain modules benefiting from GPU acceleration. At a minimum, we recommend using hardware equipped with a 1.6GHz quad-core processor and 16GB of RAM to efficiently handle the data analysis. In cases where the available memory is a bottleneck, astroCAST offers a \inlinepy{lazy} parameter to only load relevant sections of the data into memory. While this increases processing time, depending on the speed of the storage medium, it allows users to analyze datasets that would usually exceed the capabilities of their chosen hardware.
+
+On the software side, we advocate for the use of Linux operating systems, specifically Ubuntu or AlmaLinux, for optimal performance, although Windows or macOS can be used with some functional limitations. Be advised, the M1 and M2 Mac processors are currently not supported, and we recommend using the docker image instead. However, even using the docker image it is not guaranteed that astroCAST will perform as expected. Essential software includes Python version 3.9, along with Anaconda or Miniconda for managing Python environments, and git for version control. An optional recommendation is ImageJ or an equivalent image viewer for analyzing the output visually. This comprehensive approach ensures that researchers can accurately extract and analyze astrocytic calcium signals, paving the way for further understanding of their physiological roles.
+
+\subsection{Installation}
+To run the software, you need to install the astroCAST package and its dependencies. There are multiple options to install \ac{astroCAST} depending on how much control users would like to have over the installation. Of note, the following instructions install astroCAST with its full functionality. If that is not desired or possible remove the \inlineBash{-E all} or \inlineBash{[all]} flags. AstroCAST was designed primarily for the use in Linux, so some functionality will not be available in other operating systems\tref{functionalities}).
+
+\subsubsection{Creating a conda environment (optional)}
+While not strictly necessary, we highly recommend to create a fresh anaconda environment for the installation. This
+prevents common installation errors and conflicts with existing environments.
+
+\begin{lstlisting}[style=bashStyle]
+    $ conda create -n astro python=3.9 poetry
+    $ conda activate astro
+\end{lstlisting}
+
+\subsubsection{Install from source (recommended)}
+\label{res:install-from-source}
+\begin{lstlisting}[style=bashStyle]
+    $ cd "/path/to/directory/"
+    $ git clone git@github.com:janreising/astroCAST.git
+    $ cd astroCAST
+    $ poetry install -E all
+\end{lstlisting}
+
+\subsubsection{Installation with pip (easiest)}
+\begin{lstlisting}[style=bashStyle]
+    $ pip install astrocast[all]
+\end{lstlisting}
+
+\subsubsection{Container installation (last resort)}
+
+To install docker and create an account, follow the instructions on the docker webpage: https://docs.docker
+.com/engine/install/
+
+\begin{lstlisting}[style=bashStyle]
+    $ docker pull anacgon/astrocast:latest
+    $ docker image ls
+    $ docker run -v /path/to/your/data:/home/data -it -p 8888:8888 astrocast:latest
+    # Optionally, start jupyter notebook from inside the docker container:
+    $ jupyter-lab --allow-root --no-browser --port=8888 --ip="*"
+\end{lstlisting}
+
+\subsubsection{Test installation}
+
+Both commands should run without any errors.
+
+\begin{lstlisting}[style=bashStyle]
+    $ python -c "import astrocast"
+    $ astrocast --help
+\end{lstlisting}
+
+\subsection{Datasets used during development}
+
+AstroCAST was developed using publicly available datasets and our own data. The data represents astrocytes studied ex-vivo, in-vivo and in acute slices captured with \ac{1P} or \ac{2P}\tref{datasets}. To ensure transparency and provide a practical starting point, we offer a collection of sensible, default settings within a YAML file. This file, designed to represent a first-approach configuration, is accessible in our \href{https://github.com/janreising/astroCAST}{GitHub repository}. Additionally, we provide the datasets used in this manuscript, as well as pretrained models. This repository serves as a comprehensive resource, aiding users in understanding and implementing the protocol with similar data characteristics.
+
+\begin{lstlisting}[style=bashStyle]
+    # download public and custom datasets
+    $ astrocast download-datasets "/path/to/download/directory"
+
+    # download pretrained models
+    $ astrocast download-models "/path/to/download/directory"
+\end{lstlisting}

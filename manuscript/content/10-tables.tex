@@ -65,10 +65,12 @@
     \label{tab:embedding}
     \begin{tabular}{|l|c|c|c|c|c|}
         \hline
-        & \textbf{Feature Extraction (FExt)} & \textbf{Convolutional Autoencoder (CNN)} & \textbf{Recurrent Autoencoder (RNN)} & \textbf{Pearson Correlation} & \textbf{Dynamic Time Warping (DTW)} \\ \hline
+        & \textbf{Feature} & \textbf{Convolutional} & \textbf{Recurrent} & \textbf{Pearson} & \textbf{Dynamic Time} \\
+        & \textbf{Extraction} & \textbf{Autoencoder} & \textbf{Autoencoder} & \textbf{Correlation} & \textbf{Warping} \\ \hline
+        Abbreviation & \textbf{FExt} & \textbf{CNN} & \textbf{RNN} & \textbf{pearson} & \textbf{DTW} \\ \hline
         Fixed length & \xmark & \cmark & \xmark & \xmark & \xmark \\ \hline
-        Normalization required & \xmark & \cmark & \cmark & \xmark & \xmark \\ \hline
-        Training required & \xmark & \cmark & \cmark & \xmark & \xmark \\ \hline
+        Normalization & \xmark & \cmark & \cmark & \xmark & \xmark \\ \hline
+        Training & \xmark & \cmark & \cmark & \xmark & \xmark \\ \hline
         Memory limited & \xmark & \xmark & \xmark & \cmark & \cmark \\ \hline
         Wall time limited & \cmark & \xmark & \xmark & \cmark & \cmark \\ \hline
         Parallelized & \xmark & \xmark & \xmark & \cmark & \halfbullet \\ \hline
