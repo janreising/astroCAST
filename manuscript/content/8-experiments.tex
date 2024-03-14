@@ -2,11 +2,7 @@
 %Timing: 1 h – 6h
 %Running time will increase non-linearly with the number of events being clustered and varies substantially between approaches chosen.
 
-\todo{Jan}{finalize this section}{this section is still under construction and will change during the next iteration}
-
-The last step of the protocol is to evaluate the outcomes of experiment\tref{experiments}. This section provides examples to inspire various ways datasets can be analyzed. The best analysis approach will depend on the specifics of the study, and therefore, here we include examples of common types of experiments\fref{6}. AstroCAST is designed to be flexible and modular, allowing for custom addition of analyses tailored to the specific dataset. The examples in this section focus on two primary types of analyses: comparing groups under different conditions (Conditional Contrasts) and detecting coincidences of independent stimuli (Coincidence Detection).
-
-When analyzing data from multiple experiments (for example, different conditions) the datasets can be combined with the \inlinepy{MultiEvents} class.
+The last step of the protocol is to evaluate the outcomes of experiment\tref{experiments}. This section provides examples to inspire various ways datasets can be analyzed. The best analysis approach will depend on the specifics of the study, and therefore, here we include examples of common types of experiments\fref{6}. AstroCAST is designed to be flexible and modular, allowing for custom addition of analyses tailored to the specific dataset. The examples in this section focus on two primary types of analyses: comparing groups under different conditions (Conditional Contrasts) and detecting coincidences of independent stimuli (Coincidence Detection). When analyzing data from multiple experiments (for example, different conditions) the datasets can be combined with the \inlinepy{MultiEvents} class.
 
 \begin{lstlisting}[style=pyStyle]
 
@@ -24,20 +20,94 @@ When analyzing data from multiple experiments (for example, different conditions
 
 \end{lstlisting}
 
+Here, we are using sets of synthetic datasets to reproducibly show the advantages and disadvantages of each analysis approach. We encourage users to explore their own variations of synthetic datasets.
+
+\begin{lstlisting}[style=pyStyle]
+
+    from astrocast.helper import DummyGenerator, SignalGenerator
+
+    # general settings
+    z_range = (0, 10000)  # range of frames that events can be created
+
+    # Create signal generators
+    group_1 = SignalGenerator(trace_length=(50, 50),
+                noise_amplitude=0.001, parameter_fluctuations=0.01,
+                b=1, plateau_duration=1)
+    group_2 = SignalGenerator(trace_length=(50, 50),
+                noise_amplitude=0.001, parameter_fluctuations=0.01,
+                b=2, plateau_duration=6)
+    generators = [group_1, group_2]
+
+    # Create stimulus timings
+    timing_1 = None  # random event distribution
+    timing_2 = list(range(0, z_range[1], 1000))
+    timings = [timing_1, timing_2]
+
+    # Create synthetic events
+    dg = DummyGenerator(name="synthetic_events",
+        num_rows=100  # number of events per group
+        z_range=z_range, generators=generators, timings=timings,
+    )
+    eObj = dg.get_events()
+
+    # create embedding as in previous steps
+
+\end{lstlisting}
+
 \subsubsection{Conditional Contrasts}
 This module compares different experimental groups by assessing whether the observed effects are condition-dependent\fref{6}[B]. Common examples include application of different drugs, samples from different animal models or different brain regions.
 
 \paragraph{Classifier (Predict the Condition)}
 Use classification algorithms to predict the condition of each event based on its features. This provides an indication of how effectively the conditions can be distinguished based on the observed events. Feature embedding is necessary.
 
-\todo{Jan}{add code}{}
-\todo{Jan}{add figure panel}{}
+\begin{lstlisting}[style=pyStyle]
+
+    from astrocast.clustering import Discriminator
+
+    # assumes eObj and embedding was created previously
+    categories = eObj.events.group.tolist()
+    classifier = "RandomForestClassifier"
+
+    # create disciminator object and train
+    discr = Discriminator(eObj)
+    clf = discr.train_classifier(embedding=embedding,
+                                 category_vector=categories,
+                                 classifier=classifier)
+
+    # evaluate the outcome (metrics and confusion matrix)
+    scores = discr.evaluate(show_plot=False)
+    print(scores)
+
+\end{lstlisting}
 
 \paragraph{Hierarchical Clustering (Overlap with Conditions)}
-Hierarchical clustering groups similar events together. Similarity between event traces is assessed by either Dynamic Time Warping (DTW) or Pearson Correlation. The aim is to see if these groups correspond to different experimental conditions, which would indicate that the conditions have distinct profiles. Hierarchical clustering does not depend on feature embedding and can be safely performed on the normalized event traces. Note: The set of counts shown in the heatmap is called a signature.
+Hierarchical clustering groups similar events together. Similarity between event traces is assessed by either Dynamic Time Warping (DTW) or Pearson Correlation, basically calculating a distance between all events. The aim is to see if these groups correspond to different experimental conditions, which would indicate that the conditions have distinct profiles. Hierarchical clustering does not depend on feature embedding and can be safely performed on the normalized event traces. The \inlinepy{Linkage} module will return \inlinepy{barycenters}, which can be understood as a consensus event shape for each cluster, and a \inlinepy{cluster\_lookup\_table} which maps the identified clusters to the events. Clusters can be defined by either a set number of expected clusters (\inlinepy{criterion='maxlust', cutoff=expected\_num\_clusters}) or maximum distance (\inlinepy{criterion='distance', cutoff=max\_distance}).
 
-\todo{Jan}{add code}{}
-\todo{Jan}{add figure panel}{}
+\begin{lstlisting}[style=pyStyle]
+
+    from astrocast.clustering import Linkage, Discriminator
+
+    # settings
+    categories = eObj.events.group.tolist()
+    correlation_type = "dtw"  # or 'pearson'
+
+    # create linkage object and create clusters
+    link = Linkage()
+    result = link.get_barycenters(eObj.events,
+                                  cutoff=num_groups,  # here we choose to extract our groups
+                                  criterion='maxclust',
+                                  distance_type=correlation_type
+                                  )
+    # evaluate outcome (metrics and confusion matrix)
+    barycenters, cluster_lookup_table = result
+    eObj.add_clustering(cluster_lookup_table, column_name='predicted_group')
+    predicted_categories = eObj.events.predicted_group.tolist()
+
+    scores = Discriminator.compute_scores(categories, predicted_categories,
+                                          scoring="clustering")
+    print(scores)
+
+\end{lstlisting}
 
 \subsubsection{Coincidence Detection}
 This module focuses on identifying whether certain conditions or events coincide with or predict other phenomena\fref{6}[C]. Common examples would be neuronal bursts or observed animal behavior.
@@ -45,11 +115,35 @@ This module focuses on identifying whether certain conditions or events coincide
 \paragraph{Classifier (Predict Incidence Occurred)}
 Similar to the classifier used in conditional contrasts, this module predicts whether a specific incidence or event has occurred. This is particularly useful for identifying causal relationships or triggering events.
 
-\todo{Jan}{add code}{}
-\todo{Jan}{add figure panel}{}
+\begin{lstlisting}[style=pyStyle]
+
+    from astrocast.clustering import CoincidenceDetection
+
+    # assumes eObj and embedding was created and the stimulus timings are known
+    cDetect = CoincidenceDetection(events=eObj,
+                                   incidences=timing,
+                                   embedding=embedding)
+
+    # predict classes and evaluate outcome
+    _, scores = cDetect.predict_coincidence(binary_classification=True)
+    print(scores)
+
+\end{lstlisting}
 
 \paragraph{Regression (Timing of Incidence; Coinciding Events Only)}
 Regression analysis can be used to predict when an incidence occurred based on the event embedding. This analysis aims to establish whether astrocytic events correlate with the incident in question, or vice versa.
 
-\todo{Jan}{add code}{}
-\todo{Jan}{add figure panel}{}
+\begin{lstlisting}[style=pyStyle]
+
+    from astrocast.clustering import CoincidenceDetection
+
+    # assumes eObj and embedding was created and the stimulus timings are known
+    cDetect = CoincidenceDetection(events=eObj,
+                                   incidences=timing,
+                                   embedding=embedding)
+
+    # predict classes and evaluate outcome
+    _, scores = cDetect.predict_incidence_location()
+    print(scores)
+
+\end{lstlisting}
