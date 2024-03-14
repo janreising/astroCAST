@@ -48,15 +48,7 @@ By carefully adjusting these parameters, researchers can significantly enhance t
 
 Denoising is an optional but often beneficial preprocessing step in image analysis. The denoising module is based on the architecture suggested in the DeepInterpolation publication\citep{lecoq_removing_2021} and employs a \ac{CNN} designed to clean a target frame.The \ac{CNN} uses adjacent frames as a reference without exposing it to the target frame itself. This approach enables the network to interpolate the desired signal from the contextual frames. Since the noise is stochastic, the network inherently learns to disregard it, effectively isolating and enhancing the signal in the process. We have extended the original approach to support videos of varying dimensions and facilitate straightforward retraining protocols.
 
-Training the denoising model is typically a singular task; once the model is trained, it can be applied to multiple datasets with no further adjustments. The duration of this initial training varies from 1 to 12 hours, contingent on data intricacy and available computational power. Subsequent application of the model to new data, known as inference, is considerably more expedient, usually requiring minutes for each file.
-
-For convenience, we offer a suite of pretrained models tailored to different imaging modalities. A curated list is accessible on our GitHub page under \href{https://github.com/janreising/astroCAST/tree/main/denoiser_models}{denoiser models}, and a comprehensive collection of models can be downloaded via astroCAST.
-
-\begin{lstlisting}[style=bashStyle]
-    $ astrocast download-models "/path/to/download/directory/"
-\end{lstlisting}
-
-\todo{Jan}{model naming convention}{Explain the naming convention for the model files.}
+Training the denoising model is typically a singular task; once the model is trained, it can be applied to multiple datasets with no further adjustments. The duration of this initial training varies from 1 to 12 hours, contingent on data intricacy and available computational power. Subsequent application of the model to new data, known as inference, is considerably more expedient, usually requiring minutes for each file. For convenience, we offer a suite of pretrained models tailored to different imaging modalities (\ref{ref:dataset-availability}).
 
 \paragraph{Training (optional)}
 
