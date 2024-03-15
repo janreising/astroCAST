@@ -1,3 +1,54 @@
+%%
+% Table 0: comparison to other tools
+\hline \textbf{} &  &  \\
+
+\bgroup
+\def\arraystretch{1.3}
+\begin{table}[htb]
+    \centering
+    \caption{\newline}
+    \label{tab:transposed-comparison}
+    \begin{tabular}{|l|l|l|l|l|l|l|l|l|l|l|l|}
+    \hline {} & \textbf{published} & \textbf{cell type} & \textbf{model} & \textbf{validation} & \textbf{imaging} & \textbf{language} & \textbf{framework} & \textbf{interface} & \textbf{functionality} \\
+    \hline \textbf{AquA} & 2019 & astrocytes & \makecell{in-vitro,\\in-vivo} & NaN & NaN & Matlab & NaN & NaN & NaN \\
+    \hline \textbf{CaImAn} & 2019 & neurons & \makecell{in-vitro,\\in-vivo} & user labels & 1P, 2P & python & modular & GUI & NaN \\
+    \hline \textbf{Suite2P} & NaN & NaN & NaN & NaN & NaN & NaN & NaN & NaN & NaN \\
+    \hline \textbf{astroCAST} & NaN & NaN & NaN & NaN & NaN & NaN & NaN & NaN & NaN \\
+    \hline \textbf{FASP} & 2017 & NaN & in-vitro & synthetic & NaN & Java & NaN & NaN & event detection \\
+    \hline \textbf{CaSCaDe} & 2021 & neurons & \makecell{in-vivo,\\many datasets} & NaN & NaN & NaN & NaN & NaN & spike inference \\
+    \hline \textbf{Begonia} & / & NaN & NaN & NaN & 2P & Matlab & NaN & NaN & NaN \\
+    \hline \textbf{MSparkles} & 2022 & \makecell{astrocytes,\\neurons} & \makecell{in-vivo,\\ex-vivo} & NaN & 1P, 2P & Matlab & NaN & NaN & NaN \\
+    \hline \textbf{Astral} & 2021 & NaN & in-vitro & NaN & 1P & NaN & NaN & NaN & NaN \\
+    \hline \textbf{CHIPS} & 2017 & blood vessels & NaN & NaN & confocal, 2P & R & NaN & NaN & NaN \\
+    \hline
+    \end{tabular}
+\end{table}
+\egroup
+
+\todo{Jan}{add references to table}{}
+
+%\bgroup
+%\def\arraystretch{1.5}
+%\begin{table}[htb]
+%    \centering
+%    \caption{ \newline}
+%    \label{tab:comparison-other-tools}
+%    \begin{tabular}{|l|l|l|l|l|l|l|l|l|l|}
+%    \hline {} & AquA & CaImAn & Suite2P & FASP & CaSCaDe & Begonia & MSparkles & Astral & CHIPS \\
+%    \hline year & 2019 & 2019 & NaN & 2017 & 2021 & NaN & 2022 & 2021 & 2017 \\
+%    \hline cell type &    astrocytes & neurons & NaN & NaN & neurons & NaN & astrocytes, neurons & NaN &  blood vessels \\
+%    \hline model &  in-vitro, in-vivo &  in-vitro, in-vivo & NaN &  in-vitro, synthetic &  in-vivo, many datasets & NaN &  in-vivo, ex-vivo &  in-vitro &            NaN \\
+%    \hline validation & NaN & user labels & NaN & synthetic & NaN & NaN & NaN & NaN & NaN \\
+%    \hline imaging & NaN & 1P, 2P & NaN & NaN & NaN & 2P & 1P, 2P & 1P & confocal, 2P \\
+%    \hline language & Matlab & python & NaN & Java & NaN &  Matlab & Matlab & NaN & R \\
+%    \hline framework & NaN & modular & NaN & NaN & NaN & NaN & NaN & NaN & NaN \\
+%    \hline interface & NaN & GUI & NaN & NaN & NaN & NaN & NaN & NaN & NaN \\
+%    \hline functionality & NaN & NaN & NaN &  event detection & spike inference & NaN & NaN & NaN & NaN \\
+%    \hline
+%    \end{tabular}
+%\end{table}
+%\egroup
+
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % Table 1: functionality comparison
