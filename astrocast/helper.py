@@ -397,7 +397,7 @@ class SignalGenerator:
                  ragged_allowed: bool = True,
                  oscillation_frequency: int = 4, oscillation_amplitude: float = 1, plateau_duration: int = 1,
                  a: float = 0, k: float = 1, b: float = 1, v: float = 1, m_0: float = 0,
-                 leaky_k: float = 0.1, leaky_n: float = 1,
+                 leaky_k: float = 0.1, leaky_n: float = 1, show_progress: bool = False
                  ):
         """
         Initializes the SignalGenerator with parameters for the signal phases and noise level.
@@ -438,6 +438,7 @@ class SignalGenerator:
         self.a = a
         
         self.parameter_fluctuations = parameter_fluctuations
+        self.show_progress = show_progress
     
     @staticmethod
     def _richards_curve(t: Union[float, np.ndarray, int] = None, a: float = 0, k: float = 1,
@@ -686,7 +687,8 @@ class SignalGenerator:
           A list of generated signals.
         """
         signals = []
-        for _ in tqdm(range(num_signals)):
+        iterator = tqdm(range(num_signals)) if self.show_progress else range(num_signals)
+        for _ in iterator:
             signal = self.generate_signal()
             
             if signal is not None:

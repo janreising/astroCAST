@@ -28,9 +28,7 @@ Here, we are going to showcase the steps using the astroCAST python package dire
 
 \end{lstlisting}
 
-The events object has an \inlinepy{events} instance, which contains the extracted signal, as well as their associated attributes (for example \inlinepy{'dz', 'x0'}) and metrics ( for example \inlinepy{'v\_area', 'v\_signal\_to\_noise\_ratio'}). An explanation of all columns can be found in the \missing{supplementary table} or \missing{link to documentation}.
-
-\todo{Jan}{Include supplementary table of calculated parameters}{}
+The events object has an \inlinepy{events} instance, which contains the extracted signal, as well as their associated attributes (for example \inlinepy{'dz', 'x0'}) and metrics ( for example \inlinepy{'v\_area', 'v\_signal\_to\_noise\_ratio'}). An explanation of all columns can be found in the class docstring \inlinepy{help(Events)}.
 
 \paragraph{Filtering}
 AstroCAST is engineered for versatility, facilitating the analysis of diverse experimental setups. Typically, datasets undergo filtering to adhere to experimental parameters or to eliminate outliers. Although a detailed discourse on filtering protocols is outside this document's scope, we address several prevalent scenarios. For astrocytic events, imposing a cutoff for event duration is beneficial, especially when distinguishing between rapid and protracted calcium events. Moreover, applying a threshold for the signal-to-noise ratio helps to discard events with negligible amplitude. While incorporating as many events as possible seems ideal, practical constraints like computational demands or the potential dilution of relevant events with extraneous data necessitate selectivity. Additionally, filtering aids in removing outliers, achieved either through manual adjustments or an unbiased clustering method. It is vital to recognize that the concept of an outlier is not universal but intimately tied to the specifics of the experimental design. Rigorous, context-sensitive examination is crucial for accurate data interpretation. We encourage users to venture beyond the preset analysis tools of AstroCAST, engaging with their data through custom analysis methods tailored to their unique experimental conditions.
@@ -113,7 +111,7 @@ AstroCAST offers a versatile normalization interface to accommodate various rese
 AstroCAST introduces a structured approach to address the challenge of varying event durations, detailed here with increasing complexity. The normalized timeseries are transformed into fixed-length feature vectors suitable for clustering and further analysis. This sequence of steps allows for a more focused analysis while balancing the need for data integrity and computational efficiency. Each alternative has advantages and disadvantages, notably the ability to deal with variable length events\tref{embedding}.
 
 \paragraph{Feature extraction}
-Feature extraction offers a simple yet powerful approach to reduce timeseries data into a manageable set of dimensions. The module employs a variety of metrics, like mean, median, and Shannon entropy, accessible through \inlinepy{help(astrocast.reduction.FeatureExtraction)}. While this method is length-agnostic, it may overlook key features, due to the inherent dimensional reduction. Further dimension reduction can be applied using techniques like PCA, t-SNE, or UMAP .
+Feature extraction offers a simple yet powerful approach to reduce timeseries data into a manageable set of dimensions. The module employs a variety of metrics, like mean, median, and Shannon entropy, accessible through \inlinepy{help(FeatureExtraction)}. While this method is length-agnostic, it may overlook key features, due to the inherent dimensional reduction. Further dimension reduction can be applied using techniques like PCA, t-SNE, or UMAP .
 
 \begin{lstlisting}[style=pyStyle]
 

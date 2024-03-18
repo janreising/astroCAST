@@ -266,38 +266,6 @@ class Video:
 
 
 class Events(CachedClass):
-    """
-        The Events class manages and processes astrocytic events detected in timeseries calcium recordings. It provides
-        various functionalities such as loading, extending, filtering, and analyzing events.
-
-        Args:
-            event_dir: The directory or list of directories where event data is stored after event detection.
-            lazy: Flag to indicate if data should be loaded lazily.
-            data: The associated video data or path to it. If set to `infer`, attempts to automatically determine the video path.
-            loc: Location specification for loading data, applicable when data is a .h5 file.
-            group: Identifier for the group or condition to which the events belong.
-            subject_id: Identifier for the subject associated with the events.
-            z_slice: The frame range to consider for processing.
-            index_prefix: Prefix for indexing events. Useful in multi-file scenarios.
-            custom_columns: Additional columns to compute and include in the events DataFrame.
-            frame_to_time_mapping: Mapping from frame numbers to absolute time.
-            frame_to_time_function: Function to convert frame numbers to absolute time.
-            cache_path: Path for caching processed data.
-            seed: Seed value for hash generation. Needs to stay consistent between runs of analysis for caching to work.
-
-        Features:
-            - Load and preprocess event data from specified directories.
-            - Supports both single and multiple file loading.
-            - Extend event traces in time by their mean or edge footprint.
-            - Normalize and filter events based on specified criteria.
-            - Generate and visualize summary statistics, frequency distributions, and clustering results.
-
-        Example::
-
-            from astrocast.analysis import Events
-            event_obj = Events('/your/event/dir')
-
-        """
     
     def __init__(
             self, event_dir: Union[str, Path] = None, lazy: bool = True,
@@ -308,6 +276,66 @@ class Events(CachedClass):
                     "v_area_norm", "cx", "cy"), frame_to_time_mapping: Union[dict, list] = None,
             frame_to_time_function: Callable = None, cache_path: Union[str, Path] = None, seed: int = 1
             ):
+        """
+        Manages and processes astrocytic events detected in timeseries calcium recordings. This class offers
+        functionalities for loading, extending, filtering, and analyzing astrocytic event data, providing a comprehensive
+        interface for the examination of calcium imaging data.
+
+        This class interacts with event data primarily through a DataFrame that contains a variety of calculated properties
+        for each detected event. These properties facilitate detailed analysis and characterization of the events.
+
+        Args:
+            event_dir: Directory or list of directories containing event data post-detection.
+            lazy: If set to True, loads data lazily.
+            data: Associated video data or path to it. Automatically determines the path if set to `infer`.
+            loc: Location specification for loading data, applicable for .h5 files.
+            group: Identifier for the group or condition of the events.
+            subject_id: Identifier for the subject associated with the events.
+            z_slice: Frame range for processing, specified as a tuple (start, end).
+            index_prefix: Prefix for event indexing in multi-file scenarios.
+            custom_columns: Additional columns to compute and include in the DataFrame.
+            frame_to_time_mapping: Maps frame numbers to absolute time.
+            frame_to_time_function Function to convert frame numbers to absolute time.
+            cache_path: Path for caching processed data.
+            seed: Seed for hash generation, ensuring consistency between runs for cache usage.
+
+        Features:
+            - Load and preprocess event data from specified directories.
+            - Extend event traces temporally by mean or edge footprint.
+            - Normalize and filter events based on specified criteria.
+            - Generate and visualize summary statistics and frequency distributions.
+            - Perform clustering analysis on event data.
+
+            DataFrame Columns:
+                - `z0`, `z1`: Start and end indices in the z-dimension, defining the Z-index bounds of the event.
+                - `x0`, `x1`, `y0`, `y1`: Coordinates that define the event's bounding box in the XY plane.
+                - `dz`, `dx`, `dy`: Dimensions of the bounding box, indicating depth (dz), width (dx), and height (dy).
+                - `v_length`: Length of the event in the z-dimension, calculated as z1 - z0.
+                - `v_diameter`: Diameter of the event, derived as sqrt(dx^2 + dy^2).
+                - `v_area`: Total area covered by the event, calculated from the count of z-indices where the event_id is present.
+                - `v_bbox_pix_num`: Total number of pixels within the bounding box, computed as dz * dx * dy.
+                - `mask`: Binary mask indicating the presence (1) or absence (0) of the event.
+                - `v_mask_centroid_local`: Local centroid coordinates of the event mask, normalized by the bounding box size in each dimension.
+                - `v_mask_axis_major_length`, `v_mask_axis_minor_length`: Lengths of the major and minor axes of the ellipse equivalent to the event mask.
+                - `v_mask_extent`: Ratio of pixels in the region to pixels in the total bounding box.
+                - `v_mask_solidity`: Proportion of the pixels in the convex hull that are also in the region, indicating the solidity of the event.
+                - `v_mask_area`: Number of pixels in the region, representing the event's area.
+                - `v_mask_equivalent_diameter_area`: Diameter of a circle with the same area as the region.
+                - `contours`: Contours extracted from each frame of the event, detailing the event's shape.
+                - `footprint`: 2D representation of the event, capturing its extent in the XY plane.
+                - `v_fp_<property>`: Properties such as centroid, eccentricity, perimeter calculated from the 2D footprint.
+                - `trace`: Average signal intensity of the event across the z-dimension.
+                - `v_max_height`: Peak signal intensity in the trace.
+                - `v_max_gradient`: Steepest gradient in the trace, indicating rapid changes in intensity.
+                - `noise_mask_trace`: Trace calculated from the noise mask area, helping to differentiate signal from noise.
+                - `v_noise_mask_mean`, `v_noise_mask_std`: Mean and standard deviation of the noise mask trace, characterizing noise.
+                - `v_signal_to_noise_ratio`, `v_signal_to_noise_ratio_fold`: Metrics assessing the quality of the signal relative to noise.
+                - `error`: Flag indicating any computational errors during property calculation..
+
+        Example:
+            >>> from astrocast.analysis import Events
+            >>> event_obj = Events('/your/event/dir')
+        """
         
         super().__init__(cache_path=cache_path)
         
@@ -2054,10 +2082,12 @@ class MultiEvents(Events):
 
 class Plotting:
     
-    def __init__(self, events: Events = None):
+    def __init__(self, events: Union[Events, pd.DataFrame] = None):
         
-        if events is not None:
+        if isinstance(events, (Events, astrocast.analysis.Events)):
             self.events = events.events
+        elif isinstance(events, pd.DataFrame):
+            self.events = events
         else:
             self.events = events
     
