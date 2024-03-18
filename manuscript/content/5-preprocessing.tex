@@ -69,9 +69,7 @@ Each of these methods has its merits and should be chosen based on the specific 
 \end{lstlisting}
 
 The intricacies of training a custom model are beyond this protocol, and we refer to the original DeepInterpolation
-publication\citep{lecoq_removing_2021} and our \href{https://github.com/janreising/astroCAST/blob/8451394bc0d810c4037011f0bcb9cba1f10d1e72/notebooks/examples/train_denoiser_models.ipynb}{example notebook} for users interested in training their own model.
-
-\todo{Jan}{Better notebook}{Maybe it makes sense to write a better tutorial.}
+publication\citep{lecoq_removing_2021} and our \href{https://github.com/janreising/astroCAST/blob/1066d1a9787111bf19ac3dff8894d931f62a13ee/notebooks/examples/train_a_denoiser_model.ipynb}{example notebook} for users interested in training their own model.
 
 \paragraph{Denoising Data}
 Once the neural network has been trained for denoising, it can be employed on new data using the parameters that were set during its training\fref{3}. If utilizing a provided pretrained model, these parameters are inferred from the model file.

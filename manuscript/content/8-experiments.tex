@@ -6,7 +6,6 @@
 The last step of the protocol is to evaluate the outcomes of experiment\tref{experiments}. This section provides examples to inspire various ways datasets can be analyzed. The best analysis approach will depend on the specifics of the study, and therefore, here we include examples of common types of experiments\fref{6}. AstroCAST is designed to be flexible and modular, allowing for custom addition of analyses tailored to the specific dataset. The examples in this section focus on two primary types of analyses: comparing groups under different conditions (Conditional Contrasts) and detecting coincidences of independent stimuli (Coincidence Detection). When analyzing data from multiple experiments (for example, different conditions) the datasets can be combined with the \inlinepy{MultiEvents} class.
 
 \begin{lstlisting}[style=pyStyle]
-
     from astrocast.analysis import MultiEvents
 
     # collect list of experiments
@@ -18,13 +17,11 @@ The last step of the protocol is to evaluate the outcomes of experiment\tref{exp
     # load combined dataset
     combined_events_obj = MultiEvents(events_dirs=paths, groups=groups,
                                         data="infer", lazy=True)
-
 \end{lstlisting}
 
 Here, we are using sets of synthetic datasets to reproducibly show the advantages and disadvantages of each analysis approach. We encourage users to explore their own variations of synthetic datasets.
 
 \begin{lstlisting}[style=pyStyle]
-
     from astrocast.helper import DummyGenerator, SignalGenerator
 
     # general settings
@@ -52,7 +49,6 @@ Here, we are using sets of synthetic datasets to reproducibly show the advantage
     eObj = dg.get_events()
 
     # create embedding as in previous steps
-
 \end{lstlisting}
 
 \subsubsection{Conditional Contrasts}
@@ -62,7 +58,6 @@ This module compares different experimental groups by assessing whether the obse
 Use classification algorithms to predict the condition of each event based on its features. This provides an indication of how effectively the conditions can be distinguished based on the observed events. Feature embedding is necessary.
 
 \begin{lstlisting}[style=pyStyle]
-
     from astrocast.clustering import Discriminator
 
     # assumes eObj and embedding was created previously
@@ -78,14 +73,12 @@ Use classification algorithms to predict the condition of each event based on it
     # evaluate the outcome (metrics and confusion matrix)
     scores = discr.evaluate(show_plot=False)
     print(scores)
-
 \end{lstlisting}
 
 \paragraph{Hierarchical Clustering (Overlap with Conditions)}
 Hierarchical clustering groups similar events together. Similarity between event traces is assessed by either Dynamic Time Warping (DTW) or Pearson Correlation, basically calculating a distance between all events. The aim is to see if these groups correspond to different experimental conditions, which would indicate that the conditions have distinct profiles. Hierarchical clustering does not depend on feature embedding and can be safely performed on the normalized event traces. The \inlinepy{Linkage} module will return \inlinepy{barycenters}, which can be understood as a consensus event shape for each cluster, and a \inlinepy{cluster\_lookup\_table} which maps the identified clusters to the events. Clusters can be defined by either a set number of expected clusters (\inlinepy{criterion='maxlust', cutoff=expected\_num\_clusters}) or maximum distance (\inlinepy{criterion='distance', cutoff=max\_distance}).
 
 \begin{lstlisting}[style=pyStyle]
-
     from astrocast.clustering import Linkage, Discriminator
 
     # settings
@@ -107,7 +100,6 @@ Hierarchical clustering groups similar events together. Similarity between event
     scores = Discriminator.compute_scores(categories, predicted_categories,
                                           scoring="clustering")
     print(scores)
-
 \end{lstlisting}
 
 \subsubsection{Coincidence Detection}
@@ -117,7 +109,6 @@ This module focuses on identifying whether certain conditions or events coincide
 Similar to the classifier used in conditional contrasts, this module predicts whether a specific incidence or event has occurred. This is particularly useful for identifying causal relationships or triggering events.
 
 \begin{lstlisting}[style=pyStyle]
-
     from astrocast.clustering import CoincidenceDetection
 
     # assumes eObj and embedding was created and the stimulus timings are known
@@ -128,14 +119,12 @@ Similar to the classifier used in conditional contrasts, this module predicts wh
     # predict classes and evaluate outcome
     _, scores = cDetect.predict_coincidence(binary_classification=True)
     print(scores)
-
 \end{lstlisting}
 
 \paragraph{Regression (Timing of Incidence; Coinciding Events Only)}
 Regression analysis can be used to predict when an incidence occurred based on the event embedding. This analysis aims to establish whether astrocytic events correlate with the incident in question, or vice versa.
 
 \begin{lstlisting}[style=pyStyle]
-
     from astrocast.clustering import CoincidenceDetection
 
     # assumes eObj and embedding was created and the stimulus timings are known
@@ -146,5 +135,4 @@ Regression analysis can be used to predict when an incidence occurred based on t
     # predict classes and evaluate outcome
     _, scores = cDetect.predict_incidence_location()
     print(scores)
-
 \end{lstlisting}

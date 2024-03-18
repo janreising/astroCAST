@@ -25,7 +25,6 @@ Here, we are going to showcase the steps using the astroCAST python package dire
     event_path = 'path/to/events.roi'
     cache_path = Path(event_path).joinpath('cache')
     eObj = Events(event_dir=event_path, data=video, cache_path=cache_path)
-
 \end{lstlisting}
 
 The events object has an \inlinepy{events} instance, which contains the extracted signal, as well as their associated attributes (for example \inlinepy{'dz', 'x0'}) and metrics ( for example \inlinepy{'v\_area', 'v\_signal\_to\_noise\_ratio'}). An explanation of all columns can be found in the class docstring \inlinepy{help(Events)}.
@@ -34,7 +33,6 @@ The events object has an \inlinepy{events} instance, which contains the extracte
 AstroCAST is engineered for versatility, facilitating the analysis of diverse experimental setups. Typically, datasets undergo filtering to adhere to experimental parameters or to eliminate outliers. Although a detailed discourse on filtering protocols is outside this document's scope, we address several prevalent scenarios. For astrocytic events, imposing a cutoff for event duration is beneficial, especially when distinguishing between rapid and protracted calcium events. Moreover, applying a threshold for the signal-to-noise ratio helps to discard events with negligible amplitude. While incorporating as many events as possible seems ideal, practical constraints like computational demands or the potential dilution of relevant events with extraneous data necessitate selectivity. Additionally, filtering aids in removing outliers, achieved either through manual adjustments or an unbiased clustering method. It is vital to recognize that the concept of an outlier is not universal but intimately tied to the specifics of the experimental design. Rigorous, context-sensitive examination is crucial for accurate data interpretation. We encourage users to venture beyond the preset analysis tools of AstroCAST, engaging with their data through custom analysis methods tailored to their unique experimental conditions.
 
 \begin{lstlisting}[style=pyStyle]
-
     from astrocast.analysis import Plotting
     plot = Plotting(events=eObj)
 
@@ -45,7 +43,6 @@ AstroCAST is engineered for versatility, facilitating the analysis of diverse ex
     #  here: events of length between 3 and 200 frames
     filter_choice = {'dz': (3, 200)}
     eObj.filter(filter_choice, inplace=True)
-
 \end{lstlisting}
 
 \todo{Jan}{Figures from GUI}{
@@ -64,12 +61,10 @@ AstroCAST is engineered for versatility, facilitating the analysis of diverse ex
 AstroCAST's event detection module is designed to pinpoint individual events with precise temporal accuracy. Often, this precision means that the peripheral regions, or shoulders, of the event peak might not be captured. Yet, these initial and concluding slopes of the event can reveal crucial information about its nature. To address this, astroCAST includes a feature that allows for the extension of detected events to include adjacent frames.
 
 \begin{lstlisting}[style=pyStyle]
-
     # extend events
     # use_footprint: toggles between maximum projection (footprint) or first/last event frame
     # extend: either an int, (int, int) or -1 for extension across the full video
     eObj.get_extended_events(use_footprint=True, extend=3, in_place=True, load_to_memory=True)
-
 \end{lstlisting}
 
 \paragraph{Enforcing fixed-length events}
@@ -77,11 +72,9 @@ AstroCAST's event detection module is designed to pinpoint individual events wit
 Enforcing a fixed event length is a requirement for some modules of astroCAST. However, enforcing a length will significantly distort the actual event characteristics. Use length enforcement cautiously, as it can alter your data and even overlap with other nearby events. If required by your analysis, the toolkit will prompt you to unify event lengths (for example \ac{CNN} Autoencoders). For diverse event durations, consider filtering your data for similar lengths or analyzing short and long events separately to maintain data integrity.
 
 \begin{lstlisting}[style=pyStyle]
-
     # extend events
     eObj.get_extended_events(enforce length=15,
                 use_footprint=True, extend=8, in_place=True, load_to_memory=True)
-
 \end{lstlisting}
 
 \paragraph{Normalization and Standardization}
@@ -90,7 +83,6 @@ The final step before clustering involves normalizing the signal. This process a
 AstroCAST offers a versatile normalization interface to accommodate various research needs. This dynamic system allows users to apply a series of operations such as subtraction, division, and first-order differentiation to standardize data. Operations can be tailored using common statistical functions like the mean, median, or standard deviation. Additionally, AstroCAST provides a \inlinepy{'population\_wide'} flag, offering users the choice to normalize signals either individually or across a collective dataset, thereby maximizing analytical precision and flexibility.
 
 \begin{lstlisting}[style=pyStyle]
-
     # define normalization instructions
     #  here: take the differential of each signal
     #  and then divide by maximum value in the population
@@ -101,7 +93,6 @@ AstroCAST offers a versatile normalization interface to accommodate various rese
 
     # apply the normalization
     eObj.normalize(instructions, inplace=True)
-
 \end{lstlisting}
 
 \subsubsection{Event encoding}
@@ -114,7 +105,6 @@ AstroCAST introduces a structured approach to address the challenge of varying e
 Feature extraction offers a simple yet powerful approach to reduce timeseries data into a manageable set of dimensions. The module employs a variety of metrics, like mean, median, and Shannon entropy, accessible through \inlinepy{help(FeatureExtraction)}. While this method is length-agnostic, it may overlook key features, due to the inherent dimensional reduction. Further dimension reduction can be applied using techniques like PCA, t-SNE, or UMAP .
 
 \begin{lstlisting}[style=pyStyle]
-
     import astrocast.reduction as red
 
     # extract features
@@ -129,7 +119,6 @@ Feature extraction offers a simple yet powerful approach to reduce timeseries da
     umap = red.UMAP()
     embedding = umap.train(features)
     umap.plot(data=embedding, labels=lbls, use_napari=False)
-
 \end{lstlisting}
 
 \paragraph{\ac{CNN} Autoencoder}
@@ -137,7 +126,6 @@ Feature extraction offers a simple yet powerful approach to reduce timeseries da
 Using a \ac{CNN} Autoencoder provides an advanced way to maintain key features while reducing data complexity. The CNN Autoencoder consists of an encoder that maps the timeseries to a latent vector and a separately trained decoder, which performs the inverse operation. After training, only the encoder is utilized for event embedding. Note that this approach requires the input to have a fixed length (see \ref{par:enforcing-length}).
 
 \begin{lstlisting}[style=pyStyle]
-
     import astrocast.autoencoders as AE
 
     # check that traces have fixed length
@@ -158,7 +146,6 @@ Using a \ac{CNN} Autoencoder provides an advanced way to maintain key features w
 
     # evaluate embedding performance
     cnn.plot_examples_pytorch(X_test, show_diff=True)
-
 \end{lstlisting}
 
 \paragraph{\ac{RNN} Autoencoder}
@@ -166,7 +153,6 @@ Using a \ac{CNN} Autoencoder provides an advanced way to maintain key features w
 For encoding time series of variable lengths into consistent latent vectors, the \ac{RNN} Autoencoder stands out. This approach is notably advantageous over CNN embeddings, as it eliminates the need for uniform input lengths, offering a more flexible and comprehensive encoding solution for diverse data sets. However, this flexibility comes at the cost of increased computational demand, complexity in parameter tuning and an overall decrease in embedding quality.
 
 \begin{lstlisting}[style=pyStyle]
-
     import astrocast.autoencoders as AE
 
     # Prepare data
@@ -189,6 +175,5 @@ For encoding time series of variable lengths into consistent latent vectors, the
     # evaluate embedding performance
     fig, x_val, y_val, latent, losses = tRAE.plot_traces(dataloader=X_test, figsize=(20, 20))
     fig.savefig("tRAE_performance.png")
-
 \end{lstlisting}
 
