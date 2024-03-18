@@ -4,7 +4,7 @@
 \definecolor{colorJan}{RGB}{18, 179, 77}
 \definecolor{colorAthina}{RGB}{49, 133, 216}
 \definecolor{colorEric}{RGB}{208, 83, 38}
-\definecolor{colorWiktor}{RGB}{229, 209, 79}
+\definecolor{colorAna}{RGB}{229, 209, 79}
 
 \newcommand{\inlineBash}[1]{%
     \begingroup
@@ -20,6 +20,29 @@
 %\newcommand{\inlineBash}[1]{\bold{#1}}
 
 \newcommand{\missing}[1]{\textcolor{red}{\textbf{\MakeUppercase{#1}}}}
+\newcommand{\ccomment}[3]{
+
+    % Check the person and assign the color
+    \ifstrequal{#1}{Jan}{
+        \def\commentcolor{colorJan!50}
+        \def\commentauthor{Jan}
+    }{}
+    \ifstrequal{#1}{Athina}{
+        \def\commentcolor{colorAthina!50}
+        \def\commentauthor{Athina}
+    }{}
+    \ifstrequal{#1}{Eric}{
+        \def\commentcolor{colorEric!50}
+        \def\commentauthor{Eric}
+    }{}
+    \ifstrequal{#1}{Ana}{
+        \def\commentcolor{colorAna!50}
+        \def\commentauthor{Ana}
+    }{}
+
+    \colorbox{\commentcolor}{#2}
+    \pdfmargincomment[icon=Note, color=\commentcolor, author=\commentauthor]{#3}
+}
 
 %\newcommand{\lbash}[1]{\lstset{frame=single} \begin{lstlisting}[language=bash] #1 \end{lstlisting}}
 

@@ -27,7 +27,7 @@ def fix_language_codes(bbl_file_path: Path, output_file_path: Path = None):
         file.write(content)
 
 
-file_path = Path("astrocast.bib")
+file_path = Path("astroCAST.bib")
 assert file_path.exists(), f"{file_path} does not exist"
 
 fix_language_codes(file_path, file_path)
