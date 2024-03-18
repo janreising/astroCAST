@@ -6,9 +6,9 @@ AstroCAST is designed to guide users through the entire process of astrocyte cal
 
 Central to the toolkit's utility is the astroCAST Python package, which offers direct access to all functionalities of the toolkit. This enables users to incorporate astroCAST seamlessly into their existing workflows or to automate processes within their custom scripts. The toolkit is structured into three major blocks: Preprocessing, Encoding, and Exploratory Analysis.
 
-In the Preprocessing block, users can use a Command Line Interface (CLI), accessible via commands such as \inlineBash{astrocast --help} directly in the terminal. The CLI facilitates the use of a predefined configuration file to streamline the preprocessing tasks. Moreover, an intuitive 'Argument Explorer' is incorporated to assist users in quickly testing different parameters, enabling export of the resultant configuration settings. For a hands-on introduction to this stage, we have provided a Jupyter notebook, allowing users to engage with the protocol interactively.
+In the Preprocessing block, users can use a \ac{CLI}, accessible via commands such as \inlineBash{astrocast --help} directly in the terminal. The \ac{CLI} facilitates the use of a predefined configuration file to streamline the preprocessing tasks. Moreover, an intuitive 'Argument Explorer' is incorporated to assist users in quickly testing different parameters, enabling export of the resultant configuration settings. For a hands-on introduction to this stage, we have provided a Jupyter notebook, allowing users to engage with the protocol interactively.
 
-The Encoding and Analysis block adapts to the specific needs of individual experiments, catering to diverse research objectives such as comparing drug treatments, model systems, correlating activities with stimuli, or monitoring changes over time. This phase of the pipeline is supported by a dedicated Graphical User Interface (GUI), presenting a dynamic environment for meticulous analysis and enhanced data visualization capabilities.
+The Encoding and Analysis block adapts to the specific needs of individual experiments, catering to diverse research objectives such as comparing drug treatments, model systems, correlating activities with stimuli, or monitoring changes over time. This phase of the pipeline is supported by a dedicated \ac{GUI}, presenting a dynamic environment for meticulous analysis and enhanced data visualization capabilities.
 
 Acknowledging the diversity in data analysis approaches within \ac{astroCAST}, subsequent sections will provide concise guidance on interacting with astroCAST to ensure users can harness the full potential of this powerful analytical toolkit.
 
@@ -43,11 +43,24 @@ The \ac{CLI} is a useful selection of commands that enables users to perform com
 
 \subsubsection{The Graphical User Interface (GUI)}
 
-AstroCAST implements two \ac{GUI}s to simplify the selection of suitable parameters for the analysis. The commands below will either automatically open a browser page to the interface or provide a link that can be copied to a browser.
+AstroCAST implements two \ac{GUI}s, based on shiny\citep{chang_shiny_2024}, to simplify the selection of suitable parameters for the analysis. The commands below will either automatically open a browser page to the interface or provide a link that can be copied to a browser.
 
 \begin{lstlisting}[style=bashStyle]
     # Identify correct settings for the event detection
     $ astrocast explorer -- input path /path/to/file -- h5-loc /dataset/name
     # Explore detected events, including filtering, embedding and experiments
     $ astrocast exploratory-analysis -- input path /path/to/roi/ -- h5-loc /dataset/name
+\end{lstlisting}
+
+\subsubsection{The Data Viewer}
+
+For convenience astroCAST includes a data viewer, based on napari\citep{sofroniew_nicholas_napari_2022}, which allows for fast and memory efficient visualization of data. Users can default to their image viewer of choice, like ImageJ, if they choose to do so.
+
+\begin{lstlisting}[style=bashStyle]
+    # view single dataset
+    $ astrocast view-data --lazy False /path/to/file /dataset/name
+    # view multiple datasets
+    $ astrocast view-data /path/to/file /dataset/one /dataset/two
+    # view results of detection
+    $ astrocast view-detection-results --video-path /path/to/video --loc /dataset/name /path/to/dir/name.roi
 \end{lstlisting}

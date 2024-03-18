@@ -11,11 +11,16 @@
 \usepackage{makecell}
 \usepackage{rotating}
 \usepackage{pdfcomment}
+\usepackage{xr}
+\usepackage{cleveref}
+\usepackage[nolist,nohyperlinks,printonlyused]{acronym}
+\usepackage{wasysym} % for half bullet
+\usepackage{pifont}
+\usepackage{listings}
 
 \input{custom_commands}
-\usepackage[nolist,nohyperlinks,printonlyused]{acronym}
+\externaldocument[supp-]{frontiers_SupplementaryMaterial}
 
-\usepackage{listings}
 \lstdefinestyle{bashStyle}{
     language=bash,
     frame=single,
@@ -37,9 +42,6 @@
      commentstyle=\color{black},
      morecomment=[l]{-}
  }
-
-\usepackage{wasysym} % for half bullet
-\usepackage{pifont}
 
 % Define new commands for symbols to make the table cleaner
 \newcommand{\cmark}{\ding{51}} % Check mark

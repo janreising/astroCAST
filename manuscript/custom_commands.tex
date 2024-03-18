@@ -48,6 +48,7 @@
 
 %\newcommand{\fref}[1]{ (Figure~\ref{fig:#1})}
 \NewDocumentCommand{\fref}{ m O{} }{ (Figure~\ref{fig:#1}\IfValueT{#2}{\,#2})}
+\NewDocumentCommand{\frefsupp}{ m O{} }{ (Supplement~\ref{supp-fig:#1}\IfValueT{#2}{\,#2})}
 \newcommand{\tref}[1]{ (Table~\ref{tab:#1})}
 
 \newcommand{\todo}[3]{

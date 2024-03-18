@@ -45,18 +45,6 @@ AstroCAST is engineered for versatility, facilitating the analysis of diverse ex
     eObj.filter(filter_choice, inplace=True)
 \end{lstlisting}
 
-\todo{Jan}{Figures from GUI}{
-%
-%Considerations for Outlier Identification: Distinguish between technical (recording artifacts, irrelevant perturbations), biological (aberrant cells, mislabeling), and detection outliers (false positives).
-%
-%Distribution Visualization (Fig. 14): Provides insights into the overall data structure, highlighting anomalies in the spread of event characteristics. Panel ‘Summary statistics’ implements functionality to plot event characteristic distributions, aiding the identification of outliers. For instance, a boxplot might reveal events with unusually high ‘v_area’, suggesting potential artifacts or non-target cells. Comparison between groups of recordings can be made by using the “Category” dropdown menu.
-%
-%Characteristic Correlation (Fig. 15): Identifies dependencies or inconsistencies across different metrics that may suggest outlier properties. Assess interrelations, such as ‘dz’ versus ‘area’. Strong correlations or unexpected discrepancies can pinpoint outliers, guiding the refinement of detection parameters.
-%
-%Clustering Analysis (Fig 16): Integrates multiple characteristics to uncover subtle groupings, which could reveal nuanced outliers that single-variable analysis might miss. Panel “Outliers” implements UMAP reduction paired with HdbSCAN clustering to identify atypical events. Events persisting for only a single frame are prime candidates for exclusion. By selecting the cluster label in the ‘Clusters’ table, a selection of events is plotted to distinguish genuine events from outliers.
-%
-}
-
 \paragraph{Event extension}
 AstroCAST's event detection module is designed to pinpoint individual events with precise temporal accuracy. Often, this precision means that the peripheral regions, or shoulders, of the event peak might not be captured. Yet, these initial and concluding slopes of the event can reveal crucial information about its nature. To address this, astroCAST includes a feature that allows for the extension of detected events to include adjacent frames.
 
