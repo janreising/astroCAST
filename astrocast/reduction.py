@@ -3,15 +3,13 @@ import itertools
 import logging
 import pickle
 from pathlib import Path
+from typing import Literal, Tuple
 
 import numpy as np
 import pandas as pd
 import pyinform.shannon
 import pytest
 import seaborn as sns
-from typing import Tuple
-
-from matplotlib.lines import Line2D
 
 try:
     import umap
@@ -31,6 +29,47 @@ from astrocast.helper import CachedClass, wrapper_local_cache, experimental
 class FeatureExtraction(CachedClass):
     
     def __init__(self, events: Events, cache_path=None, logging_level=logging.INFO):
+        """
+        A class for extracting various statistical and signal processing features from time series data.
+
+        This class is designed to work with time series events, providing a suite of methods for feature extraction. It supports caching of results to optimize repeated computations and includes a variety of statistical, geometric, harmonic, and other time series analysis methods.
+
+        Key methods include statistical measures (mean, median, variance, standard deviation), geometric and harmonic means, sum and energy computations, temporal derivatives, spectral analysis, and several others designed to capture different aspects of time series data.
+
+        The `all_features` method aggregates all available features, providing a comprehensive overview of the extracted features for each time series in the dataset.
+
+        Features available for extraction:
+        - Mean: Compute the statistical mean.
+        - Median: Compute the statistical median.
+        - Geometric Mean (gmean): Compute the geometric mean.
+        - Harmonic Mean (hmean): Compute the harmonic mean.
+        - Vector Sum (vec_sum): Compute the vector sum.
+        - Absolute Sum (abs_sum): Compute the sum of absolute values.
+        - Absolute Energy (abs_energy): Compute the absolute sum of squares.
+        - Standard Deviation (std): Compute the standard deviation.
+        - Variance (var): Compute the variance.
+        - Median Absolute Deviation (median_absolute_deviation): Compute the median absolute deviation.
+        - Coefficient of Variation (variation): Compute the coefficient of variation.
+        - Minimum and Maximum (minimum, maximum): Compute the min and max values.
+        - Skewness (skew) and Kurtosis (kurt): Compute the skewness and kurtosis.
+        - Temporal Derivatives (mean_diff, means_abs_diff): Compute mean and mean absolute temporal derivatives.
+        - Mean Spectral Energy (mse): Compute mean spectral energy.
+        - Zero Crossing and Slope Sign Changes: Compute zero crossings and slope sign changes.
+        - Waveform Length (waveform_length): Compute the cumulative length of the waveform.
+        - Root Mean Square (root_mean_square): Compute the root-mean-square.
+
+        Further methods include statistical tests and other specific feature computations that can be useful in time
+        series analysis and machine learning contexts.
+
+        Usage:
+            fe = FeatureExtraction(events, cache_path=None)
+            features_df = fe.all_features(dropna=False, drop_axis='columns')
+
+        Args:
+            events (Events): An instance of the Events class containing time series data.
+            cache_path (str, optional): Path to the cache directory. Defaults to the cache path of the events.
+            logging_level (logging.LEVEL, optional): Level of logging. Defaults to logging.INFO.
+        """
         
         if cache_path is None:
             cache_path = events.cache_path
@@ -40,11 +79,12 @@ class FeatureExtraction(CachedClass):
         self.events = events
     
     @wrapper_local_cache
-    def all_features(self, dropna: bool = False) -> pd.DataFrame:
+    def all_features(self, dropna: bool = False, drop_axis: Literal['rows', 'columns'] = 'columns') -> pd.DataFrame:
         """ Returns dictionary of all features in the module
 
         Args:
             dropna: Whether to drop NaN values from the dataframe
+            drop_axis: Whether to drop rows or columns that contain NaN values.
 
         """
         
@@ -77,172 +117,178 @@ class FeatureExtraction(CachedClass):
                 del summary[col]
         
         if dropna:
-            len_before = len(summary)
-            summary = summary.dropna(axis="rows")
-            logging.warning(f"Dropped {len_before - len(summary)} rows "
-                            f"({len(summary) / len_before * 100:.1f}%)")
+            num_before = len(summary)
+            col_before = len(summary.columns)
+            
+            summary = summary.dropna(axis=drop_axis)
+            
+            if drop_axis == 'rows':
+                logging.warning(f"Dropped {num_before - len(summary)} rows "
+                                f"({len(summary) / num_before * 100:.1f}%)")
+            else:
+                logging.warning(f"Number of columns dropped: {col_before - len(summary.columns)}")
         
         return summary
     
     @staticmethod
-    def mean(X):
+    def mean(x):
         """ statistical mean for each variable in a segmented time series """
-        return np.mean(X)
+        return np.mean(x)
     
     @staticmethod
-    def median(X):
+    def median(x):
         """ statistical median for each variable in a segmented time series """
-        return np.median(X)
+        return np.median(x)
     
     @staticmethod
-    def gmean(X):
+    def gmean(x):
         """ geometric mean for each variable """
-        return stats.gmean(X)
+        return stats.gmean(x)
     
     @staticmethod
-    def hmean(X):
+    def hmean(x):
         """ harmonic mean for each variable """
-        return stats.hmean(X)
+        return stats.hmean(x)
     
     @staticmethod
-    def vec_sum(X):
+    def vec_sum(x):
         """ vector sum of each variable """
-        return np.sum(X)
+        return np.sum(x)
     
     @staticmethod
-    def abs_sum(X):
+    def abs_sum(x):
         """ sum of absolute values """
-        return np.sum(np.abs(X))
+        return np.sum(np.abs(x))
     
     @staticmethod
-    def abs_energy(X):
+    def abs_energy(x):
         """ absolute sum of squares for each variable """
-        return np.sum(X * X)
+        return np.sum(x * x)
     
     @staticmethod
-    def std(X):
+    def std(x):
         """ statistical standard deviation for each variable in a segmented time series """
-        return np.std(X)
+        return np.std(x)
     
     @staticmethod
-    def var(X):
+    def var(x):
         """ statistical variance for each variable in a segmented time series """
-        return np.var(X)
+        return np.var(x)
     
     @staticmethod
-    def median_absolute_deviation(X):
+    def median_absolute_deviation(x):
         """ median absolute deviation for each variable in a segmented time series """
         if hasattr(stats, 'median_abs_deviation'):
-            return stats.median_abs_deviation(X)
+            return stats.median_abs_deviation(x)
         else:
-            return stats.median_absolute_deviation(X)
+            return stats.median_absolute_deviation(x)
     
     @staticmethod
-    def variation(X):
+    def variation(x):
         """ coefficient of variation """
-        return stats.variation(X)
+        return stats.variation(x)
     
     @staticmethod
-    def minimum(X):
+    def minimum(x):
         """ minimum value for each variable in a segmented time series """
-        return np.min(X)
+        return np.min(x)
     
     @staticmethod
-    def maximum(X):
+    def maximum(x):
         """ maximum value for each variable in a segmented time series """
-        return np.max(X)
+        return np.max(x)
     
     @staticmethod
-    def skew(X):
+    def skew(x):
         """ skewness for each variable in a segmented time series """
-        return stats.skew(X)
+        return stats.skew(x)
     
     @staticmethod
-    def kurt(X):
+    def kurt(x):
         """ kurtosis for each variable in a segmented time series """
-        return stats.kurtosis(X)
+        return stats.kurtosis(x)
     
     @staticmethod
-    def mean_diff(X):
+    def mean_diff(x):
         """ mean temporal derivative """
-        return np.mean(np.diff(X))
+        return np.mean(np.diff(x))
     
     @staticmethod
-    def means_abs_diff(X):
+    def means_abs_diff(x):
         """ mean absolute temporal derivative """
-        return np.mean(np.abs(np.diff(X)))
+        return np.mean(np.abs(np.diff(x)))
     
     @staticmethod
-    def mse(X):
+    def mse(x):
         """ computes mean spectral energy for each variable in a segmented time series """
-        return np.mean(np.square(np.abs(np.fft.fft(X))))
+        return np.mean(np.square(np.abs(np.fft.fft(x))))
     
     @staticmethod
-    def mean_crossings(X):
+    def mean_crossings(x):
         """ Computes number of mean crossings for each variable in a segmented time series """
-        X = np.atleast_3d(X)
-        N = X.shape[0]
-        D = X.shape[2]
+        x = np.atleast_3d(x)
+        N = x.shape[0]
+        D = x.shape[2]
         mnx = np.zeros(N, D)
         for i in range(D):
-            pos = X[:, :, i] > 0
+            pos = x[:, :, i] > 0
             npos = ~pos
             c = (pos[:, :-1] & npos[:, 1:]) | (npos[:, :-1] & pos[:, 1:])
             mnx[:, i] = np.count_nonzero(c)
         return mnx
     
     @staticmethod
-    def mean_abs(X):
+    def mean_abs(x):
         """ statistical mean of the absolute values for each variable in a segmented time series """
-        return np.mean(np.abs(X))
+        return np.mean(np.abs(x))
     
     @staticmethod
-    def zero_crossing(X, threshold=0):
+    def zero_crossing(x, threshold=0):
         """ number of zero crossings among two consecutive samples above a certain threshold for each
         variable in the segmented time series"""
         
-        sign = np.heaviside(-1 * X[:, :-1] * X[:, 1:], 0)
-        abs_diff = np.abs(np.diff(X))
-        return np.sum(sign * abs_diff >= threshold, dtype=X.dtype)
+        sign = np.heaviside(-1 * x[:, :-1] * x[:, 1:], 0)
+        abs_diff = np.abs(np.diff(x))
+        return np.sum(sign * abs_diff >= threshold, dtype=x.dtype)
     
     @staticmethod
-    def slope_sign_changes(X, threshold=0):
+    def slope_sign_changes(x, threshold=0):
         """ number of changes between positive and negative slope among three consecutive samples
         above a certain threshold for each variable in the segmented time series"""
         
-        change = (X[:, 1:-1] - X[:, :-2]) * (X[:, 1:-1] - X[:, 2:])
-        return np.sum(change >= threshold, dtype=X.dtype)
+        change = (x[:, 1:-1] - x[:, :-2]) * (x[:, 1:-1] - x[:, 2:])
+        return np.sum(change >= threshold, dtype=x.dtype)
     
     @staticmethod
-    def waveform_length(X):
+    def waveform_length(x):
         """ cumulative length of the waveform over a segment for each variable in the segmented time
         series """
-        return np.sum(np.abs(np.diff(X)))
+        return np.sum(np.abs(np.diff(x)))
     
     @staticmethod
-    def root_mean_square(X):
+    def root_mean_square(x):
         """ root mean square for each variable in the segmented time series """
-        segment_width = X.shape[1]
-        return np.sqrt(np.sum(X * X) / segment_width)
+        segment_width = x.shape[1]
+        return np.sqrt(np.sum(x * x) / segment_width)
     
     @staticmethod
-    def emg_var(X):
+    def emg_var(x):
         """ variance (assuming a mean of zero) for each variable in the segmented time series
         (equals abs_energy divided by (seg_size - 1)) """
-        segment_width = X.shape[1]
-        return np.sum(X * X) / (segment_width - 1)
+        segment_width = x.shape[1]
+        return np.sum(x * x) / (segment_width - 1)
     
     @staticmethod
-    def willison_amplitude(X, threshold=0):
+    def willison_amplitude(x, threshold=0):
         """ the Willison amplitude for each variable in the segmented time series """
-        return np.sum(np.abs(np.diff(X)) >= threshold)
+        return np.sum(np.abs(np.diff(x)) >= threshold)
     
     @staticmethod
-    def shannon_entropy(X, b=2):
-        return pyinform.shannon.entropy(X, b=b)
+    def shannon_entropy(x, b=2):
+        return pyinform.shannon.entropy(x, b=b)
     
     @staticmethod
-    def cid_ce(X, normalize=True):
+    def cid_ce(x, normalize=True):
         """
                 This function calculator is an estimate for a time series complexity [1] (A more complex time series has more peaks,
                 valleys etc.). It calculates the value of
@@ -265,17 +311,17 @@ class FeatureExtraction(CachedClass):
                 :return: the value of this feature
                 :return type: float
                 """
-        if not isinstance(X, (np.ndarray, pd.Series)):
-            X = np.asarray(X)
+        if not isinstance(x, (np.ndarray, pd.Series)):
+            x = np.asarray(x)
         if normalize:
-            s = np.std(X)
+            s = np.std(x)
             if s != 0:
-                X = (X - np.mean(X)) / s
+                x = (x - np.mean(x)) / s
             else:
                 return 0.0
         
-        X = np.diff(X)
-        return np.sqrt(np.dot(X, X))
+        x = np.diff(x)
+        return np.sqrt(np.dot(x, x))
     
     @staticmethod
     def large_standard_deviation(x, r=0.5):
