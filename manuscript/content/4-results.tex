@@ -8,9 +8,9 @@ Central to the toolkit's utility is the astroCAST Python package, which offers d
 
 In the Preprocessing block, users can use a \ac{CLI}, accessible via commands such as \inlineBash{astrocast --help} directly in the terminal. The \ac{CLI} facilitates the use of a predefined configuration file to streamline the preprocessing tasks. Moreover, an intuitive 'Argument Explorer' is incorporated to assist users in quickly testing different parameters, enabling export of the resultant configuration settings. For a hands-on introduction to this stage, we have provided a Jupyter notebook, allowing users to engage with the protocol interactively.
 
-The Encoding and Analysis block adapts to the specific needs of individual experiments, catering to diverse research objectives such as comparing drug treatments, model systems, correlating activities with stimuli, or monitoring changes over time. This phase of the pipeline is supported by a dedicated \ac{GUI}, presenting a dynamic environment for meticulous analysis and enhanced data visualization capabilities.
+The Encoding and Analysis block adapts to the specific needs of individual experiments, catering to diverse research objectives such as comparing drug treatments, model systems, correlating activities with stimuli, or monitoring changes over time. This phase of the pipeline is supported by a dedicated \ac{GUI}, which offers an interactive environment for analysis and enhanced data visualization capabilities.
 
-Acknowledging the diversity in data analysis approaches within \ac{astroCAST}, subsequent sections will provide concise guidance on interacting with astroCAST to ensure users can harness the full potential of this powerful analytical toolkit.
+Acknowledging the diversity in data analysis approaches within \ac{astroCAST}, subsequent sections will provide concise guidance to interact with astroCAST and ensure that users can harness its full potential.
 
 \subsubsection{Jupyter notebooks}
 
@@ -28,7 +28,7 @@ A browser window will open which displays the available examples or can be used 
 
 \subsubsection{The Command Line Interface (CLI)}
 
-The \ac{CLI} is a useful selection of commands that enables users to perform common analysis steps directly from the terminal. Especially in the context of cluster or slurm environment this way of interacting with astroCAST is convenient. All parameters can either be provided manually in the terminal or through a configuration YAML file. We recommend using a configuration file when preprocessing many videos to ensure that the results can be compared. The configuration file has to adhere to the YAML format and can contain settings for multiple commands. A default configuration file can be found in the \href{https://github.com/janreising/astroCAST/blob/3ad41d03068732419df7fdde9b2a0f449898d4e2/config.yaml}{GitHub repository}.
+The \ac{CLI} is a useful selection of commands that enables users to perform common analysis steps directly from the terminal. Especially in the context of high-performance computing this way of interacting with astroCAST is convenient. All parameters can either be provided manually in the terminal or through a configuration YAML file. We recommend using a configuration file when preprocessing many videos to ensure that the results can be compared. The configuration file must adhere to the YAML format and can contain settings for more than one command. A default configuration file can be found in the \href{https://github.com/janreising/astroCAST/blob/3ad41d03068732419df7fdde9b2a0f449898d4e2/config.yaml}{GitHub repository}.
 
 \begin{lstlisting}[style=bashStyle]
     # get list of all available commands
