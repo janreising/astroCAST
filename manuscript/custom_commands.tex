@@ -10,7 +10,10 @@
     \begingroup
     \edef\temp{#1}%
     \expandafter\StrSubstitute\expandafter{\temp}{--}{-{-}}[\temp]%
-    \colorbox{lightgray}{\texttt{\small \temp}}%
+    \tcbox[on line, boxsep=0pt, left=1pt, right=1pt, top=1pt, bottom=1pt,
+           boxrule=0pt, arc=0pt, outer arc=0pt, colback=lightgray]{
+      \texttt{\small \temp}
+    }%
     \endgroup
 }
 
