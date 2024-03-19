@@ -9,7 +9,7 @@ Following the thresholding process, a binary mask is generated, which is used to
 The event detection step is the most critical aspect of astroCAST and is sensitive to the choice of parameters. We have therefore implemented an interactive interface to explore the performance of each step during event detection given the relevant options.AstroCAST will prompt a link to the browser-based interface. We recommend to select a short range of frames in the video file to keep processing time during exploration short.
 
 \begin{lstlisting}[style=bashStyle]
-    $ astrocast explorer -- input path "/path/to/file" -- h5-loc "/dataset/name"
+    > astrocast explorer -- input path "/path/to/file" -- h5-loc "/dataset/name"
 \end{lstlisting}
 
 Once users are satisfied with the chosen parameters, they can be exported to a YAML config file, that can be provided
@@ -43,7 +43,7 @@ Additionally, AstroCAST provides the option to exclude the video border from act
 AstroCAST offers a streamlined approach for assessing the quality of event detection through its command-line interface.
 
 \begin{lstlisting}[style=bashStyle]
-    $ astrocast view-detection-results "/path/to/roi"
+    > astrocast view-detection-results "/path/to/roi"
 \end{lstlisting}
 
 Researchers can visually inspect the detection outcomes. During this evaluation phase, it is crucial to determine whether the detection process has successfully identified all expected events, thereby minimizing false negatives, and to assess the correctness of these events to ensure that noise has not been misclassified as true events, which would indicate false positives. If the detection results are not satisfactory, revising the event detection parameters or adjusting settings in the preceding background subtraction step (\ref{subsubsec:background}) may be necessary to achieve improved accuracy. For a dynamic visualization that illustrates the successful identification of events we included an example video\frefsupp{detection-results}.

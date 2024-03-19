@@ -16,10 +16,10 @@ Jupyter notebooks can be used to interactively run the analysis and visualize th
 If you have cloned the repository (\ref{res:install-from-source}), an example notebook is included to follow along with the steps described here.
 
 \begin{lstlisting}[style=bashStyle]
-    $ cd "/path/to/astroCAST/notebooks/examples/"
-    $ jupyter lab
+    > cd /path/to/astroCAST/notebooks/examples/
+    > jupyter lab
     # on MacOS the command might be
-    $ jupyter-notebook
+    > jupyter-notebook
 \end{lstlisting}
 
 A browser window will open which displays the available examples or can be used to create custom notebooks.
@@ -30,13 +30,13 @@ The \ac{CLI} is a useful selection of commands that enables users to perform com
 
 \begin{lstlisting}[style=bashStyle]
     # get list of all available commands
-    $ astrocast --help
+    > astrocast --help
     # get help for individual commands
-    $ astrocast COMMAND --help
+    > astrocast COMMAND --help
     # use manual settings
-    $ astrocast COMMAND --PARAM-1 VALUE1 [...]
+    > astrocast COMMAND --PARAM-1 VALUE1 [...]
     # use a configuration file
-    $ astrocast --config '/path/to/config' COMMAND [...]
+    > astrocast --config '/path/to/config' COMMAND [...]
 \end{lstlisting}
 
 \subsubsection{The Graphical User Interface (GUI)}
@@ -45,9 +45,9 @@ AstroCAST implements two \ac{GUI}s, based on shiny\citep{chang_shiny_2024}, to s
 
 \begin{lstlisting}[style=bashStyle]
     # Identify correct settings for the event detection
-    $ astrocast explorer -- input path /path/to/file -- h5-loc /dataset/name
+    > astrocast explorer -- input path /path/to/file -- h5-loc /dataset/name
     # Explore detected events, including filtering, embedding and experiments
-    $ astrocast exploratory-analysis -- input path /path/to/roi/ -- h5-loc /dataset/name
+    > astrocast exploratory-analysis -- input path /path/to/roi/ -- h5-loc /dataset/name
 \end{lstlisting}
 
 \subsubsection{The Data Viewer}
@@ -56,9 +56,9 @@ For convenience astroCAST includes a data viewer, based on napari\citep{sofronie
 
 \begin{lstlisting}[style=bashStyle]
     # view single dataset
-    $ astrocast view-data --lazy False /path/to/file /dataset/name
+    > astrocast view-data --lazy False /path/to/file /dataset/name
     # view multiple datasets
-    $ astrocast view-data /path/to/file /dataset/one /dataset/two
+    > astrocast view-data /path/to/file /dataset/one /dataset/two
     # view results of detection
-    $ astrocast view-detection-results --video-path /path/to/video --loc /dataset/name /path/to/dir/name.roi
+    > astrocast view-detection-results --video-path /path/to/video --loc /dataset/name /path/to/dir/name.roi
 \end{lstlisting}

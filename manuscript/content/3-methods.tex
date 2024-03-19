@@ -13,22 +13,25 @@ While not strictly necessary, we highly recommend to create a fresh anaconda env
 prevents common installation errors and conflicts with existing environments.
 
 \begin{lstlisting}[style=bashStyle]
-    $ conda create -n astro python=3.9 poetry
-    $ conda activate astro
+    > conda create -n astro python=3.9 poetry
+    > conda activate astro
 \end{lstlisting}
 
 \subsubsection{Install from source (recommended)}
 \label{res:install-from-source}
 \begin{lstlisting}[style=bashStyle]
-    $ cd "/path/to/directory/"
-    $ git clone git@github.com:janreising/astroCAST.git
-    $ cd astroCAST
-    $ poetry install -E all
+    > cd "/path/to/directory/"
+    > git clone git@github.com:janreising/astroCAST.git
+    > cd astroCAST
+    > poetry install -E all
 \end{lstlisting}
 
 \subsubsection{Installation with pip (easiest)}
 \begin{lstlisting}[style=bashStyle]
-    $ pip install astrocast[all]
+    # install core features
+    > pip install astrocast
+    # install with all features
+    > pip install astrocast[all]
 \end{lstlisting}
 
 \subsubsection{Container installation (last resort)}
@@ -37,11 +40,11 @@ To install docker and create an account, follow the instructions on the docker w
 .com/engine/install/
 
 \begin{lstlisting}[style=bashStyle]
-    $ docker pull anacgon/astrocast:latest
-    $ docker image ls
-    $ docker run -v /path/to/your/data:/home/data -it -p 8888:8888 astrocast:latest
+    > docker pull anacgon/astrocast:latest
+    > docker image ls
+    > docker run -v /path/to/your/data:/home/data -it -p 8888:8888 astrocast:latest
     # Optionally, start jupyter notebook from inside the docker container:
-    $ jupyter-lab --allow-root --no-browser --port=8888 --ip="*"
+    > jupyter-lab --allow-root --no-browser --port=8888 --ip="*"
 \end{lstlisting}
 
 \subsubsection{Test installation}
@@ -49,8 +52,8 @@ To install docker and create an account, follow the instructions on the docker w
 Both commands should run without any errors.
 
 \begin{lstlisting}[style=bashStyle]
-    $ python -c "import astrocast"
-    $ astrocast --help
+    > python -c "import astrocast"
+    > astrocast --help
 \end{lstlisting}
 
 \subsection{Datasets used during development}
@@ -60,8 +63,8 @@ AstroCAST was developed using publicly available datasets and our own data. The 
 
 \begin{lstlisting}[style=bashStyle]
     # download public and custom datasets
-    $ astrocast download-datasets "/path/to/download/directory"
+    > astrocast download-datasets "/path/to/download/directory"
 
     # download pretrained models
-    $ astrocast download-models "/path/to/download/directory"
+    > astrocast download-models "/path/to/download/directory"
 \end{lstlisting}

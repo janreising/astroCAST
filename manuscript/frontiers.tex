@@ -94,16 +94,11 @@ Herlenius\,$^{1,2}$}
     During the preparation of this manuscript, we utilized the generative capabilities of OpenAI's ChatGPT-4. The AI's primary role was to assist in proofreading and language refinement to ensure clarity, conciseness, and readability of the text. While the AI provided suggestions for language adjustments, the final manuscript content was thoroughly reviewed, curated, and approved by the authors. We, the authors, take full and complete responsibility for the integrity and accuracy of the manuscript content.
 
     \section*{Funding}
-    \ccomment{Eric}{This study was supported}{ths} by grants to EH from the Swedish Research Council (2019–01157), the Stockholm County Council (2019–0400, 2019–0974 and FoUI-966 449), the Swedish Brain (FO2019-0087 and FO2021-0313), the Swedish National Heart and Lung (2018 0505 and 2021 0579), the Axel Tielmans, the Freemasons Children's House foundations and Karolinska Institutet. The funders did not participate in the design or conduct of the study.
+    \todo{Eric}{ths?}{Still not sure if that means this section is okay or not!?}
+    This study was supported by grants to EH from the Swedish Research Council (2019–01157), the Stockholm County Council (2019–0400, 2019–0974 and FoUI-966 449), the Swedish Brain (FO2019-0087 and FO2021-0313), the Swedish National Heart and Lung (2018 0505 and 2021 0579), the Axel Tielmans, the Freemasons Children's House foundations and Karolinska Institutet. The funders did not participate in the design or conduct of the study.
 
     \section*{Acknowledgments}
     We would like to express our gratitude to the staff and management of the Animal facility at KMB for their indispensable support throughout the research. The development of the toolkit presented in this work was made feasible by the generous allocation of computational resources from projects SNIC 2022/22-1224, SNIC 2022/23-638, NAISS 2023/22-646, NAISS 2023/23-338, NAISS 2024/22-60 and NAISS 2024/23-35. These projects are hosted by the National Academic Infrastructure for Supercomputing in Sweden (NAISS) at UPPMAX. We acknowledge the Swedish Research Council for funding these resources under grant agreement no. 2022-06715.
-
-    \section*{Supplemental Data}
-    \href{http://home.frontiersin.org/about/author-guidelines#SupplementaryMaterial}{Supplementary Material} should
-    be uploaded separately on submission, if there are Supplementary Figures, please include the caption in the same
-    file as the figure. LaTeX Supplementary Material templates can be found in the Frontiers LaTeX folder.
-    \todo{Jan}{Write this section}{}
 
     \section*{Data Availability Statement}
     Further information and requests for resources  should be directed to and will be fulfilled by the lead contact, Jan Philipp Reising [jan.reising@ki.se]. All original code has been deposited at \href{https://github.com/janreising/astroCAST}{astroCAST} and questions regarding the code should be opened as an issue there.
@@ -116,7 +111,24 @@ Herlenius\,$^{1,2}$}
     \include{content/10-tables}
 
     \section*{Figure captions}
-    \todo{Jan}{Regression incorrect}{Currently the regression in Fig. 6 is not performing as expected. The figure will remain as is, but the values in Fig.6C will change.}
+
+    \todo{Jan}{Figures}{
+        \begin{itemize}
+            \item Update Figure 1: Adjust the graphical abstract to better reflect recent changes, possibly including distinctions between Supervised and Unsupervised learning approaches to enhance clarity for the reader.
+            \item Combine Figures 2 and 3: Consider merging these figures to streamline the presentation and reduce redundancy, ensuring a coherent narrative flow.
+            \item Adjust Figure 4 for enhanced readability:
+            \begin{itemize}
+                \item Implement a new color order: red, turquoise, purple, green, to improve visual distinction between elements.
+                \item Standardize the x-axis label across similar plots to maintain consistency and ease of understanding.
+                \item Label panels A and B clearly to guide the reader through the figure seamlessly.
+                \item Annotate image pixels with the color of the trace in panels A and B to directly link visual data with its analytical representation, enhancing interpretability.
+                \item Rearrange sub-panels to preserve a logical flow, with row 1 showing conditions before subtraction and row 2 showing conditions after subtraction, to logically guide the reader through the data transformation process.
+            \end{itemize}
+            \item For Figure 5, implement color coding for the dots to provide a clearer, more immediate understanding of the data categories or values represented, facilitating quicker data interpretation.
+            \item In Fig. 6C the algorithms are not working as expected. Specifically, the classifier overperforms (correctly classifying the identical dataset), while the regression underperforms (no correct predictions in any condition).
+            \item Re-record supplementary videos.
+        \end{itemize}
+    }
     \include{content/11-figures}
 
 \end{document}

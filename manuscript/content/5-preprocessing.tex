@@ -17,15 +17,15 @@ Lastly, the \inlinepy{--output-path} option directs astroCAST where to save the 
 
 \begin{lstlisting}[style=bashStyle]
     # (optional) browse the available flags
-    $ astrocast convert-input --help
+    > astrocast convert-input --help
     # '--config' flag can be ommited to use default settings
-    $ astrocast --config "/path/to/config" convert-input "/path/to/file/or/folder"
+    > astrocast --config "/path/to/config" convert-input "/path/to/file/or/folder"
 \end{lstlisting}
 
 We recommend to verify the conversion through a quick visual inspection using the built-in data viewer\fref{2} or an imaging software of your choice (e.g., ImageJ). During this check, ensure that the pixel values are within the expected range (int or float), the image dimensions (width and height) are as anticipated, all frames have been successfully loaded, de-interleaving (if applicable) has been executed correctly, and the dataset name is accurate.
 
 \begin{lstlisting}[style=bashStyle]
-    $ astrocast view-data --h5-loc "dataset/name" "/path/to/your/output/file"
+    > astrocast view-data --h5-loc "dataset/name" "/path/to/your/output/file"
 \end{lstlisting}
 
 \subsubsection{Motion Correction (optional)}
@@ -40,7 +40,7 @@ By carefully adjusting these parameters, researchers can significantly enhance t
 
 \begin{lstlisting}[style=bashStyle]
     # '--config' flag can be ommited to use default settings
-    $ astrocast --config "/path/to/config" motion-correction --h5-loc "dataset/name" "/path/to/file"
+    > astrocast --config "/path/to/config" motion-correction --h5-loc "dataset/name" "/path/to/file"
 \end{lstlisting}
 
 \subsubsection{Denoising (optional)}
@@ -62,9 +62,9 @@ Each of these methods has its merits and should be chosen based on the specific 
 
 \begin{lstlisting}[style=bashStyle]
     # explore the possible parameters
-    $ astrocast train-denoiser --help
+    > astrocast train-denoiser --help
     # train model from config file
-    $ astrocast --config config.yaml train-denoiser
+    > astrocast --config config.yaml train-denoiser
 \end{lstlisting}
 
 The intricacies of training a custom model are beyond this protocol, and we refer to the original DeepInterpolation
@@ -81,7 +81,7 @@ Image parameters cater to the post-processing needs of the denoised data. The \i
 
 \begin{lstlisting}[style=bashStyle]
     # load a config file with parameters
-    $ astrocast --config config.yaml denoise "/path/to/file"
+    > astrocast --config config.yaml denoise "/path/to/file"
 \end{lstlisting}
 
 %%%%%%%%%%%%%%%%%%%%%%%%%
@@ -112,5 +112,5 @@ The \href{https://docs.scipy.org/doc/scipy/reference/generated/scipy.interpolate
 Background subtraction can be executed using either the Delta F (\inlinepy{--method 'dF'}) method, which directly subtracts the background, or the Delta F over F (\inlinepy{--method 'dFF'}) method, which divides the signal by the background post-subtraction. The choice between these methods depends on the specific requirements of the imaging data and the desired outcome of the subtraction process. However, it's important to consider that background subtraction may not be necessary for all datasets and could potentially introduce biases in event detection. Comparative analysis with and without this preprocessing step is recommended to assess its impact accurately\frefsupp{subtraction-results}.
 
 \begin{lstlisting}[style=bashStyle]
-    $ astrocast subtract-background --h5-loc "mc/ch0" --method "dF" "/path/to/file"
+    > astrocast subtract-background --h5-loc "mc/ch0" --method "dF" "/path/to/file"
 \end{lstlisting}
