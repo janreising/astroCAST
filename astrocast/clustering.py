@@ -13,8 +13,6 @@ import networkx as nx
 import numpy as np
 import pandas as pd
 import seaborn as sns
-from astrocast.analysis import Events
-from astrocast.helper import CachedClass, Normalization, is_ragged, wrapper_local_cache
 from dask import array as da
 from dtaidistance import dtw, dtw_barycenter
 from matplotlib import pyplot as plt
@@ -25,6 +23,9 @@ from sklearn import cluster, ensemble, gaussian_process, linear_model, neighbors
 from sklearn.cluster import KMeans
 from sklearn.metrics import confusion_matrix
 from tqdm import tqdm
+
+from astrocast.analysis import Events
+from astrocast.helper import CachedClass, Normalization, is_ragged, wrapper_local_cache
 
 
 class HdbScan:
@@ -1271,7 +1272,7 @@ class Discriminator(CachedClass):
             
             if regression:
                 score = self.clf.score(X, Y)
-                evaluations["score"] = score
+                evaluations[lbl] = {"score": score}
             
             else:
                 

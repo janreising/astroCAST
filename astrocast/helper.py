@@ -871,7 +871,7 @@ class DummyGenerator:
                     else:
                         jitter = 0
                     
-                    z0 = np.random.choice(timing) + jitter + timing_offset
+                    z0 = np.random.choice(timing) + jitter + -timing_offset
                 
                 return z0
             

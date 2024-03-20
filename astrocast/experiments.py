@@ -4,13 +4,14 @@ from typing import List, Tuple, Union
 import numpy as np
 import pandas as pd
 import seaborn as sns
+from matplotlib import pyplot as plt
+from matplotlib.lines import Line2D
+
 from astrocast.analysis import Plotting
 from astrocast.autoencoders import CNN_Autoencoder, PaddedDataLoader, TimeSeriesRnnAE
 from astrocast.clustering import CoincidenceDetection, Discriminator, Linkage
 from astrocast.helper import DummyGenerator, SignalGenerator
 from astrocast.reduction import FeatureExtraction
-from matplotlib import pyplot as plt
-from matplotlib.lines import Line2D
 
 
 class Experiments:
@@ -235,16 +236,22 @@ class Experiments:
     def _coincidence_detection_regression(eObj, timing, embedding, embedding_name):
         
         score = dict(evaluation_type="coincidence_detection", cluster_type="regression",
-                     metric="regression_error", data_split="test", embedding=f"{embedding_name}_r")
+                     metric="regression_error", embedding=f"{embedding_name}_r",
+                     type="RandomForestRegressor", cm=None)
+        
+        score_train = score.copy()
+        score_train["data_split"] = "train"
+        score_test = score.copy()
+        score_test["data_split"] = "test"
         
         cDetect = CoincidenceDetection(events=eObj, incidences=timing, embedding=embedding)
         _, scores = cDetect.predict_incidence_location()
         
-        score["type"] = "RandomForestRegressor"
-        score["cm"] = None
-        score["score"] = scores["score"]
+        score_train["score"] = scores["train"]["score"]
+        eObj.results.append(score_train)
         
-        eObj.results.append(score)
+        score_test["score"] = scores["test"]["score"]
+        eObj.results.append(score_test)
     
     def coincidence_detection(self):
         
