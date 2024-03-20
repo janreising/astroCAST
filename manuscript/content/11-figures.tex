@@ -2,21 +2,22 @@
 \begin{center}
 \includegraphics[width=\linewidth]{figures/1.png}
 \end{center}
-\caption{AstroCAST Pipeline Overview: First box shows how the input video is converted and processed to detect events. Second box shows how the detected events undergo feature extraction utilizing different approaches to generate feature vectors. Last steps shows how feature vectors can be analyzed to identify patterns and correlations. Optional steps in the pipeline are indicated by dotted boxes, and outputs at each stage are shown in blue. Exemplary types of experiments explained in this protocol are highlighted in red.}\label{fig:1}
+\caption{Schematic representation of the astroCAST toolkit comprising three major analytical phases for processing and analyzing astrocytic activity data. 1) In the preprocessing phase, video input is converted into an HDF5 file format, with optional stages for motion artifact correction, noise reduction, and background subtraction. 2) The event extraction phase involves the identification of astrocytic events, generating corresponding event traces and metadata. Events can subsequently undergo optional filtering, frame extension, and signal normalization. 3) The analysis of experiments is two-fold. For classification and regression, users may select from various feature vector embeddings including Feature Extraction (FExt), Convolutional Neural Network (CNN), and Recurrent Neural Network (RNN). For hierarchical clustering, the toolkit offers Pearson correlation and Dynamic Time Warping (DTW) for the computation of event similarity, represented as a distance matrix. Dashed outlines denote optional steps within the process. The presence of an open eye icon signifies supervised steps, while a closed eye indicates unsupervised steps. A line terminating in a circle denotes need for additional user input.}\label{fig:1}
 \end{figure}
 
 \begin{figure}[!htb]
 \begin{center}
 \includegraphics[width=\linewidth]{figures/2.png}
 \end{center}
-\caption{Screenshot of the \ac{GUI} displaying the converted video file of astrocytic calcium fluorescence (\ref{Tbl1}). The video has been downsampled and captured at a 20X magnification, focusing on the \ac{preBötC} region.}\label{fig:2}
+\caption{ The Astrocast Viewer interface, showcasing a video file of astrocytic calcium fluorescence captured within the inspiratory rhythm generator (preBötC) in the medulla. The original recording, acquired at a 20X magnification with a resolution of 1200x1200 pixels, was performed at a temporal resolution of 8Hz. The TIFF-format video was subsequently converted to the HDF5 file format, with spatial downscaling by a factor of four in the XY plane, as a preparatory step for further preprocessing.}\label{fig:2}
 \end{figure}
 
 \begin{figure}[!htb]
 \begin{center}
 \includegraphics[width=\linewidth]{figures/3.png}
 \end{center}
-\caption{Comparative Visualization of Denoising on Video Frames and Pixel Intensity Measurements. Single frame (512x512 pixels) before denoising (left panel), showing notable background, and the corresponding frame after the application of a denoising algorithm, showing reduced background and enhanced clarity (middle panel). Pixel intensity traces from four selected points (right panel, P0-P3) in the video frame before denoising, displaying the variation over 200 frames. Right Plot) Pixel intensity traces for the same points after denoising, indicating a more stable intensity profile, while retaining features of the signal. The denoising algorithm was applied to a (128, 128) field of view with a configuration of 5 frames, each bordering the target frame, and no gap frames. The denoiser, trained for 50 epochs on a custom dataset, had a learning rate of 0.0001, momentum of 0.9, 3 layer stacks (n\_stacks), and 64 kernels of size 3 in the first layer without batch normalization. Inference involved a 10-pixel overlap in each direction with 'edge' padding. The test and validation were conducted using the same custom training dataset.
+\caption{
+Effect of denoising on astrocytic calcium imaging data. \textbf{(A)} A single 256x256 pixel frame prior to denoising, where background noise is evident. \textbf{(B)} The same frame following denoising with enhanced clarity. (C, E, G, and I) Pixel intensity over 400 frames (50s) before the application of the denoising algorithm, showcasing the original signal variation, after normalization. (D, F, H, J) Corresponding traces after denoising, illustrating a stabilized intensity profile, with preserved signal characteristics. The same normalization parameters were applied to both original and denoised traces to ensure comparability of noise levels. Location of pixels are indicated with triangles in A and B. The denoising algorithm was executed on a (128, 128) field of view, incorporating a context of five adjacent frames for each target frame, with no gap frames. Parameters for the denoising model included a training period of 50 epochs, a learning rate of 0.0001, momentum of 0.9, and a stack of three layers with 64 kernels of size three in the initial layer, omitting batch normalization. During inference, a strategy of a 10-pixel overlap in all directions, complemented by 'edge' padding, was employed. 
 }\label{fig:3}
 \end{figure}
 
@@ -24,14 +25,18 @@
 \begin{center}
 \includegraphics[width=\linewidth]{figures/4.png}
 \end{center}
-\caption{Background Subtraction in Fluorescence Imaging Analysis. Comparative analysis of fluorescence images and pixel intensity traces before (top left) and after background subtraction (bottom left). Pixel intensity over time (right panels). These plots reveal the background noise reduction, where post-subtraction y-axis values are near zero, indicating effective subtraction. Event shapes remain consistent, verifying reliable preservation of events. Notably, the second panel (green) slightly alters the signal strength of events, underscoring the importance of careful parameter optimization or exclusion of this step if it compromises data fidelity. Please refer to Video S2\ref{} for a dynamic visualization.}\label{fig:4}
+\caption{
+Comparison before and after the application of background subtraction to fluorescence imaging data. (A, C) fluorescence images before and after background subtraction, respectively, illustrating the removal of extraneous noise. After subtraction, the background is close to zero and exhibits overall lower noise levels. (B, D) Intensity traces corresponding to the marked points on the images are plotted over time (400 frames, 50s). These traces highlight the efficacy of background subtraction, with the post-subtraction traces approaching zero on the y-axis, thereby indicating a substantial reduction of background, while signal amplitude is conserved. However, the signal shapes, especially in the red trace, exhibit slight alterations post-subtraction. Moreover, the green trace reveals the inadvertent introduction of spurious events, serving as a cautionary example of how background subtraction can inadvertently affect data integrity if parameters are not judiciously optimized.
+}\label{fig:4}
 \end{figure}
 
 \begin{figure}[!htb]
 \begin{center}
 \includegraphics[width=\linewidth]{figures/5.png}
 \end{center}
-\caption{Overview of Event Detection in Calcium Fluorescence Imaging. A) Calcium Fluorescence Processing: Post-motion correction and denoising, showcasing calcium fluorescence. Red dots signify the selected pixels for detailed analysis in Panel E. B) Event Identification: Events detected through both temporal and spatial thresholding techniques. Colored regions highlight the active events within specific pixels, illustrating the spatial distribution of neuronal activity. C) Temporal Thresholding: A binary mask generated by applying a temporal threshold, delineating periods of significant activity versus inactivity. D) Spatial Thresholding: A binary mask created by spatial thresholding to identify active regions, emphasizing the spatial aspects of neuronal activity. E) Pixel Intensity Analysis: Examination of pixel intensities for pixels indicated in Panel A. Colored regions within the plot correspond to frames identified as active, providing a temporal resolution of neuronal activity.}\label{fig:5}
+\caption{
+Depiction of astrocytic event detection employed by astroCAST using spatial and temporal thresholding. A) Binary mask of frame after application of spatial threshold (min\_ratio 1). B) Binary mask of framer after application of temporal threshold (prominence 2, width 3, rel\_height 0.9). C) Frame used for thresholding after motion correction, denoising and smoothing. D) Events detected as identified by both spatial and temporal thresholding. E-G) Pixel intensity analysis for selected pixels (as indicated in Panels A-D), with active frames color-coded in the plots.
+}\label{fig:5}
 \end{figure}
 
 \begin{figure}[!htb]

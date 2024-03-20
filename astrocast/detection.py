@@ -327,11 +327,20 @@ class Detector:
                 active_pixels_spatial = self._spatial_threshold(
                         data, min_ratio=spatial_min_ratio, threshold_z_depth=spatial_z_depth
                         )
+                
+                if debug:
+                    io.save(self.output_directory.joinpath("debug_active_pixels_spatial.tiff"),
+                            data=active_pixels_spatial)
+            
             if use_temporal:
                 active_pixels_temporal = self._temporal_threshold(
                         data, prominence=temporal_prominence, width=temporal_width, rel_height=temporal_rel_height,
                         wlen=temporal_wlen, plateau_size=temporal_plateau_size
                         )
+                
+                if debug:
+                    io.save(self.output_directory.joinpath("debug_active_pixels_temporal.tiff"),
+                            data=active_pixels_temporal)
             
             if use_spatial and use_temporal:
                 
