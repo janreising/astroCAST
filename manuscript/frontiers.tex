@@ -11,15 +11,15 @@
 \def\keyFont{\fontsize{8}{11}\helveticabold }
 \def\firstAuthorLast{Reising {et~al.}} %use et al only if is more than 1 author
 \def\Authors{Jan Philipp Reising\,$^{1,2*}$, Ana Cristina Gonzalez-Sanchez\,$^{1,2}$, Athina Samara\,$^{1,2,3}$ and Eric
-Herlenius\,$^{1,2}$}
+Herlenius\,$^{1,2*}$}
 \def\Address{$^{1}$Department of Women's and Children's Health, Karolinksa Institutet, Stockholm, Sweden \\
     $^{2}$Astrid Lindgren Children’s Hospital, Karolinska University Hospital, Stockholm, Sweden \\
     $^{3}$Department of Biomaterials, FUTURE, Center for Functional Tissue Reconstruction, University of Oslo, Oslo,
     Norway
 }
 
-\def\corrAuthor{Jan Philipp Reising, CMM Center for Molecular Medicine L8:05, 171 76 Stockholm, Sweden}
-\def\corrEmail{jan.reising@ki.se}
+\def\corrAuthor{Eric Herlenius, CMM Center for Molecular Medicine L8:05, 171 76 Stockholm, Sweden}
+\def\corrEmail{eric.herlenius@ki.se}
 
 \begin{document}
     \onecolumn
@@ -33,9 +33,9 @@ Herlenius\,$^{1,2}$}
     \correspondance{} %This field will be automatically populated
 
     % If there are more than 1 corresponding author, comment this line and uncomment the next one.
-    \extraAuth{}
+%    \extraAuth{}
 
-%    \extraAuth{corresponding Author2 \\ Laboratory X2, Institute X2, Department X2, Organization X2, Street X2, City X2, State XX2 (only USA, Canada and Australia), Zip Code2, X2 Country X2, email2@uni2.edu}
+    \extraAuth{Jan Philipp Reising, CMM Center for Molecular Medicine L8:05, 171 76 Stockholm, Sweden, jan.reising@ki.se}
 
     \maketitle
 
@@ -95,13 +95,13 @@ Herlenius\,$^{1,2}$}
 
     \section*{Funding}
     \todo{Eric}{ths?}{Still not sure if that means this section is okay or not!?}
-    This study was supported by grants to EH from the Swedish Research Council (2019–01157), the Stockholm County Council (2019–0400, 2019–0974 and FoUI-966 449), the Swedish Brain (FO2019-0087 and FO2021-0313), the Swedish National Heart and Lung (2018 0505 and 2021 0579), the Axel Tielmans, the Freemasons Children's House foundations and Karolinska Institutet. The funders did not participate in the design or conduct of the study.
+    This study was supported by grants to EH from the Swedish Research Council (2016-01111, 2019-01157, and 2023-02613), the Stockholm County Council (2019–0400, 2019–0974 and FoUI-966 449), the Swedish Brain (FO2019-0087 and FO2021-0313), the Swedish National Heart and Lung (2018 0505 and 2021 0579), the Axel Tielmans, the Freemasons Children's House foundations and Karolinska Institutet. In addition, JR, ACGB and A.S. were partly supported by the Freemasons Children’s House foundation scholarships. The funders did not participate in the design or conduct of the study.
 
     \section*{Acknowledgments}
     We would like to express our gratitude to the staff and management of the Animal facility at KMB for their indispensable support throughout the research. The development of the toolkit presented in this work was made feasible by the generous allocation of computational resources from projects SNIC 2022/22-1224, SNIC 2022/23-638, NAISS 2023/22-646, NAISS 2023/23-338, NAISS 2024/22-60 and NAISS 2024/23-35. These projects are hosted by the National Academic Infrastructure for Supercomputing in Sweden (NAISS) at UPPMAX. We acknowledge the Swedish Research Council for funding these resources under grant agreement no. 2022-06715.
 
     \section*{Data Availability Statement}
-    Further information and requests for resources  should be directed to and will be fulfilled by the lead contact, Jan Philipp Reising [jan.reising@ki.se]. All original code has been deposited at \href{https://github.com/janreising/astroCAST}{astroCAST} and questions regarding the code should be opened as an issue there.
+    Further information and requests for resources  should be directed to and will be fulfilled by the lead contact, Eric Herlenius [eric.herlenius@ki.se]. All original code has been deposited at \href{https://github.com/janreising/astroCAST}{astroCAST} and questions regarding the code should be opened as an issue there or directed to Jan Philipp Reising [jan.reising@ki.se].
 
     \bibliographystyle{Frontiers-Harvard} %  Many Frontiers journals use the Harvard referencing system (Author-date), to find the style and resources for the journal you are submitting to: https://zendesk.frontiersin.org/hc/en-us/articles/360017860337-Frontiers-Reference-Styles-by-Journal. For Humanities and Social Sciences articles please include page numbers in the in-text citations
     %\bibliographystyle{Frontiers-Vancouver} % Many Frontiers journals use the numbered referencing system, to find the style and resources for the journal you are submitting to: https://zendesk.frontiersin.org/hc/en-us/articles/360017860337-Frontiers-Reference-Styles-by-Journal
@@ -111,24 +111,6 @@ Herlenius\,$^{1,2}$}
     \include{content/10-tables}
 
     \section*{Figure captions}
-
-    \todo{Jan}{Figures}{
-        \begin{itemize}
-            \item Update Figure 1: Adjust the graphical abstract to better reflect recent changes, possibly including distinctions between Supervised and Unsupervised learning approaches to enhance clarity for the reader.
-            \item Combine Figures 2 and 3: Consider merging these figures to streamline the presentation and reduce redundancy, ensuring a coherent narrative flow.
-            \item Adjust Figure 4 for enhanced readability:
-            \begin{itemize}
-                \item Implement a new color order: red, turquoise, purple, green, to improve visual distinction between elements.
-                \item Standardize the x-axis label across similar plots to maintain consistency and ease of understanding.
-                \item Label panels A and B clearly to guide the reader through the figure seamlessly.
-                \item Annotate image pixels with the color of the trace in panels A and B to directly link visual data with its analytical representation, enhancing interpretability.
-                \item Rearrange sub-panels to preserve a logical flow, with row 1 showing conditions before subtraction and row 2 showing conditions after subtraction, to logically guide the reader through the data transformation process.
-            \end{itemize}
-            \item For Figure 5, implement color coding for the dots to provide a clearer, more immediate understanding of the data categories or values represented, facilitating quicker data interpretation.
-            \item In Fig. 6C the algorithms are not working as expected. Specifically, the classifier overperforms (correctly classifying the identical dataset), while the regression underperforms (no correct predictions in any condition).
-            \item Re-record supplementary videos.
-        \end{itemize}
-    }
     \include{content/11-figures}
 
 \end{document}
