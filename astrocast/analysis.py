@@ -8,6 +8,7 @@ from typing import Any, Callable, Dict, List, Literal, Tuple, Union
 
 import dask.array as da
 import humanize
+from sklearn.preprocessing import LabelEncoder
 
 try:
     import napari
@@ -849,6 +850,36 @@ class Events(CachedClass):
         events_end_frame = time_map.shape[0] - np.argmax(time_map[::-1, :], axis=0)
         
         return time_map, events_start_frame, events_end_frame
+    
+    @wrapper_local_cache
+    def get_time_map_by_cluster(self, cluster_column: str, show_progress: bool = True):
+        
+        events = self.events.copy()
+        
+        z1_max = events.z1.max()
+        unique_clusters = events[cluster_column].unique().tolist()
+        cluster_num = len(unique_clusters)
+        
+        if isinstance(events[cluster_column].tolist()[0], str):
+            label_encoder = LabelEncoder()
+            int_category = label_encoder.fit_transform(events[cluster_column])
+            unique_clusters = int_category.tolist()
+            cluster_column = "dummy_cluster_column"
+            events[cluster_column] = int_category
+        
+        time_map = np.zeros((z1_max, cluster_num), dtype=int)
+        iterator = tqdm(range(z1_max)) if show_progress else range(z1_max)
+        for z in iterator:
+            
+            selected = events[(events.z0 <= z) & (events.z1 > z)]
+            counts = selected[[cluster_column, "z0"]].groupby(cluster_column).count()
+            
+            for idx, row in counts.iterrows():
+                
+                tm_idx = unique_clusters.index(idx)
+                time_map[z, tm_idx] += row.z0
+        
+        return time_map
     
     @staticmethod
     def _load_events(event_dir: Path, z_slice=None, index_prefix=None, custom_columns=("v_area_norm", "cx", "cy")):
@@ -1971,12 +2002,18 @@ class MultiEvents(Events):
             
             idx = self.subject_id[i]
             
-            event = Events(event_dir=self.event_dirs[i],
-                           data=self.data[i], loc=self.loc[i], z_slice=self.z_slice[i], group=self.group[i],
-                           lazy=lazy, index_prefix=f"{idx}x", subject_id=idx,
-                           frame_to_time_mapping=self.frame_to_time_mapping[i],
-                           frame_to_time_function=self.frame_to_time_function[i],
-                           custom_columns=custom_columns, seed=self.seed, cache_path=self.cache_path[i])
+            event_dir = self.event_dirs[i]
+            
+            if isinstance(event_dir, Events):
+                event = event_dir
+            
+            else:
+                event = Events(event_dir=event_dir,
+                               data=self.data[i], loc=self.loc[i], z_slice=self.z_slice[i], group=self.group[i],
+                               lazy=lazy, index_prefix=f"{idx}x", subject_id=idx,
+                               frame_to_time_mapping=self.frame_to_time_mapping[i],
+                               frame_to_time_function=self.frame_to_time_function[i],
+                               custom_columns=custom_columns, seed=self.seed, cache_path=self.cache_path[i])
             
             self.event_objects.append(event)
         
@@ -2001,7 +2038,7 @@ class MultiEvents(Events):
         for event in self.event_objects:
             event.add_clustering(cluster_lookup_table=cluster_lookup_table, column_name=column_name)
         
-        self.combine_events()
+        self.events = self.combine_events()
     
     def filter(self, filters: dict, inplace: bool = True) -> None:
         
