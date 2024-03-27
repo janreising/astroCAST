@@ -1,53 +1,55 @@
-\documentclass[utf8]{FrontiersinHarvard}
-% for articles in journals using the Harvard Referencing Style (Author-Date), for Frontiers Reference Styles by Journal: https://zendesk.frontiersin.org/hc/en-us/articles/360017860337-Frontiers-Reference-Styles-by-Journal
-%\documentclass[utf8]{FrontiersinVancouver} % for articles in journals using the Vancouver Reference Style (Numbered), for Frontiers Reference Styles by Journal: https://zendesk.frontiersin.org/hc/en-us/articles/360017860337-Frontiers-Reference-Styles-by-Journal
+\documentclass{article}
 
 \include{packages}
-\externaldocument[supp-]{frontiers_SupplementaryMaterial}
 
-\linenumbers
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+%\usepackage{lmodern}
+%\usepackage{cm-super}
+\usepackage[a4paper, total={6.5in, 10in}]{geometry}
+\newcommand{\citep}[1]{\cite{#1}}
 
-% Leave a blank line between paragraphs instead of using \\
+\RequirePackage{inputenc,crop,graphicx,amsmath,array,color,amssymb,flushend,stfloats,amsthm,chngpage,times,datetime,epstopdf}
+\RequirePackage{natbib}
+\usepackage{parskip}[=v1]
 
-\def\keyFont{\fontsize{8}{11}\helveticabold }
-\def\firstAuthorLast{Reising {et~al.}} %use et al only if is more than 1 author
-\def\Authors{Jan Philipp Reising\,$^{1,2*}$, Ana Cristina Gonzalez-Sanchez\,$^{1,2}$, Athina Samara\,$^{1,2,3}$ and Eric
-Herlenius\,$^{1,2*}$}
-\def\Address{$^{1}$Department of Women's and Children's Health, Karolinksa Institutet, Stockholm, Sweden \\
-    $^{2}$Astrid Lindgren Children’s Hospital, Karolinska University Hospital, Stockholm, Sweden \\
-    $^{3}$Department of Biomaterials, FUTURE, Center for Functional Tissue Reconstruction, University of Oslo, Oslo,
-    Norway
-}
-
-\def\corrAuthor{Eric Herlenius, CMM Center for Molecular Medicine L8:05, 171 76 Stockholm, Sweden}
-\def\corrEmail{eric.herlenius@ki.se}
+\usepackage[usenames,dvipsnames]{xcolor}
+\usepackage[labelsep=quad,indention=10pt]{caption}
+\usepackage[labelfont=bf,list=true]{subcaption}
 
 \begin{document}
     \onecolumn
-    \firstpage{1}
+%    \firstpage{1}
 
-    \title[Astrocytic Calcium Signaling Toolkit (astroCAST)]{Astrocytic Calcium Signaling Toolkit (astroCAST):
-    Efficient Analysis of Dynamic Astrocytic Calcium Events }
+    \begin{titlepage}
+        \begin{center}
+            \vspace*{1cm}
+            \huge
+            \textbf{Astrocytic Calcium Signaling Toolkit (astroCAST)}
+            \newline
+            \vspace{0.5cm}
+            \Large
+            Efficient Analysis of Dynamic Astrocytic Calcium Events
+            \newline
+            \newline
+            Jan Philipp Reising\,$^{1,2*}$, Ana Cristina Gonzalez-Sanchez\,$^{1,2}$, Athina Samara\,$^{1,2,3}$ and Eric Herlenius\,$^{1,2*}$
+        \end{center}
 
-    \author[\firstAuthorLast ]{\Authors} %This field will be automatically populated
-    \address{} %This field will be automatically populated
-    \correspondance{} %This field will be automatically populated
+        $^{1}$ Department of Women's and Children's Health, Karolinksa Institutet, Stockholm, Sweden \\
+        $^{2}$ Astrid Lindgren Children’s Hospital, Karolinska University Hospital, Stockholm, Sweden \\
+        $^{3}$ Department of Biomaterials, FUTURE, Center for Functional Tissue Reconstruction, University of Oslo, Oslo, Norway
 
-    % If there are more than 1 corresponding author, comment this line and uncomment the next one.
-%    \extraAuth{}
+        \newline
+        * Corresponding author: \newline
+        Eric Herlenius, CMM Center for Molecular Medicine L8:05, 171 76 Stockholm, Sweden\newline
+        eric.herlenius@ki.se
 
-    \extraAuth{Jan Philipp Reising, CMM Center for Molecular Medicine L8:05, 171 76 Stockholm, Sweden, jan.reising@ki.se}
-
-    \maketitle
-
-    \begin{abstract}
-
-        \section{}
+        \section*{Abstract}
         \input{content/1-abstract}
 
-        \tiny
-        \keyFont{ \section{Keywords:} astrocytes, toolkit, calcium, timeseries, detection, events} % 4 > tags < 9
-    \end{abstract}
+    \end{titlepage}
+
+%    \linenumbers
 
     \begin{acronym}
         \acro{1P}{One-photon}
@@ -66,10 +68,8 @@ Herlenius\,$^{1,2*}$}
     \section{Introduction}
     \input{content/2-introduction}
 
-
     \section{Methods}
     \input{content/3-methods}
-
 
     \section{Results}
     \input{content/4-results}
@@ -82,7 +82,7 @@ Herlenius\,$^{1,2*}$}
 
     \section{Discussion}
     \input{content/9-discussion}
-
+%
     \section*{Conflict of Interest Statement}
     The authors declare that the research was conducted in the absence of any commercial or financial relationships that could be construed as a potential conflict of interest.
 
@@ -100,15 +100,15 @@ Herlenius\,$^{1,2*}$}
 
     \section*{Data Availability Statement}
     Further information and requests for resources  should be directed to and will be fulfilled by the lead contact, Eric Herlenius [eric.herlenius@ki.se]. All original code has been deposited at \href{https://github.com/janreising/astroCAST}{astroCAST} and questions regarding the code should be opened as an issue there or directed to Jan Philipp Reising [jan.reising@ki.se].
-
+%
     \bibliographystyle{Frontiers-Harvard} %  Many Frontiers journals use the Harvard referencing system (Author-date), to find the style and resources for the journal you are submitting to: https://zendesk.frontiersin.org/hc/en-us/articles/360017860337-Frontiers-Reference-Styles-by-Journal. For Humanities and Social Sciences articles please include page numbers in the in-text citations
-    %\bibliographystyle{Frontiers-Vancouver} % Many Frontiers journals use the numbered referencing system, to find the style and resources for the journal you are submitting to: https://zendesk.frontiersin.org/hc/en-us/articles/360017860337-Frontiers-Reference-Styles-by-Journal
+%    %\bibliographystyle{Frontiers-Vancouver} % Many Frontiers journals use the numbered referencing system, to find the style and resources for the journal you are submitting to: https://zendesk.frontiersin.org/hc/en-us/articles/360017860337-Frontiers-Reference-Styles-by-Journal
     \bibliography{astroCAST}
 
     \section*{Tables}
     \include{content/10-tables}
 
-    \section*{Figure captions}
+    \section*{Figures}
     \include{content/11-figures}
 
 \end{document}
