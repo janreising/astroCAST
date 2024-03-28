@@ -1,0 +1,996 @@
+\documentclass[utf8]{FrontiersinHarvard}
+% for articles in journals using the Harvard Referencing Style (Author-Date), for Frontiers Reference Styles by Journal: https://zendesk.frontiersin.org/hc/en-us/articles/360017860337-Frontiers-Reference-Styles-by-Journal
+%\documentclass[utf8]{FrontiersinVancouver} % for articles in journals using the Vancouver Reference Style (Numbered), for Frontiers Reference Styles by Journal: https://zendesk.frontiersin.org/hc/en-us/articles/360017860337-Frontiers-Reference-Styles-by-Journal
+
+%%%%%%%%%%%%%%%
+% USED PACKAGES
+
+\usepackage{url,hyperref,lineno,microtype,subcaption}
+\usepackage[T1]{fontenc}
+\usepackage[english]{babel}
+\usepackage{textcomp}
+\usepackage{mdframed}
+\usepackage{etoolbox} % For conditional statements
+\usepackage{xstring}
+\usepackage[normalem]{ulem}
+\usepackage{xparse}
+\usepackage{makecell}
+\usepackage{rotating}
+\usepackage{pdfcomment}
+\usepackage{xr}
+\usepackage{cleveref}
+\usepackage[nolist,nohyperlinks,printonlyused]{acronym}
+\usepackage{wasysym} % for half bullet
+\usepackage{pifont}
+\usepackage{listings}
+\usepackage{tcolorbox}
+
+%%%%%%%%%%%%%%%%%
+% CUSTOM COMMANDS
+
+\newcommand{\inlineBash}[1]{%
+    \begingroup
+    \edef\temp{#1}%
+    \expandafter\StrSubstitute\expandafter{\temp}{--}{-{-}}[\temp]%
+    \tcbox[on line, boxsep=0pt, left=1pt, right=1pt, top=1pt, bottom=1pt,
+        boxrule=0pt, arc=0pt, outer arc=0pt, colback=lightgray]{
+        \texttt{\small \temp}
+    }%
+    \endgroup
+}
+
+\newcommand{\inlinepy}[1]{\inlineBash{#1}}
+
+\newcommand{\fref}{ m O{} }{ (Figure~\ref{fig:#1}\IfValueT{#2}{\,#2})}
+\newcommand{\frefsupp}{ m O{} }{ (Supplement~\ref{supp-fig:#1}\IfValueT{#2}{\,#2})}
+\newcommand{\tref}[1]{ (Table~\ref{tab:#1})}
+
+\lstdefinestyle{bashStyle}{
+    language=bash,
+    frame=single,
+    basicstyle=\footnotesize
+}
+
+\lstdefinestyle{pyStyle}{
+    language=python,
+    frame=single,
+    basicstyle=\footnotesize
+}
+
+\lstdefinestyle{yaml}{
+    basicstyle=\color{blue}\footnotesize,
+    rulecolor=\color{black},
+    string=[s]{'}{'},
+    stringstyle=\color{blue},
+    comment=[l]{:},
+    commentstyle=\color{black},
+    morecomment=[l]{-}
+}
+
+% Define new commands for symbols to make the table cleaner
+\newcommand{\cmark}{\ding{51}} % Check mark
+\newcommand{\xmark}{\textemdash} % Cross mark
+\newcommand{\halfbullet}{\LEFTcircle} % Half bullet
+\newcommand{\optional}{*} % Optional feature
+
+% Include supplementary for referencing
+\externaldocument[supp-]{frontiers_SupplementaryMaterial}
+
+\linenumbers
+
+% Leave a blank line between paragraphs instead of using \\
+
+\def\keyFont{\fontsize{8}{11}\helveticabold }
+\def\firstAuthorLast{Reising {et~al.}} %use et al only if is more than 1 author
+\def\Authors{Jan Philipp Reising\,$^{1,2*}$, Ana Cristina Gonzalez-Sanchez\,$^{1,2,3}$, Athina Samara\,$^{1,2,4}$ and Eric
+Herlenius\,$^{1,2*}$}
+\def\Address{$^{1}$Department of Women's and Children's Health, Karolinksa Institutet, Stockholm, Sweden \\
+    $^{2}$Astrid Lindgren Children’s Hospital, Karolinska University Hospital, Stockholm, Sweden \\
+    $^{3}$Department of Medicine Solna, Karolinska Institutet, Stockholm, Sweden \\
+    $^{4}$Department of Biomaterials, FUTURE, Center for Functional Tissue Reconstruction, University of Oslo, Oslo,
+    Norway
+}
+
+\def\corrAuthor{Eric Herlenius, CMM Center for Molecular Medicine L8:05, 171 76 Stockholm, Sweden}
+\def\corrEmail{eric.herlenius@ki.se}
+
+\begin{document}
+    \onecolumn
+    \firstpage{1}
+
+    \title[Astrocytic Calcium Signaling Toolkit (astroCAST)]{Astrocytic Calcium Signaling Toolkit (astroCAST):
+    Efficient Analysis of Dynamic Astrocytic Calcium Events }
+
+    \author[\firstAuthorLast ]{\Authors} %This field will be automatically populated
+    \address{} %This field will be automatically populated
+    \correspondance{} %This field will be automatically populated
+
+    % If there are more than 1 corresponding author, comment this line and uncomment the next one.
+%    \extraAuth{}
+
+    \extraAuth{Jan Philipp Reising, CMM Center for Molecular Medicine L8:05, 171 76 Stockholm, Sweden, jan.reising@ki.se}
+
+    \maketitle
+
+    \begin{abstract}
+
+        \section{}
+        The \ac{astroCAST} is a novel solution to a longstanding challenge in neuroscience research: the specialized analysis of astrocytic calcium events within fluorescence time-series imaging. Distinct from existing neuron-centric tools, \ac{astroCAST} is adept at detecting and clustering astrocytic calcium events based on their unique spatiotemporal characteristics, thus filling a gap in astrocytic research methodologies. This toolkit not only facilitates the detection of such events but also extends its utility to provide comprehensive end-to-end analysis. This feature is absent in most tools targeting astrocytic activity. AstroCAST's development was motivated by the critical need for dedicated software that supports researchers in transitioning from raw video data to insightful experimental conclusions, efficiently managing large-scale datasets without compromising computational speed. It offers a user-friendly interface that caters to both novice and expert users, incorporating both a \ac{GUI} for detailed explorations and a \ac{CLI} for extensive analyses. Expected outcomes from utilizing \ac{astroCAST} include the ability to process and analyze a significantly larger volume of data. This enables a more profound and comprehensive analysis than previously possible, addressing the demands of large-scale astrocytic studies. In summary, \ac{astroCAST} aims to advance astrocytic calcium imaging analysis, offering a tailored, efficient, and comprehensive toolset that enhances our understanding of astrocytic functions and their implications in neuroscience.
+
+        \tiny
+        \keyFont{ \section{Keywords:} astrocytes, toolkit, calcium, timeseries, detection, events} % 4 > tags < 9
+    \end{abstract}
+
+    \begin{acronym}
+        \acro{1P}{One-photon}
+        \acro{2P}{Two-photon}
+        \acro{astroCAST}{Astrocytic Calcium Signaling Toolkit}
+        \acro{CNN}{Convolutional Neural Network}
+        \acro{preBötC}{pre-Bötzinger Complex}
+        \acro{CLI}{command-line interface}
+        \acro{GUI}{graphical user interface}
+        \acro{GPU}{Graphics Processing Unit}
+        \acro{FOV}{Field of View}
+        \acro{RBF}{Radial Basis Function}
+        \acro{RNN}{Recurring Neural Network}
+    \end{acronym}
+
+
+    \section{Introduction}
+    % background
+    Analyzing cytosolic calcium oscillations helps decode neuronal firing patterns, synaptic activity, and network dynamics, offering insights into cell activity and states\citep{del_negro_sodium_2005,grienberger_imaging_2012,dombeck_imaging_2007}. Furthermore, the changes in calcium activity may be indicative of cell responses to downregulation of molecular pathways, epigenetic alterations, or even the effect of treatments or drugs, and disease states\citep{lines_astrocytes_2020,miller_calcium_2023,robil_glioblastoma_2015,huang_vitro_2013,britti_tau_2020,zhang_estrogen_2010}. This makes dynamic calcium activity recordings a crucial tool to investigate physiology and neurological disorders and to design and develop therapeutic interventions.
+
+    % problem statement
+    While we have seen major development in recent years in the imaging tools available to study astrocytes, the software side has been slow to catch up\citep{gorzo_photonics_2022,aryal_er-gcamp6f_2022,stobart_cortical_2018}. Currently several software packages are available for researchers to analyze calcium activity recordings from brain cells\tref{transposed-comparison}. However, most of these packages are primarily developed for neurons, and are often not suitable for astrocytes. The challenge stems from astrocytes' unique physiology, marked by rapid subcompartment calcium fluctuations\citep{stobart_long-term_2018,curreli_complementary_2022} and their ability to alter the morphology during a single recording\citep{anders_epileptic_2024,baorto_astrocyte_1992}. Astrocytes exhibit calcium fluctuations that are spatially and temporally diverse, reflecting their integration of a wide range of physiological signals\citep{semyanov_making_2020,smedler_frequency_2014,denizot_simulation_2019,papouin_astrocytic_2017,bazargani_astrocyte_2016}.
+
+    The available toolkits specifically transcribing astrocytic activity come with several shortcomings\tref{transposed-comparison}. A major barrier is the use of proprietary programming languages like Matlab, that hinder widespread use. Additionally, slow implementations due to lack of parallelization and \ac{GPU} acceleration or usage of RAM exceeding most standard setups impedes analysis of long videos (>5000 frames). While all compared toolkits offer efficient event detection, most lack support to gain insight from the extracted events.
+
+    % the solution (AstroCAST)
+    AstroCAST, developed in Python for its versatility and ease of use, addresses these shortcomings through a modular design, allowing for customizable pipelines and parallel processing. It optimizes resource use by only loading data as needed, ensuring efficient hardware scaling. Its modular design enables stepwise quality control and flexible customization. Finally, astroCAST includes dedicated modules to analyze common research questions, as compared to other packages that primarily focus on event detection.
+
+    % emphasize novelty and impact
+    Here, we not only introduce astroCAST but also provide a detailed guide for extracting astrocytic calcium signals from video data, performing advanced clustering and correlating their activity with other physiological signals\fref{1}. AstroCAST extends beyond theory, having been tested with synthetic data, as well as in-vitro, ex-vivo and in-vivo recordings\tref{datasets}. This underscores AstroCAST’s ability to harness sophisticated computational techniques, making significant strides in the study of astrocytes and offering new opportunities for neuroscience research.
+
+
+    \section{Methods}
+
+    \subsection{Requirements}
+    It is imperative that the recordings specifically capture astrocytes labeled with calcium sensors, either through transgenic models or viral vectors. While the use of calcium dyes is possible, their application may not guarantee the exclusive detection of astrocytic events. The initial step of the astroCAST toolkit involves preparing the video recordings for analysis. Our protocol supports a range of file formats, including .avi, .h5, .tiff (either single or multipage), and .czi, accommodating videos with interleaved recording paradigms. To ensure reliable results, recordings should be captured at a frequency of at least 8Hz for \ac{1P} imaging and 1-2Hz for \ac{2P} imaging. This frequency selection is crucial for capturing events of the expected duration effectively.
+
+    Regarding hardware requirements, our protocol is adaptable to a variety of configurations, from personal computers to cloud infrastructures, with certain modules benefiting from \ac{GPU} acceleration. At a minimum, we recommend using hardware equipped with at least 1.6GHz quad-core processor and 16GB of RAM to efficiently handle the data analysis. In cases where the available memory is a bottleneck, astroCAST offers a \inlinepy{lazy} parameter to only load relevant sections of the data into memory. While this increases processing time, depending on the speed of the storage medium, it allows users to analyze datasets that would usually exceed the capabilities of their hardware.
+
+    On the software side, we advocate for the use of the Linux operating system, specifically Ubuntu or AlmaLinux distributions, for optimal performance. However, Windows or macOS can be used with some functional limitations\tref{functionalities}. Be advised, that the M1 and M2 Mac processors are currently not supported. Essential software includes Python version 3.9, Anaconda or Miniconda, and git for version control. Furthermore, we recommend the use of ImageJ or an equivalent image viewer for analyzing the output visually. This comprehensive approach ensures that researchers can accurately extract and analyze astrocytic calcium signals, paving the way for further understanding of their physiological roles.
+
+    \subsection{Installation}
+    To run the software, astroCAST and its dependencies must be installed. There are multiple options to do this depending on how much control users would like to have over the installation. Of note, the following instructions install astroCAST with its full functionality. If that is not desired or possible remove the \inlineBash{-E all} or \inlineBash{[all]} flags.
+
+    \subsubsection{Creating a conda environment (optional)}
+    While not strictly necessary, we highly recommend to create a fresh anaconda environment. This
+    prevents common installation errors and conflicts with existing environments.
+
+    \begin{lstlisting}[style=bashStyle]
+        > conda create -n astro python=3.9 poetry
+        > conda activate astro
+    \end{lstlisting}
+
+    \subsubsection{Install from source (recommended)}
+    \label{res:install-from-source}
+    \begin{lstlisting}[style=bashStyle]
+        > cd "/path/to/directory/"
+        > git clone git@github.com:janreising/astroCAST.git
+        > cd astroCAST
+        > poetry install -E all
+    \end{lstlisting}
+
+    \subsubsection{Installation with pip (easiest)}
+    \begin{lstlisting}[style=bashStyle]
+        # install core features
+        > pip install astrocast
+        # install with all features
+        > pip install astrocast[all]
+    \end{lstlisting}
+
+    \subsubsection{Container installation (last resort)}
+
+    To install docker and create an account, follow the instructions on the docker webpage: https://docs.docker
+    .com/engine/install/
+
+    \begin{lstlisting}[style=bashStyle]
+        > docker pull anacgon/astrocast:latest
+        > docker image ls
+        > docker run -v /path/to/your/data:/home/data -it -p 8888:8888 astrocast:latest
+        # Optionally, start jupyter notebook from inside the docker container:
+        > jupyter-lab --allow-root --no-browser --port=8888 --ip="*"
+    \end{lstlisting}
+
+    \subsubsection{Test installation}
+
+    Both commands should run without any errors.
+
+    \begin{lstlisting}[style=bashStyle]
+        > python -c "import astrocast"
+        > astrocast --help
+    \end{lstlisting}
+
+    \subsection{Animal models}
+    Our research utilized two transgenice mouse strains whose background was changed to outbred CD-1 mice supplied by Charles River Laboratories, located in Germany. The initial transgenic lines were Aldh1l1-Cre (JAX Stock No. 029655: B6N.FVB-Tg(Aldh1l1-cre/ERT2)1Khakh/J) and Ai148D mice (Jax Stock No. 030328: B6.Cg-Igs7tm148.1(tetO-GCaMP6f,CAG-tTA2)Hze/J). These strains were housed in a controlled environment featuring a cyclical light-dark period lasting 12 hours each. Unlimited access to food and water was ensured. These mice were housed at the Department of Comparative Medicine at Karolinska Institutet in Stockholm, Sweden. Our experimental protocols were in strict compliance with the European Community Guidelines and received authorization from the Stockholm Animal Research Ethics Committee (approval no. 15819-2017). Acute slices from the pre-Bötzinger complex were obtained according to the protocol previously established by Reising et al.\citep{reising_prostaglandin_2022}.
+
+    \subsection{Datasets used during development}
+    \label{ref:dataset-availability}
+
+    AstroCAST was developed using publicly available datasets and our own data. The data represents astrocytes studied ex-vivo, in-vivo and in acute slices captured with \ac{1P} or \ac{2P}\tref{datasets}. To ensure transparency and provide a practical starting point, we offer a collection of tested, default settings within a YAML file. This file, designed to represent a first-approach configuration, is accessible in our \href{https://github.com/janreising/astroCAST}{GitHub repository}. Additionally, we provide the datasets used in this manuscript, as well as pretrained models. A curated list of pretrained models is accessible on our GitHub page under \href{https://github.com/janreising/astroCAST/tree/main/denoiser_models}{denoiser models}, and a comprehensive collection of models can be downloaded via astroCAST. The file name of the model summarizes the model and training parameters.
+
+    \begin{lstlisting}[style=bashStyle]
+        # download public and custom datasets
+        > astrocast download-datasets "/path/to/download/directory"
+
+        # download pretrained models
+        > astrocast download-models "/path/to/download/directory"
+    \end{lstlisting}
+
+
+    \section{Results}
+
+    \subsection{Using astroCAST}
+
+    AstroCAST is designed to guide users through the entire process of astrocyte calcium analysis, from the initial raw data to in-depth analysis. It is a versatile toolkit that allows for a customizable workflow as users have the flexibility to omit certain steps or integrate additional analyses as their research demands. AstroCAST serves as a robust companion for computational exploration in neuroscience.
+
+    Central to the toolkit's utility is the astroCAST Python package, which offers direct access to all functionalities of the toolkit. This enables users to incorporate astroCAST seamlessly into their existing workflows or to automate processes within their custom scripts. The toolkit is structured into three major blocks: Preprocessing, Encoding, and Exploratory Analysis.
+
+    In the Preprocessing block, users can use a \ac{CLI}, accessible via commands such as \inlineBash{astrocast --help} directly in the terminal. The \ac{CLI} facilitates the use of a predefined configuration file to streamline the preprocessing tasks. Moreover, an intuitive 'Argument Explorer' is incorporated to assist users in quickly testing different parameters, enabling export of the resultant configuration settings. For a hands-on introduction to this stage, we have provided a Jupyter notebook, allowing users to engage with the protocol interactively.
+
+    The Encoding and Analysis block adapts to the specific needs of individual experiments, catering to diverse research objectives such as comparing drug treatments, model systems, correlating activities with stimuli, or monitoring changes over time. This phase of the pipeline is supported by a dedicated \ac{GUI}, which offers an interactive environment for analysis and enhanced data visualization capabilities.
+
+    Acknowledging the diversity in data analysis approaches within \ac{astroCAST}, subsequent sections will provide concise guidance to interact with astroCAST and ensure that users can harness its full potential.
+
+    \subsubsection{Jupyter notebooks}
+
+    Jupyter notebooks can be used to interactively run the analysis and visualize the results.
+    If you have cloned the repository (\ref{res:install-from-source}), an example notebook is included to follow along with the steps described here.
+
+    \begin{lstlisting}[style=bashStyle]
+        > cd /path/to/astroCAST/notebooks/examples/
+        > jupyter lab
+        # on MacOS the command might be
+        > jupyter-notebook
+    \end{lstlisting}
+
+    A browser window will open which displays the available examples or can be used to create custom notebooks.
+
+    \subsubsection{The Command Line Interface (CLI)}
+
+    The \ac{CLI} is a useful selection of commands that enables users to perform common analysis steps directly from the terminal. Especially in the context of high-performance computing this way of interacting with astroCAST is convenient. All parameters can either be provided manually in the terminal or through a configuration YAML file. We recommend using a configuration file when preprocessing many videos to ensure that the results can be compared. The configuration file must adhere to the YAML format and can contain settings for more than one command. A default configuration file can be found in the \href{https://github.com/janreising/astroCAST/blob/3ad41d03068732419df7fdde9b2a0f449898d4e2/config.yaml}{GitHub repository}.
+
+    \begin{lstlisting}[style=bashStyle]
+        # get list of all available commands
+        > astrocast --help
+        # get help for individual commands
+        > astrocast COMMAND --help
+        # use manual settings
+        > astrocast COMMAND --PARAM-1 VALUE1 [...]
+        # use a configuration file
+        > astrocast --config '/path/to/config' COMMAND [...]
+    \end{lstlisting}
+
+    \subsubsection{The Graphical User Interface (GUI)}
+
+    AstroCAST implements two \ac{GUI}s, based on shiny\citep{chang_shiny_2024}, to simplify the selection of suitable parameters for the analysis. The commands below will either automatically open a browser page to the interface or provide a link that can be copied to a browser.
+
+    \begin{lstlisting}[style=bashStyle]
+        # Identify correct settings for the event detection
+        > astrocast explorer -- input path /path/to/file -- h5-loc /dataset/name
+        # Explore detected events, including filtering, embedding and experiments
+        > astrocast exploratory-analysis -- input path /path/to/roi/ -- h5-loc /dataset/name
+    \end{lstlisting}
+
+    \subsubsection{The Data Viewer}
+
+    For convenience astroCAST includes a data viewer, based on napari\citep{sofroniew_nicholas_napari_2022}, which allows for fast and memory efficient visualization of data. Users can default to their image viewer of choice, like ImageJ, if they choose to do so.
+
+    \begin{lstlisting}[style=bashStyle]
+        # view single dataset
+        > astrocast view-data --lazy False /path/to/file /dataset/name
+        # view multiple datasets
+        > astrocast view-data /path/to/file /dataset/one /dataset/two
+        # view results of detection
+        > astrocast view-detection-results --video-path /path/to/video --loc /dataset/name /path/to/dir/name.roi
+    \end{lstlisting}
+
+    \subsection{Preprocessing}
+
+    \subsubsection{File conversion}
+    % Timing: 1-15 min (10M – 10Gpixels)
+    % Increasing the number of frames increases the processing time approximately linearly.
+
+    AstroCAST is designed to handle a wide range of common input formats, such as .tiff and .czi files, accommodating the diverse nature of imaging data in neuroscience research. One of the key features of astroCAST is its ability to process interleaved datasets. By specifying the \inlinepy{--channels} option, users can automatically split datasets based on imaging channels, which is particularly useful for experiments involving multiple channels interleaved, such as alternating wavelengths.
+
+    Moreover, astroCAST supports the subtraction of a static background from the video recordings using the \inlinepy{--subtract-background} option. This feature allows for the provision of a background image or value, which is then subtracted from the entire video. Subtracting for example the dark noise of the camera can significantly enhance the quality of the analysis.
+
+    For optimal processing and data management, it is recommended to convert files to the .h5 file format. The .h5 format benefits from smart chunking, enhancing the efficiency of data retrieval and storage. The output configuration can be finely tuned with options such as \inlinepy{--h5-loc} for specifying the dataset location within the .h5 file, \inlinepy{--compression} for selecting a compression algorithm (e.g., `gzip`), and \inlinepy{--dtype} for adjusting the data type if the input differs from the intended storage format.
+
+    Chunking is a critical aspect of data management in astroCAST, allowing for the video to be divided into discrete
+    segments for individual saving and compression. The \inlinepy{--chunks} option enables users to define the chunk size, balancing between retrieval speed and storage efficiency. An appropriately sized chunk can significantly improve processing speed without compromising on efficiency. In cases where the optimal chunk size is uncertain, setting \inlinepy{--chunks} to \inlinepy{None} instructs astroCAST to automatically determine a suitable chunk size.
+
+    Lastly, the \inlinepy{--output-path} option directs astroCAST where to save the processed output. While the .h5 format is recommended for its efficiency, astroCAST also supports saving in formats such as .tiff, .tdb, and .avi, providing flexibility to accommodate various research needs and downstream analysis requirements.
+
+    \begin{lstlisting}[style=bashStyle]
+        # (optional) browse the available flags
+        > astrocast convert-input --help
+        # '--config' flag can be ommited to use default settings
+        > astrocast --config "/path/to/config" convert-input "/path/to/file/or/folder"
+    \end{lstlisting}
+
+    We recommend to verify the conversion through a quick visual inspection using the built-in data viewer\fref{2} or an imaging software of your choice (e.g., ImageJ). During this check, ensure that the pixel values are within the expected range (int or float), the image dimensions (width and height) are as anticipated, all frames have been successfully loaded, de-interleaving (if applicable) has been executed correctly, and the dataset name is accurate.
+
+    \begin{lstlisting}[style=bashStyle]
+        > astrocast view-data --h5-loc "dataset/name" "/path/to/your/output/file"
+    \end{lstlisting}
+
+    \subsubsection{Motion Correction (optional)}
+    % Timing: 1-15 min (10M – 10Gpixels)
+    % Increasing the number of frames increases the processing time approximately linearly.
+
+    During imaging, samples will drift or warp which means that the location of the astrocytes might change in the \ac{FOV}. Depending on the amount of movement, this can have detrimental consequences to the analysis. The motion correction module of the \href{https://github.com/flatironinstitute/CaImAn}{CaImAn} package\citep{giovannucci_caiman_2019}, is used in the astroCAST protocol to correct these artifacts. We refer users to the the \href{https://jnormcorre.readthedocs.io/en/latest/Algo.html#motion-correction-methods}{jnormcorre documentation} for detailed information, but explain the commonly used parameters here.
+
+    A cornerstone of this feature is the ability to set the maximum allowed rigid shift through the \inlinepy{--max-shifts} parameter. This parameter is critical for accommodating sample motion, ensuring that shifts do not exceed half of the image dimensions, thus balancing between correction effectiveness and computational efficiency. The precision of motion correction is further refined using the \inlinepy{--max-deviation-rigid} option, which limits the deviation of each image patch from the frame's overall rigid shift. This ensures uniformity across the corrected image, enhancing the accuracy of the motion correction process. For iterative refinement of the motion correction, astroCAST employs the \inlinepy{--niter-rig} parameter, allowing up to three iterations by default. This iterative approach enables a more accurate adjustment to the motion correction algorithm, improving the quality of the processed images. To address non-uniform motion across the field of view, astroCAST offers the piecewise-rigid motion correction option, activated by setting \inlinepy{--pw-rigid} to True. This method provides a more nuanced correction by considering different motion patterns within different image segments, leading to superior correction outcomes. Furthermore, the \inlinepy{--gsig-filt} parameter anticipates the half-size of cells in pixels. This information aids in the filtering process, crucial for identifying and correcting motion artifacts accurately.
+
+    By carefully adjusting these parameters, researchers can significantly enhance the quality of their imaging data, ensuring that motion artifacts are minimized and that the resultant data is of the highest possible accuracy for subsequent analysis.
+
+    \begin{lstlisting}[style=bashStyle]
+        # '--config' flag can be ommited to use default settings
+        > astrocast --config "/path/to/config" motion-correction --h5-loc "dataset/name" "/path/to/file"
+    \end{lstlisting}
+
+    \subsubsection{Denoising (optional)}
+    % Timing: 1-12 h (first time), 1-30 min (inference)
+
+    Denoising is an optional but often beneficial preprocessing step in image analysis. The denoising module is based on the architecture suggested for DeepInterpolation\citep{lecoq_removing_2021} and employs a \ac{CNN} designed to clean a target frame.The \ac{CNN} uses adjacent frames as a reference without exposing it to the target frame itself. This approach enables the network to interpolate the desired signal from the contextual frames. Since the noise is stochastic, the network inherently learns to disregard it, effectively isolating and enhancing the signal in the process. We have extended the original approach to support videos of varying dimensions and facilitate straightforward retraining protocols.
+
+    Training the denoising model is typically a singular task; once the model is trained, it can be applied to multiple datasets with no further adjustments. The duration of this initial training varies from 1 to 12 hours, contingent on data intricacy and available computational power. Subsequent application of the model to new data, known as inference, is considerably more expedient, usually requiring minutes for each file. For convenience, we offer a suite of pretrained models tailored to different imaging modalities (\ref{ref:dataset-availability}).
+
+    \paragraph{Training (optional)}
+
+    To ensure the robustness and reliability of the denoising process, it is crucial to carefully select the training dataset for the denoiser. The approach to training should aim to minimize the model's exposure to the data it will denoise, which can enhance the reliability of denoising and prevent overfitting.
+
+    One approach is to train the model on a separate data set that will not be used in subsequent analysis. This method is advantageous because it allows the model to learn from a diverse set of data, ideally encompassing all experimental conditions expected in the study. However, it requires having a separate dataset that is representative of the various modalities, which may not always be available.
+
+    For smaller datasets or when data is limited, a transformation-based approach can be applied. Training on all experimental data but using rotated frames (90°, 180°, and 270°) ensures that the denoiser is exposed to the inherent noise and variability in the data while mitigating direct exposure to the frames being denoised. This approach is particularly resource-efficient but may result in a less robust model due to the potential predictability of rotated frames.
+
+    Each of these methods has its merits and should be chosen based on the specific context and availability of data within a given study.
+
+    \begin{lstlisting}[style=bashStyle]
+        # explore the possible parameters
+        > astrocast train-denoiser --help
+        # train model from config file
+        > astrocast --config config.yaml train-denoiser
+    \end{lstlisting}
+
+    The intricacies of training a custom model are beyond this protocol, and we refer to the original DeepInterpolation
+    publication\citep{lecoq_removing_2021} and our \href{https://github.com/janreising/astroCAST/blob/1066d1a9787111bf19ac3dff8894d931f62a13ee/notebooks/examples/train_a_denoiser_model.ipynb}{example notebook} for users interested in training their own model.
+
+    \paragraph{Denoising Data}
+    Once the neural network has been trained for denoising, it can be employed on new data using the parameters that were set during its training\fref{3}. If utilizing a provided pretrained model, these parameters are inferred from the model file.
+
+    For trivial input parameters, such as the model path and output file location, the following flags are used: \inlinepy{--model} to specify the model, \inlinepy{--output-file} to define the output file, \inlinepy{--loc-in} and \inlinepy{--loc-out} to designate the input and output data locations within the HDF5 file structure.
+
+    Network architecture parameters are crucial for ensuring that the denoising process is compatible with the data's specific attributes. These parameters need to exactly match the parameters during training. These include \inlinepy{--input-size} to set the dimensions of the input data, \inlinepy{--pre-post-frames} to determine the number of frames before and after the target frame used during denoising, \inlinepy{--gap-frames} to optionally skip frames close to the target frame, and \inlinepy{--normalize} to apply normalization techniques that aid the network in emphasizing important features over noise.
+
+    Image parameters cater to the post-processing needs of the denoised data. The \inlinepy{--rescale} parameter is used to reverse the normalization applied during denoising, as subsequent analysis steps often expect the pixel values to be in their original scale. Furthermore, \inlinepy{--padding} adjusts the input data size to match the network's expected input dimensions, ensuring that no data is lost or distorted during the denoising process.
+
+    \begin{lstlisting}[style=bashStyle]
+        # load a config file with parameters
+        > astrocast --config config.yaml denoise "/path/to/file"
+    \end{lstlisting}
+
+    %%%%%%%%%%%%%%%%%%%%%%%%%
+    %% Background subtraction
+
+    \subsubsection{Background subtraction (optional)}
+    \label{subsubsec:background}
+    % Timing: 1-20 min
+    % Running time will increase linearly with the number of frames and non-linearly with window size.
+
+    Background subtraction, while optional, can significantly enhance event detection in fluorescence imaging by mitigating issues related to bright backgrounds, uneven lighting, or pronounced bleaching effects\fref{4}. AstroCAST leverages \ac{RBF} interpolation for background approximation, ensuring accurate background modeling even in scenarios characterized by considerable signal fluctuations or missing data segments.
+
+    To facilitate optimal subtraction outcomes without introducing artifacts such as false positives or negatives, default parameters are provided, but fine-tuning may be necessary. An exploratory Jupyter \href{https://github.com/janreising/astroCAST/blob/8451394bc0d810c4037011f0bcb9cba1f10d1e72/notebooks/dev/exploring_delta.ipynb}{notebook} is available for guidance on how parameter adjustments influences the results.
+
+    % Intuition behind the process
+    The process begins with downsizing the video to manage computational load while preserving essential features. Peaks within each pixel's time series are identified and marked as NaN to exclude them from influencing the background model. The RBFInterpolator, implemented in SciPy\citep{virtanen_scipy_2020}, then estimates the background by interpolating these NaN values across the XYZ dimensions of the video. After resizing back to its original dimensions, the interpolated background is subtracted.
+
+    % Image preparation parameters
+    For initial image preparation, parameters such as \inlinepy{--scale-factor} for adjusting video resolution, \inlinepy{--blur-sigma} and \inlinepy{--blur-radius} for image blurring, are crucial. These adjustments are preparatory steps aimed at enhancing the effectiveness of the subsequent background subtraction process.
+
+    % Peak detection parameters
+    Peak detection is fine-tuned through parameters like \inlinepy{--prominence}, \inlinepy{--wlen} for window length, \inlinepy{--distance} between peaks, \inlinepy{--width} of peaks, and \inlinepy{--rel-height} defining the peak's cutoff height. These settings ensure precise identification of significant peaks, contributing to the accuracy of the background modeling.
+
+    % RBF parameters explanation
+    The \href{https://docs.scipy.org/doc/scipy/reference/generated/scipy.interpolate.RBFInterpolator.html}{RBF interpolator} constructs a smooth function from scattered data points by combining radial basis functions centered at data locations with a polynomial term\citep{fasshauer_meshfree_2007}, adjusted by coefficients that solve linear equations to fit the data. Interpolation can be tunes with parameters such as \inlinepy{--neighbors} for the interpolation neighborhood, \inlinepy{--rbf-smoothing} for interpolation smoothness, \inlinepy{--rbf-kernel} to choose the kernel type, \inlinepy{--rbf-epsilon}, and \inlinepy{--rbf-degree} for kernel adjustment, facilitating a tailored approach to background modeling.
+
+    % Method selection for background subtraction
+    Background subtraction can be executed using either the Delta F (\inlinepy{--method 'dF'}) method, which directly subtracts the background, or the Delta F over F (\inlinepy{--method 'dFF'}) method, which divides the signal by the background post-subtraction. The choice between these methods depends on the specific requirements of the imaging data and the desired outcome of the subtraction process. However, it's important to consider that background subtraction may not be necessary for all datasets and could potentially introduce biases in event detection. Comparative analysis with and without this preprocessing step is recommended to assess its impact accurately\frefsupp{subtraction-results}.
+
+    \begin{lstlisting}[style=bashStyle]
+        > astrocast subtract-background --h5-loc "mc/ch0" --method "dF" "/path/to/file"
+    \end{lstlisting}
+
+    \subsection{Event Detection}
+    %Timing: 1 min – 3h
+    %Running time will increase linearly with the number of events in the recording.
+
+    AstroCAST employs an event-centric approach to event detection, adapted from the AQuA package\citep{wang_event-based_2018}, and leverages the capabilities of scikit-image and dask for enhanced processing and analysis\citep{van_der_walt_scikit-image_2014,dask_development_team_dask_2016}. Building on the AquA algorithm, astroCAST incorporates both spatial and temporal thresholding techniques to identify and extract events effectively \fref{5}. Spatial thresholding is executed based on either a single frame or a small volume, facilitating the identification of significant patterns or features in space. Concurrently, temporal thresholding is implemented by scrutinizing individual pixels for peaks across the time dimension, essentially tracking fluorescence changes over time.
+
+    Following the thresholding process, a binary mask is generated, which is used to label connected pixels, considering the full 3D volume of the video. This allows for the integration of different frames in the z-dimension to constitute a single event in a 3D context, ensuring a comprehensive analysis of the events captured in the video. Upon successful event detection, our protocol generates a folder with a .roi extension, which houses all files related to the detected events, offering an organized and accessible repository for the extracted data.
+
+    The event detection step is the most critical aspect of astroCAST and is sensitive to the choice of parameters. We have therefore implemented an interactive interface to explore the performance of each step during event detection given the relevant options.AstroCAST will prompt a link to the browser-based interface. We recommend to select a short range of frames in the video file to keep processing time during exploration short.
+
+    \begin{lstlisting}[style=bashStyle]
+        > astrocast explorer -- input path "/path/to/file" -- h5-loc "/dataset/name"
+    \end{lstlisting}
+
+    Once users are satisfied with the chosen parameters, they can be exported to a YAML config file, that can be provided
+    to the astrocast \ac{CLI}.
+
+    \subsubsection{Detection Module Description}
+    The detection module in AstroCAST applies a comprehensive approach to identify astrocytic events by smoothing,
+    thresholding, and applying morphological operations on fluorescence imaging data. This section outlines the key steps
+    and parameters used in the process.
+
+    \paragraph{Smoothing}
+    AstroCAST incorporates a Gaussian smoothing kernel to enhance event detection while preserving spatial features.
+    Adjusting the \inlineBash{--sigma} and \inlineBash{--radius} parameters allows for
+    the refinement of the smoothing effect, ensuring that events are emphasized without compromising the integrity of
+    spatial characteristics. The smoothed data then serve as the basis for subsequent detection steps, although users can
+    opt out of smoothing if desired.
+
+    \paragraph{Identifying active pixels}
+    Thresholding in AstroCAST is executed in two phases, spatial and temporal, to classify pixels as active with high precision.
+    Spatial thresholding evaluates the entire frame to distinguish active pixels, automatically determining a cutoff value. It incorporates the mean fluorescence ratio of active to inactive pixels to mitigate the incorrect identification of noise as events. The \inlineBash{--min-ratio} parameter sets the minimum ratio threshold, and the \inlineBash{--z-depth} parameter allows for the consideration of multiple frames to improve threshold accuracy.
+    Temporal thresholding analyzes the video as a series of 1D time series, identifying peaks with a prominence above a user-defined threshold. Parameters such as \inlineBash{--prominence}, \inlineBash{--width}, \inlineBash{--rel-height}, and \inlineBash{--wlen} fine-tune the detection of events over time, enhancing the separation of true events from noise.
+    Combining spatial and temporal thresholding, users can choose to merge or differentiate the active pixels identified by each method, optimizing event detection based on specific dataset characteristics.
+
+    \paragraph{Morphological Operations}
+    To address artifacts resulting from thresholding, such as holes (false negatives) and noise (false positives), AstroCAST employs morphological operations. Parameters like \inlineBash{--area-threshold} and \inlineBash{--min-size} adjust the maximum hole size to fill and the minimum size of active pixel clusters, respectively. These operations, which also consider connectivity and the \inlineBash{--z-depth} parameter, refine the detection outcome by smoothing gaps and removing minor artifacts, enhancing the clarity and segmentation of detected events.
+
+    \paragraph{Additional options}
+    Additionally, AstroCAST provides the option to exclude the video border from active pixel detection (\inlineBash{--exclude-border}) to mitigate motion correction artifacts. An experimental feature (\inlineBash{--split-events}) is available for separating incorrectly connected events, further improving the accuracy of event detection.
+
+    \subsubsection{Evaluating Detection Quality}
+    AstroCAST offers a streamlined approach for assessing the quality of event detection through its command-line interface.
+
+    \begin{lstlisting}[style=bashStyle]
+        > astrocast view-detection-results "/path/to/roi"
+    \end{lstlisting}
+
+    Researchers can visually inspect the detection outcomes. During this evaluation phase, it is crucial to determine whether the detection process has successfully identified all expected events, thereby minimizing false negatives, and to assess the correctness of these events to ensure that noise has not been misclassified as true events, which would indicate false positives. If the detection results are not satisfactory, revising the event detection parameters or adjusting settings in the preceding background subtraction step (\ref{subsubsec:background}) may be necessary to achieve improved accuracy. For a dynamic visualization that illustrates the successful identification of events we included an example video\frefsupp{detection-results}.
+
+    \subsection{Embedding}\label{subsec:embedding}
+
+    \subsubsection{Quality control and Standardization}\label{subsubsec:quality-control}
+
+    After successful detection of events, users need to control the quality of the result to ensure data integrity for downstream analysis. In astroCAST this step optionally includes filtering and normalization. AstroCAST also features a dedicated \ac{GUI} to guide selection of filter and normalization parameters.
+
+    \begin{lstlisting}[style=bashStyle]
+        > astrocast exploratory-analysis --input-path "/path/to/roi/" --h5-loc "/dataset/name"
+    \end{lstlisting}
+
+    Here, we are going to showcase the steps using the astroCAST python package directly. Users are directed to our \href{https://github.com/janreising/astroCAST/blob/baa6ba608914338629fe117836b007a88419ba88/notebooks/examples/B-embedding.ipynb}{example notebook} to follow along. Of note, large datasets might require significant computational time. Hence, we recommend to utilize dynamic disk caching, via the \inlinepy{cache\_path} parameter, to mitigate redundant processing.
+
+    \begin{lstlisting}[style=pyStyle]
+        from pathlib import Path
+        from astrocast.analysis import Events, Video
+
+        # load video data
+        video_path = 'path/to/processed/video.h5'
+        h5_loc = 'df/ch0'
+        lazy = False  # flag to toggle on-demand loading; slower but less memory
+        video = Video(data=video_path, loc=h5_loc, lazy=lazy)
+
+        # load event data
+        event_path = 'path/to/events.roi'
+        cache_path = Path(event_path).joinpath('cache')
+        eObj = Events(event_dir=event_path, data=video, cache_path=cache_path)
+    \end{lstlisting}
+
+    The events object has an \inlinepy{events} instance, which contains the extracted signal, as well as their associated attributes (for example \inlinepy{'dz', 'x0'}) and metrics ( for example \inlinepy{'v\_area', 'v\_signal\_to\_noise\_ratio'}). An explanation of all columns can be found in the class docstring \inlinepy{help(Events)}.
+
+    \paragraph{Filtering}
+    Typically, datasets undergo filtering to adhere to experimental parameters or to eliminate outliers. Although a detailed discourse on filtering protocols is outside this document's scope, we address several prevalent scenarios. For astrocytic events, imposing a cutoff for event duration is beneficial, especially when distinguishing between rapid and protracted calcium events. Moreover, applying a threshold for the signal-to-noise ratio helps to discard events with negligible amplitude. Although it seems optimal to include as many events as possible, practical issues such as computational limits and the risk of mixing important events with irrelevant data require a selective approach. Additionally, filtering aids in removing outliers, achieved either through manual adjustments or an unbiased clustering method. It is vital to recognize that the concept of an outlier is not universal, but intimately tied to the specifics of the experimental design. Rigorous, context-sensitive examination is crucial for accurate data interpretation. We encourage users to venture beyond the preset analysis tools of AstroCAST, engaging with their data through custom analysis methods tailored to their unique experimental conditions.
+
+    \begin{lstlisting}[style=pyStyle]
+        from astrocast.analysis import Plotting
+        plot = Plotting(events=eObj)
+
+        # explore distribution
+        plot.plot_distribution(column='dz', outlier_deviation=3)
+
+        # filter based on user choice
+        #  here: events of length between 3 and 200 frames
+        filter_choice = {'dz': (3, 200)}
+        eObj.filter(filter_choice, inplace=True)
+    \end{lstlisting}
+
+    \paragraph{Event extension}
+    AstroCAST's event detection module is designed to pinpoint individual events with precise temporal accuracy. Often, this precision means that the peripheral regions, or shoulders, of the event peak might not be captured. Yet, these initial and concluding slopes of the event can reveal crucial information about its nature. To address this, astroCAST includes a feature that allows for the extension of detected events to include adjacent frames.
+
+    \begin{lstlisting}[style=pyStyle]
+        # extend events
+        # use_footprint: toggles between maximum projection (footprint) or first/last event frame
+        # extend: either an int, (int, int) or -1 for extension across the full video
+        eObj.get_extended_events(use_footprint=True, extend=3, in_place=True, load_to_memory=True)
+    \end{lstlisting}
+
+    \paragraph{Enforcing fixed-length events}
+    \label{par:enforcing-length}
+    Enforcing a fixed event length is a requirement for some modules of astroCAST. However, enforcing a length will significantly distort the actual event characteristics. Use length enforcement cautiously, as it can alter your data and even overlap with other nearby events. If required by your analysis, the toolkit will prompt you to unify event lengths (for example \ac{CNN} Autoencoders). For diverse event durations, consider filtering your data for similar lengths or analyzing short and long events separately to maintain data integrity.
+
+    \begin{lstlisting}[style=pyStyle]
+        # extend events
+        eObj.get_extended_events(enforce length=15,
+                    use_footprint=True, extend=8, in_place=True, load_to_memory=True)
+    \end{lstlisting}
+
+    \paragraph{Normalization and Standardization}
+    The final step before clustering involves normalizing the signal. This process aims to mitigate the impact of technical effects encountered during recordings, such as fluorescence bleaching, and facilitating the comparison across multiple experiments. Normalization is particularly critical when employing machine learning algorithms, as it ensures data uniformity and comparability.
+
+    AstroCAST offers a versatile normalization interface to accommodate various research needs. This dynamic system allows users to apply a series of operations such as subtraction, division, and first-order differentiation to standardize data. Operations can be tailored using common statistical functions like the mean, median, or standard deviation. Additionally, AstroCAST provides a \inlinepy{'population\_wide'} flag, offering users the choice to normalize signals either individually or across a collective dataset, thereby maximizing analytical precision and flexibility.
+
+    \begin{lstlisting}[style=pyStyle]
+        # define normalization instructions
+        #  here: take the differential of each signal
+        #  and then divide by maximum value in the population
+        instructions = {
+            0: ["diff", {}],
+            1: ["divide", {"mode": "max", "population_wide": True}]
+        }
+
+        # apply the normalization
+        eObj.normalize(instructions, inplace=True)
+    \end{lstlisting}
+
+    \subsubsection{Event encoding}
+    %Timing: 1 h – 6h
+    %Running time will increase non-linearly with the number of events being clustered and varies substantially between approaches chosen.
+
+    AstroCAST introduces a structured approach to address the challenge of varying event durations, detailed here with increasing complexity. The normalized timeseries are transformed into fixed-length feature vectors suitable for clustering and further analysis. This sequence of steps allows for a more focused analysis while balancing the need for data integrity and computational efficiency. Each alternative has advantages and disadvantages, notably the ability to deal with variable length events\tref{embedding}.
+
+    \paragraph{Feature extraction}
+    Feature extraction offers a simple yet powerful approach to reduce timeseries data into a manageable set of dimensions. The module employs a variety of metrics, like mean, median, and Shannon entropy, accessible through \inlinepy{help(FeatureExtraction)}. While this method is length-agnostic, it may overlook key features, due to the inherent dimensional reduction. Further dimension reduction can be applied using techniques like PCA, t-SNE, or UMAP .
+
+    \begin{lstlisting}[style=pyStyle]
+        import astrocast.reduction as red
+
+        # extract features
+        fe = red.FeatureExtraction(eObj)
+        features = fe.all_features(dropna=True)
+
+        # classify labels
+        hdb = clust.HdbScan()
+        lbls = hdb.fit(features)
+
+        # visualize with UMAP
+        umap = red.UMAP()
+        embedding = umap.train(features)
+        umap.plot(data=embedding, labels=lbls, use_napari=False)
+    \end{lstlisting}
+
+    \paragraph{\ac{CNN} Autoencoder}
+
+    Using a \ac{CNN} Autoencoder provides an advanced way to maintain key features while reducing data complexity. The CNN Autoencoder consists of an encoder that maps the timeseries to a latent vector and a separately trained decoder, which performs the inverse operation. After training, only the encoder is utilized for event embedding. Note that this approach requires the input to have a fixed length (see \ref{par:enforcing-length}).
+
+    \begin{lstlisting}[style=pyStyle]
+        import astrocast.autoencoders as AE
+
+        # check that traces have fixed length
+        if eObj._is_ragged():
+            raise ValueError()
+        target_length = len(eObj.events.iloc[0].trace)
+
+        # Prepare data
+        data = np.array(eObj.events.trace.tolist())
+        X_train, X_val, X_test = cnn.split_dataset(data=data)
+
+        # create and train model
+        cnn = AE.CNN_Autoencoder(target_length=target_length)
+        cnn.train_autoencoder(X_train=X_train, X_val=X_val, epochs=25)
+
+        # save model
+        cnn.save("cnn.pth")
+
+        # evaluate embedding performance
+        cnn.plot_examples_pytorch(X_test, show_diff=True)
+    \end{lstlisting}
+
+    \paragraph{\ac{RNN} Autoencoder}
+
+    For encoding time series of variable lengths into consistent latent vectors, the \ac{RNN} Autoencoder stands out. This approach is notably advantageous over CNN embeddings, as it eliminates the need for uniform input lengths, offering a more flexible and comprehensive encoding solution for diverse data sets. However, this flexibility comes at the cost of increased computational demand, complexity in parameter tuning and an overall decrease in embedding quality.
+
+    \begin{lstlisting}[style=pyStyle]
+        import astrocast.autoencoders as AE
+
+        # Prepare data
+        pdl = AE.PaddedDataLoader(data=eObj.events.trace)
+        X_train, X_val, X_test = pdl.get_datasets(batch_size=16, val_size=0.1, test_size=0.05)
+        model_path = "path/to/save/models/"
+
+        # train RNN
+        tRAE = AE.TimeSeriesRnnAE(use_cuda=True)
+        tRAE.train_epochs(dataloader_train=X_train,
+                          dataloader_val=X_val,
+                          num_epochs=10,  # number of training epochs
+                          patience=10,  # epochs to wait before early stopping
+                          safe_after_epoch=model_path
+                          )
+
+        # save model
+        tRAE.save_models("encoder.pth", "decoder.pth")
+
+        # evaluate embedding performance
+        fig, x_val, y_val, latent, losses = tRAE.plot_traces(dataloader=X_test, figsize=(20, 20))
+        fig.savefig("tRAE_performance.png")
+    \end{lstlisting}
+
+    \subsection{The outcomes of experiments}
+    %Timing: 1 h – 6h
+    %Running time will increase non-linearly with the number of events being clustered and varies substantially between approaches chosen.
+
+    The last step of the protocol is to evaluate the outcomes of experiment\tref{experiments}, utilizing various packages including scikit-learn and dtaidistance\citep{pedregosa_scikit-learn_2011,meert_wannes_dtaidistance_2020,mcinnes_umap_2018,mcinnes_hdbscan_2017}. This section provides examples to inspire various ways datasets can be analyzed. The best analysis approach will depend on the nature of the study, thus we include examples of common types of experiments\fref{6}. AstroCAST is designed to be flexible and modular, allowing for custom addition of analyses tailored to the specific dataset. The examples in this section focus on two primary types of analyses: comparing groups under different conditions (Conditional Contrasts) and detecting coincidences of independent stimuli (Coincidence Detection). When analyzing data from multiple experiments (for example, different conditions) the datasets can be combined with the \inlinepy{MultiEvents} class.
+
+    \begin{lstlisting}[style=pyStyle]
+        from astrocast.analysis import MultiEvents
+
+        # collect list of experiments
+        paths = ["./path/1", "./path/2", ...]
+
+        # optional: define group membership
+        groups = ["group_1", "group_2"]
+
+        # load combined dataset
+        combined_events_obj = MultiEvents(events_dirs=paths, groups=groups,
+                                            data="infer", lazy=True)
+    \end{lstlisting}
+
+    Here, we are using sets of synthetic datasets to reproducibly show the advantages and disadvantages of each analysis approach. We encourage users to explore their own variations of synthetic datasets.
+
+    \begin{lstlisting}[style=pyStyle]
+        from astrocast.helper import DummyGenerator, SignalGenerator
+
+        # general settings
+        z_range = (0, 10000)  # range of frames that events can be created
+
+        # Create signal generators
+        group_1 = SignalGenerator(trace_length=(50, 50),
+                    noise_amplitude=0.001, parameter_fluctuations=0.01,
+                    b=1, plateau_duration=1)
+        group_2 = SignalGenerator(trace_length=(50, 50),
+                    noise_amplitude=0.001, parameter_fluctuations=0.01,
+                    b=2, plateau_duration=6)
+        generators = [group_1, group_2]
+
+        # Create stimulus timings
+        timing_1 = None  # random event distribution
+        timing_2 = list(range(0, z_range[1], 1000))
+        timings = [timing_1, timing_2]
+
+        # Create synthetic events
+        dg = DummyGenerator(name="synthetic_events",
+            num_rows=100  # number of events per group
+            z_range=z_range, generators=generators, timings=timings,
+        )
+        eObj = dg.get_events()
+
+        # create embedding as in previous steps
+    \end{lstlisting}
+
+    \subsubsection{Conditional Contrasts}
+    This module compares different experimental groups by assessing whether the observed effects are condition-dependent\fref{6}[B]. Common examples include application of different drugs, samples from different animal models or different brain regions.
+
+    \paragraph{Classifier (Predict the Condition)}
+    Use classification algorithms to predict the condition of each event based on its features. This provides an indication of how effectively the conditions can be distinguished based on the observed events. Feature embedding is necessary.
+
+    \begin{lstlisting}[style=pyStyle]
+        from astrocast.clustering import Discriminator
+
+        # assumes eObj and embedding was created previously
+        categories = eObj.events.group.tolist()
+        classifier = "RandomForestClassifier"
+
+        # create disciminator object and train
+        discr = Discriminator(eObj)
+        clf = discr.train_classifier(embedding=embedding,
+                                     category_vector=categories,
+                                     classifier=classifier)
+
+        # evaluate the outcome (metrics and confusion matrix)
+        scores = discr.evaluate(show_plot=False)
+        print(scores)
+    \end{lstlisting}
+
+    \paragraph{Hierarchical Clustering (Overlap with Conditions)}
+    Hierarchical clustering groups similar events together. Similarity between event traces is assessed by either Dynamic Time Warping (DTW) or Pearson Correlation, basically calculating a distance between all events. The aim is to see if these groups correspond to different experimental conditions, which would indicate that the conditions have distinct profiles. Hierarchical clustering does not depend on feature embedding and can be safely performed on the normalized event traces. The \inlinepy{Linkage} module will return \inlinepy{barycenters}, which can be understood as a consensus event shape for each cluster, and a \inlinepy{cluster\_lookup\_table} which maps the identified clusters to the events. Clusters can be defined by either a set number of expected clusters (\inlinepy{criterion='maxlust', cutoff=expected\_num\_clusters}) or maximum distance (\inlinepy{criterion='distance', cutoff=max\_distance}).
+
+    \begin{lstlisting}[style=pyStyle]
+        from astrocast.clustering import Linkage, Discriminator
+
+        # settings
+        categories = eObj.events.group.tolist()
+        correlation_type = "dtw"  # or 'pearson'
+
+        # create linkage object and create clusters
+        link = Linkage()
+        result = link.get_barycenters(eObj.events,
+                                      cutoff=num_groups,  # here we choose to extract our groups
+                                      criterion='maxclust',
+                                      distance_type=correlation_type
+                                      )
+        # evaluate outcome (metrics and confusion matrix)
+        barycenters, cluster_lookup_table = result
+        eObj.add_clustering(cluster_lookup_table, column_name='predicted_group')
+        predicted_categories = eObj.events.predicted_group.tolist()
+
+        scores = Discriminator.compute_scores(categories, predicted_categories,
+                                              scoring="clustering")
+        print(scores)
+    \end{lstlisting}
+
+    \subsubsection{Coincidence Detection}
+    This module focuses on identifying whether certain conditions or events coincide with or predict other phenomena\fref{6}[C]. Common examples would be neuronal bursts or observed animal behavior.
+
+    \paragraph{Classifier (Predict Incidence Occurred)}
+    Similar to the classifier used in conditional contrasts, this module predicts whether a specific incidence or event has occurred. This is particularly useful for identifying causal relationships or triggering events.
+
+    \begin{lstlisting}[style=pyStyle]
+        from astrocast.clustering import CoincidenceDetection
+
+        # assumes eObj and embedding was created and the stimulus timings are known
+        cDetect = CoincidenceDetection(events=eObj,
+                                       incidences=timing,
+                                       embedding=embedding)
+
+        # predict classes and evaluate outcome
+        _, scores = cDetect.predict_coincidence(binary_classification=True)
+        print(scores)
+    \end{lstlisting}
+
+    \paragraph{Regression (Timing of Incidence; Coinciding Events Only)}
+    Regression analysis can be used to predict when an incidence occurred based on the event embedding. This analysis aims to establish whether astrocytic events correlate with the incident in question, or vice versa.
+
+    \begin{lstlisting}[style=pyStyle]
+        from astrocast.clustering import CoincidenceDetection
+
+        # assumes eObj and embedding was created and the stimulus timings are known
+        cDetect = CoincidenceDetection(events=eObj,
+                                       incidences=timing,
+                                       embedding=embedding)
+
+        # predict classes and evaluate outcome
+        _, scores = cDetect.predict_incidence_location()
+        print(scores)
+    \end{lstlisting}
+
+
+    \section{Discussion}
+    In the field of neurobiology, it is important to acknowledge the substantial gap in open-source, customizable tools tailored for the comprehensive characterization and dynamics of astrocytes. This scarcity significantly hinders the advancement of our understanding of the complex functions carried out by these glial cells. Their function extends far beyond their traditional role of supporting neuronal activity\citep{montalant_role_2021,ransom_new_2003}. Thus, the development and refinement of specialized tools such as astroCAST represents a step forward in addressing this limitation. Unlike previous methodologies that regard astrocytes as mere adjuncts to neuronal studies, astroCAST aimed to meticulously and explicitly address the uniqueness of astrocyte research\tref{transposed-comparison}.
+
+    AstroCAST offers comprehensive options for analyzing and interpreting activity events repurposing existing tools from various data science domains for astrocyte research. This approach highlights the importance of leveraging accumulated knowledge across fields to enhance the efficiency and breadth of astrocyte studies. Moreover, the advances in bioimaging dataset processing are still lagging behind other big data analysis approaches. Addressing this gap, astroCAST is a dedicated machine-learning driven toolkit that can be used to identify, denoise and characterize the dynamics of a set cell population. Compared to other available tools, astroCAST was specifically developed for astrocytes (Suite2P\citep{pachitariu_suite2p_2017}, CaImAn\citep{giovannucci_caiman_2019},CaSCaDe\citep{rupprecht_database_2021}) and is open-source (CHIPS\citep{barrett_chips_2018}, AquA\citep{wang_event-based_2018}, Begonia\citep{bjornstad_begoniatwo-photon_2021}, MSparkles\citep{stopper_novel_2022}). Moreover, it includes timeseries clustering which none of these tools provide.
+
+    We assessed how different embeddings and analysis approaches handle the intricate dynamics of astrocytic calcium events. To address method performance we focused on accuracy, generalization to new data, and computational efficiency\fref{6}. When provided with a dataset containing two groups with identical characteristics, all modules in astroCAST could perfectly memorize the training dataset, but failed to generalize this knowledge to unseen data. This outcome aligns with our expectations, as astrocytic events of identical shapes should indeed be indistinguishable.
+
+    Feature extraction (FExt) emerges as a quick and straightforward method, albeit less effective with complex event types. Convolutional Neural Networks (CNNs) offer speed and accuracy but falter with astrocytic events' intrinsic variable lengths. Attempts to enforce fixed lengths or extend events risk altering their inherent shapes and producing spurious results. Recurrent Neural Networks (RNNs) show promise in dealing with variable event lengths but are challenging to fine-tune. This can be seen by their subpar performance in the triplet condition (accuracy of 0.56). Pearson correlation analysis proved inadequate, with all clustering algorithms failing to differentiate between events with significant variances (0.5 prediction accuracy), except for the trivial case involving variable lengths. Dynamic Time Warping (DTW) excels in handling variable lengths but is slower and slightly less accurate (0.94 accuracy compared to others' 0.99) for fixed-length events. However, avoiding an embedding step compensates for the slower processing speed, albeit with a significant memory constraint as the number of events increases (O($n^2$) complexity).
+
+    In summary, while each approach has its strengths and weaknesses in processing astrocytic calcium imaging datasets, our findings highlight the crucial balance between accuracy, adaptability to variable event lengths, and computational demands.
+
+    The intended audience of astroCAST are bioinformaticians or neuroscientists with a solid foundation in programming. Proficiency in Python and familiarity with executing command line tools are essential prerequisites for effectively utilizing this toolkit. Importantly, troubleshooting code is a necessary skill set for circumnavigating potential challenges during data processing and personalizing experimental implementation. Prior experience in image analysis, time series clustering, and machine learning is advantageous but not mandatory. However, to decode the intricacies of astrocytes, it is essential employ a multidisciplinary team skilled in both experimental neuroscience and computational analysis.
+
+    In our experience, astroCAST's \ac{GUI} responsiveness was a key limitation, indicating an area of fine-tuning for future versions. Furthermore, the toolkit could not pass the threshold of "inference-of-cell" implementation, which would assign events to individual cells. Thus, the "Functional Units" module currently exists as an experimental feature, but it lacks proper validation and testing due to insufficient biological data (e.g., sparse Gcampf6 expression recordings or post-imaging staining).
+
+    However, \ac{astroCAST} can facilitate several key outcomes for researchers working with astrocytic calcium imaging data analysis. On the technical front, the tool is designed to handle large-scale datasets effectively. For example, in time-lapse recordings of astrocytes at 20X magnification and 1024x1024 pixel resolution, astroCAST is equipped to identify up to 1,000 astrocytic events per 100 frames. As the analysis progresses, users should find that the software can comfortably manage up to 100,000 events using the algorithms provided. This performance equates to the comparative analysis of around 7 time-lapse videos, each with a 20-minute recording time.
+
+    The astroCAST toolkit has proved to be effective in analyzing calcium events in fluorescence imaging data. We have tested the system in depth on acute slices, as well as available public data for in-vivo and cell culture recordings\tref{datasets}. There are, however, challenges that might be considered as limitations. For example, due to its design agnosticism towards cell shape, astroCAST cannot firmly attribute events to individual cell. This allows for the analysis of recordings even when cells overlap or change morphology. Furthermore, issues that originate from the difficulty to distinguish close bordering events, the computational complexity, the event length and data dimensionality, and others, may also need fine-tuning. We acknowledge that users might encounter some of these, and we make suggestions for each in the troubleshooting section. We regard astroCAST's flexible modular design as crucial for overcoming challenges, empowering researchers to translate astrocytic calcium signalling into biological insights.
+
+    AstroCAST is designed to handle larger datasets, analyzing more events than previously possible in astrocyte-specific studies with enhanced efficiency. This is achieved without compromising computational time. From an innovation standpoint, astroCAST offers more than just event detection. Users can expect a cohesive, end-to-end analytical workflow that guides them from raw video data to insightful experimental conclusions. The software brings structure and flexibility to the often-challenging variable-length timeseries analysis, setting it apart as a unique tool in the field of astrocytic calcium imaging. AstroCAST not only enhances our ability to probe astrocyte activity, but also holds the promise of unveiling previously unexplored aspects of their role in neural circuitry and brain development and function. This demonstrates the potential for future synergistic integration of advanced imaging techniques, such as calcium imaging, with established and high-resolution methods like immunohistochemistry or spatial transcriptomics, offering a wealth of new possibilities for in-depth astrocytic analysis.
+
+    \section*{Conflict of Interest Statement}
+    The authors declare that the research was conducted in the absence of any commercial or financial relationships that could be construed as a potential conflict of interest.
+
+    \section*{Author Contributions}
+    JPR and EH conceptualized the study and EH secured funding for the project. JPR designed the algorithms, conducted the data analysis, and contributed to the building of the astroCAST toolkit. ACGS collaborated with JPR in building the toolkit. JPR wrote the manuscript, with contributions from ACGS and AS. EH and AS provided supervision throughout the project. All authors reviewed and approved the final manuscript.
+
+    \section*{Use of Generative AI}
+    During the preparation of this manuscript, we utilized the generative capabilities of OpenAI's ChatGPT-4. The AI's primary role was to assist in proofreading and language refinement to ensure clarity, conciseness, and readability of the text. While the AI provided suggestions for language adjustments, the final manuscript content was thoroughly reviewed, curated, and approved by the authors. We, the authors, take full and complete responsibility for the integrity and accuracy of the manuscript content.
+
+    \section*{Funding}
+    This study was supported by grants to EH from the Swedish Research Council (2016-01111, 2019-01157, and 2023-02613), the Stockholm County Council (2019–0400, 2019–0974 and FoUI-966 449), the Swedish Brain (FO2019-0087 and FO2021-0313), the Swedish National Heart and Lung (2018 0505 and 2021 0579), the Axel Tielmans, the Freemasons Children's House foundations and Karolinska Institutet. In addition, JR, ACGS and AS were partly supported by the Freemasons Children’s House foundation scholarships. The funders did not participate in the design or conduct of the study.
+
+    \section*{Acknowledgments}
+    We sincerely thank Anita Javanmardi for her help with the generation of the graphical abstract. Also, we would like to express our gratitude to the staff and management of the Animal facility at KMB for their indispensable support throughout the research. The development of the toolkit presented in this work was made feasible by the generous allocation of computational resources from projects SNIC 2022/22-1224, SNIC 2022/23-638, NAISS 2023/22-646, NAISS 2023/23-338, NAISS 2024/22-60 and NAISS 2024/23-35. These projects are hosted by the National Academic Infrastructure for Supercomputing in Sweden (NAISS) at UPPMAX. We acknowledge the Swedish Research Council for funding these resources under grant agreement no. 2022-06715.
+
+    \section*{Data Availability Statement}
+    Further information and requests for resources should be directed to and will be fulfilled by the lead contact, Eric Herlenius [eric.herlenius@ki.se]. All original code has been deposited at \href{https://github.com/janreising/astroCAST}{astroCAST} and questions regarding the code should be opened as an issue there or directed to Jan Philipp Reising [jan.reising@ki.se].
+
+    \bibliographystyle{Frontiers-Harvard} %  Many Frontiers journals use the Harvard referencing system (Author-date), to find the style and resources for the journal you are submitting to: https://zendesk.frontiersin.org/hc/en-us/articles/360017860337-Frontiers-Reference-Styles-by-Journal. For Humanities and Social Sciences articles please include page numbers in the in-text citations
+    %\bibliographystyle{Frontiers-Vancouver} % Many Frontiers journals use the numbered referencing system, to find the style and resources for the journal you are submitting to: https://zendesk.frontiersin.org/hc/en-us/articles/360017860337-Frontiers-Reference-Styles-by-Journal
+    \bibliography{astroCAST}
+
+    \section*{Tables}
+    %%
+    % Table 0: comparison to other tools
+    \bgroup
+    \def\arraystretch{1.1}
+    \begin{table}[htb]
+        \centering
+        \caption{Comparison of computational tools for analyzing cellular calcium oscillations. This table highlights the diversity of approaches, including the programming language used, modularity of the tool, and the availability of a graphical user interface (GUI). Modular indicates whether steps can be used in isolation and custom steps can be added. Notably, entries marked with an asterisk (*) are based on preprint sources. \newline}
+        \label{tab:transposed-comparison}
+        \tiny
+        \begin{tabular}{|l|c|c|c|c|c|c|c|c|c|c|c|}
+            \hline {}                                                       & \textbf{cell type} & \textbf{model} & \textbf{validation} & \textbf{imaging} & \textbf{language} & \textbf{modular} & \textbf{GUI} \\
+            \hline \textbf{Suite2P\citep{pachitariu_suite2p_2017} *}        & neurons            & in-vivo        & comparison & 2P & Python & \cmark & \cmark \\
+            \hline \textbf{FASP\citep{wang_automated_2017}}                 & astrocytes         & in-vitro       & synthetic           & \xmark & Java & \cmark & \cmark \\
+            \hline \textbf{CHIPS\citep{barrett_chips_2018}} & endothelial & \makecell{in-vitro \\in-vivo} & \xmark & \makecell{2P \\confocal} & Matlab & \cmark & \cmark \\
+            \hline \textbf{AquA\citep{wang_event-based_2018}}          & astrocytes         & \makecell{in-vitro       \\in-vivo} & synthetic          & 2P & Matlab & \xmark & \cmark \\
+            \hline \textbf{CaImAn\citep{giovannucci_caiman_2019}} & neurons & \makecell{in-vitro \\in-vivo} & user labels & 1P, 2P & Python & \cmark & \cmark \\
+            \hline \textbf{Astral\citep{dzyubenko_analysing_2021}} & astrocytes & in-vitro & \xmark & 1P & Python & \xmark & \cmark \\
+            \hline \textbf{Begonia\citep{bjornstad_begoniatwo-photon_2021}} & astrocyte & in-vivo & \xmark & 2P & Matlab & \cmark & \cmark \\
+            \hline \textbf{CaSCaDe\citep{rupprecht_database_2021}} & neurons & \makecell{in-vivo \\in-vitro \\ex-vivo} & ground truth & 1P, 2P & Python & \cmark & \xmark \\
+            \hline \textbf{MSparkles\citep{stopper_novel_2022} *} & \makecell{astrocytes \\neurons} & \makecell{in-vivo \\ex-vivo} & comparison & 1P, 2P & Matlab & \xmark & \cmark \\
+            \hline \textbf{astroCAST} & astrocytes & \makecell{in-vivo \\ex-vivo} & synthetic & 1P, 2P & Python & \cmark & \cmark \\
+            \hline
+        \end{tabular}
+    \end{table}
+    \egroup
+
+    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+    % Table 1: functionality comparison
+
+    \bgroup
+    \def\arraystretch{1.5}
+    \begin{table}[htb]
+        \centering
+        \caption{Availability of different functionalities of astroCAST across
+        operating systems. A check mark (\cmark) denotes full compatibility and active support. An asterisk (\optional)
+            indicates that the
+            functionality is optional and can be installed upon user request (see below). A cross mark (\xmark) signifies
+            that the
+            functionality is not supported or available on the operating system. A half bullet (\halfbullet) indicates
+            partial support,
+            indicating that the functionality is expected to be available but is not actively tested. \newline}
+        \label{tab:functionalities}
+        \begin{tabular}{|l|c|c|c|c|}
+            \hline
+            \textbf{Functionality} & \textbf{Linux} & \textbf{Windows} & \textbf{MacOS (Intel)} & \textbf{Docker} \\ \hline
+            Preprocessing          & \cmark         & \cmark           & \cmark                 & \cmark          \\ \hline
+            Motion correction      & \cmark         & \cmark           & \cmark                 & \cmark          \\ \hline
+            Denoising              & \cmark         & \halfbullet      & \cmark                 & \cmark          \\ \hline
+            Delta                  & \cmark         & \cmark           & \cmark                 & \cmark          \\ \hline
+            Detection              & \cmark         & \cmark           & \cmark                 & \cmark          \\ \hline
+            UMAP outlier detection & \cmark         & \cmark           & \xmark                 & \cmark          \\ \hline
+            Encoding - all         & \cmark         & \cmark           & \cmark                 & \cmark          \\ \hline
+            DTW distance           & \cmark         & \cmark           & \xmark                 & \cmark          \\ \hline
+            Video player \optional & \cmark         & \cmark           & \cmark                 & \xmark          \\ \hline
+        \end{tabular}
+    \end{table}
+    \egroup
+
+    %%%%%%%%%%%%%%%%%%%
+    % Table 2: Datasets
+
+    \bgroup
+    \def\arraystretch{1.5}
+    \begin{table}[htb]
+        \centering
+        \caption{Overview of Datasets Employed in Analysis. \newline}
+        \label{tab:datasets}
+        \begin{tabular}{|l|l|l|l|l|l|}
+            \hline
+            \textbf{Dataset} & \textbf{Publication}              & \textbf{Experiment}   & \textbf{Imaging}   \\ \hline
+            train/test       & Reising et al. in preparation     & acute slices, Gcamp6f & \ac{1P} (8 Hz)     \\ \hline
+            ExVivo           & AQuA\citep{wang_event-based_2018} & acute slices, Gcamp6f & \ac{2P} (1.1 Hz)   \\ \hline
+            Glusnfr          & AQuA\citep{wang_event-based_2018} & acute slices, GluSnFR & \ac{2P} (4-100 Hz) \\ \hline
+            InVivo           & AQuA\citep{wang_event-based_2018} & in vivo GCamp6f       & \ac{2P} (2 Hz)     \\ \hline
+            cellscan\_scim   & CHIPS\citep{barrett_chips_2018}   & blood vessels         & \ac{2P}            \\ \hline
+        \end{tabular}
+    \end{table}
+    \egroup
+
+    %%%%%%%%%%%%%%%%%%%%
+    % Table 3: embedding
+
+    \bgroup
+    \def\arraystretch{1.5}
+    \begin{table}[htb]
+        \centering
+        \caption{Evaluation of different methodologies for Embedding and Distance calculations. Highlights the requirements and limitations. A (\cmark) indicates a necessary requirement, items with (\xmark) are optional and a (\halfbullet) indicates a difference between operating systems.\newline}
+        \label{tab:embedding}
+        \begin{tabular}{|l|c|c|c|c|c|}
+            \hline
+            & \textbf{Feature}    & \textbf{Convolutional} & \textbf{Recurrent}   & \textbf{Pearson}     & \textbf{Dynamic Time} \\
+            & \textbf{Extraction} & \textbf{Autoencoder}   & \textbf{Autoencoder} & \textbf{Correlation} & \textbf{Warping} \\ \hline
+            Abbreviation      & \textbf{FExt}       & \textbf{CNN}           & \textbf{RNN}         & \textbf{pearson}     & \textbf{DTW}          \\ \hline
+            Fixed length      & \xmark              & \cmark                 & \xmark               & \xmark               & \xmark                \\ \hline
+            Normalization     & \xmark              & \cmark                 & \cmark               & \xmark               & \xmark                \\ \hline
+            Training          & \xmark              & \cmark                 & \cmark               & \xmark               & \xmark                \\ \hline
+            Memory limited    & \xmark              & \xmark                 & \xmark               & \cmark               & \cmark                \\ \hline
+            Wall time limited & \cmark              & \xmark                 & \xmark               & \cmark               & \cmark                \\ \hline
+            Parallelized      & \xmark              & \xmark                 & \xmark               & \cmark               & \halfbullet           \\ \hline
+        \end{tabular}
+    \end{table}
+    \egroup
+
+    %%%%%%%%%%%%%%%%%%%%%%
+    % Table 4: Experiments
+
+    \bgroup
+    \def\arraystretch{1.5}
+    \begin{table}[htb]
+        \centering
+        \caption{Comprehensive overview of experiment types that are included in astroCAST, with their respective requirements.\newline}
+        \label{tab:experiments}
+        \begin{tabular}{|l|c|c|c|c|}
+            \hline
+            & \multicolumn{2}{c|}{\textbf{Conditional Contrasts}} & \multicolumn{2}{c|}{\textbf{Coincidence Detection}} \\ \hline
+            & \textbf{Classifier} & \textbf{Hierarchical} & \textbf{Classifier} & \textbf{Regression} \\ \hline
+            Training required & \cmark              & \xmark                & \cmark              & \cmark              \\ \hline
+            User labels       & group               & group                 & timing              & timing              \\ \hline
+            Input type        & embedding           & distance              & embedding           & embedding           \\ \hline
+        \end{tabular}
+    \end{table}
+    \egroup
+
+    \section*{Figures}
+    \begin{figure}[!htb]
+        \begin{center}
+            \includegraphics[width=\linewidth]{figures/1}
+        \end{center}
+        \caption{Schematic representation of the astroCAST toolkit comprising three major analytical phases for processing and analyzing astrocytic activity data. 1) In the preprocessing phase, video input is converted into an HDF5 file format, with optional stages for motion artifact correction, noise reduction, and background subtraction. 2) The event extraction phase involves the identification of astrocytic events, generating corresponding event traces and metadata. Events can subsequently undergo optional filtering, frame extension, and signal normalization. 3) The analysis of experiments is two-fold. For classification and regression, users may select from various feature vector embeddings including Feature Extraction (FExt), Convolutional Neural Network (CNN), and Recurrent Neural Network (RNN). For hierarchical clustering, the toolkit offers Pearson correlation and Dynamic Time Warping (DTW) for the computation of event similarity, represented as a distance matrix. Dashed outlines denote optional steps within the process. The presence of an open eye icon signifies supervised steps, while a closed eye indicates unsupervised steps. A line terminating in a circle denotes need for additional user input.}\label{fig:1}
+    \end{figure}
+
+    \begin{figure}[!htb]
+        \begin{center}
+            \includegraphics[width=\linewidth]{figures/2}
+        \end{center}
+        \caption{ The Astrocast Viewer interface, showcasing a video file of astrocytic calcium fluorescence captured within the inspiratory rhythm generator (preBötC) in the medulla. The original recording, acquired at a 20X magnification with a resolution of 1200x1200 pixels, was performed at a temporal resolution of 8Hz. The TIFF-format video was subsequently converted to the HDF5 file format, with spatial downscaling by a factor of four in the XY plane, as a preparatory step for further preprocessing.}\label{fig:2}
+    \end{figure}
+
+    \begin{figure}[!htb]
+        \begin{center}
+            \includegraphics[width=\linewidth]{figures/3}
+        \end{center}
+        \caption{
+            Effect of denoising on astrocytic calcium imaging data. \textbf{(A)} A single 256x256 pixel frame prior to denoising, where background noise is evident. \textbf{(B)} The same frame following denoising with enhanced clarity. (C, E, G, and I) Pixel intensity over 400 frames (50s) before the application of the denoising algorithm, showcasing the original signal variation, after normalization. (D, F, H, J) Corresponding traces after denoising, illustrating a stabilized intensity profile, with preserved signal characteristics. The same normalization parameters were applied to both original and denoised traces to ensure comparability of noise levels. Location of pixels are indicated with triangles in A and B. The denoising algorithm was executed on a (128, 128) field of view, incorporating a context of five adjacent frames for each target frame, with no gap frames. Parameters for the denoising model included a training period of 50 epochs, a learning rate of 0.0001, momentum of 0.9, and a stack of three layers with 64 kernels of size three in the initial layer, omitting batch normalization. During inference, a strategy of a 10-pixel overlap in all directions, complemented by 'edge' padding, was employed.
+        }\label{fig:3}
+    \end{figure}
+
+    \begin{figure}[!htb]
+        \begin{center}
+            \includegraphics[width=\linewidth]{figures/4}
+        \end{center}
+        \caption{
+            Comparison before and after the application of background subtraction to fluorescence imaging data. (A, C) fluorescence images before and after background subtraction, respectively, illustrating the removal of extraneous noise. After subtraction, the background is close to zero and exhibits overall lower noise levels. (B, D) Intensity traces corresponding to the marked points on the images are plotted over time (400 frames, 50s). These traces highlight the efficacy of background subtraction, with the post-subtraction traces approaching zero on the y-axis, thereby indicating a substantial reduction of background, while signal amplitude is conserved. However, the signal shapes, especially in the red trace, exhibit slight alterations post-subtraction. Moreover, the green trace reveals the inadvertent introduction of spurious events, serving as a cautionary example of how background subtraction can inadvertently affect data integrity if parameters are not judiciously optimized.
+        }\label{fig:4}
+    \end{figure}
+
+    \begin{figure}[!htb]
+        \begin{center}
+            \includegraphics[width=\linewidth]{figures/5}
+        \end{center}
+        \caption{
+            Depiction of astrocytic event detection employed by astroCAST using spatial and temporal thresholding. A) Binary mask of frame after application of spatial threshold (min\_ratio 1). B) Binary mask of framer after application of temporal threshold (prominence 2, width 3, rel\_height 0.9). C) Frame used for thresholding after motion correction, denoising and smoothing. D) Events detected as identified by both spatial and temporal thresholding. E-G) Pixel intensity analysis for selected pixels (as indicated in Panels A-D), with active frames color-coded in the plots. The frame shown in A-D is indicated as a vertical dotted line.
+        }\label{fig:5}
+    \end{figure}
+
+    \begin{figure}[!htb]
+        \begin{center}
+            \includegraphics[width=\linewidth]{figures/6}
+        \end{center}
+        \caption{
+            Performance of Different Algorithms on Analyzing Various Synthetic Datasets. A) Showcase of synthetic calcium events designed to represent various levels of analytical difficulty, where color coding corresponds to events generated under different parameter sets that simulate diverse conditions or event types. All events include a random noise amplitude of 0.001 and parameter fluctuations of 0.01, subtly varying each event's parameters. B) Conditional contrasts analysis assesses algorithmic efficiency in distinguishing events from differing conditions (groups 0, 1 and 2). Events are characterized using different methods: FExt for Feature Extraction, CNN for Convolutional Autoencoder, and RNN for Recurrent Autoencoder. The hierarchical clustering leverages distance metrics between events (Pearson correlationor dynamic time warping), depicted by the absence of training dependency in grey. CNN's inability to process variable-length events results in its omission in the final panel. C) Coincidence detection analysis gauges algorithm performance in predicting the occurrence of stimulus events. This encompasses two groups: one with events exclusively occurring during a stimulus and another with randomly occurring events. The embedding classifier and prediction methods are consistent with panel B, where the classifier identifies stimulus occurrence, and regression determines the exact timing of the stimulus in coinciding events. For all scores the worst score out of 3 replicates is displayed.
+        }\label{fig:6}
+    \end{figure}
+
+
+\end{document}
+
+%\section{Level1}
+%\subsection{Level 2}
+%\subsubsection{Level 3}
+%\paragraph{Level 4}
+%\subparagraph{Level 5}
