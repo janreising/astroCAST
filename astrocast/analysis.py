@@ -526,7 +526,9 @@ class Events(CachedClass):
         results = {f.__name__: np.round(f(groups, pred_groups), 2) for f in selected_metrics}
         return results
     
-    def get_counts_per_cluster(self, cluster_col: str, group_col: str = None) -> pd.DataFrame:
+    @wrapper_local_cache
+    def get_counts_per_cluster(self, cluster_col: str, group_col: str = None, z_slice: Tuple[int, int] = None,
+                               transpose: bool = False) -> (pd.DataFrame):
         """
                 Computes the counts of events per cluster, optionally grouped by an additional column.
 
@@ -537,7 +539,8 @@ class Events(CachedClass):
                     cluster_col: The name of the column in the events DataFrame that contains cluster labels.
                     group_col: The name of the column by which to group counts. If provided, the method
                         returns counts per cluster for each group. If None, the method returns overall counts per cluster.
-
+                    z_slice: Frames to select for counting
+                    transpose: Flag to return transposed matrix
                 Returns:
                     pd.DataFrame: A DataFrame with counts of events. Each row represents a cluster. If group_col is provided, each column represents a group, otherwise there is a single column with total counts.
 
@@ -546,25 +549,35 @@ class Events(CachedClass):
                     This method is particularly useful for analyzing the distribution of events across different clusters and groups.
 
                 """
+        
+        events = self.events.copy()
+        
+        if z_slice is not None:
+            z0, z1 = z_slice
+            events = events[(events.z0 >= z0) & (events.z1 < z1)]
+        
         if group_col is None:
-            counts = self.events[cluster_col].value_counts()
+            counts = events[cluster_col].value_counts()
         
         else:
             
-            unique_clusters = self.events[cluster_col].unique()
+            unique_clusters = events[cluster_col].unique()
             lut_cluster = {c: i for i, c in enumerate(unique_clusters)}
             
-            unique_groups = self.events[group_col].unique()
+            unique_groups = events[group_col].unique()
             lut_groups = {g: i for i, g in enumerate(unique_groups)}
             
             counts = np.zeros(shape=(len(unique_clusters), len(unique_groups)), dtype=int)
             
-            for _, row in self.events.iterrows():
+            for _, row in events.iterrows():
                 x = lut_cluster[row[cluster_col]]
                 y = lut_groups[row[group_col]]
                 counts[x, y] += 1
             
             counts = pd.DataFrame(data=counts, index=unique_clusters, columns=unique_groups)
+        
+        if transpose:
+            counts = counts.transpose()
         
         return counts
     
@@ -979,12 +992,30 @@ class Events(CachedClass):
         
         arr = np.zeros((len(events), self.num_frames))
         
-        for i, (z0, z1, trace) in enumerate(zip(events.z0, events.z1, events.trace)):
-            arr[i, z0:z1] = trace
+        for i, (idx, row) in enumerate(events.iterrows()):
+            z0, z1 = row.z0, row.z1
+            dz = z1 - z0
+            
+            trace = row.trace
+            dtrace = len(trace)
+            
+            if dz != dtrace:
+                logging.warning(f"z boundaries ({z0}, {z1}) does match trace length: {dtrace}. Skipping {idx}.")
+                continue
+            
+            if z0 < 0:
+                logging.warning(f"Encountered event with negative z0: {z0}. Skipping {idx}.")
+                continue
+            
+            try:
+                arr[i, z0:z1] = trace
+            except ValueError as err:
+                logging.warning(f"Encountered broadcast issue at {idx}. Skipping value. \n {err}")
         
-        # todo this should actually be a mask instead then; np.nan creates weird behavior
         if empty_as_nan:
-            arr[arr == 0] = np.nan
+            mask = np.ones(arr.shape)
+            mask[np.where(arr == 0)] = 0
+            arr = np.ma.array(arr, mask=mask)
         
         return arr
     
@@ -1029,10 +1060,9 @@ class Events(CachedClass):
         X = pd.DataFrame({"id": ids, "time": times, "dim_0": dim_0s})
         return X
     
-    @wrapper_local_cache
     def get_average_event_trace(
             self, events: pd.DataFrame = None, empty_as_nan: bool = True, agg_func: Callable = np.nanmean,
-            index: List[int] = None, gradient: bool = False, smooth: int = None
+            index: List[int] = None, gradient: bool = False, smooth: int = None, ragged: bool = False,
             ) -> pd.Series:
         """
         Computes the average trace of events, optionally applying smoothing and gradient calculation.
@@ -1052,7 +1082,8 @@ class Events(CachedClass):
             index: The index values for the resulting pd.Series. If None, defaults to a range based on trace length.
             gradient: If True, calculates the gradient of the average trace.
             smooth: Specifies the window size for smoothing the average trace. If None, no smoothing is applied.
-
+            ragged: Flag whether data is ragged or not
+            
         Returns:
             pd.Series: A pandas Series representing the average event trace, indexed as specified by the 'index' argument.
 
@@ -1065,7 +1096,7 @@ class Events(CachedClass):
         """
         
         # Convert events DataFrame to a numpy array representation
-        arr = self.to_numpy(events=events, empty_as_nan=empty_as_nan)
+        arr = self.to_numpy(events=events, empty_as_nan=empty_as_nan, ragged=ragged)
         
         # Check if agg_func is callable
         if not callable(agg_func):
@@ -1913,6 +1944,19 @@ class MultiEvents(Events):
                          "v_area_norm", "cx", "cy"), frame_to_time_mapping: Union[dict, list] = None,
                  frame_to_time_function: Union[Callable, List[Callable]] = None, cache_path: Union[str, Path] = None,
                  seed: int = 1):
+        
+        if cache_path is not None:
+            
+            if isinstance(cache_path, str):
+                cache_path = Path(cache_path)
+            
+            if not cache_path.is_dir():
+                cache_path.mkdir()
+                assert cache_path.exists(), f"failed to create cache_path: {cache_path}"
+                logging.info(f"created cache_path at {cache_path}")
+            
+            self.cache_path = cache_path
+        
         super().__init__()
         
         self.seed = seed
@@ -2021,7 +2065,7 @@ class MultiEvents(Events):
     
     def combine_events(self):
         events = pd.concat([ev.events for ev in self.event_objects])
-        events.reset_index(drop=False, inplace=True, names="idx")
+        events.reset_index(drop=False, inplace=True, names="subject_idx")
         
         # make categorical
         for col in ('file_name', 'subject_id', 'group'):
@@ -2030,40 +2074,40 @@ class MultiEvents(Events):
         
         return events
     
-    def __hash__(self):
-        raise NotImplementedError
+    # def __hash__(self):
+    #     raise NotImplementedError
     
-    def add_clustering(self, cluster_lookup_table: dict, column_name: str = "cluster") -> None:
-        
-        for event in self.event_objects:
-            event.add_clustering(cluster_lookup_table=cluster_lookup_table, column_name=column_name)
-        
-        self.events = self.combine_events()
+    # def add_clustering(self, cluster_lookup_table: dict, column_name: str = "cluster") -> None:
+    #
+    #     for event in self.event_objects:
+    #         event.add_clustering(cluster_lookup_table=cluster_lookup_table, column_name=column_name)
+    #
+    #     self.events = self.combine_events()
     
-    def filter(self, filters: dict, inplace: bool = True) -> None:
-        
-        if not inplace:
-            raise NotImplementedError("currently MultiEvent objects can only be changed inplace.")
-        
-        for event in self.event_objects:
-            event.filter(filters=filters, inplace=inplace)
-        
-        self.combine_events()
+    # def filter(self, filters: dict, inplace: bool = True) -> None:
+    #
+    #     if not inplace:
+    #         raise NotImplementedError("currently MultiEvent objects can only be changed inplace.")
+    #
+    #     for event in self.event_objects:
+    #         event.filter(filters=filters, inplace=inplace)
+    #
+    #     self.combine_events()
     
-    def to_numpy(self, events: pd.DataFrame = None, empty_as_nan: bool = True, ragged: bool = False) -> np.ndarray:
-        raise NotImplementedError("currently MultiEvent objects does not implement this function.")
-    
+    # def to_numpy(self, events: pd.DataFrame = None, empty_as_nan: bool = True, ragged: bool = False) -> np.ndarray:
+    #     raise NotImplementedError("currently MultiEvent objects does not implement this function.")
+    #
     def show_event_map(
             self, video: Union[Path, str] = None, loc: str = None, z_slice: Tuple[int, int] = None, lazy: bool = True
             ):
         raise NotImplementedError("currently MultiEvent objects does not implement this function.")
     
-    def get_trials(
-            self, trial_timings: Union[np.ndarray, da.Array], trial_length: int = 30,
-            multi_timing_behavior: Literal['first', 'expand', 'exclude'] = "first",
-            output_format: Literal['array', 'dataframe'] = "array"
-            ) -> Union[np.ndarray, pd.DataFrame]:
-        raise NotImplementedError("currently MultiEvent objects does not implement this function.")
+    # def get_trials(
+    #         self, trial_timings: Union[np.ndarray, da.Array], trial_length: int = 30,
+    #         multi_timing_behavior: Literal['first', 'expand', 'exclude'] = "first",
+    #         output_format: Literal['array', 'dataframe'] = "array"
+    #         ) -> Union[np.ndarray, pd.DataFrame]:
+    #     raise NotImplementedError("currently MultiEvent objects does not implement this function.")
     
     @wrapper_local_cache
     def get_extended_events(
@@ -2106,15 +2150,15 @@ class MultiEvents(Events):
             ) -> pd.DataFrame:
         raise NotImplementedError("currently MultiEvent objects does not implement this function.")
     
-    def normalize(self, normalize_instructions: dict, inplace: bool = True):
-        
-        if not inplace:
-            raise NotImplementedError("currently MultiEvent objects can only be changed inplace.")
-        
-        for event in self.event_objects:
-            event.normalize(normalize_instructions=normalize_instructions, inplace=inplace)
-        
-        self.combine_events()
+    # def normalize(self, normalize_instructions: dict, inplace: bool = True):
+    #
+    #     if not inplace:
+    #         raise NotImplementedError("currently MultiEvent objects can only be changed inplace.")
+    #
+    #     for event in self.event_objects:
+    #         event.normalize(normalize_instructions=normalize_instructions, inplace=inplace)
+    #
+    #     self.combine_events()
 
 
 class Plotting:
@@ -2476,3 +2520,46 @@ class Plotting:
         axx[letters_right[-1]].set_xlabel("frames")
         
         return fig, axx
+    
+    def get_color_mapping(self, group_column: str = "group", index_column: str = "subject_id"):
+        
+        unique_groups = self.events[group_column].unique()
+        colors = sns.color_palette("husl", len(unique_groups))
+        
+        temp = self.events[[group_column, index_column]].drop_duplicates()
+        temp.index = temp.subject_id
+        
+        lut = dict(zip(unique_groups, colors))
+        
+        col_colors = temp[group_column].astype(str).map(lut)
+        return col_colors.to_dict()
+    
+    @staticmethod
+    def plot_trial_alignment(trials: Union[pd.DataFrame, List[pd.DataFrame]],
+                             labels: List[str] = None,
+                             colors: List = None,
+                             figsize=(5, 5), ax=None):
+        
+        if ax is None:
+            fig, ax = plt.subplots(1, 1, figsize=figsize)
+        
+        if isinstance(trials, pd.DataFrame):
+            trials = [trials]
+        
+        if labels is not None and isinstance(labels, str):
+            labels = [labels]
+        
+        if labels is not None and len(labels) != len(trials):
+            logging.warning(f"Length of labels ({len(labels)} != length of trials ({len(trials)}).")
+            labels = None
+        
+        if colors is None:
+            colors = sns.color_palette("husl", len(trials))
+        elif len(colors) != len(trials):
+            raise ValueError(f"length of colors ({len(colors)}) does not match length of trials ({len(trials)})")
+        
+        for i, trial in enumerate(trials):
+            label = labels[i] if labels is not None else None
+            sns.lineplot(x="timepoint", y="value", data=trial, ax=ax, color=colors[i], label=label,
+                         # **arg
+                         )

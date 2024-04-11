@@ -13,8 +13,6 @@ import networkx as nx
 import numpy as np
 import pandas as pd
 import seaborn as sns
-from astrocast.analysis import Events
-from astrocast.helper import CachedClass, Normalization, is_ragged, wrapper_local_cache
 from dask import array as da
 from dtaidistance import dtw, dtw_barycenter
 from matplotlib import pyplot as plt
@@ -25,6 +23,9 @@ from sklearn import cluster, ensemble, gaussian_process, linear_model, neighbors
 from sklearn.cluster import KMeans
 from sklearn.metrics import confusion_matrix
 from tqdm import tqdm
+
+from astrocast.analysis import Events
+from astrocast.helper import CachedClass, Normalization, is_ragged, wrapper_local_cache
 
 
 class HdbScan:
@@ -125,9 +126,10 @@ class Linkage(CachedClass):
         self.Z = None
     
     def get_barycenters(
-            self, events, cutoff, criterion="distance", default_cluster=-1, distance_matrix=None,
-            distance_type="pearson", param_distance={}, return_linkage_matrix=False, param_linkage={},
-            param_clustering={}, param_barycenter={}
+            self, events, cutoff, criterion="distance", default_cluster=-1,
+            distance_matrix=None, distance_type: Literal['pearson', 'dtw', 'dtw_parallel'] = "pearson",
+            param_distance={}, return_linkage_matrix=False,
+            param_linkage={}, param_clustering={}, param_barycenter={}
             ):
         
         """
@@ -447,7 +449,9 @@ class Distance(CachedClass):
     
     @wrapper_local_cache
     def get_dtw_correlation(
-            self, events: Events, use_mmap: bool = False, block: int = 10000, show_progress: bool = True
+            self, events: Events, use_mmap: bool = False, block: int = 10000,
+            parallel: bool = True, compact: bool = False, only_triu: bool = False,
+            return_similarity: bool = True, show_progress: bool = True
             ):
         """
                     Computes the dynamic time warping (DTW) correlation matrix for a set of time series.
@@ -490,7 +494,7 @@ class Distance(CachedClass):
         
         if not use_mmap:
             distance_matrix = dtw.distance_matrix_fast(
-                    traces, use_pruning=False, parallel=True, compact=True, only_triu=True
+                    traces, use_pruning=False, parallel=parallel, compact=compact, only_triu=only_triu
                     )
             
             distance_matrix = np.array(distance_matrix)
@@ -509,7 +513,8 @@ class Distance(CachedClass):
                 x1 = min(x0 + block, N)
                 
                 dm_ = dtw.distance_matrix_fast(
-                        traces, block=((x0, x1), (0, N)), use_pruning=False, parallel=True, compact=True, only_triu=True
+                        traces, block=((x0, x1), (0, N)), use_pruning=False, parallel=parallel, compact=compact,
+                        only_triu=only_triu
                         )
                 
                 distance_matrix[i:i + len(dm_)] = dm_
@@ -519,7 +524,84 @@ class Distance(CachedClass):
                 
                 del dm_
         
+        if return_similarity:
+            distance_matrix = self.distance_to_similarity(distance_matrix)
+        
         return distance_matrix
+    
+    @staticmethod
+    def distance_to_similarity(D, r=None, a=None, method='exponential', return_params=False, cover_quantile=False):
+        """Transform a distance matrix to a similarity matrix.
+
+        The available methods are:
+        - Exponential: e^(-D / r)
+          r is max(D) if not given
+        - Gaussian: e^(-D^2 / r^2)
+          r is max(D) if not given
+        - Reciprocal: 1 / (r + D*a)
+          r is 1 if not given
+        - Reverse: r - D
+          r is min(D) + max(D) if not given
+
+        All of these methods are monotonically decreasing transformations. The order of the
+        distances thus remains unchanged (only the direction).
+
+        Example usage::
+
+            dist_matrix = dtw.distance_matrix(series)
+            sim_matrix = distance_to_similarity(dist_matrix)
+
+
+        :param D: The distance matrix
+        :param r: A scaling or smoothing parameter.
+        :param method: One of 'exponential', 'gaussian', 'reciprocal', 'reverse'
+        :param return_params: Return the value used for parameter r
+        :param cover_quantile: Compute r such that the function covers the `cover_quantile` fraction of the data.
+            Expects a value in [0,1]. If a tuple (quantile, value) is given, then r (and a) are set such that
+            at the quantile the given value is reached (if not given, value is 1-quantile).
+        :return: Similarity matrix S
+        """
+        if cover_quantile is not False:
+            if type(cover_quantile) in [tuple, list]:
+                cover_quantile, cover_quantile_target = cover_quantile
+            else:
+                cover_quantile_target = 1 - cover_quantile
+        else:
+            cover_quantile_target = None
+        method = method.lower()
+        if method == 'exponential':
+            if r is None:
+                if cover_quantile is False:
+                    r = np.max(D)
+                else:
+                    r = -np.quantile(D, cover_quantile) / np.log(cover_quantile_target)
+            S = np.exp(-D / r)
+        elif method == 'gaussian':
+            if r is None:
+                if cover_quantile is False:
+                    r = np.max(D)
+                else:
+                    r = np.sqrt(-np.quantile(D, cover_quantile) ** 2 / np.log(cover_quantile_target))
+            S = np.exp(-np.power(D, 2) / r ** 2)
+        elif method == 'reciprocal':
+            if r is None:
+                r = 1
+            if a is None:
+                if cover_quantile is False:
+                    a = 1
+                else:
+                    a = (1 - cover_quantile_target * r) / (cover_quantile_target * np.quantile(D, cover_quantile))
+            S = 1 / (r + D * a)
+        elif method == 'reverse':
+            if r is None:
+                r = np.min(D) + np.max(D)
+            S = (r - D) / r
+        else:
+            raise ValueError("method={} is not supported".format(method))
+        if return_params:
+            return S, r
+        else:
+            return S
     
     @wrapper_local_cache
     def get_dtw_parallel_correlation(
@@ -958,7 +1040,7 @@ class Distance(CachedClass):
         trace_0 = events[ev0]
         trace_1 = events[ev1]
         
-        if not isinstance(trace_0, np.ndarray):
+        if isinstance(trace_0, da.Array):
             trace_0 = trace_0.compute()
             trace_1 = trace_1.compute()
         
@@ -1171,13 +1253,13 @@ class Discriminator(CachedClass):
         return available_models
     
     def train_classifier(
-            self, embedding=None, category_vector=None, split=0.8, classifier="RandomForestClassifier",
+            self, embedding=None, category_vector=None, indices=None, split=0.8, classifier="RandomForestClassifier",
             balance_training_set: bool = False, balance_test_set: bool = False, **kwargs
             ):
         
         # split into training and validation dataset
         if self.X_train is None or self.Y_train is None:
-            self.split_dataset(embedding, category_vector, split=split,
+            self.split_dataset(embedding, category_vector, split=split, indices=indices,
                                balance_training_set=balance_training_set, balance_test_set=balance_test_set)
         
         # available models
@@ -1302,10 +1384,10 @@ class Discriminator(CachedClass):
         
         return evaluations
     
-    def split_dataset(
-            self, embedding, category_vector, split=0.8, balance_training_set=False, balance_test_set=False,
-            encode_category=None, normalization_instructions=None
-            ):
+    def split_dataset(self, embedding, category_vector, indices=None,
+                      split=0.8, balance_training_set=False, balance_test_set=False,
+                      encode_category=None, normalization_instructions=None
+                      ):
         
         # get data
         X = embedding
@@ -1351,9 +1433,16 @@ class Discriminator(CachedClass):
         X_train, X_test = X[:split_idx], X[split_idx:]
         Y_train, Y_test = Y[:split_idx], Y[split_idx:]
         
-        indices = self.events.events.index.tolist()
+        # ensure correct length of indices
+        if indices is None:
+            logging.warning(f"Assuming indices from event dataframe.")
+            indices = self.events.events.index.tolist()
+        elif len(indices) != len(X):
+            raise ValueError(f"length of indices ({len(indices)}) does not match length of embedding ({len(X)})")
+        
         indices_train, indices_test = indices[:split_idx], indices[split_idx:]
         
+        # todo: this is too late, because sometimes Y_test is missing values due to the split in the section before
         # balancing
         if balance_training_set:
             X_train, Y_train, indices_train = self._balance_set(X_train, Y_train, indices_train)
@@ -1369,28 +1458,64 @@ class Discriminator(CachedClass):
         self.indices_train = indices_train
         self.indices_test = indices_test
     
+    # @staticmethod
+    # def _balance_set(X, Y, indices):
+    #
+    #     # identify the category with the fewest members
+    #     count_category_members = pd.Series(Y).value_counts()
+    #     min_category_count = count_category_members.min()
+    #
+    #     # choose random indices
+    #     rand_indices = list()
+    #     for category in count_category_members.index.unique():
+    #         rand_indices.append(np.random.choice(np.where(Y == category)[0], size=min_category_count, replace=False))
+    #
+    #     rand_indices = np.array(rand_indices).astype(int)
+    #     rand_indices = rand_indices.flatten()
+    #
+    #     # select randomly chosen rows
+    #     X = X[rand_indices]
+    #     Y = Y[rand_indices]
+    #
+    #     indices = np.array(indices)[rand_indices]
+    #
+    #     return X, Y, indices
+    
     @staticmethod
     def _balance_set(X, Y, indices):
         
-        # identify the category with the fewest members
-        count_category_members = pd.Series(Y).value_counts()
-        min_category_count = count_category_members.min()
+        X = np.array(X)
+        Y = np.array(Y)
         
-        # choose random indices
-        rand_indices = list()
-        for category in count_category_members.index.unique():
-            rand_indices.append(np.random.choice(np.where(Y == category)[0], size=min_category_count, replace=False))
+        unique_classes = np.unique(Y)
+        min_class_samples = np.inf
         
-        rand_indices = np.array(rand_indices).astype(int)
-        rand_indices = rand_indices.flatten()
+        for cls in unique_classes:
+            class_count = np.sum(Y == cls)
+            if class_count < min_class_samples:
+                min_class_samples = class_count
         
-        # select randomly chosen rows
-        X = X[rand_indices]
-        Y = Y[rand_indices]
+        if min_class_samples == np.inf or min_class_samples == 0:
+            # Balancing is not feasible; you could raise an error or skip.
+            raise ValueError("Balancing not feasible: One or more classes have zero samples.")
         
-        indices = np.array(indices)[rand_indices]
+        balanced_X, balanced_Y, balanced_indices = [], [], []
+        for cls in unique_classes:
+            cls_indices = np.where(Y == cls)[0]
+            chosen_indices = np.random.choice(cls_indices, min_class_samples, replace=False)
+            chosen_indices = np.array(chosen_indices).flatten()
+            
+            balanced_X.append(X[chosen_indices])
+            balanced_Y.append(Y[chosen_indices])
+            balanced_indices.extend([indices[i] for i in chosen_indices])
         
-        return X, Y, indices
+        # Flattening the lists
+        balanced_X = np.vstack(balanced_X)
+        balanced_Y = np.concatenate(balanced_Y)
+        # Ensure indices match the order of the balanced dataset
+        balanced_indices = [indices[i] for i in np.argsort(balanced_Y)]
+        
+        return balanced_X, balanced_Y, balanced_indices
 
 
 class CoincidenceDetection:

@@ -8,8 +8,9 @@ import shutil
 import tempfile
 import time
 import types
+from functools import lru_cache
 from pathlib import Path
-from typing import List, Tuple, Union
+from typing import List, Literal, Tuple, Union
 
 import awkward as ak
 import dask.array as da
@@ -22,6 +23,7 @@ import tiledb
 import xxhash
 import yaml
 from skimage.util import img_as_uint
+from sklearn.preprocessing import LabelEncoder
 from tqdm import tqdm
 
 
@@ -216,7 +218,7 @@ def wrapper_local_cache(f):
                 with open(path + ".p", "wb") as f:
                     pickle.dump(value, f)
             except:
-                print("saving failed because datatype is unknown: ", type(value))
+                logging.warning("saving failed because datatype is unknown: ", type(value))
                 return False
         
         return True
@@ -241,7 +243,7 @@ def wrapper_local_cache(f):
                 result = pickle.load(f)
         
         else:
-            print("loading failed because filetype not recognized: ", path)
+            logging.warning("loading failed because filetype not recognized: ", path)
             result = None
         
         return result
@@ -261,7 +263,15 @@ def wrapper_local_cache(f):
                 logging.warning(f"trying to cache static method or class without 'cache_path': {f.__name__}")
                 cache_path = None
         
-        if cache_path is not None and isinstance(cache_path, (str, Path)):
+        if cache_path == "lru_cache":
+            
+            @lru_cache
+            def temp(args_, kwargs_):
+                return f(*args_, **kwargs_)
+            
+            return temp(args, kwargs)
+        
+        elif cache_path is not None and isinstance(cache_path, (str, Path)):
             
             hash_string = get_string_from_args(f, args, kwargs)
             cache_path = cache_path.joinpath(hash_string)
@@ -397,7 +407,7 @@ class SignalGenerator:
                  ragged_allowed: bool = True,
                  oscillation_frequency: int = 4, oscillation_amplitude: float = 1, plateau_duration: int = 1,
                  a: float = 0, k: float = 1, b: float = 1, v: float = 1, m_0: float = 0,
-                 leaky_k: float = 0.1, leaky_n: float = 1, show_progress: bool = False
+                 leaky_k: float = 0.1, leaky_n: float = 1, show_progress: bool = False,
                  ):
         """
         Initializes the SignalGenerator with parameters for the signal phases and noise level.
@@ -439,6 +449,24 @@ class SignalGenerator:
         
         self.parameter_fluctuations = parameter_fluctuations
         self.show_progress = show_progress
+        
+        self.identifier = self.get_hash()
+    
+    def get_hash(self):
+        
+        if isinstance(self.trace_length, (int, float)):
+            tl = self.trace_length
+        elif isinstance(self.trace_length, (List, Tuple)):
+            tl = sum(self.trace_length)
+        else:
+            tl = 1
+        
+        h = xxhash.xxh128(np.array([self.signal_amplitude, self.noise_amplitude, self.abort_amplitude,
+                                    self.oscillation_frequency, self.oscillation_amplitude, self.plateau_duration,
+                                    self.leaky_k, self.leaky_n, tl, self.offset, self.ragged_allowed,
+                                    self.m_0, self.v, self.b, self.k, self.a]))
+        
+        return h.intdigest()
     
     @staticmethod
     def _richards_curve(t: Union[float, np.ndarray, int] = None, a: float = 0, k: float = 1,
@@ -720,9 +748,9 @@ class DummyGenerator:
     
     def __init__(
             self, num_rows=25, trace_length=12, ragged=False, offset=0, min_length=2,
-            n_groups: int = 1, n_clusters=None,
+            n_groups: Union[int, List[str]] = 1, n_clusters: int = 1, n_subjects: Union[int, List[str]] = 1,
             timings: List[List[int]] = None, timing_jitter: Union[int, Tuple[float, float]] = None,
-            timing_offset: int = 0,
+            timing_offset: Union[int, Literal['max']] = 0,
             z_range: Tuple[int, int] = None,
             generators: Union[SignalGenerator, List[SignalGenerator]] = None, ratios: List[float] = None
             ):
@@ -730,8 +758,9 @@ class DummyGenerator:
         self.generators = [generators] if isinstance(generators, SignalGenerator) else generators
         self.ratios = ratios
         self.ragged = True if (isinstance(ragged, str) and ragged == "ragged") else ragged
-        self.groups = n_groups
-        self.clusters = n_clusters
+        self.n_groups = n_groups
+        self.n_subjects = n_subjects
+        self.identifiers = None
         
         self.timings = timings
         self.z_range = z_range
@@ -743,19 +772,13 @@ class DummyGenerator:
             self.data = self._get_random_data(num_rows=num_rows, trace_length=trace_length,
                                               ragged=self.ragged, min_length=min_length, offset=offset)
             
-            if self.groups is not None:
-                self.groups = np.random.randint(0, n_groups, size=len(self.data), dtype=int)
-            
-            if self.clusters is not None:
-                self.clusters = np.random.randint(0, n_clusters, size=len(self.data), dtype=int)
+            self.identifiers = np.random.randint(0, n_clusters, size=len(self.data), dtype=int)
         
         # signal populations
         else:
-            self.data, self.groups = self._get_signal_population(generators=self.generators,
-                                                                 num_rows=num_rows,
-                                                                 ratios=self.ratios)
-            
-            # todo: implement differences between groups and clusters
+            self.data, self.identifiers = self._get_signal_population(generators=self.generators,
+                                                                      num_rows=num_rows,
+                                                                      ratios=self.ratios)
     
     @staticmethod
     def _get_random_data(num_rows, trace_length, ragged, min_length, offset):
@@ -810,7 +833,7 @@ class DummyGenerator:
             num_signals = int(num_rows * ratios[gen_idx])
             signals = gen.generate_signal_population(num_signals)
             population.extend(signals)
-            identifiers.extend([gen_idx] * num_signals)
+            identifiers.extend([gen.identifier] * num_signals)
         
         # shuffle
         if shuffle:
@@ -871,7 +894,12 @@ class DummyGenerator:
                     else:
                         jitter = 0
                     
-                    z0 = np.random.choice(timing) + jitter + -timing_offset
+                    if timing_offset == 'max':
+                        chosen_timing = np.random.choice(timing)
+                        idx_max = np.argmax(row.trace)
+                        z0 = chosen_timing + jitter - idx_max
+                    else:
+                        z0 = np.random.choice(timing) + jitter - timing_offset
                 
                 return z0
             
@@ -888,23 +916,36 @@ class DummyGenerator:
         
         data = self.data
         
-        if type(data) == list:
+        if isinstance(data, list):
             df = pd.DataFrame(dict(trace=data))
         
-        elif type(data) == np.ndarray:
+        elif isinstance(data, np.ndarray):
             df = pd.DataFrame(dict(trace=data.tolist()))
         else:
-            raise TypeError
+            raise TypeError(f"unknown data type: {type(data)}")
         
-        if self.groups is not None:
-            df["group"] = self.groups
-        else:
-            df["group"] = 0
+        # add a group
+        if self.n_groups is not None:
+            
+            if isinstance(self.n_groups, int):
+                df["group"] = np.random.randint(0, self.n_groups, size=len(self.data), dtype=int)
+            elif isinstance(self.n_groups, List):
+                df["group"] = [np.random.choice(self.n_groups) for _ in range(len(self.data))]
+            else:
+                raise ValueError(f"n_groups has to be of type int or list, not: {type(self.n_groups)}")
         
-        if self.clusters is not None:
-            df["clusters"] = self.clusters
-        else:
-            df["cluster"] = 0
+        # add subject id
+        if self.n_subjects is not None:
+            
+            if isinstance(self.n_subjects, int):
+                df["subject_id"] = np.random.randint(0, self.n_subjects, size=len(self.data), dtype=int)
+            elif isinstance(self.n_subjects, list):
+                df["subject_id"] = [np.random.choice(self.n_subjects) for _ in range(len(self.data))]
+            else:
+                raise ValueError(f"n_subjects has to be of type int or list, not: {type(self.n_subjects)}")
+        
+        # add a cluster
+        df["cluster"] = self.identifiers
         
         df = self._create_z_boundaries(df=df)
         
@@ -958,11 +999,11 @@ class DummyGenerator:
         else:
             return da.from_array(data, chunks="auto")
     
-    def get_events(self):
+    def get_events(self, cache_path=None):
         
         from astrocast.analysis import Events
         
-        ev = Events(event_dir=None)
+        ev = Events(event_dir=None, cache_path=cache_path)
         df = self.get_dataframe()
         
         ev.events = df
@@ -979,6 +1020,68 @@ class DummyGenerator:
             raise ValueError(f"unknown attribute: {name}")
         
         return options[name]
+
+
+class DummyMultiGenerator:
+    
+    def __init__(self):
+        pass
+    
+    @staticmethod
+    def get_multi_event(group_names: List[str], num_rows: int, subject_ids: Union[List[str], int],
+                        z_range: Tuple[int, int] = None, ragged=True,
+                        signal_generators: Union[int, List[SignalGenerator]] = 1,
+                        signal_offset: float = 1, encode_clusters: bool = True,
+                        timings: List[List[int]] = None, timing_jitter: Union[int, Tuple[float, float]] = None,
+                        timing_offset: Union[int, Literal['max']] = None,
+                        cache_path: str = "lru_cache", shuffle: bool = True, **kwargs):
+        from astrocast.analysis import MultiEvents
+        
+        offset = 1
+        eObjects = []
+        for idx_g, group_name in enumerate(group_names):
+            
+            if isinstance(signal_generators, int):
+                signal_generators_ = [SignalGenerator(
+                        b=np.random.normal(loc=1.5, scale=0.5) * offset,
+                        plateau_duration=np.random.normal(loc=5, scale=2) * offset,
+                        signal_amplitude=np.random.normal(loc=1, scale=0.5) * offset,
+                        **kwargs
+                        ) for _ in range(signal_generators)]
+            else:
+                signal_generators_ = signal_generators[idx_g]
+            
+            if isinstance(subject_ids, List):
+                subject_ids_ = [f"{sid}_{group_name}" for sid in subject_ids]
+            elif isinstance(subject_ids, int):
+                subject_ids_ = [f"{idx_g * subject_ids + i}" for i in range(subject_ids)]
+            else:
+                raise ValueError(f"unknown type for subject_ids: {type(subject_ids)}")
+            
+            timings_ = timings[idx_g] if timings is not None else None
+            timing_jitter_ = timing_jitter[idx_g] if timing_jitter is not None else None
+            timing_offset_ = timing_offset[idx_g] if timing_offset is not None else None
+            
+            dg = DummyGenerator(num_rows=num_rows, generators=signal_generators_, n_subjects=subject_ids_,
+                                timings=timings_, timing_jitter=timing_jitter_, timing_offset=timing_offset_,
+                                z_range=z_range, ragged=ragged)
+            eObj = dg.get_events()
+            eObj.events["group"] = group_name
+            
+            eObjects.append(eObj)
+            offset *= signal_offset
+        
+        eObj_multi = MultiEvents(event_dirs=eObjects, cache_path=cache_path)
+        
+        if encode_clusters:
+            
+            le = LabelEncoder()
+            eObj_multi.events.cluster = le.fit_transform(eObj_multi.events.cluster.tolist())
+        
+        if shuffle:
+            eObj_multi.events = eObj_multi.events.sample(frac=1).reset_index(drop=True)
+        
+        return eObj_multi
 
 
 class EventSim:
@@ -1674,6 +1777,8 @@ class CachedClass:
             
             if not cache_path.is_dir():
                 cache_path.mkdir()
+                assert cache_path.exists(), f"failed to create cache_path: {cache_path}"
+                logging.info(f"created cache_path at {cache_path}")
         
         self.cache_path = cache_path
         
