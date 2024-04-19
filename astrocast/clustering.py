@@ -5,7 +5,7 @@ import tempfile
 import traceback
 from collections import defaultdict
 from pathlib import Path
-from typing import Literal, Tuple, Union
+from typing import List, Literal, Tuple, Union
 
 import fastcluster
 import hdbscan
@@ -13,6 +13,8 @@ import networkx as nx
 import numpy as np
 import pandas as pd
 import seaborn as sns
+from astrocast.analysis import Events, MultiEvents
+from astrocast.helper import CachedClass, Normalization, is_ragged, wrapper_local_cache
 from dask import array as da
 from dtaidistance import dtw, dtw_barycenter
 from matplotlib import pyplot as plt
@@ -23,9 +25,6 @@ from sklearn import cluster, ensemble, gaussian_process, linear_model, neighbors
 from sklearn.cluster import KMeans
 from sklearn.metrics import confusion_matrix
 from tqdm import tqdm
-
-from astrocast.analysis import Events
-from astrocast.helper import CachedClass, Normalization, is_ragged, wrapper_local_cache
 
 
 class HdbScan:
@@ -39,7 +38,7 @@ class HdbScan:
         
         self.events = events
     
-    def fit(self, embedding, y=None):
+    def fit(self, embedding, y=None) -> np.ndarray:
         
         hdb_labels = self.hdb.fit_predict(embedding, y=y)
         
@@ -128,8 +127,9 @@ class Linkage(CachedClass):
     def get_barycenters(
             self, events, cutoff, criterion="distance", default_cluster=-1,
             distance_matrix=None, distance_type: Literal['pearson', 'dtw', 'dtw_parallel'] = "pearson",
+            min_cluster_size: int = 1, max_cluster_size: int = None,
             param_distance={}, return_linkage_matrix=False,
-            param_linkage={}, param_clustering={}, param_barycenter={}
+            param_linkage={}, param_barycenter={}
             ):
         
         """
@@ -155,7 +155,8 @@ class Linkage(CachedClass):
         
         linkage_matrix = self.calculate_linkage_matrix(distance_matrix, **param_linkage)
         clusters, cluster_labels = self.cluster_linkage_matrix(
-                linkage_matrix, cutoff, criterion=criterion, **param_clustering
+                linkage_matrix, cutoff, criterion=criterion,
+                min_cluster_size=min_cluster_size, max_cluster_size=max_cluster_size,
                 )
         barycenters = self.calculate_barycenters(clusters, cluster_labels, events, **param_barycenter)
         
@@ -275,7 +276,7 @@ class Linkage(CachedClass):
                 ) if show_progress else enumerate(clusters.index)
         for i, cl in iterator:
             idx_ = np.where(cluster_labels == cl)[0]
-            sel = [np.array(traces[id_]) for id_ in idx_]
+            sel = [np.array(traces[id_], dtype=np.double) for id_ in idx_]
             idx = [indices[id_] for id_ in idx_]
             
             nb_initial_samples = len(sel) if len(sel) < 11 else int(init_fraction * len(sel))
@@ -375,8 +376,13 @@ class Distance(CachedClass):
     A class for computing correlation matrices and histograms.
     """
     
+    def __init__(self, cache_path: Union[str, Path] = None,
+                 logging_level=logging.INFO):
+        
+        super().__init__(cache_path=cache_path, logging_level=logging_level, logger_name="Distance")
+    
     @wrapper_local_cache
-    def get_pearson_correlation(self, events, dtype=np.single):
+    def get_pearson_correlation(self, events, dtype=np.single, trace_column: str = "trace"):
         """
         Computes the correlation matrix of events.
 
@@ -393,65 +399,149 @@ class Distance(CachedClass):
             ValueError: If events DataFrame does not have a 'trace' column.
         """
         
-        if not isinstance(events, (np.ndarray, pd.DataFrame, da.Array, Events)):
-            raise ValueError(
-                    f"Please provide events as one of (np.ndarray, pd.DataFrame, Events) instead of {type(events)}."
-                    )
-        
-        if isinstance(events, Events):
+        if isinstance(events, (Events, MultiEvents)):
             events = events.events
         
-        if isinstance(events, pd.DataFrame):
-            if "trace" not in events.columns:
-                raise ValueError("Events DataFrame is expected to have a 'trace' column.")
+        if isinstance(events, (pd.DataFrame, pd.core.frame.DataFrame)):
+            if trace_column not in events.columns:
+                raise ValueError(f"Events DataFrame is expected to have a trace column: {trace_column}")
             
-            events = events["trace"].tolist()
-            events = np.array(events, dtype=object) if is_ragged(events) else np.array(events)
+            traces = events[trace_column].tolist()
+            traces_are_ragged = is_ragged(traces)
+            
+            if traces_are_ragged:
+                traces = np.array(traces, dtype=object)
+            
+            else:
+                traces = np.array(traces, dtype=float)
         
-        if is_ragged(events):
+        elif isinstance(events, (np.ndarray, da.Array)):
+            traces = events
+            traces_are_ragged = is_ragged(traces)
+        else:
+            raise ValueError(f"events must be of type Events, pd.DataFrame, np.ndarray or da.Array; not {type(events)}")
+        
+        if traces_are_ragged:
             
             logging.warning(f"Events are ragged (unequal length), default to slow correlation calculation.")
             
             # todo find an elegant solution
             #  dask natively cannot handle awkward arrays well. np.mean, map_blocks, etc. don't seem to work
             #  there is a dask-awkward library, but it is not very mature
-            if isinstance(events, da.Array):
-                events = events.compute()
+            if isinstance(traces, da.Array):
+                traces = traces.compute()
             
-            N = len(events)
+            N = len(traces)
             corr = np.zeros((N, N), dtype=dtype)
             for x in tqdm(range(N)):
                 for y in range(N):
                     
                     if corr[y, x] == 0:
                         
-                        ex = events[x]
-                        ey = events[y]
+                        ex = traces[x]
+                        ey = traces[y]
                         
-                        ex = ex - np.mean(ex)
-                        ey = ey - np.mean(ey)
+                        if np.isnan(ex).any() or np.isnan(ey).any():
+                            logging.warning(
+                                    f"Traces contain NaN values. Masking array to avoid incorrect distance measurement."
+                                    f"This will slow processing significantly.")
+                            
+                            ex = np.ma.masked_invalid(ex)
+                            ey = np.ma.masked_invalid(ey)
+                            
+                            ex -= np.nanmean(ex)
+                            ey -= np.nanmean(ey)
+                            
+                            c = np.ma.correlate(ex, ey, mode='valid')
+                            c = c.data
                         
-                        c = np.correlate(ex, ey, mode="valid")
+                        else:
+                            
+                            ex = ex - np.mean(ex)
+                            ey = ey - np.mean(ey)
+                            
+                            c = np.correlate(ex, ey, mode="valid")
                         
                         # ensure result between -1 and 1
                         c = np.max(c)
-                        c = c / (max(len(ex), len(ey) * np.std(ex) * np.std(ey)))
+                        c /= (max(len(ex), len(ey) * np.std(ex) * np.std(ey)))
                         
                         corr[x, y] = c
                     
                     else:
                         corr[x, y] = corr[y, x]
         else:
-            corr = np.corrcoef(events).astype(dtype)
+            
+            if np.isnan(traces).any():
+                logging.warning(f"Traces contain NaN values. Masking array to avoid incorrect distance measurement."
+                                f"This will slow processing significantly.")
+                traces = np.ma.masked_invalid(traces)
+                corr = np.ma.corrcoef(traces).data
+                corr = corr.data
+            else:
+                corr = np.corrcoef(traces)
+            
+            corr = corr.astype(dtype)
             corr = np.tril(corr)
         
         return corr
     
+    @staticmethod
+    def _fix_invalid_distance_matrix(distance_matrix: np.ndarray, traces: List[np.ndarray],
+                                     max_tries=3):
+        
+        # troubleshooting
+        idx_nan = np.isnan(distance_matrix)
+        idx_inf = np.isinf(distance_matrix)
+        
+        if idx_nan.any() or idx_inf.any():
+            
+            tries = 0
+            while True:
+                
+                idx_nan = np.where(idx_nan)
+                idx_inf = np.where(idx_inf)
+                
+                idx_x = np.concatenate([idx_nan[0], idx_inf[0]], axis=0)
+                idx_y = np.concatenate([idx_nan[1], idx_inf[1]], axis=0)
+                
+                if tries == 0:
+                    logging.warning(f"invalid distances identified ({len(idx_x)}, "
+                                    f"{len(idx_x) / len(distance_matrix) ** 2 * 100:.1f}%). "
+                                    f"Trying to fix automatically.")
+                else:
+                    logging.warning(f"Still invalid distances found ({len(idx_x)}). "
+                                    f"Trying {tries}/{max_tries}")
+                
+                for i in tqdm(range(len(idx_x))):
+                    x = idx_x[i]
+                    y = idx_y[i]
+                    
+                    trace_x = np.array(traces[x]).astype(np.double)
+                    trace_y = np.array(traces[y]).astype(np.double)
+                    
+                    distance_matrix[x, y] = dtw.distance_fast(trace_x, trace_y, use_pruning=False)
+                
+                idx_nan = np.isnan(distance_matrix)
+                idx_inf = np.isinf(distance_matrix)
+                
+                if not idx_nan.any() and not idx_inf.any():
+                    break
+                
+                elif tries >= max_tries:
+                    logging.warning(f"max tries exceeded. Setting invalid values to 1e20")
+                    max_distance = np.nanmax(distance_matrix)
+                    distance_matrix[idx_nan] = max_distance
+                    distance_matrix[idx_inf] = max_distance
+        
+        return distance_matrix
+    
     @wrapper_local_cache
     def get_dtw_correlation(
             self, events: Events, use_mmap: bool = False, block: int = 10000,
-            parallel: bool = True, compact: bool = False, only_triu: bool = False,
-            return_similarity: bool = True, show_progress: bool = True
+            parallel: bool = True, compact: bool = False, only_triu: bool = False, use_pruning: bool = False,
+            return_similarity: bool = True, show_progress: bool = True, trace_column: str = "trace",
+            max_tries: int = 3
             ):
         """
                     Computes the dynamic time warping (DTW) correlation matrix for a set of time series.
@@ -489,12 +579,12 @@ class Distance(CachedClass):
         if not isinstance(events, pd.DataFrame):
             events = events.events
         
-        traces = [np.array(t) for t in events.trace.tolist()]
+        traces = [np.array(t) for t in events[trace_column].tolist()]
         N = len(traces)
         
         if not use_mmap:
             distance_matrix = dtw.distance_matrix_fast(
-                    traces, use_pruning=False, parallel=parallel, compact=compact, only_triu=only_triu
+                    traces, use_pruning=use_pruning, parallel=parallel, compact=compact, only_triu=only_triu
                     )
             
             distance_matrix = np.array(distance_matrix)
@@ -520,9 +610,12 @@ class Distance(CachedClass):
                 distance_matrix[i:i + len(dm_)] = dm_
                 distance_matrix.flush()
                 
-                i = i + len(dm_)
+                i += len(dm_)
                 
                 del dm_
+        
+        distance_matrix = self._fix_invalid_distance_matrix(distance_matrix=distance_matrix, traces=traces,
+                                                            max_tries=max_tries)
         
         if return_similarity:
             distance_matrix = self.distance_to_similarity(distance_matrix)
@@ -609,7 +702,7 @@ class Distance(CachedClass):
                 "square_euclidean_distance", "gower", "norm1", "norm2", "braycurtis", "canberra", "chebyshev", "cityblock", "correlation", "cosine", "euclidean", "jensenshannon", "minkowski", "sqeuclidean"] = "norm1",
             type_dtw: Literal["d", "i"] = "d", constrained_path_search: Literal["itakura", "sakoe_chiba"] = None,
             itakura_max_slope: float = None, sakoe_chiba_radius: int = None, sigma_kernel: int = 1,
-            dtw_to_kernel: bool = False, multivariate: bool = True, use_mmap: bool = False
+            dtw_to_kernel: bool = False, multivariate: bool = True, use_mmap: bool = False, trace_column: str = "trace"
             ) -> Union[np.ndarray, Tuple[np.ndarray, np.ndarray]]:
         
         """
@@ -753,7 +846,10 @@ class Distance(CachedClass):
         
         from dtwParallel import dtw_functions
         
-        traces = np.array(events.events.trace.tolist())
+        if not isinstance(events, pd.DataFrame):
+            events = events.events
+        
+        traces = np.array(events[trace_column].tolist())
         
         if use_mmap:
             logging.warning(f"Currently the use of mmap files is not implemented.")
@@ -826,11 +922,13 @@ class Distance(CachedClass):
     
     def get_correlation(
             self, events, correlation_type: Literal['pearson', 'dtw', 'dtw_parallel'] = "pearson",
-            correlation_param: dict = None
+            correlation_param: dict = None, trace_column: str = "trace"
             ):
         
         if correlation_param is None:
             correlation_param = {}
+        
+        correlation_param["trace_column"] = trace_column
         
         funcs = {"pearson":      lambda x: self.get_pearson_correlation(x, **correlation_param),
                  "dtw":          lambda x: self.get_dtw_correlation(x, **correlation_param),
@@ -944,7 +1042,7 @@ class Distance(CachedClass):
     def plot_compare_correlated_events(
             corr, events, event_ids=None, event_index_range=(0, -1), z_range=None, corr_mask=None,
             corr_range=None, ev0_color="blue", ev1_color="red", ev_alpha=0.5, spine_linewidth=3, ax=None,
-            figsize=(20, 3), title=None
+            figsize=(20, 3), title=None, trace_column: str = "trace"
             ):
         """
         Plot and compare correlated events.
@@ -982,10 +1080,10 @@ class Distance(CachedClass):
         
         # Convert events to numpy array if it is a DataFrame
         if isinstance(events, pd.DataFrame):
-            if "trace" not in events.columns:
-                raise ValueError("'events' dataframe is expected to have a 'trace' column.")
+            if trace_column not in events.columns:
+                raise ValueError(f"'events' dataframe is expected to have the column: {trace_column}")
             
-            events = np.array(events.trace.tolist())
+            events = np.array(events[trace_column].tolist())
         
         ind_min, ind_max = event_index_range
         if ind_max == -1:
@@ -1125,50 +1223,88 @@ class Modules(CachedClass):
         return self.events.__hash__()
     
     @wrapper_local_cache
-    def _create_node_edge_tables(self, correlation, correlation_boundaries=(0.98, 1)):
+    def _create_node_edge_tables(self, correlation: np.ndarray, correlation_boundaries=(0.98, 1),
+                                 max_distance: float = None):
+        
+        if isinstance(self.events, Events):
+            events = self.events.events
+        else:
+            events = self.events
+        
+        if len(events) != len(correlation):
+            raise ValueError(f"Number of dimensions ({correlation.shape}) does not match events length ({len(events)})")
         
         # select correlations within given boundaries
         lower_bound, upper_bound = correlation_boundaries
-        selected_correlations = np.where(np.logical_and(correlation >= lower_bound, correlation < upper_bound))[0]
+        selected_correlations = np.where(np.logical_and(correlation >= lower_bound, correlation < upper_bound))
         
         # deal with compact correlation matrices
-        if len(selected_correlations.shape) == 1:
-            triu_indices = np.array(np.triu_indices(len(self.events)))
-            selected_correlations = triu_indices[:, selected_correlations].squeeze()
+        if len(selected_correlations) == 1:
+            raise NotImplementedError(f"Node edge table has to be square matrix")
+            
+            selected_correlations = selected_correlations[0]
+            
+            if len(selected_correlations.shape) == 1:
+                triu_indices = np.array(np.triu_indices(len(events)))
+                selected_correlations = triu_indices[:, selected_correlations].squeeze()
         
-        # filter events
-        selected_idx = np.unique(selected_correlations)
-        # selected_events = self.events.events.iloc[selected_idx]
-        selected_events = self.events[selected_idx.tolist()]
+        selected_x_corr, selected_y_corr = selected_correlations
+        logging.info(f"Remaining connections ({lower_bound:.2f} <= c < {upper_bound:.2f}): "
+                     f"{len(selected_x_corr)}/{len(events) ** 2} "
+                     f"({len(selected_x_corr) / len(events) ** 2 * 100:.2f}%)")
         
-        logging.info(
-                f"remaining connections {len(selected_events):,d}/{len(self.events):,d} ({len(selected_events) / len(self.events) * 100:.2f}%)"
-                )
+        if max_distance is not None:
+            
+            import math
+            
+            x_corr, y_corr = [], []
+            for idx_x, idx_y in tqdm(list(zip(selected_x_corr, selected_y_corr)), desc='Filtering by distance'):
+                px = events.iloc[idx_x].cx, events.iloc[idx_x].cy
+                py = events.iloc[idx_y].cx, events.iloc[idx_y].cy
+                
+                dist = math.dist(px, py)
+                if dist <= max_distance:
+                    x_corr.append(idx_x)
+                    y_corr.append(idx_y)
+            
+            logging.info(f"Remaining connections (distance <= {max_distance}): "
+                         f"{len(x_corr)}/{len(selected_x_corr) ** 2} "
+                         f"({len(x_corr) / len(selected_x_corr) ** 2 * 100:.2f}% / "
+                         f"{len(x_corr) / len(events) ** 2 * 100:.2f}%)")
+            
+            selected_x_corr, selected_y_corr = np.array(x_corr), np.array(y_corr)
         
         # create nodes table
+        selected_xy_corr = np.unique(np.concatenate([selected_x_corr, selected_y_corr], axis=0))
+        selected_events = events.iloc[selected_xy_corr]
         nodes = pd.DataFrame(
-                {"i_idx":     selected_idx, "x": selected_events.cx, "y": selected_events.cy,
+                {"i_idx":     selected_xy_corr,
+                 "x":         selected_events.cx, "y": selected_events.cy,
                  "trace_idx": selected_events.index}
                 )
         
         # create edges table
-        edges = pd.DataFrame(
-                {"source": selected_correlations[0, :], "target": selected_correlations[1, :]}
-                )
+        edges = pd.DataFrame({"source": selected_x_corr, "target": selected_y_corr})
         
         # convert edge indices from iidx in correlation array
         # to row_idx in nodes table
-        lookup = dict(zip(nodes.i_idx.tolist(), nodes.index.tolist()))
+        lookup = dict(zip(nodes.i_idx.tolist(), nodes.trace_idx.tolist()))
         edges.source = edges.source.map(lookup)
         edges.target = edges.target.map(lookup)
         
         return nodes, edges
     
     @wrapper_local_cache
-    def create_graph(self, correlation, correlation_boundaries=(0.98, 1), exclude_out_of_cluster_connection=True):
+    def create_graph(self, correlation, correlation_boundaries=(0.98, 1), exclude_out_of_cluster_connection=True,
+                     return_graph: bool = False, color_palette: str = None, palette=None, max_distance: float = None):
         
-        nodes, edges = self._create_node_edge_tables(correlation, correlation_boundaries=correlation_boundaries)
+        nodes, edges = self._create_node_edge_tables(correlation, correlation_boundaries=correlation_boundaries,
+                                                     max_distance=max_distance)
         logging.info(f"#nodes: {len(nodes)}, #edges: {len(edges)}")
+        
+        if len(nodes) < 1:
+            logging.warning(f"No nodes were recovered. Aborting graph creation")
+            return None, None, None
         
         # create graph and populate with edges
         G = nx.Graph()
@@ -1181,10 +1317,22 @@ class Modules(CachedClass):
         # assign modules
         nodes["module"] = -1
         n_mod = 0
-        for module in tqdm(communities):
+        for module in tqdm(communities, desc='Updating modules'):
             for m in module:
                 nodes.loc[m, "module"] = n_mod
             n_mod += 1
+        
+        # add color
+        if color_palette or palette is not None:
+            from astrocast.analysis import Plotting
+            
+            p = Plotting()
+            lut = p.get_group_color(df=nodes, palette=color_palette, group_column="module")
+            nodes["color"] = nodes.module.map(lut)
+            
+            for idx, node in nodes.iterrows():
+                if not isinstance(node.color, tuple):
+                    nodes[idx] = "black"
         
         # add module column to nodes dataframe
         nodes["module"] = nodes["module"].astype("category")
@@ -1202,7 +1350,17 @@ class Modules(CachedClass):
         
         lookup_cluster_table = dict(zip(nodes.trace_idx.tolist(), nodes.module.tolist()))
         
-        return nodes, edges, lookup_cluster_table
+        if color_palette or palette is not None:
+            edges["color"] = edges.module.map(lut)
+            
+            for idx, edge in edges.iterrows():
+                if not isinstance(edge.color, tuple):
+                    edges[idx] = "black"
+        
+        if return_graph:
+            return G, nodes, edges, lookup_cluster_table
+        else:
+            return nodes, edges, lookup_cluster_table
     
     @staticmethod
     def summarize_modules(nodes):
@@ -1225,6 +1383,50 @@ class Modules(CachedClass):
             summary[func_key] = nodes.groupby("module").apply(func)
         
         return pd.DataFrame(summary)
+    
+    @staticmethod
+    def plot_correlation_heatmap(correlation: np.ndarray, correlation_boundary: Tuple[float, float] = None,
+                                 figsize=(7, 5), ax: plt.Axes = None, **kwargs):
+        
+        if correlation_boundary is not None:
+            masked_corr = np.zeros(correlation.shape)
+            
+            lower_bound, upper_bound = correlation_boundary
+            indices = np.where(np.logical_and(lower_bound <= correlation, correlation < upper_bound))
+            masked_corr[indices] = correlation[indices]
+            
+            logging.info(f"{len(indices[0])}/{len(masked_corr)}")
+        
+        else:
+            masked_corr = correlation
+        
+        if ax is None:
+            fig, ax = plt.subplots(1, 1, figsize=figsize)
+        
+        sns.heatmap(data=masked_corr, ax=ax, **kwargs)
+    
+    @staticmethod
+    def plot_network(G: nx.Graph, nodes: pd.DataFrame, edges: pd.DataFrame,
+                     node_size=25, font_size=8, width=2,
+                     node_color="blue", edge_color="black",
+                     show_grid: bool = False, with_labels: bool = False,
+                     figsize=(10, 10), ax: plt.Axes = None, **kwargs):
+        
+        pos = dict(zip(nodes.index, [(row.x, row.y) for _, row in nodes.iterrows()]))
+        
+        if ax is None:
+            fig, ax = plt.subplots(1, 1, figsize=figsize)
+        
+        if edge_color == "edge":
+            edge_color = edges.color
+        
+        nx.draw_networkx(G, pos=pos,
+                         node_size=node_size, font_size=font_size, width=width,
+                         node_color=node_color, edge_color=edge_color, with_labels=with_labels,
+                         ax=ax, **kwargs)
+        
+        if not show_grid:
+            ax.grid(None)
 
 
 class Discriminator(CachedClass):

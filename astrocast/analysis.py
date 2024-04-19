@@ -25,6 +25,7 @@ import pandas as pd
 import psutil
 import seaborn as sns
 import xxhash
+import warnings
 from matplotlib import pyplot as plt
 from scipy.cluster.hierarchy import fcluster
 from sklearn import metrics
@@ -45,6 +46,7 @@ class Video:
             if len(loc) == 1:
                 loc = loc[0]
         
+        self.Z, self.X, self.Y = None, None, None
         if isinstance(data, (Path, str)):
             
             io = IO()
@@ -79,6 +81,10 @@ class Video:
         self.z_slice = z_slice
         
         self.name = name
+    
+    def copy(self):
+        video = copy.deepcopy(self)
+        return video
     
     def __hash__(self):
         
@@ -275,7 +281,8 @@ class Events(CachedClass):
             z_slice: Tuple[int, int] = None, index_prefix: str = None,
             custom_columns: Union[list, Tuple, Literal['v_area_norm', 'v_ara_footprint', 'cx', 'cy']] = (
                     "v_area_norm", "cx", "cy"), frame_to_time_mapping: Union[dict, list] = None,
-            frame_to_time_function: Callable = None, cache_path: Union[str, Path] = None, seed: int = 1
+            frame_to_time_function: Callable = None, cache_path: Union[str, Path] = None,
+            logging_level=logging.INFO, seed: int = 1
             ):
         """
         Manages and processes astrocytic events detected in timeseries calcium recordings. This class offers
@@ -338,13 +345,12 @@ class Events(CachedClass):
             >>> event_obj = Events('/your/event/dir')
         """
         
-        super().__init__(cache_path=cache_path)
+        super().__init__(cache_path=cache_path, logging_level=logging_level, logger_name="Events")
         
         self.seed = seed
         self.z_slice = z_slice
         
         if event_dir is None:
-            logging.warning("event_dir is None. Creating empty Events instance!")
             self.event_map = None
             self.num_frames, self.X, self.Y = None, None, None
             self.events = None
@@ -450,29 +456,66 @@ class Events(CachedClass):
     
     def __hash__(self):
         
-        traces = self.events.trace
+        # traces = self.events.trace
+        #
+        # hashed_traces = traces.apply(lambda x: xxhash.xxh64_intdigest(np.array(x), seed=self.seed))
+        # hash_ = xxhash.xxh64_intdigest(hashed_traces.values, seed=self.seed)
         
-        hashed_traces = traces.apply(lambda x: xxhash.xxh64_intdigest(np.array(x), seed=self.seed))
-        hash_ = xxhash.xxh64_intdigest(hashed_traces.values, seed=self.seed)
+        seed = self.seed
+        events = self.events
+        columns = events.columns
+        
+        # exclude precalculated value columns
+        columns = [c for c in columns if not c.startswith("v_")]
+        
+        # exclude irrelevant columns
+        excl_columns = ['mask', 'contours', 'footprint', 'trace_orig', 'noise_mask_trace', 'error',
+                        'subject_id', 'file_name', 'group', 'subject_idx']
+        columns = [c for c in columns if c not in excl_columns]
+        
+        n_events = len(events)
+        n_columns = len(columns)
+        
+        hashes = np.zeros((n_events, n_columns), dtype=int)
+        for i in range(n_events):
+            for ii, col in enumerate(columns):
+                hashes[i, ii] = xxhash.xxh32(events.iloc[i][col], seed=seed).intdigest()
+        
+        hashes = np.sort(hashes, axis=0)
+        hash_ = xxhash.xxh32(hashes, seed=seed).intdigest()
         
         return hash_
     
     def _repr_html_(self):
         return self.events._repr_html_()
     
-    # def save(self, path):
-    #     from joblib import dump
-    #     dump(self, path)
-    #
-    # @staticmethod
-    # def load(path):
-    #     from joblib import load
-    #     return load(path)
+    def save(self, path):
+        # from joblib import dump
+        # dump(self, path)
+        raise NotImplemented
+    
+    @staticmethod
+    def load(path):
+        # from joblib import load
+        # return load(path)
+        raise NotImplemented
     
     def _is_ragged(self):
         return is_ragged(self.events.trace.tolist())
     
-    def add_clustering(self, cluster_lookup_table: dict, column_name: str = "cluster") -> None:
+    def _is_multi_subject(self):
+        
+        if "subject_id" not in self.events.columns:
+            logging.warning(f"Could not find 'subject_id' column. Assuming single subject.")
+            return False
+        
+        elif len(self.events.subject_id.unique()) < 2:
+            return False
+        
+        else:
+            return True
+    
+    def add_clustering(self, cluster_lookup_table: dict, column_name: str = "cluster", key_column: str = None) -> None:
         """
                 Adds a clustering column to the events DataFrame based on a provided lookup table.
 
@@ -509,8 +552,37 @@ class Events(CachedClass):
                     f"column_name ({column_name}) already exists in events table > overwriting column. "
                     f"Please provide a different column_name if this is not the expected behavior."
                     )
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            
+            if key_column is not None:
+                events[column_name] = events[key_column].apply(lambda x: cluster_lookup_table[x])
+            
+            else:
+                events[column_name] = events.index.map(cluster_lookup_table)
+    
+    def encode_column(self, column_name: str):
+        """
+            Encode a specified column of the 'events' dataframe using label encoding.
+
+            This method applies label encoding to the specified column of the dataframe attribute 'events'.
+            It transforms the categorical data into a format that can be used by machine learning algorithms.
+            The method uses scikit-learn's LabelEncoder to convert each unique string value into a unique integer.
+
+            .. caution::
+              - This method modifies the dataframe in-place, meaning that the original categorical data
+                will be replaced with numerical codes.
+              - The method assumes that the column exists within the dataframe and contains categorical data
+                that can be encoded by LabelEncoder.
+
+            Args:
+                column_name: The name of the column in the 'events' dataframe to be encoded.
+        """
         
-        events[column_name] = events.index.map(cluster_lookup_table)
+        le = LabelEncoder()
+        col = self.events[column_name]
+        col = le.fit_transform(col.tolist())
+        self.events[column_name] = col
     
     @staticmethod
     def _score_clustering(groups, pred_groups):
@@ -526,7 +598,6 @@ class Events(CachedClass):
         results = {f.__name__: np.round(f(groups, pred_groups), 2) for f in selected_metrics}
         return results
     
-    @wrapper_local_cache
     def get_counts_per_cluster(self, cluster_col: str, group_col: str = None, z_slice: Tuple[int, int] = None,
                                transpose: bool = False) -> (pd.DataFrame):
         """
@@ -646,7 +717,21 @@ class Events(CachedClass):
         
         """ Returns a copy of the Events object. """
         
-        return copy.deepcopy(self)
+        obj = Events()
+        obj.cache_path = self.cache_path
+        obj.logger = self.logger
+        obj.seed = self.seed
+        obj.z_slice = self.z_slice
+        obj.event_dir = self.event_dir
+        obj.event_map = self.event_map.copy() if self.event_map is not None else None
+        obj.num_frames = self.num_frames
+        obj.X = self.X
+        obj.Y = self.Y
+        obj.events = self.events.copy()
+        obj.z_range = self.z_range
+        obj.data = self.data.copy() if self.data is not None else None
+        
+        return obj
     
     def filter(self, filters: dict, inplace: bool = True) -> Union[None, pd.DataFrame]:
         """
@@ -706,7 +791,7 @@ class Events(CachedClass):
             self.events = events
         
         L2 = len(events)
-        logging.info(f"#events: {L1} > {L2} ({L2 / L1 * 100:.1f}%)")
+        self.logger.info(f"#events: {L1} > {L2} ({L2 / L1 * 100:.1f}%)")
         
         return events
     
@@ -920,7 +1005,6 @@ class Events(CachedClass):
             raise FileNotFoundError(f"Did not find 'events.npy' in {event_dir}")
         
         events = np.load(path.as_posix(), allow_pickle=True)[()]
-        logging.info(f"Number of events: {len(events)}")
         
         events = pd.DataFrame(events).transpose()
         events.sort_index(inplace=True)
@@ -964,7 +1048,12 @@ class Events(CachedClass):
         
         if z_slice is not None:
             z0, z1 = z_slice
+            original_length = len(events)
             events = events[(events.z0 >= z0) & (events.z1 <= z1)]
+            logging.info(f"Number of events: {len(events)}/{original_length} "
+                         f"({len(events) / original_length * 100:.1f}%)")
+        else:
+            logging.info(f"Number of events: {len(events)}")
         
         return events
     
@@ -1429,68 +1518,22 @@ class Events(CachedClass):
         return res
     
     @wrapper_local_cache
-    def get_extended_events(
-            self, events: pd.DataFrame = None, video: Union[np.ndarray, da.Array, Video] = None, dtype: type = float,
-            use_footprint: bool = False, extend: Union[int, Tuple[int, int]] = -1, ensure_min: int = None,
-            ensure_max: int = None, pad_borders: bool = False, return_array: bool = False, in_place: bool = False,
-            normalization_instructions: Dict[int, List[Union[str, Dict[str, str]]]] = None, show_progress: bool = True,
-            load_to_memory: bool = False,
-            memmap_path: Union[str, Path] = None, save_path: Union[str, Path] = None, save_param: Dict[str, Any] = None
-            ) -> Union[pd.DataFrame, Tuple[np.ndarray, List[int], List[int]]]:
-        """
-                Extends the footprint of individual events either over the entire z-range or a fixed number of bordering
-                frames of a time series recording.
-
-                This method extends the event signals by applying the event's footprint or mask over a specified range in the
-                video. It supports different modes of extension, normalization of the extended signal, and various output
-                options. The method is useful when capturing the shoulders of the events is beneficial (e.g. in classification
-                tasks)
-
-                .. note::
-                  - Normalization instructions should be provided as a dictionary where each key is an operation index,
-                    and the value is a list of the operation and its parameters. For more information see
-                    :func:`~astrocast.helper.Normalization.run`.
-
-                .. caution::
-                  - The method raises ValueError if 'video' is not provided and no data is available in 'self.data'.
-                  - The function may generate large arrays, potentially consuming a significant portion of available RAM.
-
-                Args:
-                  events: DataFrame containing event data. If None, uses 'self.events'.
-                  video: 3D numpy array of video data. If None, uses 'self.data'.
-                  dtype: Data type for the output array.
-                  use_footprint: Whether to use the event's footprint for extension.
-                  extend: Extension length or range. Can be a single int or a tuple (left, right). -1 corresponds to the
-                    full range.
-                  ensure_min: Minimum length to ensure for each extended event.
-                  ensure_max: Maximum length to allow for each extended event.
-                  pad_borders: If True, pads the borders of video to ensure requested length.
-                  return_array: Whether to return the extended events as a numpy array.
-                  in_place: Whether to modify 'events' in place.
-                  normalization_instructions: Dictionary with normalization operations and parameters. For more information see
-                    :func:`~astrocast.helper.Normalization.run`.
-                  show_progress: Whether to show progress bar during execution.
-                  memmap_path: Path to save memmap file, if needed.
-                  save_path: Path to save output, if desired.
-                  save_param: Additional parameters for saving the file.
-
-                Returns:
-                  Depending on 'return_array', returns either a modified DataFrame or a tuple of the numpy array and two lists
-                  containing the extended z-range start and end indices.
-
-                Example::
-
-                  # Assuming a class instance 'event_obj' and a np.ndarray of the video data 'my_video_data'.
-                  extended_events = event_obj.get_extended_events(event_obj.events, video=my_video_data, dtype=np.float32)
-                  print(extended_events)
-                """
+    def _wrapped_get_extended_events(self, events: pd.DataFrame = None,
+                                     video: Union[np.ndarray, da.Array, Video] = None, dtype: type = float,
+                                     use_footprint: bool = False, extend: Union[int, Tuple[int, int]] = -1,
+                                     ensure_min: int = None,
+                                     ensure_max: int = None, pad_borders: bool = False, return_array: bool = False,
+                                     normalization_instructions: Dict[int, List[Union[str, Dict[str, str]]]] = None,
+                                     show_progress: bool = True,
+                                     load_to_memory: bool = False,
+                                     memmap_path: Union[str, Path] = None, save_path: Union[str, Path] = None,
+                                     save_param: Dict[str, Any] = None
+                                     ) -> Union[pd.DataFrame, Tuple[np.ndarray, List[int], List[int]]]:
         
         if events is None:
             events = self.events
         
-        if not in_place:
-            events = events.copy()
-        
+        events = events.copy()
         n_events = len(events)
         
         # load data
@@ -1513,10 +1556,10 @@ class Events(CachedClass):
         n_frames, X, Y = video.shape
         
         if load_to_memory and isinstance(video, da.Array):
-            logging.warning(f"attempting to load data to RAM "
-                            f"({humanize.naturalsize(video.size * video.itemsize)}).")
+            self.logger.warning(f"attempting to load data to RAM "
+                                f"({humanize.naturalsize(video.size * video.itemsize)}).")
             video = video.compute()
-            logging.warning(f"loaded!")
+            self.logger.warning(f"loaded!")
         
         # create container to save extended events in
         arr_ext, extended = None, None
@@ -1534,7 +1577,7 @@ class Events(CachedClass):
             arr_size = arr_ext.itemsize * n_events * n_frames
             ram_size = psutil.virtual_memory().total
             if arr_size > 0.9 * ram_size:
-                logging.warning(
+                self.logger.warning(
                         f"array size ({n_events}, {n_frames}) is larger than 90% RAM size ({arr_size * 1e-9:.2f}GB, {arr_size / ram_size * 100}%). Consider using smaller dtype or providing a 'mmemap_path'"
                         )
         
@@ -1653,6 +1696,9 @@ class Events(CachedClass):
             # logging.warning(f"{[(tr.shape, len(tr.shape)) for tr in full_trace]}, {z0}:{z1}, {full_z0}:{full_z1}")
             trace = np.concatenate(full_trace)
             
+            if np.ma.isMaskedArray(trace):
+                trace = trace.filled(trace.mean())
+            
             if ensure_max is not None and len(trace) > ensure_max:
                 c0 = max(0, full_z0 - z0)
                 c1 = len(trace) - max(0, z1 - full_z1)
@@ -1688,7 +1734,7 @@ class Events(CachedClass):
         if return_array:
             
             if memmap_path is not None:
-                logging.info(f"'save_path' ignored. Extended array saved as memmap to :{memmap_path}")
+                self.logger.info(f"'save_path' ignored. Extended array saved as memmap to :{memmap_path}")
             
             elif save_path is not None:
                 io = IO()
@@ -1702,6 +1748,7 @@ class Events(CachedClass):
         
         else:
             
+            events["trace_orig"] = events.trace
             events.trace = extended
             
             # save a copy of original z frames
@@ -1713,7 +1760,73 @@ class Events(CachedClass):
             events.z0 = z0_container
             events.z1 = z1_container
             events.dz = events["z1"] - events["z0"]
-            
+        
+        return events
+    
+    def get_extended_events(
+            self, events: pd.DataFrame = None, video: Union[np.ndarray, da.Array, Video] = None, dtype: type = float,
+            use_footprint: bool = False, extend: Union[int, Tuple[int, int]] = -1, ensure_min: int = None,
+            ensure_max: int = None, pad_borders: bool = False, return_array: bool = False, in_place: bool = False,
+            normalization_instructions: Dict[int, List[Union[str, Dict[str, str]]]] = None, show_progress: bool = True,
+            load_to_memory: bool = False,
+            memmap_path: Union[str, Path] = None, save_path: Union[str, Path] = None, save_param: Dict[str, Any] = None
+            ) -> Union[pd.DataFrame, Tuple[np.ndarray, List[int], List[int]]]:
+        """
+                Extends the footprint of individual events either over the entire z-range or a fixed number of bordering
+                frames of a time series recording.
+
+                This method extends the event signals by applying the event's footprint or mask over a specified range in the
+                video. It supports different modes of extension, normalization of the extended signal, and various output
+                options. The method is useful when capturing the shoulders of the events is beneficial (e.g. in classification
+                tasks)
+
+                .. note::
+                  - Normalization instructions should be provided as a dictionary where each key is an operation index,
+                    and the value is a list of the operation and its parameters. For more information see
+                    :func:`~astrocast.helper.Normalization.run`.
+
+                .. caution::
+                  - The method raises ValueError if 'video' is not provided and no data is available in 'self.data'.
+                  - The function may generate large arrays, potentially consuming a significant portion of available RAM.
+
+                Args:
+                  events: DataFrame containing event data. If None, uses 'self.events'.
+                  video: 3D numpy array of video data. If None, uses 'self.data'.
+                  dtype: Data type for the output array.
+                  use_footprint: Whether to use the event's footprint for extension.
+                  extend: Extension length or range. Can be a single int or a tuple (left, right). -1 corresponds to the
+                    full range.
+                  ensure_min: Minimum length to ensure for each extended event.
+                  ensure_max: Maximum length to allow for each extended event.
+                  pad_borders: If True, pads the borders of video to ensure requested length.
+                  return_array: Whether to return the extended events as a numpy array.
+                  in_place: Whether to modify 'events' in place.
+                  normalization_instructions: Dictionary with normalization operations and parameters. For more information see
+                    :func:`~astrocast.helper.Normalization.run`.
+                  show_progress: Whether to show progress bar during execution.
+                  memmap_path: Path to save memmap file, if needed.
+                  save_path: Path to save output, if desired.
+                  save_param: Additional parameters for saving the file.
+
+                Returns:
+                  Depending on 'return_array', returns either a modified DataFrame or a tuple of the numpy array and two lists
+                  containing the extended z-range start and end indices.
+
+                Example::
+
+                  # Assuming a class instance 'event_obj' and a np.ndarray of the video data 'my_video_data'.
+                  extended_events = event_obj.get_extended_events(event_obj.events, video=my_video_data, dtype=np.float32)
+                  print(extended_events)
+                """
+        
+        events = self._wrapped_get_extended_events(events=events, video=video, dtype=dtype, use_footprint=use_footprint,
+                                                   ensure_min=ensure_min, ensure_max=ensure_max,
+                                                   pad_borders=pad_borders, return_array=return_array,
+                                                   normalization_instructions=normalization_instructions,
+                                                   show_progress=show_progress, load_to_memory=load_to_memory,
+                                                   memmap_path=memmap_path, save_path=save_path, save_param=save_param)
+        
+        if in_place:
             self.events = events
             
             return events
@@ -1809,10 +1922,9 @@ class Events(CachedClass):
                     data = data[:, :max_length]
         
         # update events dataframe
-        print(data.shape)
         events.trace = data.tolist()
         events.dz = events.trace.apply(lambda x: len(x))
-        logging.warning("z0 and z1 values do not correspond to the adjusted event boundaries")
+        self.logger.warning("z0 and z1 values do not correspond to the adjusted event boundaries")
         
         if inplace:
             self.events = events
@@ -1942,129 +2054,164 @@ class MultiEvents(Events):
                  z_slice: Union[Tuple[int, int], List[Tuple[int, int]]] = None,
                  custom_columns: Union[list, Tuple, Literal['v_area_norm', 'v_ara_footprint', 'cx', 'cy']] = (
                          "v_area_norm", "cx", "cy"), frame_to_time_mapping: Union[dict, list] = None,
-                 frame_to_time_function: Union[Callable, List[Callable]] = None, cache_path: Union[str, Path] = None,
-                 seed: int = 1):
+                 frame_to_time_function: Union[Callable, List[Callable]] = None,
+                 cache_path: Union[str, Path] = None, cache_paths: Union[List, str] = None,
+                 logging_level=logging.INFO, seed: int = 1):
         
-        if cache_path is not None:
+        super().__init__(cache_path=cache_path)
+        logging.basicConfig()
+        self.logger = logging.getLogger("MultiEvents")
+        self.logger.setLevel(logging_level)
+        
+        if event_dirs is None:
+            self.event_dirs = None
+            self.num_event_objects = 0
+        
+        else:
             
-            if isinstance(cache_path, str):
-                cache_path = Path(cache_path)
+            self.seed = seed
+            self.num_event_objects = len(event_dirs)
+            self.event_dirs = event_dirs
             
-            if not cache_path.is_dir():
-                cache_path.mkdir()
-                assert cache_path.exists(), f"failed to create cache_path: {cache_path}"
-                logging.info(f"created cache_path at {cache_path}")
-            
-            self.cache_path = cache_path
-        
-        super().__init__()
-        
-        self.seed = seed
-        self.z_slice = z_slice
-        self.num_event_objects = len(event_dirs)
-        self.event_dirs = event_dirs
-        
-        # data
-        if data == "infer" or data is None:
-            self.data = [data for _ in range(self.num_event_objects)]
-        elif isinstance(data, list):
-            if len(data) != self.num_event_objects:
-                raise ValueError(f"Length of events and data is unequal: "
-                                 f"#data {len(data)} != #events {self.num_event_objects}")
-            self.data = data
-        else:
-            raise ValueError(f"'data' must be either list, 'infer' or None NOT {data}")
-        
-        # loc
-        if isinstance(loc, list):
-            if len(loc) != self.num_event_objects:
-                raise ValueError(f"Length of events and data is unequal: "
-                                 f"#loc {len(loc)} != #events {self.num_event_objects}")
-            self.loc = loc
-        else:
-            self.loc = [loc for _ in range(self.num_event_objects)]
-        
-        # z_slice
-        if isinstance(z_slice, list):
-            if len(z_slice) != self.num_event_objects:
-                raise ValueError(f"Length of events and data is unequal: "
-                                 f"#z_slice {len(z_slice)} != #events {self.num_event_objects}")
-            self.z_slice = z_slice
-        else:
-            self.z_slice = [z_slice for _ in range(self.num_event_objects)]
-        
-        # group
-        if isinstance(group, list):
-            if len(group) != self.num_event_objects:
-                raise ValueError(f"Length of events and data is unequal: "
-                                 f"#group {len(group)} != #events {self.num_event_objects}")
-            self.group = group
-        else:
-            self.group = [group for _ in range(self.num_event_objects)]
-        
-        # subject_id
-        if isinstance(subject_id, list):
-            if len(subject_id) != self.num_event_objects:
-                raise ValueError(f"Length of events and data is unequal: "
-                                 f"#subject_id {len(subject_id)} != #events {self.num_event_objects}")
-            self.subject_id = subject_id
-        elif subject_id is None:
-            self.subject_id = range(self.num_event_objects)
-        else:
-            self.subject_id = [subject_id for _ in range(self.num_event_objects)]
-        
-        # frame_to_time_mapping
-        if isinstance(frame_to_time_mapping, list):
-            if len(frame_to_time_mapping) != self.num_event_objects:
-                raise ValueError(f"Length of events and data is unequal: "
-                                 f"#frame_to_time_mapping {len(frame_to_time_mapping)} != #events {self.num_event_objects}")
-            self.frame_to_time_mapping = frame_to_time_mapping
-        else:
-            self.frame_to_time_mapping = [frame_to_time_mapping for _ in range(self.num_event_objects)]
-        
-        # frame_to_time_function
-        if isinstance(frame_to_time_function, list):
-            if len(frame_to_time_function) != self.num_event_objects:
-                raise ValueError(f"Length of events and data is unequal: "
-                                 f"#frame_to_time_function {len(frame_to_time_function)} != #events {self.num_event_objects}")
-            self.frame_to_time_function = frame_to_time_function
-        else:
-            self.frame_to_time_function = [frame_to_time_function for _ in range(self.num_event_objects)]
-        
-        # cache
-        if isinstance(cache_path, list):
-            if len(cache_path) != self.num_event_objects:
-                raise ValueError(f"Length of events and data is unequal: "
-                                 f"#cache_path {len(cache_path)} != #events {self.num_event_objects}")
-            self.cache_path = cache_path
-        else:
-            self.cache_path = [cache_path for _ in range(self.num_event_objects)]
-        
-        # create events
-        self.event_objects = []
-        for i in range(self.num_event_objects):
-            
-            idx = self.subject_id[i]
-            
-            event_dir = self.event_dirs[i]
-            
-            if isinstance(event_dir, Events):
-                event = event_dir
-            
+            # data
+            if data == "infer" or data is None:
+                self.data = [data for _ in range(self.num_event_objects)]
+            elif isinstance(data, list):
+                if len(data) != self.num_event_objects:
+                    raise ValueError(f"Length of events and data is unequal: "
+                                     f"#data {len(data)} != #events {self.num_event_objects}")
+                self.data = data
             else:
-                event = Events(event_dir=event_dir,
-                               data=self.data[i], loc=self.loc[i], z_slice=self.z_slice[i], group=self.group[i],
-                               lazy=lazy, index_prefix=f"{idx}x", subject_id=idx,
-                               frame_to_time_mapping=self.frame_to_time_mapping[i],
-                               frame_to_time_function=self.frame_to_time_function[i],
-                               custom_columns=custom_columns, seed=self.seed, cache_path=self.cache_path[i])
+                raise ValueError(f"'data' must be either list, 'infer' or None NOT {data}")
             
-            self.event_objects.append(event)
-        
-        self.events = self.combine_events()
+            # loc
+            if isinstance(loc, list):
+                if len(loc) != self.num_event_objects:
+                    raise ValueError(f"Length of events and data is unequal: "
+                                     f"#loc {len(loc)} != #events {self.num_event_objects}")
+                self.loc = loc
+            else:
+                self.loc = [loc for _ in range(self.num_event_objects)]
+            
+            # z_slice
+            if isinstance(z_slice, list):
+                if len(z_slice) != self.num_event_objects:
+                    raise ValueError(f"Length of events and data is unequal: "
+                                     f"#z_slice {len(z_slice)} != #events {self.num_event_objects}")
+                self.z_slice = z_slice
+            else:
+                self.z_slice = [z_slice for _ in range(self.num_event_objects)]
+            
+            # group
+            if isinstance(group, list):
+                if len(group) != self.num_event_objects:
+                    raise ValueError(f"Length of events and data is unequal: "
+                                     f"#group {len(group)} != #events {self.num_event_objects}")
+                self.group = group
+            else:
+                self.group = [group for _ in range(self.num_event_objects)]
+            
+            # subject_id
+            if isinstance(subject_id, list):
+                if len(subject_id) != self.num_event_objects:
+                    raise ValueError(f"Length of events and data is unequal: "
+                                     f"#subject_id {len(subject_id)} != #events {self.num_event_objects}")
+                self.subject_id = subject_id
+            elif subject_id is None:
+                self.subject_id = range(self.num_event_objects)
+            else:
+                self.subject_id = [subject_id for _ in range(self.num_event_objects)]
+            
+            # frame_to_time_mapping
+            if isinstance(frame_to_time_mapping, list):
+                if len(frame_to_time_mapping) != self.num_event_objects:
+                    raise ValueError(f"Length of events and data is unequal: "
+                                     f"#frame_to_time_mapping {len(frame_to_time_mapping)} != #events {self.num_event_objects}")
+                self.frame_to_time_mapping = frame_to_time_mapping
+            else:
+                self.frame_to_time_mapping = [frame_to_time_mapping for _ in range(self.num_event_objects)]
+            
+            # frame_to_time_function
+            if isinstance(frame_to_time_function, list):
+                if len(frame_to_time_function) != self.num_event_objects:
+                    raise ValueError(f"Length of events and data is unequal: "
+                                     f"#frame_to_time_function {len(frame_to_time_function)} != #events {self.num_event_objects}")
+                self.frame_to_time_function = frame_to_time_function
+            else:
+                self.frame_to_time_function = [frame_to_time_function for _ in range(self.num_event_objects)]
+            
+            # cache
+            if cache_paths is None and self.cache_path is not None:
+                cache_paths = [Path(self.cache_path).joinpath(f"{sid}") for sid in self.subject_id]
+            elif isinstance(cache_paths, list):
+                if len(cache_paths) != self.num_event_objects:
+                    raise ValueError(f"Length of events and data is unequal: "
+                                     f"#cache_path {len(cache_path)} != #events {self.num_event_objects}")
+                cache_paths = cache_paths
+            else:
+                cache_paths = [None for _ in range(self.num_event_objects)]
+            
+            # create events
+            self.event_objects = []
+            for i in range(self.num_event_objects):
+                
+                idx = self.subject_id[i]
+                
+                event_dir = self.event_dirs[i]
+                
+                if isinstance(event_dir, Events):
+                    event = event_dir
+                
+                else:
+                    
+                    args = {}
+                    args["data"] = self.data[i]
+                    args["loc"] = self.loc[i]
+                    args["z_slice"] = self.z_slice[i]
+                    args["frame_to_time_mapping"] = self.frame_to_time_mapping[i]
+                    args["frame_to_time_function"] = self.frame_to_time_function[i]
+                    args["group"] = self.group[i]
+                    args["cache_path"] = cache_paths[i]
+                    args["subject_id"] = f"{idx}x"
+                    args["lazy"] = lazy
+                    args["custom_columns"] = custom_columns
+                    args["seed"] = self.seed
+                    
+                    event = Events(event_dir=event_dir, **args)
+                
+                self.event_objects.append(event)
+            
+            self.events = self.combine_events()
     
-    def combine_events(self):
-        events = pd.concat([ev.events for ev in self.event_objects])
+    def copy(self):
+        
+        """ Returns a copy of the Events object. """
+        
+        obj = MultiEvents()
+        obj.cache_path = self.cache_path
+        obj.logger = self.logger
+        obj.seed = self.seed
+        obj.event_dirs = self.event_dirs.copy()
+        obj.num_event_objects = self.num_event_objects
+        obj.loc = self.loc.copy()
+        obj.z_slice = self.z_slice.copy()
+        obj.group = self.group.copy()
+        obj.subject_id = self.subject_id.copy()
+        obj.frame_to_time_mapping = self.frame_to_time_mapping.copy()
+        obj.frame_to_time_function = self.frame_to_time_function.copy()
+        obj.event_objects = [obj.copy() for obj in self.event_objects]
+        obj.events = self.events.copy()
+        
+        return obj
+    
+    def combine_events(self, event_objects: Union[List[Events], List[pd.DataFrame]] = None, inplace=True):
+        
+        if event_objects is None:
+            event_objects = [ev.events for ev in self.event_objects]
+        elif isinstance(event_objects[0], Events):
+            event_objects = [ev.events for ev in event_objects]
+        
+        events = pd.concat(event_objects)
         events.reset_index(drop=False, inplace=True, names="subject_idx")
         
         # make categorical
@@ -2072,55 +2219,29 @@ class MultiEvents(Events):
             if col in events.columns:
                 events[col] = events[col].astype("category")
         
+        if inplace:
+            self.events = events
+        
         return events
     
-    # def __hash__(self):
-    #     raise NotImplementedError
-    
-    # def add_clustering(self, cluster_lookup_table: dict, column_name: str = "cluster") -> None:
-    #
-    #     for event in self.event_objects:
-    #         event.add_clustering(cluster_lookup_table=cluster_lookup_table, column_name=column_name)
-    #
-    #     self.events = self.combine_events()
-    
-    # def filter(self, filters: dict, inplace: bool = True) -> None:
-    #
-    #     if not inplace:
-    #         raise NotImplementedError("currently MultiEvent objects can only be changed inplace.")
-    #
-    #     for event in self.event_objects:
-    #         event.filter(filters=filters, inplace=inplace)
-    #
-    #     self.combine_events()
-    
-    # def to_numpy(self, events: pd.DataFrame = None, empty_as_nan: bool = True, ragged: bool = False) -> np.ndarray:
-    #     raise NotImplementedError("currently MultiEvent objects does not implement this function.")
-    #
     def show_event_map(
             self, video: Union[Path, str] = None, loc: str = None, z_slice: Tuple[int, int] = None, lazy: bool = True
             ):
         raise NotImplementedError("currently MultiEvent objects does not implement this function.")
     
-    # def get_trials(
-    #         self, trial_timings: Union[np.ndarray, da.Array], trial_length: int = 30,
-    #         multi_timing_behavior: Literal['first', 'expand', 'exclude'] = "first",
-    #         output_format: Literal['array', 'dataframe'] = "array"
-    #         ) -> Union[np.ndarray, pd.DataFrame]:
-    #     raise NotImplementedError("currently MultiEvent objects does not implement this function.")
-    
     @wrapper_local_cache
-    def get_extended_events(
-            self, events: pd.DataFrame = None, video: Union[np.ndarray, da.Array, Video] = None, dtype: type = float,
-            use_footprint: bool = False, extend: Union[int, Tuple[int, int]] = -1, ensure_min: int = None,
-            ensure_max: int = None, pad_borders: bool = False, return_array: bool = False, in_place: bool = False,
-            normalization_instructions: Dict[int, List[Union[str, Dict[str, str]]]] = None, show_progress: bool = True,
-            load_to_memory: bool = False,
-            memmap_path: Union[str, Path] = None, save_path: Union[str, Path] = None, save_param: Dict[str, Any] = None
-            ):
-        
-        if not in_place:
-            raise NotImplementedError("currently MultiEvent objects can only be changed inplace.")
+    def _wrapped_get_ext_events_multi(self, events: pd.DataFrame = None,
+                                      video: Union[np.ndarray, da.Array, Video] = None,
+                                      dtype: type = float,
+                                      use_footprint: bool = False, extend: Union[int, Tuple[int, int]] = -1,
+                                      ensure_min: int = None,
+                                      ensure_max: int = None, pad_borders: bool = False, return_array: bool = False,
+                                      normalization_instructions: Dict[int, List[Union[str, Dict[str, str]]]] = None,
+                                      show_progress: bool = True,
+                                      load_to_memory: bool = False,
+                                      memmap_path: Union[str, Path] = None, save_path: Union[str, Path] = None,
+                                      save_param: Dict[str, Any] = None, obj_inplace: bool = False
+                                      ):
         
         if return_array:
             raise NotImplementedError("currently MultiEvent objects cannot return arrays.")
@@ -2128,21 +2249,78 @@ class MultiEvents(Events):
         if save_path is not None:
             raise NotImplementedError("currently MultiEvent objects cannot save results.")
         
+        if events is not None:
+            raise NotImplementedError("currently MultiEvent objects cannot take custom events.")
+        
+        if video is not None:
+            raise NotImplementedError("currently MultiEvent objects cannot take custom videos.")
+        
         if show_progress:
             iterator = tqdm(self.event_objects)
         else:
             iterator = self.event_objects
         
-        for event in iterator:
-            event.get_extended_events(events=events, video=video, dtype=dtype,
-                                      use_footprint=use_footprint, extend=extend, ensure_min=ensure_min,
-                                      ensure_max=ensure_max, pad_borders=pad_borders, return_array=return_array,
-                                      in_place=in_place, normalization_instructions=normalization_instructions,
-                                      show_progress=show_progress, memmap_path=memmap_path, save_path=save_path,
-                                      save_param=save_param, load_to_memory=load_to_memory
-                                      )
+        events_container = []
+        for eObj in iterator:
+            event = eObj.get_extended_events(events=events, video=video,
+                                             dtype=dtype,
+                                             use_footprint=use_footprint, extend=extend, ensure_min=ensure_min,
+                                             ensure_max=ensure_max, pad_borders=pad_borders, return_array=return_array,
+                                             in_place=obj_inplace,
+                                             normalization_instructions=normalization_instructions,
+                                             show_progress=show_progress, memmap_path=memmap_path, save_path=save_path,
+                                             save_param=save_param, load_to_memory=load_to_memory
+                                             )
+            events_container.append(event)
         
-        self.combine_events()
+        return self.combine_events(event_objects=events_container, inplace=False)
+    
+    def get_extended_events(self, events: pd.DataFrame = None, video: Union[np.ndarray, da.Array, Video] = None,
+                            dtype: type = float,
+                            use_footprint: bool = False, extend: Union[int, Tuple[int, int]] = -1,
+                            ensure_min: int = None,
+                            ensure_max: int = None, pad_borders: bool = False, return_array: bool = False,
+                            in_place: bool = True,
+                            normalization_instructions: Dict[int, List[Union[str, Dict[str, str]]]] = None,
+                            show_progress: bool = True,
+                            load_to_memory: bool = False,
+                            memmap_path: Union[str, Path] = None, save_path: Union[str, Path] = None,
+                            save_param: Dict[str, Any] = None
+                            ):
+        
+        if memmap_path is not None:
+            raise NotImplementedError("currently MultiEvent objects cannot use memmap_path.")
+        
+        if save_path is not None:
+            raise NotImplementedError("currently MultiEvent objects cannot use save_path.")
+        
+        ext_events = self._wrapped_get_ext_events_multi(events=events, video=video, dtype=dtype,
+                                                        use_footprint=use_footprint, extend=extend,
+                                                        ensure_min=ensure_min,
+                                                        ensure_max=ensure_max, pad_borders=pad_borders,
+                                                        return_array=return_array,
+                                                        normalization_instructions=normalization_instructions,
+                                                        show_progress=show_progress, memmap_path=memmap_path,
+                                                        save_path=save_path, obj_inplace=in_place,
+                                                        save_param=save_param, load_to_memory=load_to_memory)
+        
+        if in_place:
+            
+            for eObj in self.event_objects:
+                eObj.get_extended_events(events=events, video=video, dtype=dtype,
+                                         use_footprint=use_footprint, extend=extend, ensure_min=ensure_min,
+                                         ensure_max=ensure_max, pad_borders=pad_borders,
+                                         return_array=return_array,
+                                         in_place=in_place,
+                                         normalization_instructions=normalization_instructions,
+                                         show_progress=show_progress, memmap_path=memmap_path,
+                                         save_path=save_path,
+                                         save_param=save_param, load_to_memory=load_to_memory
+                                         )
+            
+            self.events = ext_events
+        
+        return ext_events
     
     def enforce_length(
             self, min_length: Union[int, None] = None, pad_mode: str = "edge", max_length: Union[int, None] = None,
@@ -2150,15 +2328,47 @@ class MultiEvents(Events):
             ) -> pd.DataFrame:
         raise NotImplementedError("currently MultiEvent objects does not implement this function.")
     
-    # def normalize(self, normalize_instructions: dict, inplace: bool = True):
-    #
-    #     if not inplace:
-    #         raise NotImplementedError("currently MultiEvent objects can only be changed inplace.")
-    #
-    #     for event in self.event_objects:
-    #         event.normalize(normalize_instructions=normalize_instructions, inplace=inplace)
-    #
-    #     self.combine_events()
+    def get_local_to_global_index_mapping(self, local_index: str = 'subject_idx', subject_id: str = 'subject_id'):
+        
+        mapping = {}
+        for idx, row in self.events.iterrows():
+            mapping[(row[subject_id], row[local_index])] = idx
+        
+        return mapping
+    
+    def filter(self, filters: dict, inplace: bool = True) -> Union[None, pd.DataFrame]:
+        """
+        Filters the events DataFrame based on specified criteria.
+
+        This method applies filtering on the events DataFrame based on the criteria provided in the `filters` dictionary.
+        The filtering can be done either in place or on a copy of the DataFrame, depending on the `inplace` parameter.
+
+        Args:
+            filters: A dictionary where keys are column names and values are tuples specifying the
+                filtering criteria. For numeric columns, the tuple should be (min_value, max_value). For
+                string or categorical columns, the tuple should contain the allowed values.
+            inplace (bool): If True, the filtering is applied in place and the method returns None. If False,
+                a new DataFrame with the filtered data is returned.
+
+        Returns:
+            If inplace is False, returns the filtered DataFrame. Otherwise, returns None.
+
+        Raises:
+            ValueError: If an unknown column data type is encountered.
+
+        Example::
+
+            # Assuming `events` is an instance of the Events class
+            # To filter events where the event length is between 5 and 20 frames use:
+            filters = {'dz': (5, 20)}
+            filtered_events = events.filter(filters, inplace=False)
+        """
+        
+        if inplace:
+            for obj in self.event_objects:
+                obj.filter(filters=filters, inplace=inplace)
+        
+        return Events.filter(self, filters=filters, inplace=inplace)
 
 
 class Plotting:
@@ -2521,18 +2731,164 @@ class Plotting:
         
         return fig, axx
     
-    def get_color_mapping(self, group_column: str = "group", index_column: str = "subject_id"):
+    @staticmethod
+    def get_color_from_list(data: Union[List, np.ndarray], palette: Union[List, str] = 'husl',
+                            default_color: str = None):
         
-        unique_groups = self.events[group_column].unique()
-        colors = sns.color_palette("husl", len(unique_groups))
+        unique_groups = np.unique(data)
         
-        temp = self.events[[group_column, index_column]].drop_duplicates()
-        temp.index = temp.subject_id
+        if isinstance(palette, str):
+            palette = sns.color_palette(palette, len(unique_groups))
+        else:
+            if len(unique_groups) > len(palette):
+                raise KeyError(f"Length of palette ({len(palette)} is not sufficient for "
+                               f"number of groups ({len(unique_groups)}")
         
-        lut = dict(zip(unique_groups, colors))
+        if default_color is not None:
+            lut = defaultdict(lambda: default_color)
+            for g, c in list(zip(unique_groups, palette)):
+                lut[g] = c
+        else:
+            lut = dict(zip(unique_groups, palette))
         
-        col_colors = temp[group_column].astype(str).map(lut)
-        return col_colors.to_dict()
+        return lut
+    
+    @staticmethod
+    def get_marker_from_list(data: Union[List, np.ndarray], style: Literal['polygon', 'letter', 'LETTER'] = 'polygon'):
+        
+        unique_groups = np.unique(data)
+        
+        if style == 'polygon':
+            
+            symbols = []
+            typ = 0
+            num_sides = 3
+            angle = 0
+            while len(symbols) < len(unique_groups):
+                
+                symbols.append((num_sides, typ, angle))
+                
+                typ += 1
+                if typ > 2:
+                    num_sides += 1
+                    typ = 0
+                
+                if num_sides > 7:
+                    num_sides = 3
+                    typ = 0
+                    angle += 15
+        
+        elif style == 'letter':
+            symbols = [f"${chr(97 + i)}$" for i in range(len(unique_groups))]
+        elif style == 'LETTER':
+            symbols = [f"${chr(64 + i)}$" for i in range(len(unique_groups))]
+        else:
+            raise ValueError(f"style must be on of [polygon, letter, LETTER], not {style}")
+        
+        lut = dict(zip(unique_groups, symbols))
+        
+        return lut
+    
+    def get_group_color(self, group_column: str, df: pd.DataFrame = None,
+                        palette: Union[List, str] = 'husl', default_color: str = None,
+                        show_mapping: bool = False):
+        
+        if df is None:
+            df = self.events
+        
+        unique_groups = df[group_column].unique()
+        lut = self.get_color_from_list(data=unique_groups, palette=palette, default_color=default_color)
+        
+        if show_mapping:
+            fig, ax = plt.subplots(1, 1, figsize=(4, 4))
+            
+            for i, (idx, color) in enumerate(lut.items()):
+                ax.scatter(i + 1, i + 1, color=color, label=idx, marker="o")
+            ax.legend()
+        
+        return lut
+    
+    def get_id_to_group_color(self, group_column: str, index_column: str, df: pd.DataFrame = None,
+                              palette: Union[List, str] = 'husl', lut_group_to_color: dict = None,
+                              show_mapping: bool = False, default_color: str = None) -> Tuple[dict, dict]:
+        
+        if df is None:
+            df = self.events
+        
+        unique_groups = df[group_column].unique()
+        
+        if lut_group_to_color is None:
+            lut_group_to_color = self.get_group_color(df=df, group_column=group_column,
+                                                      palette=palette, default_color=default_color, show_mapping=False)
+        
+        # filter data frame
+        temp = df[[group_column, index_column]].drop_duplicates()
+        temp.index = temp[index_column]
+        
+        # create color_dictionary
+        lut_id_to_group_color = temp.apply(lambda x: lut_group_to_color[x[group_column]], axis=1)
+        lut_id_to_group_color = lut_id_to_group_color.to_dict()
+        
+        if show_mapping:
+            fig, (ax0, ax1) = plt.subplots(1, 2, figsize=(10, 5))
+            
+            for i, (idx, color) in enumerate(lut_id_to_group_color.items()):
+                ax0.scatter(i + 1, i + 1, color=color, label=idx, marker="o")
+            ax0.legend()
+            
+            for i, (idx, color) in enumerate(lut_group_to_color.items()):
+                ax1.scatter(i + 1, i + 1, color=color, label=idx, marker="o")
+            ax1.legend()
+        
+        return lut_id_to_group_color
+    
+    def add_color_boxes(self, indices: List, ax: plt.axis, by: Literal["group", "index"] = "index",
+                        orient: Literal['right', 'left', 'top', 'bottom'] = 'right',
+                        color_mapping: dict = None, group_column: str = None, index_column: str = None,
+                        x: float = None, y=None, xy_steps=1, width=0.1, height=10, lw=0,
+                        padding=10, axis='y', length=0, ):
+        
+        if color_mapping is None:
+            
+            if group_column is None:
+                raise ValueError("Please provide a color_mapping or a group_column.")
+            if index_column is None:
+                raise ValueError("Please provide a color_mapping or a index_column.")
+            
+            group_mapping, index_mapping = self.get_id_to_group_color(group_column=group_column,
+                                                                      index_column=index_column)
+            
+            if by == "group":
+                color_mapping = group_mapping
+            elif by == "index":
+                color_mapping = index_mapping
+            else:
+                raise ValueError(f"by must be one of [index, group] and not: {by}")
+        
+        if orient == 'right':
+            x = 1.02 if x is None else x
+        elif orient == 'left':
+            x = -width if x is None else x
+        elif orient == 'top':
+            y = 1.02 if y is None else y
+        elif orient == 'bottom':
+            y = -height if y is None else y
+        else:
+            raise ValueError(f"Valid options for orient are [left, right, top, bottom] and not: {orient}")
+        
+        # Add grouping colors to the y-axis
+        ax.tick_params(axis=axis, which='major', pad=padding, length=length)
+        for i, idx in enumerate(indices):
+            color = color_mapping[idx]
+            
+            if orient in ['left', 'right']:
+                xy = (x, i * xy_steps)
+            else:
+                xy = (i * xy_steps, y)
+            
+            ax.add_patch(plt.Rectangle(xy=xy,
+                                       width=width, height=height, color=color, lw=lw,
+                                       transform=ax.get_yaxis_transform(), clip_on=False))
     
     @staticmethod
     def plot_trial_alignment(trials: Union[pd.DataFrame, List[pd.DataFrame]],
