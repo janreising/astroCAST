@@ -29,7 +29,7 @@ import warnings
 from matplotlib import pyplot as plt
 from scipy.cluster.hierarchy import fcluster
 from sklearn import metrics
-from tqdm import tqdm
+from tqdm.auto import tqdm
 
 import astrocast.detection
 from astrocast import helper
@@ -1582,9 +1582,9 @@ class Events(CachedClass):
                         )
         
         else:
-            extended = list()
+            extended = []
         
-        z0_container, z1_container = list(), list()
+        z0_container, z1_container = [], []
         
         # extract footprints
         c = 0
@@ -1693,8 +1693,10 @@ class Events(CachedClass):
             # combine
             full_trace = [np.squeeze(tr) for tr in [pre_trace, event.trace, post_trace]]
             full_trace = [tr for tr in full_trace if len(tr.shape) > 0]
-            # logging.warning(f"{[(tr.shape, len(tr.shape)) for tr in full_trace]}, {z0}:{z1}, {full_z0}:{full_z1}")
             trace = np.concatenate(full_trace)
+            
+            logging.debug(f"event {i}: {' + '.join([str(tr.shape) for tr in full_trace])}. "
+                          f"z0:z1 ({z0}:{z1}). full_z0:z1 ({full_z0}:{full_z1})")
             
             if np.ma.isMaskedArray(trace):
                 trace = trace.filled(trace.mean())

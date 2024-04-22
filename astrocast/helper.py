@@ -8,7 +8,6 @@ import shutil
 import tempfile
 import time
 import types
-from functools import lru_cache
 from pathlib import Path
 from typing import List, Literal, Tuple, Union
 
@@ -24,7 +23,7 @@ import xxhash
 import yaml
 from skimage.util import img_as_uint
 from sklearn.preprocessing import LabelEncoder
-from tqdm import tqdm
+from tqdm.auto import tqdm
 
 
 def closest_power_of_two(value):
@@ -321,7 +320,7 @@ def wrapper_local_cache(f):
                     logger.info(f"multiple saves found. files should be deleted: {files}")
                 
                 # save result
-                logger.info(f"saving to: {cache_path}")
+                logger.info(f"saving to: {cache_path.name}")
                 save_value(cache_path, result)
         
         else:

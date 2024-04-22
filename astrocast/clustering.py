@@ -4,6 +4,7 @@ import pickle
 import tempfile
 import traceback
 from collections import defaultdict
+from functools import lru_cache
 from pathlib import Path
 from typing import List, Literal, Tuple, Union
 
@@ -13,18 +14,20 @@ import networkx as nx
 import numpy as np
 import pandas as pd
 import seaborn as sns
-from astrocast.analysis import Events, MultiEvents
-from astrocast.helper import CachedClass, Normalization, is_ragged, wrapper_local_cache
 from dask import array as da
 from dtaidistance import dtw, dtw_barycenter
 from matplotlib import pyplot as plt
 from matplotlib.colors import LinearSegmentedColormap
 from networkx.algorithms import community
 from scipy.cluster.hierarchy import fcluster
+from scipy.spatial import KDTree
 from sklearn import cluster, ensemble, gaussian_process, linear_model, neighbors, neural_network, tree
 from sklearn.cluster import KMeans
 from sklearn.metrics import confusion_matrix
-from tqdm import tqdm
+from tqdm.auto import tqdm
+
+from astrocast.analysis import Events, MultiEvents
+from astrocast.helper import CachedClass, Normalization, is_ragged, wrapper_local_cache
 
 
 class HdbScan:
@@ -376,20 +379,23 @@ class Distance(CachedClass):
     A class for computing correlation matrices and histograms.
     """
     
-    def __init__(self, cache_path: Union[str, Path] = None,
+    def __init__(self, events: Union[pd.DataFrame, Events, MultiEvents], cache_path: Union[str, Path] = None,
                  logging_level=logging.INFO):
         
         super().__init__(cache_path=cache_path, logging_level=logging_level, logger_name="Distance")
+        
+        if isinstance(events, (Events, MultiEvents)):
+            self.events = events.events
+        else:
+            self.events = events
     
     @wrapper_local_cache
-    def get_pearson_correlation(self, events, dtype=np.single, trace_column: str = "trace"):
+    def get_pearson_correlation(self, dtype=np.single, trace_column: str = "trace"):
         """
         Computes the correlation matrix of events.
 
         Args:
-            events (np.ndarray or da.Array or pd.DataFrame): Input events data.
             dtype (np.dtype, optional): Data type of the correlation matrix. Defaults to np.single.
-            mmap (bool, optional): Flag indicating whether to use memory-mapped arrays. Defaults to False.
 
         Returns:
             np.ndarray: Correlation matrix.
@@ -399,8 +405,7 @@ class Distance(CachedClass):
             ValueError: If events DataFrame does not have a 'trace' column.
         """
         
-        if isinstance(events, (Events, MultiEvents)):
-            events = events.events
+        events = self.events
         
         if isinstance(events, (pd.DataFrame, pd.core.frame.DataFrame)):
             if trace_column not in events.columns:
@@ -538,7 +543,7 @@ class Distance(CachedClass):
     
     @wrapper_local_cache
     def get_dtw_correlation(
-            self, events: Events, use_mmap: bool = False, block: int = 10000,
+            self, use_mmap: bool = False, block: int = 10000,
             parallel: bool = True, compact: bool = False, only_triu: bool = False, use_pruning: bool = False,
             return_similarity: bool = True, show_progress: bool = True, trace_column: str = "trace",
             max_tries: int = 3
@@ -555,9 +560,6 @@ class Distance(CachedClass):
                         This function will not work on most systems with MacOS. Please use the `dtw_parallel` function instead.
 
                     Args:
-                        events:
-                            An instance of the custom `Events` class containing the time series data. Each time series
-                            is represented as a trace within this object.
                         use_mmap:
                             If set to `True`, the function uses memory-mapped files to store the distance matrix.
                             This approach is beneficial when dealing with large datasets as it avoids excessive memory usage.
@@ -576,8 +578,7 @@ class Distance(CachedClass):
 
                     """
         
-        if not isinstance(events, pd.DataFrame):
-            events = events.events
+        events = self.events
         
         traces = [np.array(t) for t in events[trace_column].tolist()]
         N = len(traces)
@@ -698,7 +699,7 @@ class Distance(CachedClass):
     
     @wrapper_local_cache
     def get_dtw_parallel_correlation(
-            self, events: Events, local_dissimilarity: Literal[
+            self, local_dissimilarity: Literal[
                 "square_euclidean_distance", "gower", "norm1", "norm2", "braycurtis", "canberra", "chebyshev", "cityblock", "correlation", "cosine", "euclidean", "jensenshannon", "minkowski", "sqeuclidean"] = "norm1",
             type_dtw: Literal["d", "i"] = "d", constrained_path_search: Literal["itakura", "sakoe_chiba"] = None,
             itakura_max_slope: float = None, sakoe_chiba_radius: int = None, sigma_kernel: int = 1,
@@ -713,9 +714,6 @@ class Distance(CachedClass):
 
 
                 Args:
-                    events:
-                            An instance of the custom `Events` class from this package. This class encapsulates the time series
-                            and metadata necessary for analysis.
                     sigma_kernel:
                         Sets the width of the exponential kernel used in transforming the DTW distance matrix into a similarity matrix.
                         The parameter sigma controls the rate at which similarity values decrease with increasing DTW distances.
@@ -846,8 +844,7 @@ class Distance(CachedClass):
         
         from dtwParallel import dtw_functions
         
-        if not isinstance(events, pd.DataFrame):
-            events = events.events
+        events = self.events
         
         traces = np.array(events[trace_column].tolist())
         
@@ -921,9 +918,11 @@ class Distance(CachedClass):
         return distance_matrix
     
     def get_correlation(
-            self, events, correlation_type: Literal['pearson', 'dtw', 'dtw_parallel'] = "pearson",
+            self, correlation_type: Literal['pearson', 'dtw', 'dtw_parallel'] = "pearson",
             correlation_param: dict = None, trace_column: str = "trace"
             ):
+        
+        events = self.events
         
         if correlation_param is None:
             correlation_param = {}
@@ -972,6 +971,20 @@ class Distance(CachedClass):
         counts, _ = np.histogram(corr, bins=num_bins, range=(start, stop), density=density)
         
         return counts
+    
+    @lru_cache
+    def get_spatial_tree(self, leafsize: int = 10, compact_nodes: bool = True, copy_data: bool = False,
+                         balanced_tree: bool = True):
+        
+        events = self.events
+        cx = events.cx.values
+        cy = events.cy.values
+        
+        data = np.array([cx, cy], dtype=float).transpose()
+        
+        kdtree = KDTree(data=data, leafsize=leafsize, compact_nodes=compact_nodes, copy_data=copy_data,
+                        balanced_tree=balanced_tree)
+        return kdtree
     
     def plot_correlation_characteristics(
             self, corr=None, events=None, ax=None, perc=(5e-5, 5e-4, 1e-3, 1e-2, 0.05), bin_num=50, log_y=True,
@@ -1255,15 +1268,13 @@ class Modules(CachedClass):
         
         if max_distance is not None:
             
-            import math
+            dist = Distance(events)
+            tree = dist.get_spatial_tree()
+            pairs = tree.query_pairs(r=max_distance)
             
             x_corr, y_corr = [], []
-            for idx_x, idx_y in tqdm(list(zip(selected_x_corr, selected_y_corr)), desc='Filtering by distance'):
-                px = events.iloc[idx_x].cx, events.iloc[idx_x].cy
-                py = events.iloc[idx_y].cx, events.iloc[idx_y].cy
-                
-                dist = math.dist(px, py)
-                if dist <= max_distance:
+            for idx_x, idx_y in tqdm(list(zip(selected_x_corr, selected_y_corr)), desc='Filter by distance'):
+                if (idx_x, idx_y) in pairs:
                     x_corr.append(idx_x)
                     y_corr.append(idx_y)
             
