@@ -479,7 +479,11 @@ class Events(CachedClass):
         hashes = np.zeros((n_events, n_columns), dtype=int)
         for i in range(n_events):
             for ii, col in enumerate(columns):
-                hashes[i, ii] = xxhash.xxh32(events.iloc[i][col], seed=seed).intdigest()
+                
+                try:
+                    hashes[i, ii] = xxhash.xxh32(events.iloc[i][col], seed=seed).intdigest()
+                except TypeError as err:
+                    logging.error(f"xxhash failed for column {col}: {err}")
         
         hashes = np.sort(hashes, axis=0)
         hash_ = xxhash.xxh32(hashes, seed=seed).intdigest()
@@ -599,7 +603,7 @@ class Events(CachedClass):
         return results
     
     def get_counts_per_cluster(self, cluster_col: str, group_col: str = None, z_slice: Tuple[int, int] = None,
-                               transpose: bool = False) -> (pd.DataFrame):
+                               transpose: bool = False, relative: bool = False) -> (pd.DataFrame):
         """
                 Computes the counts of events per cluster, optionally grouped by an additional column.
 
@@ -646,6 +650,9 @@ class Events(CachedClass):
                 counts[x, y] += 1
             
             counts = pd.DataFrame(data=counts, index=unique_clusters, columns=unique_groups)
+        
+        if relative:
+            counts /= counts.sum()
         
         if transpose:
             counts = counts.transpose()
@@ -2014,6 +2021,7 @@ class Events(CachedClass):
         # update events
         if inplace:
             self.events.trace = norm_traces.tolist()
+            self.events.trace = self.events.trace.apply(lambda x: np.array(x))
         else:
             return norm_traces
     
@@ -2054,6 +2062,7 @@ class MultiEvents(Events):
                  group: Union[str, int, List[Union[str, int]]] = None,
                  subject_id: Union[str, int, List[Union[str, int]]] = None,
                  z_slice: Union[Tuple[int, int], List[Tuple[int, int]]] = None,
+                 normalize: dict = None,
                  custom_columns: Union[list, Tuple, Literal['v_area_norm', 'v_ara_footprint', 'cx', 'cy']] = (
                          "v_area_norm", "cx", "cy"), frame_to_time_mapping: Union[dict, list] = None,
                  frame_to_time_function: Union[Callable, List[Callable]] = None,
@@ -2180,6 +2189,9 @@ class MultiEvents(Events):
                     args["seed"] = self.seed
                     
                     event = Events(event_dir=event_dir, **args)
+                    
+                    if normalize is not None:
+                        event.normalize(normalize_instructions=normalize, inplace=True)
                 
                 self.event_objects.append(event)
             
@@ -2857,13 +2869,11 @@ class Plotting:
             if index_column is None:
                 raise ValueError("Please provide a color_mapping or a index_column.")
             
-            group_mapping, index_mapping = self.get_id_to_group_color(group_column=group_column,
-                                                                      index_column=index_column)
-            
             if by == "group":
-                color_mapping = group_mapping
+                color_mapping = self.get_group_color(group_column=group_column)
             elif by == "index":
-                color_mapping = index_mapping
+                color_mapping = self.get_id_to_group_color(group_column=group_column,
+                                                           index_column=index_column)
             else:
                 raise ValueError(f"by must be one of [index, group] and not: {by}")
         
