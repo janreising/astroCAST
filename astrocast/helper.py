@@ -407,7 +407,9 @@ class SignalGenerator:
                  ragged_allowed: bool = True,
                  oscillation_frequency: int = 4, oscillation_amplitude: float = 1, plateau_duration: int = 1,
                  a: float = 0, k: float = 1, b: float = 1, v: float = 1, m_0: float = 0,
-                 leaky_k: float = 0.1, leaky_n: float = 1, show_progress: bool = False,
+                 leaky_k: float = 0.1, leaky_n: float = 1,
+                 num_peaks=1, peak_rebounce_ratio=.65,
+                 show_progress: bool = False, logging_level=logging.WARNING
                  ):
         """
         Initializes the SignalGenerator with parameters for the signal phases and noise level.
@@ -424,6 +426,11 @@ class SignalGenerator:
             leaky_k: A constant controlling the rate of the leak.
             leaky_n: The exponent controlling how the leak rate scales with the state's value.
         """
+        
+        logging.basicConfig()
+        self.logger = logging.getLogger()
+        self.logger.setLevel(logging_level)
+        
         self.signal_amplitude = signal_amplitude
         self.noise_amplitude = noise_amplitude
         self.abort_amplitude = abort_amplitude
@@ -435,6 +442,9 @@ class SignalGenerator:
         
         self.leaky_k = leaky_k
         self.leaky_n = leaky_n
+        
+        self.num_peaks = num_peaks
+        self.peak_rebounce_ratio = peak_rebounce_ratio
         
         self.trace_length = trace_length
         self.offset = offset
@@ -464,7 +474,9 @@ class SignalGenerator:
         h = xxhash.xxh128(np.array([self.signal_amplitude, self.noise_amplitude, self.abort_amplitude,
                                     self.oscillation_frequency, self.oscillation_amplitude, self.plateau_duration,
                                     self.leaky_k, self.leaky_n, tl, self.offset, self.ragged_allowed,
-                                    self.m_0, self.v, self.b, self.k, self.a]))
+                                    self.m_0, self.v, self.b, self.k, self.a, self.num_peaks,
+                                    self.peak_rebounce_ratio]),
+                          seed=1)
         
         return h.intdigest()
     
@@ -594,6 +606,10 @@ class SignalGenerator:
         oscillation_frequency = self._fluctuate_parameter(self.oscillation_frequency)
         oscillation_amplitude = self._fluctuate_parameter(self.oscillation_amplitude)
         
+        # repeat burst parameters
+        num_peaks = self.num_peaks
+        peak_rebounce_ratio = self.peak_rebounce_ratio
+        
         # define functions
         rise = self._richards_curve(a=a, k=k, c=c, b=b, v=v, m_0=m_0)
         leaky_integrator = self.leaky_integrator(k=self._fluctuate_parameter(self.leaky_k),
@@ -628,7 +644,10 @@ class SignalGenerator:
         t = 0
         plateau_start = 0
         phase = 0
+        peak_counter = 0
         while True:
+            
+            self.logger.debug(f"{t:4d} ({phase}): {v:3f}")
             
             # add noise
             v += self.noise_floor()
@@ -652,16 +671,22 @@ class SignalGenerator:
             
             # wait for burst to pick up speed
             if phase == 0 and v > k / 4:
+                peak_counter += 1
                 phase += 1
             
             # wait for burst to lose speed
-            if phase == 1 and len(signal) > 1 and signal[-1] > v + self.noise_amplitude:
+            if phase == 1 and len(signal) > 1 and signal[-1] + self.noise_amplitude < np.max(signal):
                 phase += 1
                 plateau_start = t
             
             # wait for plateau to end
             if phase == 2 and t > plateau_start + plateau_duration:
                 phase += 1
+            
+            # rebounce phase
+            if phase == 3 and peak_counter < num_peaks and v < np.max(signal) * peak_rebounce_ratio:
+                phase = 0
+                t = 0
             
             # abort conditions
             if max_length is not None and len(signal) >= max_length:
@@ -865,7 +890,7 @@ class DummyGenerator:
             
             # create random boundaries
             dz_sum = int(df.dz.sum() / 2)
-            df["z0"] = [np.random.randint(low=z_range[0], high=z_range[1]) for _ in range(len(df))]
+            df["z0"] = [np.random.randint(low=z_range[0], high=z_range[1] - df.dz.max()) for _ in range(len(df))]
             df["z1"] = df.z0 + df.dz
         
         else:

@@ -2,13 +2,13 @@
 
 \subsubsection{Quality control and Standardization}\label{subsubsec:quality-control}
 
-After successful detection of events, users need to control the quality of the result to ensure data integrity for downstream analysis. In astroCAST this step optionally includes filtering and normalization. AstroCAST also features a dedicated \ac{GUI} to guide selection of filter and normalization parameters.
+After successful detection of events, users need to control the quality of the result to ensure data integrity for downstream analysis. In astroCaST this step optionally includes filtering and normalization. AstroCAST also features a dedicated \ac{GUI} to guide selection of filter and normalization parameters.
 
 \begin{lstlisting}[style=bashStyle]
     > astrocast exploratory-analysis --input-path "/path/to/roi/" --h5-loc "/dataset/name"
 \end{lstlisting}
 
-Here, we are going to showcase the steps using the astroCAST python package directly. Users are directed to our \href{https://github.com/janreising/astroCAST/blob/baa6ba608914338629fe117836b007a88419ba88/notebooks/examples/B-embedding.ipynb}{example notebook} to follow along. Of note, large datasets might require significant computational time. Hence, we recommend to utilize dynamic disk caching, via the \inlinepy{cache\_path} parameter, to mitigate redundant processing.
+Here, we are going to showcase the steps using the astroCaST python package directly. Users are directed to our \href{https://github.com/janreising/astroCAST/blob/baa6ba608914338629fe117836b007a88419ba88/notebooks/examples/B-embedding.ipynb}{example notebook} to follow along. Of note, large datasets might require significant computational time. Hence, we recommend to utilize dynamic disk caching, via the \inlinepy{cache\_path} parameter, to mitigate redundant processing.
 
 \begin{lstlisting}[style=pyStyle]
     from pathlib import Path
@@ -45,7 +45,7 @@ Typically, datasets undergo filtering to adhere to experimental parameters or to
 \end{lstlisting}
 
 \paragraph{Event extension}
-AstroCAST's event detection module is designed to pinpoint individual events with precise temporal accuracy. Often, this precision means that the peripheral regions, or shoulders, of the event peak might not be captured. Yet, these initial and concluding slopes of the event can reveal crucial information about its nature. To address this, astroCAST includes a feature that allows for the extension of detected events to include adjacent frames.
+AstroCAST's event detection module is designed to pinpoint individual events with precise temporal accuracy. Often, this precision means that the peripheral regions, or shoulders, of the event peak might not be captured. Yet, these initial and concluding slopes of the event can reveal crucial information about its nature. To address this, astroCaST includes a feature that allows for the extension of detected events to include adjacent frames.
 
 \begin{lstlisting}[style=pyStyle]
     # extend events
@@ -56,7 +56,7 @@ AstroCAST's event detection module is designed to pinpoint individual events wit
 
 \paragraph{Enforcing fixed-length events}
 \label{par:enforcing-length}
-Enforcing a fixed event length is a requirement for some modules of astroCAST. However, enforcing a length will significantly distort the actual event characteristics. Use length enforcement cautiously, as it can alter your data and even overlap with other nearby events. If required by your analysis, the toolkit will prompt you to unify event lengths (for example \ac{CNN} Autoencoders). For diverse event durations, consider filtering your data for similar lengths or analyzing short and long events separately to maintain data integrity.
+Enforcing a fixed event length is a requirement for some modules of astroCaST. However, enforcing a length will significantly distort the actual event characteristics. Use length enforcement cautiously, as it can alter your data and even overlap with other nearby events. If required by your analysis, the toolkit will prompt you to unify event lengths (for example \ac{CNN} Autoencoders). For diverse event durations, consider filtering your data for similar lengths or analyzing short and long events separately to maintain data integrity.
 
 \begin{lstlisting}[style=pyStyle]
     # extend events
@@ -86,7 +86,7 @@ AstroCAST offers a versatile normalization interface to accommodate various rese
 %Timing: 1 h – 6h
 %Running time will increase non-linearly with the number of events being clustered and varies substantially between approaches chosen.
 
-AstroCAST introduces a structured approach to address the challenge of varying event durations, detailed here with increasing complexity. The normalized timeseries are transformed into fixed-length feature vectors suitable for clustering and further analysis. This sequence of steps allows for a more focused analysis while balancing the need for data integrity and computational efficiency. Each alternative has advantages and disadvantages, notably the ability to deal with variable length events\tref{embedding}.
+AstroCaST introduces a structured approach to address the challenge of varying event durations, detailed here with increasing complexity. The normalized timeseries are transformed into fixed-length feature vectors suitable for clustering and further analysis. This sequence of steps allows for a more focused analysis while balancing the need for data integrity and computational efficiency. Each alternative has advantages and disadvantages, notably the ability to deal with variable length events\tref{embedding}. \added[id=R2]{It is essential to re-train the encoding model whenever the dataset is changed, to ensure optimal encoding.}
 
 \paragraph{Feature extraction}
 Feature extraction offers a simple yet powerful approach to reduce timeseries data into a manageable set of dimensions. The module employs a variety of metrics, like mean, median, and Shannon entropy, accessible through \inlinepy{help(FeatureExtraction)}. While this method is length-agnostic, it may overlook key features, due to the inherent dimensional reduction. Further dimension reduction can be applied using techniques like PCA, t-SNE, or UMAP .

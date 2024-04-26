@@ -344,7 +344,6 @@ class Events(CachedClass):
         self.z_slice = z_slice
         
         if event_dir is None:
-            logging.warning("event_dir is None. Creating empty Events instance!")
             self.event_map = None
             self.num_frames, self.X, self.Y = None, None, None
             self.events = None
@@ -1930,6 +1929,29 @@ class Events(CachedClass):
         cluster_lookup_table.update({k: label for k, label in list(zip(self.events.index.tolist(), labels.tolist()))})
         
         return cluster_lookup_table
+    
+    def encode_column(self, column_name: str):
+        """
+            Encode a specified column of the 'events' dataframe using label encoding.
+
+            This method applies label encoding to the specified column of the dataframe attribute 'events'.
+            It transforms the categorical data into a format that can be used by machine learning algorithms.
+            The method uses scikit-learn's LabelEncoder to convert each unique string value into a unique integer.
+
+            .. caution::
+              - This method modifies the dataframe in-place, meaning that the original categorical data
+                will be replaced with numerical codes.
+              - The method assumes that the column exists within the dataframe and contains categorical data
+                that can be encoded by LabelEncoder.
+
+            Args:
+                column_name: The name of the column in the 'events' dataframe to be encoded.
+        """
+        
+        le = LabelEncoder()
+        col = self.events[column_name]
+        col = le.fit_transform(col.tolist())
+        self.events[column_name] = col
 
 
 class MultiEvents(Events):
