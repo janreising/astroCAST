@@ -13,6 +13,8 @@ import networkx as nx
 import numpy as np
 import pandas as pd
 import seaborn as sns
+from astrocast.analysis import Events
+from astrocast.helper import CachedClass, Normalization, is_ragged, wrapper_local_cache
 from dask import array as da
 from dtaidistance import dtw, dtw_barycenter
 from matplotlib import pyplot as plt
@@ -23,9 +25,6 @@ from sklearn import cluster, ensemble, gaussian_process, linear_model, neighbors
 from sklearn.cluster import KMeans
 from sklearn.metrics import confusion_matrix
 from tqdm import tqdm
-
-from astrocast.analysis import Events
-from astrocast.helper import CachedClass, Normalization, is_ragged, wrapper_local_cache
 
 
 class HdbScan:
@@ -375,6 +374,12 @@ class Distance(CachedClass):
     A class for computing correlation matrices and histograms.
     """
     
+    def __init__(self, events: Union[pd.DataFrame, Events] = None, cache_path: Union[str, Path] = None,
+                 logging_level=logging.INFO):
+        super().__init__(cache_path=cache_path, logging_level=logging_level)
+        
+        self.events = events
+    
     @wrapper_local_cache
     def get_pearson_correlation(self, events, dtype=np.single):
         """
@@ -450,7 +455,7 @@ class Distance(CachedClass):
     @wrapper_local_cache
     def get_dtw_correlation(
             self, events: Events, use_mmap: bool = False, block: int = 10000,
-            parallel: bool = True, compact: bool = False, only_triu: bool = False,
+            parallel: bool = True, compact: bool = False, only_triu: bool = False, use_pruning: bool = False,
             return_similarity: bool = True, show_progress: bool = True
             ):
         """
@@ -494,7 +499,7 @@ class Distance(CachedClass):
         
         if not use_mmap:
             distance_matrix = dtw.distance_matrix_fast(
-                    traces, use_pruning=False, parallel=parallel, compact=compact, only_triu=only_triu
+                    traces, use_pruning=use_pruning, parallel=parallel, compact=compact, only_triu=only_triu
                     )
             
             distance_matrix = np.array(distance_matrix)
@@ -825,9 +830,15 @@ class Distance(CachedClass):
         return distance_matrix
     
     def get_correlation(
-            self, events, correlation_type: Literal['pearson', 'dtw', 'dtw_parallel'] = "pearson",
+            self, events=None, correlation_type: Literal['pearson', 'dtw', 'dtw_parallel'] = "pearson",
             correlation_param: dict = None
             ):
+        
+        if events is None:
+            events = self.events
+        
+        if events is None:
+            raise ValueError(f"Please provide data using the 'events' flag.")
         
         if correlation_param is None:
             correlation_param = {}

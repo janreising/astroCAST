@@ -1962,6 +1962,7 @@ class MultiEvents(Events):
                  group: Union[str, int, List[Union[str, int]]] = None,
                  subject_id: Union[str, int, List[Union[str, int]]] = None,
                  z_slice: Union[Tuple[int, int], List[Tuple[int, int]]] = None,
+                 normalize=None,
                  custom_columns: Union[list, Tuple, Literal['v_area_norm', 'v_ara_footprint', 'cx', 'cy']] = (
                          "v_area_norm", "cx", "cy"), frame_to_time_mapping: Union[dict, list] = None,
                  frame_to_time_function: Union[Callable, List[Callable]] = None, cache_path: Union[str, Path] = None,
@@ -1986,100 +1987,32 @@ class MultiEvents(Events):
         self.num_event_objects = len(event_dirs)
         self.event_dirs = event_dirs
         
-        # data
-        if data == "infer" or data is None:
-            self.data = [data for _ in range(self.num_event_objects)]
-        elif isinstance(data, list):
-            if len(data) != self.num_event_objects:
-                raise ValueError(f"Length of events and data is unequal: "
-                                 f"#data {len(data)} != #events {self.num_event_objects}")
-            self.data = data
-        else:
-            raise ValueError(f"'data' must be either list, 'infer' or None NOT {data}")
-        
-        # loc
-        if isinstance(loc, list):
-            if len(loc) != self.num_event_objects:
-                raise ValueError(f"Length of events and data is unequal: "
-                                 f"#loc {len(loc)} != #events {self.num_event_objects}")
-            self.loc = loc
-        else:
-            self.loc = [loc for _ in range(self.num_event_objects)]
-        
-        # z_slice
-        if isinstance(z_slice, list):
-            if len(z_slice) != self.num_event_objects:
-                raise ValueError(f"Length of events and data is unequal: "
-                                 f"#z_slice {len(z_slice)} != #events {self.num_event_objects}")
-            self.z_slice = z_slice
-        else:
-            self.z_slice = [z_slice for _ in range(self.num_event_objects)]
-        
-        # group
-        if isinstance(group, list):
-            if len(group) != self.num_event_objects:
-                raise ValueError(f"Length of events and data is unequal: "
-                                 f"#group {len(group)} != #events {self.num_event_objects}")
-            self.group = group
-        else:
-            self.group = [group for _ in range(self.num_event_objects)]
-        
-        # subject_id
-        if isinstance(subject_id, list):
-            if len(subject_id) != self.num_event_objects:
-                raise ValueError(f"Length of events and data is unequal: "
-                                 f"#subject_id {len(subject_id)} != #events {self.num_event_objects}")
-            self.subject_id = subject_id
-        elif subject_id is None:
-            self.subject_id = range(self.num_event_objects)
-        else:
-            self.subject_id = [subject_id for _ in range(self.num_event_objects)]
-        
-        # frame_to_time_mapping
-        if isinstance(frame_to_time_mapping, list):
-            if len(frame_to_time_mapping) != self.num_event_objects:
-                raise ValueError(f"Length of events and data is unequal: "
-                                 f"#frame_to_time_mapping {len(frame_to_time_mapping)} != #events {self.num_event_objects}")
-            self.frame_to_time_mapping = frame_to_time_mapping
-        else:
-            self.frame_to_time_mapping = [frame_to_time_mapping for _ in range(self.num_event_objects)]
-        
-        # frame_to_time_function
-        if isinstance(frame_to_time_function, list):
-            if len(frame_to_time_function) != self.num_event_objects:
-                raise ValueError(f"Length of events and data is unequal: "
-                                 f"#frame_to_time_function {len(frame_to_time_function)} != #events {self.num_event_objects}")
-            self.frame_to_time_function = frame_to_time_function
-        else:
-            self.frame_to_time_function = [frame_to_time_function for _ in range(self.num_event_objects)]
-        
-        # cache
-        if isinstance(cache_path, list):
-            if len(cache_path) != self.num_event_objects:
-                raise ValueError(f"Length of events and data is unequal: "
-                                 f"#cache_path {len(cache_path)} != #events {self.num_event_objects}")
-            self.cache_path = cache_path
-        else:
-            self.cache_path = [cache_path for _ in range(self.num_event_objects)]
+        self.parameters = {i: {"event_dir": event_dir} for i, event_dir in enumerate(self.event_dirs)}
+        self._add_attribute(name='data', attribute=data)
+        self._add_attribute(name='loc', attribute=loc)
+        self._add_attribute(name='z_slice', attribute=z_slice)
+        self._add_attribute(name='lazy', attribute=lazy)
+        self._add_attribute(name='group', attribute=group)
+        self._add_attribute(name='subject_id', attribute=subject_id)
+        self._add_attribute(name='frame_to_time_mapping', attribute=frame_to_time_mapping)
+        self._add_attribute(name='frame_to_time_function', attribute=frame_to_time_function)
+        self._add_attribute(name='cache_path', attribute=cache_path)
         
         # create events
         self.event_objects = []
-        for i in range(self.num_event_objects):
+        for i, param in self.parameters.items():
             
-            idx = self.subject_id[i]
-            
+            idx = param["subject_id"]
             event_dir = self.event_dirs[i]
             
             if isinstance(event_dir, Events):
                 event = event_dir
             
             else:
-                event = Events(event_dir=event_dir,
-                               data=self.data[i], loc=self.loc[i], z_slice=self.z_slice[i], group=self.group[i],
-                               lazy=lazy, index_prefix=f"{idx}x", subject_id=idx,
-                               frame_to_time_mapping=self.frame_to_time_mapping[i],
-                               frame_to_time_function=self.frame_to_time_function[i],
-                               custom_columns=custom_columns, seed=self.seed, cache_path=self.cache_path[i])
+                event = Events(index_prefix=f"{idx}x", seed=self.seed, custom_columns=custom_columns, **param)
+            
+            if normalize is not None:
+                event.normalize(normalize_instructions=normalize, inplace=True)
             
             self.event_objects.append(event)
         
@@ -2095,6 +2028,22 @@ class MultiEvents(Events):
                 events[col] = events[col].astype("category")
         
         return events
+    
+    def _add_attribute(self, name: str, attribute):
+        
+        num_event_objects = self.num_event_objects
+        
+        if isinstance(attribute, list):
+            if len(attribute) != num_event_objects:
+                raise ValueError(f"Length of events and data is unequal: "
+                                 f"#{name} {len(attribute)} != #events {num_event_objects}")
+            
+            for i, v in enumerate(attribute):
+                self.parameters[i][name] = v
+        
+        else:
+            for i in range(num_event_objects):
+                self.parameters[i][name] = attribute
     
     # def __hash__(self):
     #     raise NotImplementedError
@@ -2404,7 +2353,7 @@ class Plotting:
             for i, (val, selected_traces) in enumerate(traces.items()):
                 for trace in selected_traces:
                     ax.plot(trace, color=colors[i], alpha=alpha, linestyle=linestyle,
-                            label=f"group {i}")
+                            label=f"{val}")
             
             handles, labels = ax.get_legend_handles_labels()
             by_label = dict(zip(labels, handles))
