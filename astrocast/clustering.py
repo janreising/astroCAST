@@ -829,9 +829,30 @@ class Distance(CachedClass):
         
         return distance_matrix
     
+    @staticmethod
+    def _clean_distance_matrix(distance_matrix: np.ndarray, replace_value: Union[Literal['max'], float, int] = 'max'):
+        
+        x, y = np.where(np.isnan(dm))
+        xx, yy = np.where(np.isinf(dm))
+        
+        x = np.concatenate([x, xx])
+        y = np.concatenate([y, yy])
+        
+        if replace_value == 'max':
+            replace_value = np.max(distance_matrix[x, y])
+        
+        for i in range(len(x)):
+            
+            x_ = x[i]
+            y_ = y[i]
+            
+            distance_matrix[x_, y_] = replace_value
+        
+        return distance_matrix
+    
     def get_correlation(
             self, events=None, correlation_type: Literal['pearson', 'dtw', 'dtw_parallel'] = "pearson",
-            correlation_param: dict = None
+            correlation_param: dict = None, clean_matrix: bool = True
             ):
         
         if events is None:
@@ -852,7 +873,12 @@ class Distance(CachedClass):
         else:
             corr_func = funcs[correlation_type]
         
-        return corr_func(events)
+        corr = corr_func(events)
+        
+        if clean_matrix:
+            corr = self._clean_distance_matrix(corr)
+        
+        return corr
     
     def _get_correlation_histogram(
             self, corr=None, events=None, correlation_type="pearson", correlation_param={}, start=-1, stop=1,
