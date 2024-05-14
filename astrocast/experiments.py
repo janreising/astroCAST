@@ -7,15 +7,14 @@ import seaborn as sns
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from matplotlib import pyplot as plt
-from matplotlib.lines import Line2D
-from torch.utils.data import DataLoader, Dataset
-
 from astrocast.analysis import Plotting
 from astrocast.autoencoders import CNN_Autoencoder, PaddedDataLoader, TimeSeriesRnnAE
 from astrocast.clustering import CoincidenceDetection, Discriminator, Linkage
 from astrocast.helper import DummyGenerator, SignalGenerator
 from astrocast.reduction import FeatureExtraction
+from matplotlib import pyplot as plt
+from matplotlib.lines import Line2D
+from torch.utils.data import DataLoader, Dataset
 
 
 class Experiments:
@@ -62,6 +61,13 @@ class Experiments:
             else:
                 timings = None
             
+            # extract group_based_on
+            if "group_based_on" in param:
+                group_based_on = param["group_based_on"]
+                del param["group_based_on"]
+            else:
+                group_based_on = "group"
+            
             # extract generators
             if "generators" in param and not isinstance(param["generators"], SignalGenerator):
                 param["generators"] = [SignalGenerator(**gen_param) for gen_param in param["generators"]]
@@ -77,6 +83,10 @@ class Experiments:
                 eObj.n_groups = len(eObj.events.group.unique())
                 eObj.timings = timings
                 eObj.replicate = replicate
+                
+                # switch cluster and group
+                eObj.encode_column("cluster")
+                eObj.events["group"] = eObj.events[group_based_on]
                 
                 eObj.embeddings = {}
                 eObj.results = []

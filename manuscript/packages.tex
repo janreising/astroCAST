@@ -5,7 +5,6 @@
 \usepackage{mdframed}
 \usepackage{etoolbox} % For conditional statements
 \usepackage{xstring}
-\usepackage[normalem]{ulem} % todo: delete later
 \usepackage{xparse}
 \usepackage{makecell}
 \usepackage{rotating}
@@ -48,3 +47,11 @@
 \newcommand{\xmark}{\textemdash} % Cross mark
 \newcommand{\halfbullet}{\LEFTcircle} % Half bullet
 \newcommand{\optional}{*} % Optional feature
+
+
+%    highlightmarkup=background,
+%    addedmarkup=uline, deletedmarkup=sout, authormarkup=superscript
+% commentmarkup=footnote
+\usepackage{changes}
+\definechangesauthor[name={Jan Philipp Reising}, color=BlueViolet]{R1}
+\definechangesauthor[name={Jan Philipp Reising}, color=RawSienna]{R2}

@@ -12,13 +12,13 @@
         \hline \textbf{Suite2P\citep{pachitariu_suite2p_2017} *} & neurons & in-vivo & comparison & 2P & Python & \cmark & \cmark \\
         \hline \textbf{FASP\citep{wang_automated_2017}} & astrocytes & in-vitro & synthetic & \xmark & Java & \cmark & \cmark \\
         \hline \textbf{CHIPS\citep{barrett_chips_2018}} & endothelial & \makecell{in-vitro\\in-vivo} & \xmark & \makecell{2P\\confocal} & Matlab & \cmark & \cmark \\
-        \hline \textbf{AquA\citep{wang_event-based_2018}} & astrocytes & \makecell{in-vitro\\in-vivo} & synthetic & 2P & Matlab & \xmark & \cmark \\
+        \hline \textbf{\replaced[id=R1]{AQuA}{AquA}\citep{wang_event-based_2018}} & astrocytes & \makecell{in-vitro\\in-vivo} & synthetic & 2P & Matlab & \xmark & \cmark \\
         \hline \textbf{CaImAn\citep{giovannucci_caiman_2019}} & neurons & \makecell{in-vitro\\in-vivo} & user labels & 1P, 2P & Python & \cmark & \cmark \\
         \hline \textbf{Astral\citep{dzyubenko_analysing_2021}} & astrocytes & in-vitro & \xmark & 1P & Python & \xmark & \cmark \\
         \hline \textbf{Begonia\citep{bjornstad_begoniatwo-photon_2021}} & astrocyte & in-vivo & \xmark & 2P & Matlab & \cmark & \cmark \\
         \hline \textbf{CaSCaDe\citep{rupprecht_database_2021}} & neurons & \makecell{in-vivo\\in-vitro\\ex-vivo} & ground truth & 1P, 2P & Python & \cmark & \xmark \\
         \hline \textbf{MSparkles\citep{stopper_novel_2022} *} & \makecell{astrocytes\\neurons} & \makecell{in-vivo\\ex-vivo} & comparison & 1P, 2P & Matlab & \xmark & \cmark\\
-        \hline \textbf{astroCAST} & astrocytes & \makecell{in-vivo\\ex-vivo} & synthetic & 1P, 2P & Python & \cmark & \cmark\\
+        \hline \textbf{astroCaST} & astrocytes & \makecell{in-vivo\\ex-vivo} & synthetic & 1P, 2P & Python & \cmark & \cmark\\
     \hline
     \end{tabular}
 \end{table}
@@ -31,7 +31,7 @@
 \def\arraystretch{1.5}
 \begin{table}[htb]
     \centering
-    \caption{Availability of different functionalities of astroCAST across
+    \caption{Availability of different functionalities of astroCaST across
     operating systems. A check mark (\cmark) denotes full compatibility and active support. An asterisk (\optional)
         indicates that the
     functionality is optional and can be installed upon user request (see below). A cross mark (\xmark) signifies
@@ -68,10 +68,10 @@
     \begin{tabular}{|l|l|l|l|l|l|}
         \hline
         \textbf{Dataset} & \textbf{Publication} & \textbf{Experiment} & \textbf{Imaging} \\ \hline
-        train/test & Reising et al. in preparation & acute slices, Gcamp6f & \ac{1P} (8 Hz) \\ \hline
-        ExVivo & AQuA\citep{wang_event-based_2018} & acute slices, Gcamp6f & \ac{2P} (1.1 Hz) \\ \hline
+        train/test & Reising et al. in preparation & acute slices, \replaced[id=R1]{GCaMP6f}{Gcamp6f} & \ac{1P} (8 Hz) \\ \hline
+        ExVivo & AQuA\citep{wang_event-based_2018} & acute slices, \replaced[id=R1]{GCaMP6f}{Gcamp6f} & \ac{2P} (1.1 Hz) \\ \hline
         Glusnfr & AQuA\citep{wang_event-based_2018} & acute slices, GluSnFR & \ac{2P} (4-100 Hz) \\ \hline
-        InVivo & AQuA\citep{wang_event-based_2018} & in vivo GCamp6f & \ac{2P} (2 Hz) \\ \hline
+        InVivo & AQuA\citep{wang_event-based_2018} & in vivo \replaced[id=R1]{GCaMP6f}{Gcamp6f} & \ac{2P} (2 Hz) \\ \hline
         cellscan\_scim & CHIPS\citep{barrett_chips_2018} & blood vessels & \ac{2P} \\ \hline
     \end{tabular}
 \end{table}
@@ -108,7 +108,7 @@
 \def\arraystretch{1.5}
 \begin{table}[htb]
     \centering
-    \caption{Comprehensive overview of experiment types that are included in astroCAST, with their respective requirements.\newline}
+    \caption{Comprehensive overview of experiment types that are included in astroCaST, with their respective requirements.\newline}
     \label{tab:experiments}
     \begin{tabular}{|l|c|c|c|c|}
         \hline
