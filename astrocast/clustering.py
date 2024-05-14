@@ -14,8 +14,6 @@ import networkx as nx
 import numpy as np
 import pandas as pd
 import seaborn as sns
-from astrocast.analysis import Events, MultiEvents
-from astrocast.helper import CachedClass, Normalization, is_ragged, wrapper_local_cache
 from dask import array as da
 from dtaidistance import dtw, dtw_barycenter
 from matplotlib import pyplot as plt
@@ -27,6 +25,9 @@ from sklearn import cluster, ensemble, gaussian_process, linear_model, neighbors
 from sklearn.cluster import KMeans
 from sklearn.metrics import confusion_matrix
 from tqdm.auto import tqdm
+
+from astrocast.analysis import Events, MultiEvents
+from astrocast.helper import CachedClass, Normalization, is_ragged, wrapper_local_cache
 
 
 class HdbScan:
@@ -376,39 +377,13 @@ class Linkage(CachedClass):
 
 
 class Distance(CachedClass):
-
+    
     def __init__(self, events: Union[pd.DataFrame, Events] = None, cache_path: Union[str, Path] = None,
                  logging_level=logging.INFO):
         super().__init__(cache_path=cache_path, logging_level=logging_level, logger_name="Distance")
         
         self.events = events
-    
-    @wrapper_local_cache
-    def get_pearson_correlation(self, events, dtype=np.single):
-        """
-        Computes the correlation matrix of events.
-
-        Args:
-            events (np.ndarray or da.Array or pd.DataFrame): Input events data.
-            dtype (np.dtype, optional): Data type of the correlation matrix. Defaults to np.single.
-            mmap (bool, optional): Flag indicating whether to use memory-mapped arrays. Defaults to False.
-
-        Returns:
-            np.ndarray: Correlation matrix.
-
-        Raises:
-            ValueError: If events is not one of (np.ndarray, da.Array, pd.DataFrame).
-            ValueError: If events DataFrame does not have a 'trace' column.
-        """
-        
-        super().__init__(cache_path=cache_path, logging_level=logging_level, logger_name="Distance")
-        
         self.my_hash = None
-        if events.__class__.__name__ in ["Events", "MultiEvents"]:
-            self.events = events.events
-            self.my_hash = hash(events)
-        else:
-            self.events = events
     
     def __hash__(self):
         
@@ -447,57 +422,13 @@ class Distance(CachedClass):
         
         return distance_matrix
     
-    @wrapper_local_cache
-    def get_dtw_correlation(
-            self, events: Events, use_mmap: bool = False, block: int = 10000,
-            parallel: bool = True, compact: bool = False, only_triu: bool = False, use_pruning: bool = False,
-            return_similarity: bool = True, show_progress: bool = True
-            ):
-        """
-                    Computes the dynamic time warping (DTW) correlation matrix for a set of time series.
-
-                    This function calculates the pairwise DTW distances between time series data,
-                    represented by the `events` object. It uses a fast DTW computation method and can handle
-                    large datasets by optionally utilizing memory mapping (mmap).
-
-                    .. error:
-
-                        This function will not work on most systems with MacOS. Please use the `dtw_parallel` function instead.
-
-                    Args:
-                        events:
-                            An instance of the custom `Events` class containing the time series data. Each time series
-                            is represented as a trace within this object.
-                        use_mmap:
-                            If set to `True`, the function uses memory-mapped files to store the distance matrix.
-                            This approach is beneficial when dealing with large datasets as it avoids excessive memory usage.
-                            However, it may result in a temporary file being created in the working directory.
-                        block:
-                            The size of the block used to split the computation of the DTW distance matrix.
-                            A smaller block size reduces memory usage but may increase computational time.
-                        show_progress:
-                            If set to `True`, displays a progress bar indicating the computation progress of the distance matrix.
-
-                    Returns:
-                        np.ndarray
-                            A 1-D array representing the upper triangular part of the computed DTW distance matrix.
-                            The matrix is compacted into a 1-D array where each entry represents the distance between
-                            a pair of time series.
-
-                    """
+    @staticmethod
+    def _fix_invalid_distance_matrix(distance_matrix: np.ndarray, traces: List[np.ndarray],
+                                     max_tries=3):
         
-        if not isinstance(events, pd.DataFrame):
-            events = events.events
-        
-        traces = [np.array(t) for t in events.trace.tolist()]
-        N = len(traces)
-        
-        if not use_mmap:
-            distance_matrix = dtw.distance_matrix_fast(
-                    traces, use_pruning=use_pruning, parallel=parallel, compact=compact, only_triu=only_triu
-                    )
-            
-            distance_matrix = np.array(distance_matrix)
+        # troubleshooting
+        idx_nan = np.isnan(distance_matrix)
+        idx_inf = np.isinf(distance_matrix)
         
         if idx_nan.any() or idx_inf.any():
             
@@ -1203,9 +1134,9 @@ class Distance(CachedClass):
         return distance_matrix
     
     def get_correlation(
-
+            
             self, events=None, correlation_type: Literal['pearson', 'dtw', 'dtw_parallel'] = "pearson",
-            correlation_param: dict = None,
+            correlation_param: dict = None, trace_column: str = "trace",
             clean_matrix: bool = True, clean_replace_value: Union[Literal['max'], float, int] = 'max',
             ):
         
