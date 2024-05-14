@@ -461,6 +461,7 @@ def hash_events_dataframe(events: pd.DataFrame, excluded_columns: List[str] = No
         print(hash_value)
 
     """
+    
     import xxhash
     
     cols = events.columns
@@ -468,24 +469,12 @@ def hash_events_dataframe(events: pd.DataFrame, excluded_columns: List[str] = No
     if excluded_columns is not None:
         cols = [c for c in cols if c not in excluded_columns]
     
-    arr = np.array(len(cols), dtype=int)
-    for i, c in enumerate(cols):
-        
-        values = events[c].values
-        if isinstance(values[0], np.ndarray):
-            by_row = np.zeros(len(values), dtype=int)
-            for ii, r in enumerate(values.tolist()):
-                by_row[ii] = xxhash.xxh32(r, seed=seed).intdigest()
-            values = by_row
-        
-        arr[i] = xxhash.xxh32(values, seed=seed).intdigest()
+    events = events[cols].copy()
     
-    if sort_hash_array:
-        arr = np.sort(arr, axis=0)
+    for col in events.columns:
+        events[col] = events[col].apply(lambda x: xxhash.xxh32(x, seed=seed).intdigest())
     
-    hash_value = xxhash.xxh32(arr, seed=seed).intdigest()
-    
-    return hash_value
+    return xxhash.xxh32(events.values, seed=seed).intdigest()
 
 
 class SignalGenerator:

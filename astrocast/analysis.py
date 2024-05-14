@@ -456,7 +456,6 @@ class Events(CachedClass):
     
     def __hash__(self):
         
-        seed = self.seed
         events = self.events
         
         # exclude precalculated value columns
@@ -466,7 +465,9 @@ class Events(CachedClass):
         excluded_columns += ['mask', 'contours', 'footprint', 'trace_orig', 'noise_mask_trace', 'error',
                              'subject_id', 'file_name', 'group', 'subject_idx']
         
-        hash_ = helper.hash_events_dataframe(events, excluded_columns=excluded_columns, seed=seed)
+        excluded_columns = [c for c in events.columns if c != "z0"]
+        
+        hash_ = helper.hash_events_dataframe(events, excluded_columns=excluded_columns, seed=self.seed)
         
         return hash_
     
