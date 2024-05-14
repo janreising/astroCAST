@@ -1535,7 +1535,7 @@ class Events(CachedClass):
         
         if events is None:
             events = self.events
-
+        
         events = events.copy()
         n_events = len(events)
         
@@ -2092,7 +2092,7 @@ class MultiEvents(Events):
                                                              attribute=frame_to_time_mapping)
             self.frame_to_time_function = self._add_attribute(name='frame_to_time_function',
                                                               attribute=frame_to_time_function)
-            self.cache_path = self._add_attribute(name='cache_path', attribute=cache_path)
+            self.cache_path = self._add_attribute(name='cache_path', attribute=cache_paths)
             
             # create events
             self.event_objects = []
@@ -2171,7 +2171,7 @@ class MultiEvents(Events):
                 attribute = [attribute for _ in range(num_event_objects)]
                 self.parameters[i][name] = attribute
                 return attribute
-
+    
     def show_event_map(
             self, video: Union[Path, str] = None, loc: str = None, z_slice: Tuple[int, int] = None, lazy: bool = True
             ):
@@ -2698,7 +2698,7 @@ class Plotting:
                 lut[g] = c
         else:
             lut = dict(zip(unique_groups, palette))
-
+        
         return lut
     
     @staticmethod
