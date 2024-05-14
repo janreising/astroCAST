@@ -2,6 +2,7 @@ import inspect
 import itertools
 import logging
 import pickle
+from collections import defaultdict
 from pathlib import Path
 from typing import Literal, Tuple
 
@@ -460,7 +461,7 @@ class UMAP:
     def __init__(self, n_neighbors=30, min_dist=0, n_components=2, metric="euclidean", ):
         self.reducer = umap.UMAP(n_neighbors=n_neighbors, min_dist=min_dist, n_components=n_components, metric=metric)
     
-    def train(self, data):
+    def train(self, data) -> np.ndarray:
         return self.reducer.fit_transform(data)
     
     def embed(self, data):
@@ -596,6 +597,10 @@ class ClusterTree:
     
     def __init__(self, Z):
         self.tree = hierarchy.to_tree(Z)
+        self.root_id = np.max(Z[:, :2]) + 1
+    
+    def get_root(self):
+        return self.get_node(self.root_id)
     
     def get_node(self, id_):
         return self.search(self.tree, id_)
@@ -649,3 +654,59 @@ class ClusterTree:
             bool: True if the node is a leaf, False otherwise.
         """
         return self.tree.get_left() is None and self.tree.get_right() is None
+    
+    def _get_clusters_by_leaf_num(self, root_node, max_leaves: int, min_leaves: int = 1):
+        """ Recursive function to get clusters by number of leaf nodes.
+
+        Args:
+            root_node: Node to start searching for clusters.
+            max_leaves: Maximum number of leaf nodes below each cluster node.
+            min_leaves: Minimum number of leaf nodes below each cluster node.
+
+        Returns:
+            # todo: what would make sense to return? Ultimately we need a mapping from lead_id to cluster_name
+
+        """
+        
+        leaf_count = root_node.get_count()
+        
+        if min_leaves <= leaf_count < max_leaves:
+            return [root_node]
+        
+        elif leaf_count >= max_leaves:
+            left_cluster_nodes = self._get_clusters_by_leaf_num(root_node.get_left(), max_leaves=max_leaves,
+                                                                min_leaves=min_leaves)
+            right_cluster_nodes = self._get_clusters_by_leaf_num(root_node.get_right(), max_leaves=max_leaves,
+                                                                 min_leaves=min_leaves)
+            return left_cluster_nodes + right_cluster_nodes
+        
+        elif leaf_count < min_leaves:
+            return []
+        
+        else:
+            logging.error(f"Implementation should not be able to reach this code section. "
+                          f"leaf_count: {leaf_count} ({max_leaves}, {min_leaves})")
+            return []
+    
+    def get_clusters(self, max_leaves: int, min_leaves: int = 1, default_value=-1):
+        
+        if isinstance(max_leaves, float):
+            max_leaves = int(max_leaves * self.get_count(self.get_root()))
+        
+        if isinstance(min_leaves, float):
+            min_leaves = int(min_leaves * self.get_count(self.get_root()))
+        
+        cluster_nodes = self._get_clusters_by_leaf_num(root_node=self.get_root(),
+                                                       max_leaves=max_leaves, min_leaves=min_leaves)
+        
+        mapping = defaultdict(lambda: default_value)
+        
+        cluster_id = 0
+        for cn in cluster_nodes:
+            leaves = self.get_leaves(cn)
+            for leaf in leaves:
+                mapping[leaf] = cluster_id
+            
+            cluster_id += 1
+        
+        return mapping

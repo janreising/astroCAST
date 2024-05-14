@@ -840,7 +840,7 @@ class Distance(CachedClass):
         y = np.concatenate([y, yy])
         
         if replace_value == 'max':
-            replace_value = np.nanmax(distance_matrix[x, y])
+            replace_value = np.nanmax(distance_matrix[x, y]) + 1
         
         for i in range(len(x)):
             
