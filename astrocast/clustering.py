@@ -832,8 +832,8 @@ class Distance(CachedClass):
     @staticmethod
     def _clean_distance_matrix(distance_matrix: np.ndarray, replace_value: Union[Literal['max'], float, int] = 'max'):
         
-        x, y = np.where(np.isnan(dm))
-        xx, yy = np.where(np.isinf(dm))
+        x, y = np.where(np.isnan(distance_matrix))
+        xx, yy = np.where(np.isinf(distance_matrix))
         
         x = np.concatenate([x, xx])
         y = np.concatenate([y, yy])
