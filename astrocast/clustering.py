@@ -878,8 +878,8 @@ class Distance(CachedClass):
         corr = corr_func(events)
         
         if clean_matrix:
-            corr = self._clean_distance_matrix(corr, replace_value=clean_replace_value)
             self.logger.info(f"cleaning distance matrix")
+            corr = self._clean_distance_matrix(corr, replace_value=clean_replace_value)
         
         return corr
     

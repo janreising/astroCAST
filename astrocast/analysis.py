@@ -2085,16 +2085,19 @@ class MultiEvents(Events):
             self.num_event_objects = len(event_dirs)
             self.event_dirs = event_dirs
             
-            self.parameters = {i: {"event_dir": event_dir} for i, event_dir in enumerate(self.event_dirs)}
-            self._add_attribute(name='data', attribute=data)
-            self._add_attribute(name='loc', attribute=loc)
-            self._add_attribute(name='z_slice', attribute=z_slice)
-            self._add_attribute(name='lazy', attribute=lazy)
-            self._add_attribute(name='group', attribute=group)
-            self._add_attribute(name='subject_id', attribute=subject_id)
-            self._add_attribute(name='frame_to_time_mapping', attribute=frame_to_time_mapping)
-            self._add_attribute(name='frame_to_time_function', attribute=frame_to_time_function)
-            self._add_attribute(name='cache_path', attribute=cache_path)
+            self.parameters = {i: {"event_dir": event_dir} for i, event_dir in enumerate(
+                    self.event_dirs)}
+            self.data = self._add_attribute(name='data', attribute=data)
+            self.loc = self._add_attribute(name='loc', attribute=loc)
+            self.z_slice = self._add_attribute(name='z_slice', attribute=z_slice)
+            self.lazy = self._add_attribute(name='lazy', attribute=lazy)
+            self.group = self._add_attribute(name='group', attribute=group)
+            self.subject_id = self._add_attribute(name='subject_id', attribute=subject_id)
+            self.frame_to_time_mapping = self._add_attribute(name='frame_to_time_mapping',
+                                                             attribute=frame_to_time_mapping)
+            self.frame_to_time_function = self._add_attribute(name='frame_to_time_function',
+                                                              attribute=frame_to_time_function)
+            self.cache_path = self._add_attribute(name='cache_path', attribute=cache_path)
             
             # create events
             self.event_objects = []
@@ -2168,10 +2171,12 @@ class MultiEvents(Events):
             
             for i, v in enumerate(attribute):
                 self.parameters[i][name] = v
-        
+                return v
         else:
             for i in range(num_event_objects):
+                attribute = [attribute for _ in range(num_event_objects)]
                 self.parameters[i][name] = attribute
+                return attribute
     
     # def __hash__(self):
     #     raise NotImplementedError
