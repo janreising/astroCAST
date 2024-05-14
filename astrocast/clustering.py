@@ -13,8 +13,6 @@ import networkx as nx
 import numpy as np
 import pandas as pd
 import seaborn as sns
-from astrocast.analysis import Events
-from astrocast.helper import CachedClass, Normalization, is_ragged, wrapper_local_cache
 from dask import array as da
 from dtaidistance import dtw, dtw_barycenter
 from matplotlib import pyplot as plt
@@ -25,6 +23,9 @@ from sklearn import cluster, ensemble, gaussian_process, linear_model, neighbors
 from sklearn.cluster import KMeans
 from sklearn.metrics import confusion_matrix
 from tqdm import tqdm
+
+from astrocast.analysis import Events
+from astrocast.helper import CachedClass, Normalization, is_ragged, wrapper_local_cache
 
 
 class HdbScan:
@@ -839,7 +840,7 @@ class Distance(CachedClass):
         y = np.concatenate([y, yy])
         
         if replace_value == 'max':
-            replace_value = np.max(distance_matrix[x, y])
+            replace_value = np.nanmax(distance_matrix[x, y])
         
         for i in range(len(x)):
             
@@ -852,7 +853,8 @@ class Distance(CachedClass):
     
     def get_correlation(
             self, events=None, correlation_type: Literal['pearson', 'dtw', 'dtw_parallel'] = "pearson",
-            correlation_param: dict = None, clean_matrix: bool = True
+            correlation_param: dict = None,
+            clean_matrix: bool = True, clean_replace_value: Union[Literal['max'], float, int] = 'max',
             ):
         
         if events is None:
@@ -876,7 +878,8 @@ class Distance(CachedClass):
         corr = corr_func(events)
         
         if clean_matrix:
-            corr = self._clean_distance_matrix(corr)
+            corr = self._clean_distance_matrix(corr, replace_value=clean_replace_value)
+            self.logger.info(f"cleaning distance matrix")
         
         return corr
     
