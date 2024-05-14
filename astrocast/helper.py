@@ -1793,7 +1793,7 @@ class Normalization:
 
 class CachedClass:
     
-    def __init__(self, cache_path=None, logging_level=logging.INFO, name: str = 'CachedClass'):
+    def __init__(self, cache_path=None, logging_level=logging.INFO, logger_name: str = "CachedClass"):
         
         if cache_path is not None:
             
@@ -1809,7 +1809,7 @@ class CachedClass:
         
         # set logging level
         logging.basicConfig()
-        self.logger = logging.getLogger(name)
+        self.logger = logging.getLogger(logger_name)
         self.logger.setLevel(logging_level)
     
     @wrapper_local_cache

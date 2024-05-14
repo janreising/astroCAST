@@ -377,7 +377,7 @@ class Distance(CachedClass):
     
     def __init__(self, events: Union[pd.DataFrame, Events] = None, cache_path: Union[str, Path] = None,
                  logging_level=logging.INFO):
-        super().__init__(cache_path=cache_path, logging_level=logging_level, name="Distance")
+        super().__init__(cache_path=cache_path, logging_level=logging_level, logger_name="Distance")
         
         self.events = events
     
