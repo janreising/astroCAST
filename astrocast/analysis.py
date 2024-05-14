@@ -458,16 +458,15 @@ class Events(CachedClass):
         
         seed = self.seed
         events = self.events
-        columns = events.columns
         
         # exclude precalculated value columns
-        columns = [c for c in columns if not c.startswith("v_")]
+        excluded_columns = [c for c in events.columns if c.startswith("v_")]
         
         # exclude irrelevant columns
-        columns += ['mask', 'contours', 'footprint', 'trace_orig', 'noise_mask_trace', 'error',
-                    'subject_id', 'file_name', 'group', 'subject_idx']
+        excluded_columns += ['mask', 'contours', 'footprint', 'trace_orig', 'noise_mask_trace', 'error',
+                             'subject_id', 'file_name', 'group', 'subject_idx']
         
-        hash_ = helper.hash_events_dataframe(events, excluded_columns=columns, seed=seed)
+        hash_ = helper.hash_events_dataframe(events, excluded_columns=excluded_columns, seed=seed)
         
         return hash_
     
