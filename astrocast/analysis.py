@@ -2162,15 +2162,14 @@ class MultiEvents(Events):
             if len(attribute) != num_event_objects:
                 raise ValueError(f"Length of events and data is unequal: "
                                  f"#{name} {len(attribute)} != #events {num_event_objects}")
-            
-            for i, v in enumerate(attribute):
-                self.parameters[i][name] = v
-                return v
+        
         else:
-            for i in range(num_event_objects):
-                attribute = [attribute for _ in range(num_event_objects)]
-                self.parameters[i][name] = attribute
-                return attribute
+            attribute = [attribute for _ in range(num_event_objects)]
+        
+        for i, v in enumerate(attribute):
+            self.parameters[i][name] = v
+        
+        return attribute
     
     def show_event_map(
             self, video: Union[Path, str] = None, loc: str = None, z_slice: Tuple[int, int] = None, lazy: bool = True
