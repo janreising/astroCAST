@@ -456,11 +456,6 @@ class Events(CachedClass):
     
     def __hash__(self):
         
-        # traces = self.events.trace
-        #
-        # hashed_traces = traces.apply(lambda x: xxhash.xxh64_intdigest(np.array(x), seed=self.seed))
-        # hash_ = xxhash.xxh64_intdigest(hashed_traces.values, seed=self.seed)
-        
         seed = self.seed
         events = self.events
         columns = events.columns
@@ -469,24 +464,10 @@ class Events(CachedClass):
         columns = [c for c in columns if not c.startswith("v_")]
         
         # exclude irrelevant columns
-        excl_columns = ['mask', 'contours', 'footprint', 'trace_orig', 'noise_mask_trace', 'error',
-                        'subject_id', 'file_name', 'group', 'subject_idx']
-        columns = [c for c in columns if c not in excl_columns]
+        columns += ['mask', 'contours', 'footprint', 'trace_orig', 'noise_mask_trace', 'error',
+                    'subject_id', 'file_name', 'group', 'subject_idx']
         
-        n_events = len(events)
-        n_columns = len(columns)
-        
-        hashes = np.zeros((n_events, n_columns), dtype=int)
-        for i in range(n_events):
-            for ii, col in enumerate(columns):
-                
-                try:
-                    hashes[i, ii] = xxhash.xxh32(events.iloc[i][col], seed=seed).intdigest()
-                except TypeError as err:
-                    self.logger.error(f"xxhash failed for column {col}: {err}")
-        
-        hashes = np.sort(hashes, axis=0)
-        hash_ = xxhash.xxh32(hashes, seed=seed).intdigest()
+        hash_ = helper.hash_events_dataframe(events, excluded_columns=columns, seed=seed)
         
         return hash_
     

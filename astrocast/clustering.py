@@ -26,6 +26,7 @@ from sklearn.cluster import KMeans
 from sklearn.metrics import confusion_matrix
 from tqdm.auto import tqdm
 
+from astrocast import helper
 from astrocast.analysis import Events, MultiEvents
 from astrocast.helper import CachedClass, Normalization, is_ragged, wrapper_local_cache
 
@@ -382,23 +383,14 @@ class Distance(CachedClass):
                  logging_level=logging.INFO):
         super().__init__(cache_path=cache_path, logging_level=logging_level, logger_name="Distance")
         
-        self.events = events
-        self.my_hash = None
+        if isinstance(events, pd.DataFrame):
+            self.events = events
+            self.my_hash = helper.hash_events_dataframe(events)
+        else:
+            self.events = events.events
+            self.my_hash = hash(events)
     
     def __hash__(self):
-        
-        if self.my_hash is None:
-            
-            import xxhash
-            
-            events = self.events
-            
-            cols = events.columns
-            arr = np.array(len(cols), dtype=int)
-            for i, c in enumerate(cols):
-                arr[i] = xxhash.xxh32(events[c].values, seed=1).intdigest()
-            self.my_hash = xxhash.xxh32(arr, seed=1).intdigest()
-        
         return self.my_hash
     
     @staticmethod

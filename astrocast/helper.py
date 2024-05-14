@@ -124,11 +124,7 @@ def wrapper_local_cache(f):
             hashed_value = xxhash.xxh32(arg.values, seed=seed).intdigest()
         
         elif isinstance(arg, pd.DataFrame):
-            cols = arg.columns
-            arr = np.array(len(cols), dtype=int)
-            for i, c in enumerate(cols):
-                arr[i] = xxhash.xxh32(arg[c].values, seed=seed).intdigest()
-            return xxhash.xxh32(arr, seed=seed).intdigest()
+            hashed_value = hash_events_dataframe(arg, seed=seed)
         
         elif isinstance(arg, dict):
             hashed_value = get_hash_from_dict(arg)
@@ -422,6 +418,74 @@ def get_data_dimensions(
         return shape, chunksize, dtype
     else:
         return shape, chunksize
+
+
+def hash_events_dataframe(events: pd.DataFrame, excluded_columns: List[str] = None,
+                          sort_hash_array: bool = False, seed: int = 1):
+    """
+    Generate a hash value for a given DataFrame, excluding specified columns.
+
+    This function computes a hash value for the entire DataFrame, optionally
+    excluding certain columns from the hash calculation. It uses the `xxhash`
+    library to ensure efficient and fast hashing. Each column's values are
+    hashed first, and then these hashes are combined to produce a final hash
+    value for the DataFrame.
+
+    .. note::
+        - This function assumes that the DataFrame columns contain hashable values.
+        - The `xxhash` library is used for its speed and performance benefits.
+
+    .. caution::
+        - Make sure the DataFrame does not contain any sensitive data if you plan
+          to use the hash for sharing purposes.
+        - Excluding columns will change the hash value, so ensure consistent
+          usage of the `excluded_columns` parameter.
+
+    Args:
+        events: The DataFrame to be hashed.
+        excluded_columns: List of column names to exclude from hashing. Default is None.
+        sort_hash_array: Toggle sorting of hash array.
+        seed: Seed value for the `xxhash` hashing function. Default is 1.
+
+    Returns:
+        An integer representing the hash value of the DataFrame.
+
+    Example::
+        import pandas as pd
+        from typing import List
+
+        data = {'A': [1, 2, 3], 'B': [4, 5, 6], 'C': [7, 8, 9]}
+        df = pd.DataFrame(data)
+
+        hash_value = hash_events_dataframe(df, excluded_columns=['B'])
+        print(hash_value)
+
+    """
+    import xxhash
+    
+    cols = events.columns
+    
+    if excluded_columns is not None:
+        cols = [c for c in cols if c not in excluded_columns]
+    
+    arr = np.array(len(cols), dtype=int)
+    for i, c in enumerate(cols):
+        
+        values = events[c].values
+        if isinstance(values[0], np.ndarray):
+            by_row = np.zeros(len(values), dtype=int)
+            for ii, r in enumerate(values.tolist()):
+                by_row[ii] = xxhash.xxh32(r, seed=seed).intdigest()
+            values = by_row
+        
+        arr[i] = xxhash.xxh32(values, seed=seed).intdigest()
+    
+    if sort_hash_array:
+        arr = np.sort(arr, axis=0)
+    
+    hash_value = xxhash.xxh32(arr, seed=seed).intdigest()
+    
+    return hash_value
 
 
 class SignalGenerator:
