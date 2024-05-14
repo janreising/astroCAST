@@ -483,7 +483,7 @@ class Events(CachedClass):
                 try:
                     hashes[i, ii] = xxhash.xxh32(events.iloc[i][col], seed=seed).intdigest()
                 except TypeError as err:
-                    logging.error(f"xxhash failed for column {col}: {err}")
+                    self.logger.error(f"xxhash failed for column {col}: {err}")
         
         hashes = np.sort(hashes, axis=0)
         hash_ = xxhash.xxh32(hashes, seed=seed).intdigest()
@@ -494,14 +494,10 @@ class Events(CachedClass):
         return self.events._repr_html_()
     
     def save(self, path):
-        #     from joblib import dump
-        #     dump(self, path)
         raise NotImplemented
     
     @staticmethod
     def load(path):
-        #     from joblib import load
-        #     return load(path)
         raise NotImplemented
     
     def _is_ragged(self):
@@ -1539,9 +1535,8 @@ class Events(CachedClass):
         
         if events is None:
             events = self.events
-            
-            events = events.copy()
-        
+
+        events = events.copy()
         n_events = len(events)
         
         # load data
@@ -2120,7 +2115,6 @@ class MultiEvents(Events):
             self.events = self.combine_events()
     
     def copy(self):
-        
         """ Returns a copy of the Events object. """
         
         obj = MultiEvents()
@@ -2177,30 +2171,7 @@ class MultiEvents(Events):
                 attribute = [attribute for _ in range(num_event_objects)]
                 self.parameters[i][name] = attribute
                 return attribute
-    
-    # def __hash__(self):
-    #     raise NotImplementedError
-    
-    # def add_clustering(self, cluster_lookup_table: dict, column_name: str = "cluster") -> None:
-    #
-    #     for event in self.event_objects:
-    #         event.add_clustering(cluster_lookup_table=cluster_lookup_table, column_name=column_name)
-    #
-    #     self.events = self.combine_events()
-    
-    # def filter(self, filters: dict, inplace: bool = True) -> None:
-    #
-    #     if not inplace:
-    #         raise NotImplementedError("currently MultiEvent objects can only be changed inplace.")
-    #
-    #     for event in self.event_objects:
-    #         event.filter(filters=filters, inplace=inplace)
-    #
-    #     self.combine_events()
-    
-    # def to_numpy(self, events: pd.DataFrame = None, empty_as_nan: bool = True, ragged: bool = False) -> np.ndarray:
-    #     raise NotImplementedError("currently MultiEvent objects does not implement this function.")
-    #
+
     def show_event_map(
             self, video: Union[Path, str] = None, loc: str = None, z_slice: Tuple[int, int] = None, lazy: bool = True
             ):
@@ -2727,7 +2698,7 @@ class Plotting:
                 lut[g] = c
         else:
             lut = dict(zip(unique_groups, palette))
-        
+
         return lut
     
     @staticmethod

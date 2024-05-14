@@ -16,7 +16,7 @@ import numpy as np
 import yaml
 from colorama import Fore, init as init_colorama
 from prettytable import PrettyTable
-from tqdm import tqdm
+from tqdm.auto import tqdm
 
 init_colorama(autoreset=True)
 click_custom_option = partial(click.option, show_default=True)

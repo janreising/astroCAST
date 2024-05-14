@@ -10,9 +10,9 @@ import torch.nn as nn
 import torch.optim as optim
 from matplotlib import pyplot as plt
 from sklearn.model_selection import train_test_split
-from torch.nn.utils.rnn import pad_packed_sequence, pack_padded_sequence, pad_sequence
-from torch.utils.data import Dataset, DataLoader, TensorDataset
-from tqdm import tqdm
+from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence, pad_sequence
+from torch.utils.data import DataLoader, Dataset, TensorDataset
+from tqdm.auto import tqdm
 
 
 # Convolutional Neural Network Autoencoder

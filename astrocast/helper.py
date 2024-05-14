@@ -8,7 +8,6 @@ import shutil
 import tempfile
 import time
 import types
-from functools import lru_cache
 from pathlib import Path
 from typing import List, Literal, Tuple, Union
 
@@ -24,7 +23,7 @@ import xxhash
 import yaml
 from skimage.util import img_as_uint
 from sklearn.preprocessing import LabelEncoder
-from tqdm import tqdm
+from tqdm.auto import tqdm
 
 
 def closest_power_of_two(value):
@@ -94,11 +93,17 @@ def wrapper_local_cache(f):
     :return:
     """
     
+    exclude_arg_names = ["show_progress", "verbose", "verbosity", "cache_path", "n_jobs", "njobs", "palette",
+                         "load_to_memory", "save_path", "save_param"]
+    
+    max_hash_string_length = 150
+    logging.basicConfig()
+    logger = logging.getLogger("Wrapper")
+    logger.setLevel(logging.INFO)
+    seed = 1
+    
     def hash_from_ndarray(v):
-        h = xxhash.xxh64()
-        h.update(v.flatten())
-        
-        return h.intdigest()
+        return xxhash.xxh64(v.flatten(), seed=1).intdigest()
     
     def hash_arg(arg):
         
@@ -113,47 +118,54 @@ def wrapper_local_cache(f):
             logging.warning(f"Could not import package: {err}")
         
         if isinstance(arg, np.ndarray):
-            return hash_from_ndarray(arg)
+            hashed_value = hash_from_ndarray(arg)
         
-        elif isinstance(arg, (pd.DataFrame, pd.Series)):
-            df_hash = pd.util.hash_pandas_object(arg)
-            return hash_from_ndarray(df_hash.values)
+        elif isinstance(arg, pd.Series):
+            hashed_value = xxhash.xxh32(arg.values, seed=seed).intdigest()
+        
+        elif isinstance(arg, pd.DataFrame):
+            cols = arg.columns
+            arr = np.array(len(cols), dtype=int)
+            for i, c in enumerate(cols):
+                arr[i] = xxhash.xxh32(arg[c].values, seed=seed).intdigest()
+            return xxhash.xxh32(arr, seed=seed).intdigest()
         
         elif isinstance(arg, dict):
-            return get_hash_from_dict(arg)
+            hashed_value = get_hash_from_dict(arg)
         
         elif isinstance(arg, tuple(custom_classes)):
-            return hash(arg)
+            hashed_value = hash(arg)
         
         elif isinstance(arg, (bool, int, tuple)):
-            return str(arg)
+            hashed_value = str(arg)
         
         elif isinstance(arg, str):
             
             if len(arg) < 10:
-                return arg
+                hashed_value = arg
             else:
-                return hash(arg)
+                hashed_value = hash(arg)
         
         elif isinstance(arg, list):
             
             arg = pd.Series(arg)
             df_hash = pd.util.hash_pandas_object(arg)
-            return hash_from_ndarray(df_hash.values)
+            hashed_value = hash_from_ndarray(df_hash.values)
         
         elif callable(arg):
-            return arg.__name__
+            hashed_value = arg.__name__
         
         else:
-            logging.warning(f"unknown argument type: {type(arg)}")
             
             try:
                 h = hash(arg)
-                return h
+                hashed_value = h
             
             except:
                 logging.error(f"couldn't hash argument type: {type(arg)}")
-                return arg
+                hashed_value = arg
+        
+        return hashed_value
     
     def get_hash_from_dict(kwargs):
         
@@ -165,18 +177,27 @@ def wrapper_local_cache(f):
         hash_string = ""
         for key in keys:
             
-            if key in ["show_progress", "verbose", "verbosity", "cache_path", "n_jobs", "njobs"]:
+            if key in exclude_arg_names:
                 continue
             
-            if key in ["in_place", "inplace"]:
-                logging.warning(
-                        f"cached value was loaded, which is incompatible with inplace option. "
-                        f"Please overwrite value manually!"
+            if (key == "in_place" and kwargs[key]) or (key == "inplace" and kwargs[key]):
+                logger.warning(
+                        f"attempting to load cached value which is incompatible with inplace option. "
+                        f"The result will not be saved in place."
                         )
                 continue
             
             # save key name
-            hash_string += f"{hash_arg(key)}-"
+            if isinstance(key, str):
+                
+                if len(key) > 20:
+                    key_ = key[:10]
+                else:
+                    key_ = key
+                
+                hash_string += f"{key_}-"
+            else:
+                hash_string += f"{hash_arg(key)}-"
             
             value = kwargs[key]
             hash_string += f"{hash_arg(value)}_"
@@ -188,12 +209,11 @@ def wrapper_local_cache(f):
         hash_string = f"{f.__name__}_"
         
         args_ = [hash_arg(arg) for arg in args]
-        for a in args_:
-            hash_string += f"{a}_"
+        for i, a in enumerate(args_):
+            hash_string += f"arg{i}-{a}_"
         
         hash_string += get_hash_from_dict(kwargs)
         
-        logging.warning(f"hash_string: {hash_string}")
         return hash_string
     
     def save_value(path, value):
@@ -218,7 +238,7 @@ def wrapper_local_cache(f):
                 with open(path + ".p", "wb") as f:
                     pickle.dump(value, f)
             except:
-                logging.warning("saving failed because datatype is unknown: ", type(value))
+                logger.warning("saving failed because datatype is unknown: ", type(value))
                 return False
         
         return True
@@ -250,30 +270,32 @@ def wrapper_local_cache(f):
     
     def inner_function(*args, **kwargs):
         
+        logger.debug(f"function: {f.__name__}")
+        logger.debug(f"args: {args}")
+        logger.debug(f"kwargs: {kwargs}")
+        
         if isinstance(f, types.FunctionType) and "cache_path" in list(kwargs.keys()):
             cache_path = kwargs["cache_path"]
         
         else:
             
-            try:
-                self_ = args[0]
+            self_ = args[0]
+            if hasattr(self_, "cache_path"):
                 cache_path = self_.cache_path
-            
-            except:
-                logging.warning(f"trying to cache static method or class without 'cache_path': {f.__name__}")
+                logger.debug(f"Starting caching for {f.__name__} at {cache_path}")
+            else:
+                logger.warning(f"Trying to cache static method or class without 'cache_path': {f.__name__}")
+                logger.debug(f"Failed from {type(self_)}, {self_}")
                 cache_path = None
         
-        if cache_path == "lru_cache":
-            
-            @lru_cache
-            def temp(args_, kwargs_):
-                return f(*args_, **kwargs_)
-            
-            return temp(args, kwargs)
-        
-        elif cache_path is not None and isinstance(cache_path, (str, Path)):
+        if cache_path is not None and isinstance(cache_path, (str, Path)):
             
             hash_string = get_string_from_args(f, args, kwargs)
+            
+            if len(hash_string) > max_hash_string_length:
+                logger.debug(f"hash string is too long ({len(hash_string)} > {max_hash_string_length})")
+                hash_string = str(hash(hash_string))
+            
             cache_path = cache_path.joinpath(hash_string)
             
             # find file with regex matching from hash_value
@@ -285,23 +307,27 @@ def wrapper_local_cache(f):
                 result = load_value(files[0])
                 
                 if result is None:
-                    logging.info("error during loading. recalculating value")
+                    logger.info("error during cache loading. Proceeding with function call.")
                     return f(*args, **kwargs)
                 
-                logging.info(f"loaded result of {f.__name__} from file")
+                logger.info(f"loaded result of {f.__name__} from file")
             
             else:
                 
                 result = f(*args, **kwargs)
                 
                 if len(files) > 0:
-                    logging.info(f"multiple saves found. files should be deleted: {files}")
+                    logger.info(f"multiple saves found. files should be deleted: {files}")
                 
                 # save result
-                logging.info(f"saving to: {cache_path}")
+                logger.info(f"saving to: {cache_path.name}")
                 save_value(cache_path, result)
         
         else:
+            
+            if cache_path is not None:
+                logger.warning(f"cache_path has unexpected type ({type(cache_path)}, not str or Path.")
+            
             result = f(*args, **kwargs)
         
         return result

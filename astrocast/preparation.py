@@ -27,7 +27,7 @@ from scipy.interpolate import RBFInterpolator
 from scipy.ndimage import gaussian_filter, minimum_filter1d
 from skimage.transform import rescale, resize
 from skimage.util import img_as_uint
-from tqdm import tqdm
+from tqdm.auto import tqdm
 
 from astrocast.helper import get_data_dimensions
 

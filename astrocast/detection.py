@@ -25,7 +25,7 @@ from skimage.feature import peak_local_max
 from skimage.filters import gaussian, threshold_triangle
 from skimage.measure import find_contours, regionprops_table
 from skimage.segmentation import watershed
-from tqdm import tqdm
+from tqdm.auto import tqdm
 
 from astrocast.helper import get_data_dimensions, is_docker
 from astrocast.preparation import IO

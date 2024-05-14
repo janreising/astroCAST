@@ -13,7 +13,7 @@ import torch.nn.functional as F
 import xxhash
 from torch.nn.modules.loss import _Loss
 from torch.utils.data import DataLoader, Dataset
-from tqdm import tqdm
+from tqdm.auto import tqdm
 
 from astrocast.autoencoders import EarlyStopper
 from astrocast.helper import closest_power_of_two, wrapper_local_cache
