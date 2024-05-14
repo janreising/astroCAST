@@ -1151,16 +1151,16 @@ class Distance(CachedClass):
         
         correlation_param["trace_column"] = trace_column
         
-        funcs = {"pearson":      lambda: self.get_pearson_correlation(**correlation_param),
-                 "dtw":          lambda: self.get_dtw_correlation(**correlation_param),
-                 "dtw_parallel": lambda: self.get_dtw_parallel_correlation(**correlation_param)}
+        funcs = {"pearson":      self.get_pearson_correlation,
+                 "dtw":          self.get_dtw_correlation,
+                 "dtw_parallel": self.get_dtw_parallel_correlation}
         
         if correlation_type not in funcs.keys():
             raise ValueError(f"cannot find correlation type. Choose one of: {funcs.keys()}")
         else:
             corr_func = funcs[correlation_type]
         
-        corr = corr_func(events)
+        corr = corr_func(**correlation_param)
         
         if clean_matrix:
             self.logger.info(f"cleaning distance matrix")
