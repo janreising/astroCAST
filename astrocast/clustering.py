@@ -865,7 +865,7 @@ class Distance(CachedClass):
                 x1 = min(x0 + block, N)
                 
                 dm_ = dtw.distance_matrix_fast(
-                        traces, block=((x0, x1), (0, N)), use_pruning=False, parallel=parallel, compact=compact,
+                        traces, block=((x0, x1), (0, N)), use_pruning=False, parallel=parallel, compact=True,
                         only_triu=only_triu
                         )
                 
@@ -875,6 +875,9 @@ class Distance(CachedClass):
                 i += len(dm_)
                 
                 del dm_
+        
+        if not compact:
+            distance_matrix = dtw.distances_array_to_matrix(distance_matrix, N, block=None, only_triu=only_triu)
         
         distance_matrix = self._fix_invalid_distance_matrix(distance_matrix=distance_matrix, traces=traces,
                                                             max_tries=max_tries)
