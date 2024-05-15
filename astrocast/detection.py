@@ -79,7 +79,7 @@ class Detector:
         
         # paths
         self.input_path = Path(input_path)
-        self.output = output if output is None else Path(output)
+        self.output = self.validate_output_path(output)
         working_directory = self.input_path.parent
         
         logging.info(f"working directory: {working_directory}")
@@ -97,6 +97,25 @@ class Detector:
         self.data = None
         self.Z, self.X, self.Y = None, None, None
         self.meta = {}
+    
+    def validate_output_path(self, output_directory: Union[str, Path]) -> Path:
+        
+        output_path = None
+        if output_directory is not None:
+            
+            output_directory = Path(output_directory)
+            name = output_directory.name
+            
+            substitutions = {
+                "{name}": self.input_path.stem,
+                }
+            
+            for s, r in substitutions.items():
+                name = name.replace(s, r)
+            
+            output_path = output_directory.with_name(name)
+        
+        return output_path
     
     def run(
             self, loc: str = None, exclude_border: int = 0, threshold: Union[int, float] = None,
