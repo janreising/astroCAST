@@ -1266,14 +1266,28 @@ def delete_h5_dataset(input_path, loc):
                     del f[ds]
 
 
+def load_paths_from_yaml(yaml_path: Path, data_path: Path):
+    
+    paths = []
+    with open(yaml_path, "r") as y:
+        meta = yaml.safe_load(y)
+    
+    for k, v in meta["subjects"].items():
+        paths.append(data_path.joinpath(v["path"]))
+    
+    return paths
+
+
 @cli.command
 @click.argument('data-path', type=click.Path())
 @click_custom_option('--cfg-path', type=click.Path(), default=Path("config.yaml"))
 @click_custom_option('--log-path', type=click.Path(), default=Path("."))
+@click_custom_option('--base-path', type=click.Path(), default=None)
+@click_custom_option('--skip-if-exists', type=click.BOOL, default=True)
 @click_custom_option('--tasks', default=None)
 @click_custom_option('--base-command', type=click.STRING, default="")
 @click_custom_option('--account', type=click.STRING)
-def push_slurm_tasks(log_path, cfg_path, data_path, tasks, base_command, account):
+def push_slurm_tasks(log_path, cfg_path, data_path, base_path, skip_if_exists, tasks, base_command, account):
     import h5py as h5
     from simple_slurm import Slurm
     
@@ -1284,7 +1298,18 @@ def push_slurm_tasks(log_path, cfg_path, data_path, tasks, base_command, account
     cfg_path = Path(cfg_path)
     log_path = Path(log_path)
     
-    files = [data_path] if data_path.is_file() else list(data_path.glob("*/*.h5"))
+    if data_path.is_file() and data_path.suffix in [".yaml", ".yml"]:
+        
+        if base_path is None:
+            base_path = Path()
+        
+        files = load_paths_from_yaml(data_path, base_path)
+    
+    elif data_path.is_file():
+        files = [data_path]
+    
+    else:
+        files = list(data_path.glob("*/*.h5"))
     
     if isinstance(tasks, str):
         tasks = ast.literal_eval(tasks)
@@ -1310,8 +1335,8 @@ def push_slurm_tasks(log_path, cfg_path, data_path, tasks, base_command, account
                 job_name = f"{k}_{base_name}"
                 
                 # roi output exists
-                skip_step = True
-                if k == "roi":
+                skip_step = skip_if_exists
+                if skip_step and k == "roi":
                     
                     roi_output = f.with_suffix(".roi")
                     if roi_output.exists():
@@ -1323,7 +1348,7 @@ def push_slurm_tasks(log_path, cfg_path, data_path, tasks, base_command, account
                                 skip_step = False
                 
                 # other outputs exist
-                elif k not in file:
+                elif skip_step and k not in file:
                     skip_step = False
                 
                 if skip_step:
