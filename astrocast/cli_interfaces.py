@@ -1268,6 +1268,9 @@ def delete_h5_dataset(input_path, loc):
 
 def load_paths_from_yaml(yaml_path: Path, data_path: Path):
     
+    yaml_path = Path(yaml_path)
+    data_path = Path(data_path)
+    
     paths = []
     with open(yaml_path, "r") as y:
         meta = yaml.safe_load(y)
