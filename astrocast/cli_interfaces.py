@@ -1276,7 +1276,7 @@ def load_paths_from_yaml(yaml_path: Path, data_path: Path):
         meta = yaml.safe_load(y)
     
     for k, v in meta["subjects"].items():
-        paths.append(data_path.joinpath(v["path"]))
+        paths.append(data_path.joinpath(v["path"]).with_suffix(".h5"))
     
     return paths
 
