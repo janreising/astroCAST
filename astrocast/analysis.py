@@ -749,6 +749,10 @@ class Events(CachedClass):
         
         for column in filters:
             
+            if len(events) < 1:
+                self.logger.warning(f"Filtering lead to empty dataframe.")
+                break
+            
             typ = events[column].dtype
             if typ == "object":
                 typ = type(events[column].dropna().iloc[0])
