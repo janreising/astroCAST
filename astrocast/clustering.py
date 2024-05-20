@@ -15,6 +15,7 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 from dask import array as da
+from dask.distributed import Client, progress
 from dtaidistance import dtw, dtw_barycenter
 from matplotlib import pyplot as plt
 from matplotlib.colors import LinearSegmentedColormap
@@ -226,11 +227,130 @@ class Linkage(CachedClass):
         return combined_barycenters, internal_lookup_tables, step_two_barycenters, external_lookup_table
     
     @wrapper_local_cache
-    def calculate_linkage_matrix(self, distance_matrix, method="average", metric="euclidean"):
-        Z = fastcluster.linkage(distance_matrix, method=method, metric=metric, preserve_input=False)
-        # todo add flag to cache or not to cache
-        self.Z = Z
-        return Z
+    def calculate_linkage_matrix(self, distance_matrix, method="average", metric="euclidean",
+                                 use_co_association: bool = False,
+                                 use_random_sample: bool = False,
+                                 fraction_random_samples: float = 0.1,
+                                 n_subsets: int = 10, n_sub_clusters: int = 100
+                                 ):
+        """
+            Calculate the linkage matrix for hierarchical clustering.
+
+            Depending on the parameters, either computes the linkage matrix directly from the distance matrix
+            or uses a co-association matrix approach for more robust clustering.
+
+            Args:
+                distance_matrix: The distance matrix used for clustering.
+                method: The linkage algorithm to use (default is "average").
+                metric: The distance metric to use (default is "euclidean").
+                use_co_association: Whether to use the co-association matrix approach (default is False).
+                use_random_sample: Whether to use random sampling for co-association (default is False).
+                fraction_random_samples: Fraction of the data to use for each random sample (default is 0.1).
+                n_subsets: Number of subsets to use for co-association (default is 10).
+                n_sub_clusters: Number of clusters to form in each subset (default is 100).
+
+            Returns:
+                The linkage matrix computed from the distance matrix.
+            """
+        
+        if not use_co_association:
+            linkage_matrix = fastcluster.linkage(distance_matrix, method=method, metric=metric, preserve_input=False)
+        
+        else:
+            linkage_matrix = self._calculate_co_association_linkage(distance_matrix=distance_matrix,
+                                                                    method=method, metric=metric,
+                                                                    use_random_sample=use_random_sample,
+                                                                    fraction_random_samples=fraction_random_samples,
+                                                                    n_subsets=n_subsets,
+                                                                    n_sub_clusters=n_sub_clusters)
+        
+        self.Z = linkage_matrix
+        return linkage_matrix
+    
+    @staticmethod
+    def _calculate_co_association_linkage(distance_matrix: Union[np.ndarray, da.Array], method: str, metric: str,
+                                          use_random_sample: bool = False,
+                                          fraction_random_samples: float = 0.1,
+                                          n_subsets: int = 10, n_sub_clusters: int = 100):
+        """
+            Calculate the linkage matrix using a co-association matrix approach.
+
+            This method is useful for more robust clustering by aggregating multiple clustering results
+            from different subsets or samples of the data.
+
+            Args:
+                distance_matrix: The distance matrix used for clustering.
+                method: The linkage algorithm to use.
+                metric: The distance metric to use.
+                use_random_sample: Whether to use random sampling for co-association (default is False).
+                fraction_random_samples: Fraction of the data to use for each random sample (default is 0.1).
+                n_subsets: Number of subsets to use for co-association (default is 10).
+                n_sub_clusters: Number of clusters to form in each subset (default is 100).
+
+            Returns:
+                The linkage matrix computed from the co-association matrix.
+            """
+        if not isinstance(distance_matrix, da.Array):
+            distance_matrix = da.from_array(distance_matrix, chunks=distance_matrix.shape)
+        
+        def compute_linkage(dm: da.Array, indices_):
+            """
+                Compute the linkage matrix for a subset of the distance matrix.
+
+                Args:
+                    dm: The dask array representing the distance matrix.
+                    indices_: The indices of the subset to use for clustering.
+
+                Returns:
+                    A tuple containing the linkage matrix and the subset indices.
+                """
+            subset_dist_matrix = dm[indices_][:, indices_]
+            lm = fastcluster.linkage(subset_dist_matrix, method=method, metric=metric, preserve_input=True)
+            return lm, indices_
+        
+        if use_random_sample:
+            
+            # Generate multiple random samples
+            n = len(distance_matrix)
+            sample_size_n = int(n * fraction_random_samples)
+            chosen_indices = [np.random.choice(n, sample_size_n, replace=False) for _ in range(n_subsets)]
+        
+        else:
+            
+            # Split data into subsets
+            indices = np.arange(distance_matrix.shape[0])
+            chosen_indices = np.array_split(indices, n_subsets)
+        
+        linkage_results = []
+        with Client(memory_limit='auto', processes=False) as client:
+            for subset_indices in chosen_indices:
+                linkage_results.append(
+                        client.submit(compute_linkage, distance_matrix, subset_indices)
+                        )
+            
+            progress(linkage_results)
+            results = client.gather(linkage_results)
+        
+        # Initialize co-association matrix
+        co_association_matrix = np.zeros((len(distance_matrix), len(distance_matrix)))
+        
+        # Populate co-association matrix
+        for link_matrix, subset_indices in results:
+            # Generate flat clusters from linkage matrix
+            labels = fcluster(link_matrix, t=n_sub_clusters, criterion='maxclust')
+            
+            for idx1 in range(len(subset_indices)):
+                for idx2 in range(len(subset_indices)):
+                    if labels[idx1] == labels[idx2]:
+                        co_association_matrix[subset_indices[idx1], subset_indices[idx2]] += 1
+        
+        # Normalize co-association matrix
+        co_association_matrix /= n_subsets
+        
+        # Perform final clustering on the co-association matrix
+        linkage_matrix = fastcluster.linkage(co_association_matrix, method=method, metric=metric, preserve_input=False)
+        
+        return linkage_matrix
     
     @staticmethod
     def cluster_linkage_matrix(
