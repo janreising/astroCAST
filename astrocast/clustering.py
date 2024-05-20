@@ -231,7 +231,8 @@ class Linkage(CachedClass):
                                  use_co_association: bool = False,
                                  use_random_sample: bool = False,
                                  fraction_random_samples: float = 0.1,
-                                 n_subsets: int = 10, n_sub_clusters: int = 100
+                                 n_subsets: int = 10, n_sub_clusters: int = 100,
+                                 use_processes: bool = False
                                  ):
         """
             Calculate the linkage matrix for hierarchical clustering.
@@ -271,7 +272,8 @@ class Linkage(CachedClass):
     def _calculate_co_association_linkage(distance_matrix: Union[np.ndarray, da.Array], method: str, metric: str,
                                           use_random_sample: bool = False,
                                           fraction_random_samples: float = 0.1,
-                                          n_subsets: int = 10, n_sub_clusters: int = 100):
+                                          n_subsets: int = 10, n_sub_clusters: int = 100,
+                                          use_processes: bool = False):
         """
             Calculate the linkage matrix using a co-association matrix approach.
 
@@ -322,7 +324,7 @@ class Linkage(CachedClass):
             chosen_indices = np.array_split(indices, n_subsets)
         
         linkage_results = []
-        with Client(memory_limit='auto', processes=False) as client:
+        with Client(memory_limit='auto', processes=use_processes) as client:
             for subset_indices in chosen_indices:
                 linkage_results.append(
                         client.submit(compute_linkage, distance_matrix, subset_indices)
