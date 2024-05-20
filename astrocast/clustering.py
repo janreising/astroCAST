@@ -8,6 +8,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import List, Literal, Tuple, Union
 
+import dask
 import fastcluster
 import hdbscan
 import networkx as nx
@@ -324,14 +325,15 @@ class Linkage(CachedClass):
             chosen_indices = np.array_split(indices, n_subsets)
         
         linkage_results = []
-        with Client(memory_limit='auto', processes=use_processes) as client:
-            for subset_indices in chosen_indices:
-                linkage_results.append(
-                        client.submit(compute_linkage, distance_matrix, subset_indices)
-                        )
-            
-            progress(linkage_results)
-            results = client.gather(linkage_results)
+        with dask.config.set(**{'array.slicing.split_large_chunks': False}):
+            with Client(memory_limit='auto', processes=use_processes) as client:
+                for subset_indices in chosen_indices:
+                    linkage_results.append(
+                            client.submit(compute_linkage, distance_matrix, subset_indices)
+                            )
+                
+                progress(linkage_results)
+                results = client.gather(linkage_results)
         
         # Initialize co-association matrix
         co_association_matrix = np.zeros((len(distance_matrix), len(distance_matrix)))
