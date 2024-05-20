@@ -340,6 +340,8 @@ class Linkage(CachedClass):
         
         pbar.unregister()
         
+        logging.info(f"finished calculation of subset linkage matrices.")
+        
         # Initialize co-association matrix
         co_association_matrix = np.zeros((len(distance_matrix), len(distance_matrix)))
         
@@ -355,6 +357,8 @@ class Linkage(CachedClass):
         
         # Normalize co-association matrix
         co_association_matrix /= n_subsets
+        
+        logging.info(f"finished creation of co-association matrix")
         
         # Perform final clustering on the co-association matrix
         linkage_matrix = fastcluster.linkage(co_association_matrix, method=method, metric=metric, preserve_input=False)
