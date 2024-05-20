@@ -330,7 +330,7 @@ class Linkage(CachedClass):
         
         linkage_results = []
         with dask.config.set(**{'array.slicing.split_large_chunks': False}):
-            with Client(memory_limit='auto', processes=use_processes) as client:
+            with Client(memory_limit='auto', processes=use_processes, ) as client:
                 for subset_indices in chosen_indices:
                     linkage_results.append(
                             client.submit(compute_linkage, distance_matrix, subset_indices)
@@ -344,7 +344,7 @@ class Linkage(CachedClass):
         co_association_matrix = np.zeros((len(distance_matrix), len(distance_matrix)))
         
         # Populate co-association matrix
-        for link_matrix, subset_indices in results:
+        for link_matrix, subset_indices in tqdm(results, desc='Creating co-association matrix'):
             # Generate flat clusters from linkage matrix
             labels = fcluster(link_matrix, t=n_sub_clusters, criterion='maxclust')
             
