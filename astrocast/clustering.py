@@ -16,7 +16,8 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 from dask import array as da
-from dask.distributed import Client, progress
+from dask.diagnostics import ProgressBar
+from dask.distributed import Client
 from dtaidistance import dtw, dtw_barycenter
 from matplotlib import pyplot as plt
 from matplotlib.colors import LinearSegmentedColormap
@@ -324,6 +325,9 @@ class Linkage(CachedClass):
             indices = np.arange(distance_matrix.shape[0])
             chosen_indices = np.array_split(indices, n_subsets)
         
+        pbar = ProgressBar(minimum=0)
+        pbar.register()
+        
         linkage_results = []
         with dask.config.set(**{'array.slicing.split_large_chunks': False}):
             with Client(memory_limit='auto', processes=use_processes) as client:
@@ -332,8 +336,9 @@ class Linkage(CachedClass):
                             client.submit(compute_linkage, distance_matrix, subset_indices)
                             )
                 
-                progress(linkage_results)
                 results = client.gather(linkage_results)
+        
+        pbar.unregister()
         
         # Initialize co-association matrix
         co_association_matrix = np.zeros((len(distance_matrix), len(distance_matrix)))
