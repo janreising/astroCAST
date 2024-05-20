@@ -26,12 +26,16 @@ from scipy.cluster.hierarchy import fcluster
 from scipy.spatial import KDTree
 from sklearn import cluster, ensemble, gaussian_process, linear_model, neighbors, neural_network, tree
 from sklearn.cluster import KMeans
+from sklearn.decomposition import PCA
 from sklearn.metrics import confusion_matrix
-from tqdm.auto import tqdm
+from tqdm import tqdm
 
 from astrocast import helper
 from astrocast.analysis import Events, MultiEvents
 from astrocast.helper import CachedClass, Normalization, is_ragged, wrapper_local_cache
+
+
+# from tqdm.auto import tqdm
 
 
 class HdbScan:
@@ -120,8 +124,10 @@ class Linkage(CachedClass):
     def __init__(self, events: Union[Events, MultiEvents], cache_path=None, logging_level=logging.INFO):
         super().__init__(logging_level=logging_level, cache_path=cache_path, logger_name="Linkage")
         
+        self.n_centroids = None
+        self.pre_cluster_labels = None
         self.events = events
-        self.my_hash = hash(events)
+        self.my_hash = hash(events) if cache_path is not None else None
         
         self.Z = None
     
@@ -232,8 +238,9 @@ class Linkage(CachedClass):
     def calculate_linkage_matrix(self, distance_matrix, method="average", metric="euclidean",
                                  use_co_association: bool = False,
                                  use_random_sample: bool = False,
-                                 fraction_random_samples: float = 0.1,
+                                 fraction_random_samples: float = 0.1, min_k_means_clusters: int = 100,
                                  n_subsets: int = 10, n_sub_clusters: int = 100,
+                                 pca_retained_variance: float = 0.95, fraction_pre_clusters: float = 0.1,
                                  use_processes: bool = False
                                  ):
         """
@@ -258,23 +265,36 @@ class Linkage(CachedClass):
         
         if not use_co_association:
             linkage_matrix = fastcluster.linkage(distance_matrix, method=method, metric=metric, preserve_input=False)
+            
+            self.Z = linkage_matrix
+            return linkage_matrix
         
         else:
-            linkage_matrix = self._calculate_co_association_linkage(distance_matrix=distance_matrix,
-                                                                    method=method, metric=metric,
-                                                                    use_random_sample=use_random_sample,
-                                                                    fraction_random_samples=fraction_random_samples,
-                                                                    n_subsets=n_subsets,
-                                                                    n_sub_clusters=n_sub_clusters)
-        
-        self.Z = linkage_matrix
-        return linkage_matrix
+            # linkage_matrix, pre_cluster_labels, n_centroids = self._calculate_co_association_linkage(
+            linkage_matrix = self._calculate_co_association_linkage(
+                    distance_matrix=distance_matrix,
+                    method=method, metric=metric,
+                    use_random_sample=use_random_sample,
+                    fraction_random_samples=fraction_random_samples,
+                    min_k_means_clusters=min_k_means_clusters,
+                    n_subsets=n_subsets,
+                    n_sub_clusters=n_sub_clusters,
+                    pca_retained_variance=pca_retained_variance,
+                    fraction_pre_clusters=fraction_pre_clusters,
+                    use_processes=use_processes)
+            
+            self.Z = linkage_matrix
+            # self.pre_cluster_labels = pre_cluster_labels
+            # self.n_centroids = n_centroids
+            # return linkage_matrix, pre_cluster_labels, n_centroids
+            return linkage_matrix
     
     @staticmethod
     def _calculate_co_association_linkage(distance_matrix: Union[np.ndarray, da.Array], method: str, metric: str,
                                           use_random_sample: bool = False,
-                                          fraction_random_samples: float = 0.1,
+                                          fraction_random_samples: float = 0.1, min_k_means_clusters: int = 100,
                                           n_subsets: int = 10, n_sub_clusters: int = 100,
+                                          pca_retained_variance: float = 0.95, fraction_pre_clusters: float = 0.1,
                                           use_processes: bool = False):
         """
             Calculate the linkage matrix using a co-association matrix approach.
@@ -361,13 +381,37 @@ class Linkage(CachedClass):
         logging.info(f"finished creation of co-association matrix")
         
         # Perform final clustering on the co-association matrix
-        linkage_matrix = fastcluster.linkage(co_association_matrix, method=method, metric=metric, preserve_input=False)
+        # todo: this step is still exactly as slow as before
+        # linkage_matrix = fastcluster.linkage(co_association_matrix,
+        # method=method, metric=metric, preserve_input=False)
         
+        # Optional: Dimensionality Reduction using PCA
+        if pca_retained_variance is not None:
+            before_n = len(co_association_matrix)
+            pca = PCA(n_components=pca_retained_variance)  # Retain 95% of variance
+            co_association_matrix = pca.fit_transform(co_association_matrix)
+            after_n = len(co_association_matrix)
+            print(f"reduced co association matrix from {before_n} to {after_n} "
+                  f"({after_n / before_n * 100:.1f}%)")
+        
+        # Step 2: Pre-Clustering using K-Means
+        # n_pre_clusters = min(int(len(distance_matrix) * fraction_pre_clusters), min_k_means_clusters)
+        # kmeans = KMeans(n_clusters=n_pre_clusters)
+        # pre_cluster_labels = kmeans.fit_predict(co_association_matrix)
+        # centroids = kmeans.cluster_centers_
+        # n_centroids = len(centroids)
+        
+        # Step 3: Hierarchical Clustering on Centroids
+        # centroid_linkage_matrix = fastcluster.linkage(centroids, method=method, metric=metric)
+        linkage_matrix = fastcluster.linkage(co_association_matrix, method=method, metric=metric)
+        
+        # return centroid_linkage_matrix, pre_cluster_labels, n_centroids
         return linkage_matrix
     
     @staticmethod
     def cluster_linkage_matrix(
-            Z, cutoff, criterion="distance", min_cluster_size=1, max_cluster_size=None
+            Z, cutoff, criterion="distance", min_cluster_size=1, max_cluster_size=None,
+            pre_cluster_labels=None, n_centroids: int = None
             ):
         
         valid_criterion = ('inconsistent', 'distance', 'monocrit', 'maxclust', 'maxclust_monocrit')
@@ -378,6 +422,12 @@ class Linkage(CachedClass):
                     )
         
         cluster_labels = fcluster(Z, t=cutoff, criterion=criterion)
+        
+        if pre_cluster_labels is not None:
+            
+            cluster_map = {i: cluster_labels[i] for i in range(n_centroids)}
+            cluster_labels = np.array([cluster_map[label] for label in pre_cluster_labels])
+        
         clusters = pd.Series(cluster_labels).value_counts().sort_index()
         
         if (min_cluster_size > 0) and (min_cluster_size < 1):
@@ -518,10 +568,10 @@ class Distance(CachedClass):
         
         if isinstance(events, pd.DataFrame):
             self.events = events
-            self.my_hash = helper.hash_events_dataframe(events)
+            self.my_hash = helper.hash_events_dataframe(events) if cache_path is not None else None
         else:
             self.events = events.events
-            self.my_hash = hash(events)
+            self.my_hash = hash(events) if cache_path is not None else None
     
     def __hash__(self):
         return self.my_hash

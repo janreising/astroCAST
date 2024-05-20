@@ -354,6 +354,8 @@ class Events(CachedClass):
             self.event_map = None
             self.num_frames, self.X, self.Y = None, None, None
             self.events = None
+            self.event_dir = None
+            self.z_range = None
         
         else:
             
@@ -2106,7 +2108,7 @@ class MultiEvents(Events):
         obj.cache_path = self.cache_path
         obj.logger = self.logger
         obj.seed = self.seed
-        obj.event_dirs = self.event_dirs.copy()
+        obj.event_dirs = self.event_dirs.copy() if self.event_dirs is not None else None
         obj.num_event_objects = self.num_event_objects
         obj.loc = self.loc.copy()
         obj.z_slice = self.z_slice.copy()
@@ -2114,7 +2116,7 @@ class MultiEvents(Events):
         obj.subject_id = self.subject_id.copy()
         obj.frame_to_time_mapping = self.frame_to_time_mapping.copy()
         obj.frame_to_time_function = self.frame_to_time_function.copy()
-        obj.event_objects = [obj.copy() for obj in self.event_objects]
+        obj.event_objects = [obj.copy() for obj in self.event_objects] if self.event_objects is not None else []
         obj.events = self.events.copy()
         
         return obj
