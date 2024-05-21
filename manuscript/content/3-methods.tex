@@ -71,3 +71,7 @@ AstroCAST was developed using publicly available datasets and our own data. The 
     # download pretrained models
     > astrocast download-models "/path/to/download/directory"
 \end{lstlisting}
+
+\subsection{Benchmarking of astroCaST and AQuA}
+
+\added[id=R2]{A novel synthetic video dataset was designed to evaluate the performance of both astroCaST and AQuA. This dataset was specifically developed following the implementation of astroCaST, and was not used for the optimization of astroCaST. The choice of a synthetic dataset is justified due to the lack of suitable publicly accessible datasets with verified ground truth labels. Both algorithms were run with their default settings, astroCaST with settings from config.yaml and AQuA with preset 2 (ex-vivo), to ensure unbiased performance comparison. The computational analysis was conducted on the Rackham HPC cluster at UPPMAX, Uppsala University, employing 12 CPU cores (Intel Xeon V4), 76.8 GB of RAM, and 20 hours of allocated wall time. A detection was considered failed if it surpassed either the memory capacity or time constraints. Within these parameters, AQuA successfully processed video dimensions up to 5000x800x800 pixels, whereas astroCaST managed videos up to 5000x1200x1200 pixels. Events were filtered to lengths between 5 and 1000 frames to eliminate evident anomalies.}
