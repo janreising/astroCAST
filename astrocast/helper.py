@@ -472,7 +472,10 @@ def hash_events_dataframe(events: pd.DataFrame, excluded_columns: List[str] = No
     events = events[cols].copy()
     
     for col in events.columns:
-        events[col] = events[col].apply(lambda x: xxhash.xxh32(x, seed=seed).intdigest())
+        try:
+            events[col] = events[col].apply(lambda x: xxhash.xxh32(x, seed=seed).intdigest())
+        except TypeError:
+            events[col] = events[col].apply(lambda x: xxhash.xxh32(np.array(x), seed=seed).intdigest())
     
     return xxhash.xxh32(events.values, seed=seed).intdigest()
 
