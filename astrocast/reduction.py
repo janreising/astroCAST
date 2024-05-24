@@ -4,7 +4,7 @@ import logging
 import pickle
 from collections import defaultdict
 from pathlib import Path
-from typing import Literal, Tuple
+from typing import List, Literal, Tuple
 
 import numpy as np
 import pandas as pd
@@ -595,9 +595,16 @@ class UMAP:
 class ClusterTree:
     """ converts linkage matrix to searchable tree"""
     
-    def __init__(self, Z):
+    def __init__(self, Z, names: List = None):
         self.tree = hierarchy.to_tree(Z)
         self.root_id = np.max(Z[:, :2]) + 1
+        
+        self.leaves = None
+        self.nodes = None
+        
+        if names is not None:
+            value_dictionary = {l: n for l, n in list(zip(range(len(names)), names))}
+            self._set_attributes("idx", value_dictionary)
     
     def get_root(self):
         return self.get_node(self.root_id)
@@ -605,15 +612,35 @@ class ClusterTree:
     def get_node(self, id_):
         return self.search(self.tree, id_)
     
-    def get_leaves(self, tree):
+    def get_leaves(self, tree=None, attribute: str = "id"):
+        
+        if tree is None:
+            if self.leaves is None:
+                self.leaves = self.get_leaves(self.get_root())
+            return self.leaves
         
         if tree.is_leaf():
-            return [tree.id]
+            return [getattr(tree, attribute)]
         
         left = self.get_leaves(tree.get_left())
         right = self.get_leaves(tree.get_right())
         
         return left + right
+    
+    def get_nodes(self, tree=None):
+        
+        if tree is None:
+            if self.nodes is None:
+                self.nodes = self.get_nodes(self.get_root())
+            return self.nodes
+        
+        if tree.is_leaf():
+            return []
+        
+        left = self.get_nodes(tree.get_left())
+        right = self.get_nodes(tree.get_right())
+        
+        return [tree.id] + left + right
     
     def get_count(self, tree):
         
@@ -624,6 +651,32 @@ class ClusterTree:
         right = self.get_count(tree.get_right())
         
         return left + right
+    
+    def get_attribute(self, id_, attribute: str, tree=None):
+        
+        if tree is None:
+            tree = self.get_root()
+        
+        node = self.search(tree, id_)
+        return getattr(node, attribute)
+    
+    def get_attributes(self, attribute: str, ids: List, tree=None):
+        attributes = {}
+        for id_ in ids:
+            attr = self.get_attribute(id_, attribute, tree=tree)
+            attributes[id_] = attr
+        
+        return attributes
+    
+    def _set_attribute(self, id_, attribute: str, value):
+        
+        node = self.search(self.get_root(), id_=id_)
+        setattr(node, attribute, value)
+    
+    def _set_attributes(self, attribute: str, value_dictionary: dict):
+        
+        for id_, value in value_dictionary.items():
+            self._set_attribute(id_, attribute, value)
     
     def search(self, tree, id_):
         
@@ -710,3 +763,111 @@ class ClusterTree:
             cluster_id += 1
         
         return mapping
+    
+    def calculate_distance(self, node1, node2):
+        """
+        Calculate the distance between two nodes. This should be implemented based on
+        your specific distance metric.
+
+        Args:
+            node1 (ClusterNode): The first node.
+            node2 (ClusterNode): The second node.
+
+        Returns:
+            float: The distance between the two nodes.
+        """
+        # Placeholder for actual distance calculation
+        # Implement this based on your distance metric (e.g., Euclidean distance)
+        return np.linalg.norm(np.array(node1.dist) - np.array(node2.dist))
+    
+    def merge_trees(self, tree1, tree2, threshold):
+        """
+        Merges two trees based on a distance threshold.
+
+        Args:
+            tree1 (ClusterNode): The root node of the first tree.
+            tree2 (ClusterNode): The root node of the second tree.
+            threshold (float): The distance threshold for merging.
+
+        Returns:
+            ClusterNode: The root of the merged tree.
+        """
+        if self.calculate_distance(tree1, tree2) <= threshold:
+            new_root = TreeNode(len(self.tree) + 1)
+            new_root.children = [tree1, tree2]
+            new_root.distance = self.calculate_distance(tree1, tree2)
+            tree1.parent = new_root
+            tree2.parent = new_root
+            return new_root
+        else:
+            # If not mergeable, return a new root with tree1 and tree2 as separate children
+            new_root = TreeNode(len(self.tree) + 1)
+            new_root.children = [tree1, tree2]
+            new_root.distance = self.calculate_distance(tree1, tree2)
+            tree1.parent = new_root
+            tree2.parent = new_root
+            return new_root
+    
+    def tree_to_linkage(self):
+        """
+        Converts the tree back to a linkage matrix.
+
+        Returns:
+            np.ndarray: The linkage matrix.
+        """
+        
+        root = self.get_root()
+        leaves = self.get_leaves(root)
+        
+        def add_node(node, node_list):
+            if node.is_leaf():
+                return node.id
+            left_id = add_node(node.get_left(), node_list)
+            right_id = add_node(node.get_right(), node_list)
+            node_id = len(node_list) + len(leaves)
+            node_list.append([left_id, right_id, node.dist, node.count])
+            return node_id
+        
+        node_list = []
+        add_node(root, node_list)
+        return np.array(node_list)
+    
+    def plot_dendogram(self, truncate_mode='level', p=4, figsize=(8, 3), ax=None):
+        
+        if ax is None:
+            fig, ax = plt.subplots(1, 1, figsize=figsize)
+        
+        Z = self.tree_to_linkage()
+        _ = hierarchy.dendrogram(Z=Z, truncate_mode=truncate_mode, p=p, ax=ax)
+    
+    def _calculate_overlap(self, other_tree):
+        """
+        Calculate the overlap between two nodes based on their leaf nodes.
+
+        Args:
+            node1 (ClusterNode): The first node.
+            node2 (ClusterNode): The second node.
+
+        Returns:
+            float: The overlap metric between the two nodes.
+        """
+        attr1 = self.get_leaves(attribute="idx")
+        attr2 = other_tree.get_leaves(attribute="idx")
+        
+        print(attr1)
+        #
+        # attr1 = [l.idx for l in leaves1]
+        # attr2 = [l.idx for l in leaves2]
+        #
+        # attr1 = self.get_attributes("idx", ids=leaves1)
+        # attr2 = other_tree.get_attributes("idx", ids=leaves2)
+        
+        # attr1 = set(attr1.values())
+        # attr2 = set(attr2.values())
+        
+        attr1 = set(attr1)
+        attr2 = set(attr2)
+        
+        intersection = len(attr1.intersection(attr2))
+        union = len(attr1.union(attr2))
+        return intersection / union
