@@ -4,7 +4,6 @@ import pickle
 import tempfile
 import traceback
 from collections import defaultdict
-from functools import lru_cache
 from pathlib import Path
 from typing import List, Literal, Tuple, Union
 
@@ -1378,7 +1377,6 @@ class Distance(CachedClass):
         
         return counts
     
-    @lru_cache
     def get_spatial_tree(self, leafsize: int = 10, compact_nodes: bool = True, copy_data: bool = False,
                          balanced_tree: bool = True):
         
