@@ -1,9 +1,12 @@
+import concurrent.futures
 import inspect
+import itertools
 import logging
 import pickle
 import tempfile
 import traceback
 from collections import defaultdict
+from heapq import heappop, heappush
 from pathlib import Path
 from typing import List, Literal, Tuple, Union
 
@@ -31,7 +34,7 @@ from tqdm import tqdm
 
 from astrocast import helper
 from astrocast.analysis import Events, MultiEvents
-from astrocast.helper import CachedClass, Normalization, is_ragged, wrapper_local_cache
+from astrocast.helper import CachedClass, MiniLogger, Normalization, is_ragged, wrapper_local_cache
 
 
 # from tqdm.auto import tqdm
@@ -1556,7 +1559,11 @@ class Modules(CachedClass):
         
         if len(nodes) < 1:
             logging.warning(f"No nodes were recovered. Aborting graph creation")
-            return None, None, None
+            
+            if return_graph:
+                return None, None, None
+            else:
+                return None, None, None
         
         # create graph and populate with edges
         G = nx.Graph()
@@ -2108,3 +2115,393 @@ class CoincidenceDetection:
                 )
         
         return clf, score
+
+
+class TeraHAC:
+    
+    def __init__(self, epsilon, threshold, logging_level=logging.INFO):
+        self.epsilon = epsilon
+        self.threshold = threshold
+        
+        self.log = MiniLogger(logger_name="TeraHAC", level=logging_level)
+    
+    def initialize_graph(self, graph):
+        for node in graph.nodes:
+            graph.nodes[node]['cluster_size'] = 1
+            graph.nodes[node]['min_merge_similarity'] = float('inf')
+            graph.nodes[node]['max_merge_similarity'] = 0
+            graph.nodes[node]['max_weight'] = 0  # Initialize max_weight
+        for u, v, data in graph.edges(data=True):
+            weight = data['weight']
+            graph.nodes[u]['max_weight'] = max(graph.nodes[u]['max_weight'], weight)
+            graph.nodes[v]['max_weight'] = max(graph.nodes[v]['max_weight'], weight)
+        
+        return graph
+    
+    def subgraph_hac(self, subgraph):
+        pq = []
+        for u, v, data in subgraph.edges(data=True):
+            weight = data['weight']
+            goodness = max(subgraph.nodes[u]['max_weight'], subgraph.nodes[v]['max_weight']) / weight
+            heappush(pq, (goodness, u, v))
+        
+        merges = []
+        while pq and pq[0][0] <= 1 + self.epsilon:
+            _, u, v = heappop(pq)
+            if subgraph.has_edge(u, v):
+                # new_node, merge_distance, new_cluster_size = self.merge_clusters(subgraph, u, v)
+                # merges.append((u, v, merge_distance))  # Include merge distance
+                
+                self.merge_clusters(subgraph, u, v)
+                merges.append((u, v))
+        
+        self.log.log(f"Merges performed: {merges}", level=logging.DEBUG)
+        return merges
+    
+    @staticmethod
+    def merge_clusters(graph, u, v):
+        new_node = max(graph.nodes) + 1  # Ensure new_node is an integer
+        graph.add_node(new_node)
+        
+        graph.nodes[new_node]['cluster_size'] = graph.nodes[u]['cluster_size'] + graph.nodes[v]['cluster_size']
+        graph.nodes[new_node]['min_merge_similarity'] = min(graph.nodes[u]['min_merge_similarity'],
+                                                            graph.nodes[v]['min_merge_similarity'],
+                                                            graph.edges[u, v]['weight'])
+        graph.nodes[new_node]['max_merge_similarity'] = max(graph.nodes[u]['max_merge_similarity'],
+                                                            graph.nodes[v]['max_merge_similarity'],
+                                                            graph.edges[u, v]['weight'])
+        
+        # Calculate max weight
+        max_weight = 0
+        for neighbor in list(graph.neighbors(u)) + list(graph.neighbors(v)):
+            # if neighbor not in {u, v} and graph.has_edge(u, neighbor) and graph.has_edge(v, neighbor):
+            if neighbor not in {u, v}:
+                
+                weight = 0
+                if graph.has_edge(u, neighbor):
+                    weight = max(weight, graph[u][neighbor]['weight'])
+                if graph.has_edge(v, neighbor):
+                    weight = max(weight, graph[v][neighbor]['weight'])
+                
+                graph.add_edge(new_node, neighbor, weight=weight)
+                max_weight = max(max_weight, weight)
+        
+        graph.nodes[new_node]['max_weight'] = max_weight  # Update max_weight for new_node
+        
+        # # Calculate the average linkage distance
+        # total_weight = graph.edges[u, v]['weight']
+        # count = 1
+        #
+        # for neighbor in list(graph.neighbors(u)) + list(graph.neighbors(v)):
+        #     if neighbor not in {u, v}:
+        #         if graph.has_edge(u, neighbor):
+        #             weight = graph[u][neighbor]['weight']
+        #             total_weight += weight
+        #             count += 1
+        #         if graph.has_edge(v, neighbor):
+        #             weight = graph[v][neighbor]['weight']
+        #             total_weight += weight
+        #             count += 1
+        #         graph.add_edge(new_node, neighbor, weight=weight)
+        #
+        # # Update the distance for the new cluster
+        # merge_distance = total_weight / count
+        #
+        # graph.nodes[new_node]['max_weight'] = merge_distance  # This is now the merge distance
+        
+        graph.remove_node(u)
+        graph.remove_node(v)
+        
+        return new_node
+        
+        # return new_node, merge_distance, new_cluster_size
+    
+    def run_terahac(self, similarity_matrix: np.ndarray, similarity_threshold: float = 0.5,
+                    stop_after=10e6, parallel: bool = False,
+                    zero_similarity_decrease: float = 0.9,
+                    distance_conversion: Literal["inverse", "reciprocal", "inverse_logarithmic"] = None,
+                    plot_intermediate: bool = False, n_colors=10, color_palette="pastel"):
+        
+        graph = self.create_similarity_graph(similarity_matrix, threshold=similarity_threshold)
+        self.log.log(f"Created graph from similarity matrix.")
+        
+        graph = self.initialize_graph(graph)
+        self.log.log(f"Initialized graph.")
+        
+        if plot_intermediate:
+            color_palette = sns.color_palette(color_palette, n_colors)
+            palette = itertools.cycle(color_palette)
+        
+        counter = 0
+        linkage_matrix = []
+        pruned = []
+        # dendrogram_nodes = []
+        # last_merge_distance = 0
+        while graph.number_of_edges() > 0 and counter < stop_after:
+            
+            self.log.log(f"#nodes: {len(graph.nodes):,d} #edges: {len(graph.edges):,d}", level=logging.INFO)
+            
+            if plot_intermediate:
+                fig, (ax0, ax1, ax2) = plt.subplots(1, 3, figsize=(12, 3))
+                node_color = next(palette)
+                self.plot_graph(graph, title=f"full", ax=[ax0], iteration=counter, color=node_color)
+            
+            # todo: replace by Bateni et al. affinity clustering algorithm
+            subgraphs = [graph.subgraph(c).copy() for c in nx.connected_components(graph)]
+            self.log.log(f"#{counter}: Collected {len(subgraphs)} sub graphs.")
+            
+            if plot_intermediate:
+                self.plot_graph(subgraphs, title=f"SG", color=node_color)
+            
+            # Merge sub graphs
+            merges = []
+            if not parallel:
+                for subgraph in tqdm(subgraphs):
+                    merges.extend(self.subgraph_hac(subgraph))
+            else:
+                with concurrent.futures.ThreadPoolExecutor() as executor:
+                    futures = [executor.submit(self.subgraph_hac, subgraph) for subgraph in subgraphs]
+                    for future in tqdm(concurrent.futures.as_completed(futures), total=len(futures)):
+                        merges.extend(future.result())
+            
+            self.log.log(f"#{counter}: Performed {len(merges)} merges.")
+            
+            # for u, v, merge_distance in merges:
+            for u, v in merges:
+                if graph.has_edge(u, v):
+                    
+                    n = self.merge_clusters(graph, u, v)
+                    
+                    new_node = graph.nodes[n]
+                    linkage_matrix.append([float(u), float(v), new_node["max_weight"], new_node["cluster_size"]])
+            
+            if plot_intermediate:
+                self.plot_graph(graph, title=f"post merge", ax=[ax1], iteration=counter, color=node_color)
+            
+            # Prune nodes
+            to_prune = []
+            eps_threshold = self.threshold / (1 + self.epsilon)
+            for n in graph.nodes:
+                node = graph.nodes[n]
+                edges = graph.edges(n)
+                
+                if len(edges) < 1 or node['max_weight'] < eps_threshold:
+                    to_prune.append(n)
+            
+            pruned += to_prune
+            graph.remove_nodes_from(to_prune)
+            
+            if len(to_prune) > 0:
+                self.log.log(f"#{counter}: Pruned {len(to_prune)} nodes.")
+            
+            # Break loop
+            
+            if plot_intermediate:
+                self.plot_graph(graph, title=f"post remove", ax=[ax2], iteration=counter, color=node_color)
+            
+            if len(merges) == 0:
+                self.log.log("No more merges are possible.", level=logging.INFO)
+                break
+            
+            counter += 1
+        
+        if counter >= stop_after:
+            self.log.log(f"Prematurely stopped run after {counter} iterations.", level=logging.WARNING)
+        
+        # Final merge step to ensure all nodes are merged
+        # remaining_nodes = list(graph.nodes)
+        # while len(remaining_nodes) > 1:
+        #     new_node, merge_distance, new_cluster_size = self.merge_clusters(graph, remaining_nodes[0],
+        #                                                                      remaining_nodes[1])
+        #
+        #     # %todo -->
+        #
+        #     merge_distance += last_merge_distance
+        #
+        #     # % todo <--
+        #
+        #     dendrogram_nodes.append((remaining_nodes[0], remaining_nodes[1], merge_distance, new_cluster_size))
+        #     remaining_nodes = list(graph.nodes)
+        #
+        #     # %todo -->
+        #
+        #     last_merge_distance = merge_distance
+        #
+        #     # % todo <--
+        
+        if plot_intermediate:
+            self.plot_graph(graph, title=f"Final")
+        
+        # convert linkage_matrix and remove zero values
+        linkage_matrix = np.array(linkage_matrix, dtype=float)
+        
+        if zero_similarity_decrease is not None:
+            distances = linkage_matrix[:, 2]
+            mask = np.ones(distances.shape, dtype=bool)
+            zero_entries = np.where(distances == 0)[0]
+            mask[zero_entries] = 0
+            
+            new_min = np.min(linkage_matrix[mask, 2]) / 2 * zero_similarity_decrease
+            
+            for ze in zero_entries:
+                linkage_matrix[ze, 2] = new_min
+                new_min *= zero_similarity_decrease
+        else:
+            new_min = 0
+        
+        # add pruned
+        skipped = 0
+        if len(pruned) > 0:
+            c_max = len(similarity_matrix) + len(linkage_matrix) - 1
+            for i, pr in enumerate(pruned):
+                
+                if np.any(np.isin(linkage_matrix[:, :-2], [pr])):
+                    skipped += 1
+                    continue
+                
+                fix = [[pr, c_max + i - skipped, new_min, 0]]
+                fix = np.array(fix, dtype=float)
+                linkage_matrix = np.concatenate([linkage_matrix, fix])
+                new_min *= zero_similarity_decrease
+        
+        # add missing
+        all_clusters = np.unique(linkage_matrix[:, 0:2])
+        c_max = len(similarity_matrix) + len(linkage_matrix) - 1
+        should_exist = np.arange(0, c_max)
+        
+        missing_indices = np.isin(should_exist, all_clusters, invert=True)
+        missing = should_exist[missing_indices]
+        skipped = 0
+        if len(missing) > 0:
+            for i, m in enumerate(missing):
+                
+                if np.any(np.isin(linkage_matrix[:, :-2], [m])):
+                    skipped += 1
+                    continue
+                
+                fix = [[m, c_max + i - skipped, new_min, 0]]
+                fix = np.array(fix, dtype=float)
+                linkage_matrix = np.concatenate([linkage_matrix, fix])
+                new_min *= zero_similarity_decrease
+        
+        # convert to distance
+        if distance_conversion == "inverse":
+            linkage_matrix[:, 2] = 1 - linkage_matrix[:, 2]
+        elif distance_conversion == "reciprocal":
+            linkage_matrix[:, 2] = 1 / linkage_matrix[:, 2]
+        elif distance_conversion == "inverse_logarithmic":
+            linkage_matrix[:, 2] = - np.log(linkage_matrix[:, 2])
+        elif distance_conversion is None:
+            pass
+        else:
+            self.log.log(f"Incorrect 'distance_conversion' input ({distance_conversion}. Must be one of "
+                         f"inverse, reciprocal, inverse_logarithmic")
+        
+        # linkage_matrix = np.array(linkage_matrix, dtype=float)
+        # # eps_threshold = self.threshold / (1 + self.epsilon)
+        # # max_dist = similarity_threshold + eps_threshold
+        # print(f"pruned: {pruned}")
+        # for pr in pruned:
+        #
+        #     u = pr
+        #     v = np.max(linkage_matrix[:, 0:2]) + 1
+        #     sim = 0
+        #     cluster_size = 0
+        #
+        #     row = np.array([[u, v, -1, sim, cluster_size]])
+        #
+        #     linkage_matrix = np.concatenate((linkage_matrix, row), axis=0)
+        #     # max_dist += eps_threshold
+        #
+        return graph, linkage_matrix
+        
+        # self.log.log(f"Final dendrogram nodes: {dendrogram_nodes}", level=logging.DEBUG)
+        #
+        # # Convert dendrogram nodes to linkage matrix
+        # linkage_matrix = self.convert_to_linkage_matrix(dendrogram_nodes, len(graph.nodes))
+        #
+        # return linkage_matrix
+    
+    @staticmethod
+    def distance_to_similarity(distance_matrix, method='inverse', sigma=1.0):
+        if method == 'inverse':
+            similarity_matrix = 1 / distance_matrix
+        elif method == 'gaussian':
+            similarity_matrix = np.exp(-distance_matrix ** 2 / (2.0 * sigma ** 2))
+        else:
+            raise ValueError("Unknown method: choose 'inverse' or 'gaussian'")
+        return similarity_matrix
+    
+    def create_similarity_graph(self, similarity_matrix, threshold=None, k=None):
+        n = similarity_matrix.shape[0]
+        G = nx.Graph()
+        
+        for i in range(n):
+            for j in range(i + 1, n):
+                similarity = similarity_matrix[i, j]
+                if threshold is not None and similarity >= threshold:
+                    G.add_edge(i, j, weight=similarity)
+                elif k is not None:
+                    sorted_indices = np.argsort(similarity_matrix[i])[::-1]
+                    for idx in sorted_indices[:k]:
+                        if idx != i:
+                            G.add_edge(i, idx, weight=similarity_matrix[i, idx])
+        
+        total_edges = (n ** 2 - n) / 2
+        self.log.log(f"retained edges: {len(G.edges) / total_edges * 100:.1f}%")
+        
+        return G
+    
+    @staticmethod
+    def convert_to_linkage_matrix(dendrogram_nodes, num_points):
+        """
+        Convert dendrogram nodes to a linkage matrix.
+
+        Args:
+        dendrogram_nodes (list of tuples): List of merges in the format (node1, node2, distance, cluster_size).
+        num_points (int): Number of original data points.
+
+        Returns:
+        np.ndarray: Linkage matrix.
+        """
+        linkage_matrix = []
+        current_cluster_index = num_points
+        
+        for node1, node2, distance, cluster_size in dendrogram_nodes:
+            linkage_matrix.append([node1, node2, distance, cluster_size])  # Include cluster size
+            current_cluster_index += 1
+        
+        return np.array(linkage_matrix, dtype=np.double)
+    
+    @staticmethod
+    def plot_graph(G, ax=None, title: str = None, iteration: int = None, color="#1f78b4"):
+        
+        if not isinstance(G, list):
+            G = [G]
+        
+        if ax is None:
+            fig, axx = plt.subplots(1, len(G), figsize=(3 * len(G), 3))
+        else:
+            axx = ax
+        
+        if not isinstance(axx, (np.ndarray, list)):
+            axx = [axx]
+        
+        for i, g in enumerate(G):
+            
+            ax = axx[i]
+            
+            layout = nx.spring_layout(g)
+            
+            for edge in g.edges(data="weight"):
+                nx.draw_networkx_edges(g, layout, edgelist=[edge], alpha=(edge[2] / 5), ax=ax)
+            
+            nx.draw_networkx_nodes(g, layout, node_color=color, ax=ax)
+            nx.draw_networkx_labels(g, layout, ax=ax)
+            
+            if title is not None:
+                
+                if iteration is None:
+                    ax.set_title(f"{title} {i}: {len(g.nodes)}")
+                else:
+                    ax.set_title(f"{title} {iteration}: {len(g.nodes)}")

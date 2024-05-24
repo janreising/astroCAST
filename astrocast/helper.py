@@ -1951,3 +1951,37 @@ def download_pretrained_models(save_path):
             )
     
     logging.info(f"Downloaded sample datasets to: {save_path}")
+
+
+class MiniLogger():
+    
+    def __init__(self, logger_name="ML", level=logging.INFO):
+        import time
+        import logging
+        
+        logging.basicConfig()
+        self.logger = logging.getLogger(logger_name)
+        self.logger.setLevel(level)
+        
+        self.t0 = time.time()
+        self.last_msg_t0 = self.t0
+    
+    def log(self, msg: str, level=logging.INFO):
+        
+        import humanize
+        
+        t1 = time.time()
+        msg = f"{humanize.naturaldelta(t1 - self.last_msg_t0)}: {msg}"
+        
+        if level == logging.INFO:
+            self.logger.info(msg)
+        elif level == logging.WARNING:
+            self.logger.warning(msg)
+        elif level == logging.DEBUG:
+            self.logger.debug(msg)
+        elif level == logging.ERROR:
+            self.logger.error(msg)
+        else:
+            self.logger.info(msg)
+        
+        self.last_msg_t0 = t1
