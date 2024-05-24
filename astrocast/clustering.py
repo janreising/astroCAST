@@ -1476,7 +1476,7 @@ class Modules(CachedClass):
         self.events = events
     
     def __hash__(self):
-        return self.events.__hash__()
+        return hash(self.events)
     
     @wrapper_local_cache
     def _create_node_edge_tables(self, correlation: np.ndarray, correlation_boundaries=(0.98, 1),
