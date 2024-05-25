@@ -1971,7 +1971,7 @@ class MiniLogger():
         import humanize
         
         t1 = time.time()
-        msg = f"{humanize.naturaldelta(t1 - self.last_msg_t0)}: {msg}"
+        msg = f"{humanize.naturaldelta(t1 - self.last_msg_t0)} ({humanize.naturaldelta(t1 - self.t0)}): {msg}"
         
         if level == logging.INFO:
             self.logger.info(msg)
