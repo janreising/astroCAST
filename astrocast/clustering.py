@@ -2138,7 +2138,7 @@ class TeraHAC:
         
         return graph
 
-    def _get_subgraph(self, G, method: Literal["connected_components", "louvain"] = "louvain"):
+    def _get_subgraph(self, G, method: Literal["connected_components", "louvain", "label_propagation"] = "louvain"):
         subgraphs = []
     
         if method == "louvain":
@@ -2152,7 +2152,13 @@ class TeraHAC:
         elif method == "connected_components":
             for c in nx.connected_components(G):
                 subgraphs.append(G.subgraph(c).copy())
-    
+
+        elif method == "label_propagation":
+            communities = nx.algorithms.community.label_propagation_communities(graph)
+
+            for community in communities:
+                subgraphs.append(graph.subgraph(community).copy())
+        
         return subgraphs
     
     def subgraph_hac(self, subgraph):
@@ -2236,7 +2242,7 @@ class TeraHAC:
     def run_terahac(self, similarity_matrix: np.ndarray, similarity_threshold: float = 0.5,
                     stop_after=10e6, parallel: bool = False,
                     zero_similarity_decrease: float = 0.9,
-                    subgraph_approach: Literal["connected_components", "louvain"] = "louvain",
+                    subgraph_approach: Literal["connected_components", "louvain", "label_propagation"] = "label_propagation",
                     distance_conversion: Literal["inverse", "reciprocal", "inverse_logarithmic"] = None,
                     plot_intermediate: bool = False, n_colors=10, color_palette="pastel"):
                         
