@@ -2137,6 +2137,26 @@ class TeraHAC:
             graph.nodes[v]['max_weight'] = max(graph.nodes[v]['max_weight'], weight)
         
         return graph
+
+    def _get_subgraph(self, G, method: Literal["connected_components", "louvain"] = "louvain"):
+
+        if method == "louvain":
+
+            import community as community_louvain
+            partition = community_louvain.best_partition(G)
+
+            subgraphs = []
+            for community_ in set(partition.values()):
+                nodes = [nodes for nodes in partition.keys() if partition[nodes] == community_]
+                subgraphs.append(G.subgraph(nodes).copy())
+
+        elif method == "connected_components":
+
+            subgraphs = []
+            for c in nx.connected_components(G):
+                subgraphs.append(G.subgraph(c).copy()
+                                 
+        return subgraphs
     
     def subgraph_hac(self, subgraph):
         pq = []
@@ -2219,9 +2239,10 @@ class TeraHAC:
     def run_terahac(self, similarity_matrix: np.ndarray, similarity_threshold: float = 0.5,
                     stop_after=10e6, parallel: bool = False,
                     zero_similarity_decrease: float = 0.9,
+                    subgraph_approach: Literal["connected_components", "louvain"] = "louvain",
                     distance_conversion: Literal["inverse", "reciprocal", "inverse_logarithmic"] = None,
                     plot_intermediate: bool = False, n_colors=10, color_palette="pastel"):
-        
+                        
         graph = self.create_similarity_graph(similarity_matrix, threshold=similarity_threshold)
         self.log.log(f"Created graph from similarity matrix.")
         
@@ -2247,7 +2268,7 @@ class TeraHAC:
                 self.plot_graph(graph, title=f"full", ax=[ax0], iteration=counter, color=node_color)
             
             # todo: replace by Bateni et al. affinity clustering algorithm
-            subgraphs = [graph.subgraph(c).copy() for c in nx.connected_components(graph)]
+            subgraphs = self._get_subgraph(graph, method = subgraph_approach)
             self.log.log(f"#{counter}: Collected {len(subgraphs)} sub graphs.")
             
             if plot_intermediate:
