@@ -2154,10 +2154,10 @@ class TeraHAC:
                 subgraphs.append(G.subgraph(c).copy())
 
         elif method == "label_propagation":
-            communities = nx.algorithms.community.label_propagation_communities(graph)
+            communities = nx.algorithms.community.label_propagation_communities(G)
 
             for community in communities:
-                subgraphs.append(graph.subgraph(community).copy())
+                subgraphs.append(G.subgraph(community).copy())
         
         return subgraphs
     
