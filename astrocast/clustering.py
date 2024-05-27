@@ -2139,23 +2139,20 @@ class TeraHAC:
         return graph
 
     def _get_subgraph(self, G, method: Literal["connected_components", "louvain"] = "louvain"):
-
+        subgraphs = []
+    
         if method == "louvain":
-
             import community as community_louvain
             partition = community_louvain.best_partition(G)
-
-            subgraphs = []
+    
             for community_ in set(partition.values()):
-                nodes = [nodes for nodes in partition.keys() if partition[nodes] == community_]
+                nodes = [node for node in partition.keys() if partition[node] == community_]
                 subgraphs.append(G.subgraph(nodes).copy())
-
+    
         elif method == "connected_components":
-
-            subgraphs = []
             for c in nx.connected_components(G):
-                subgraphs.append(G.subgraph(c).copy()
-                                 
+                subgraphs.append(G.subgraph(c).copy())
+    
         return subgraphs
     
     def subgraph_hac(self, subgraph):
