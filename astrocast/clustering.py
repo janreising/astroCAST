@@ -3075,3 +3075,112 @@ class TeraHAC(CachedClass):
                     ax.set_title(f"{title} {i}: {len(g.nodes)}")
                 else:
                     ax.set_title(f"{title} {iteration}: {len(g.nodes)}")
+
+
+class LinkageGraph:
+    
+    def __init__(self, linkage_matrix: np.ndarray, n_observations: int):
+        self.graph, self.root_node = self.create_graph(linkage_matrix, n_observations)
+    
+    def create_graph(self, linkage_matrix: np.ndarray, n_observations: int):
+        
+        G = nx.DiGraph()
+        
+        new_id = None
+        for i in tqdm(range(len(linkage_matrix))):
+            
+            id0, id1, distance, num = linkage_matrix[i, :]
+            id0 = int(id0)
+            id1 = int(id1)
+            new_id = n_observations + i
+            
+            if id0 not in G.nodes:
+                G.add_node(id0, counts=0)
+                c0 = 1
+            else:
+                c0 = G.nodes[id0]["counts"]
+            
+            if id1 not in G.nodes:
+                G.add_node(id1, counts=0)
+                c1 = 1
+            else:
+                c1 = G.nodes[id1]["counts"]
+            
+            G.add_node(new_id, counts=c0 + c1)
+            G.add_edge(new_id, id0, weight=distance)
+            G.add_edge(new_id, id1, weight=distance)
+        
+        return G, new_id
+    
+    def get_descendant_count(self, node):
+        return self.graph.nodes[node]["counts"]
+    
+    def get_clusters_by_descendant_count(self, max_leaves: int, min_leaves: int = 1, root_node=None):
+        """Recursive function to get clusters by the number of descendant nodes in a NetworkX directed graph.
+
+        Args:
+            graph: The NetworkX directed graph.
+            root_node: Node to start searching for clusters.
+            max_leaves: Maximum number of descendant nodes below each cluster node.
+            min_leaves: Minimum number of descendant nodes below each cluster node.
+
+        Returns:
+            List of clusters where each cluster is represented by the root node of the subgraph.
+        """
+        
+        if root_node is None:
+            root_node = self.root_node
+        
+        def recursive_cluster(node):
+            leaf_count = self.get_descendant_count(node)
+            
+            if min_leaves <= leaf_count < max_leaves:
+                return [node]
+            
+            elif leaf_count >= max_leaves:
+                clusters = []
+                for successor in self.graph.successors(node):
+                    clusters.extend(recursive_cluster(successor))
+                return clusters
+            
+            elif leaf_count < min_leaves:
+                return []
+        
+        return recursive_cluster(root_node)
+    
+    def get_children(self, node):
+        
+        if self.get_descendant_count(node) == 0:
+            return [node]
+        else:
+            children = []
+            for successor in self.graph.successors(node):
+                children.extend(self.get_children(successor))
+            return children
+    
+    def get_clusters(self, max_leaves: int, min_leaves: int = 1, root_node: int = None, default_value=-1):
+        
+        from collections import defaultdict
+        
+        if root_node is None:
+            root_node = self.root_node
+        
+        if isinstance(max_leaves, float):
+            max_leaves = int(max_leaves * self.get_descendant_count(root_node))
+        
+        if isinstance(min_leaves, float):
+            min_leaves = int(min_leaves * self.get_descendant_count(root_node))
+        
+        cluster_nodes = self.get_clusters_by_descendant_count(max_leaves=max_leaves, min_leaves=min_leaves)
+        
+        mapping = defaultdict(lambda: default_value)
+        
+        cluster_id = 0
+        for cn in cluster_nodes:
+            children = self.get_children(cn)
+            for child in children:
+                mapping[child] = cluster_id
+            
+            cluster_id += 1
+        
+        return mapping
