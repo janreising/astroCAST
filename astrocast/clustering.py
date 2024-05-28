@@ -2694,7 +2694,8 @@ class TeraHAC(CachedClass):
                     
                     cluster_0 = m
                     cluster_1 = c_max + i - skipped
-                    cluster_count = link.get_cluster_sum(linkage_matrix, cluster_0, cluster_1, len(similarity_matrix))
+                    # cluster_count = link.get_cluster_sum(linkage_matrix, cluster_0, cluster_1, len(similarity_matrix))
+                    cluster_count = 0
                     
                     fix = [[cluster_0, cluster_1, new_min, cluster_count]]
                     fix = np.array(fix, dtype=float)
