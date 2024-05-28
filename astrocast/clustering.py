@@ -2716,7 +2716,7 @@ class TeraHAC(CachedClass):
     
     @wrapper_local_cache
     def distance_to_similarity(self, distance_matrix, method: Literal['inverse', 'gaussian'] = 'gaussian', sigma=1.0,
-                               use_cache: bool = True):
+                               ignore_cache: bool = False):
         """
         Convert a distance matrix to a similarity matrix using the specified method.
 
@@ -2943,7 +2943,7 @@ class TeraHAC(CachedClass):
                 
                 # Apply Gaussian conversion
                 similarity_matrix = self.distance_to_similarity(sampled_matrix, method=method, sigma=sigma,
-                                                                use_cache=False)
+                                                                ignore_cache=True)
                 
                 # Apply thresholding
                 metrics = self.compute_graph_metrics(similarity_matrix, similarity_threshold)
