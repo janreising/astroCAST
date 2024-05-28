@@ -3078,56 +3078,109 @@ class TeraHAC(CachedClass):
 
 
 class LinkageGraph:
+    """
+        A class to create and manage a directed graph based on a linkage matrix.
+
+        This class provides methods to:
+        - Create a directed graph from a linkage matrix.
+        - Calculate the count of descendant nodes for any given node.
+        - Identify clusters within the graph based on the number of descendant nodes.
+        - Retrieve all child nodes for a given node.
+        - Generate a mapping of nodes to cluster IDs.
+
+        Attributes:
+            graph (nx.DiGraph): The directed graph created from the linkage matrix.
+            root_node (int): The root node of the graph.
+
+        Methods:
+            __init__(linkage_matrix: np.ndarray, n_observations: int):
+                Initializes the LinkageGraph with a linkage matrix and number of observations.
+
+            create_graph(linkage_matrix: np.ndarray, n_observations: int):
+                Creates a directed graph from the linkage matrix.
+
+            get_descendant_count(node):
+                Gets the count of descendant nodes for a given node.
+
+            get_clusters_by_descendant_count(max_leaves: int, min_leaves: int = 1, root_node=None):
+                Recursive function to get clusters by the number of descendant nodes in the graph.
+
+            get_children(node):
+                Gets all child nodes (leaf nodes) for a given node.
+
+            get_clusters(max_leaves: int, min_leaves: int = 1, root_node: int = None, default_value=-1):
+                Gets the clusters from the graph and returns a mapping of nodes to cluster IDs.
+        """
     
     def __init__(self, linkage_matrix: np.ndarray, n_observations: int):
+        """Initializes the LinkageGraph with a linkage matrix and number of observations.
+
+        Args:
+            linkage_matrix: A numpy array representing the linkage matrix.
+            n_observations: The number of observations in the original dataset.
+        """
         self.graph, self.root_node = self.create_graph(linkage_matrix, n_observations)
     
-    def create_graph(self, linkage_matrix: np.ndarray, n_observations: int):
-        
-        G = nx.DiGraph()
-        
+    @staticmethod
+    def create_graph(linkage_matrix: np.ndarray, n_observations: int):
+        """Creates a directed graph from the linkage matrix.
+
+        Args:
+            linkage_matrix: A numpy array representing the linkage matrix.
+            n_observations: The number of observations in the original dataset.
+
+        Returns:
+            A tuple containing the created graph and the root node.
+        """
+        graph = nx.DiGraph()
         new_id = None
+        
         for i in tqdm(range(len(linkage_matrix))):
-            
             id0, id1, distance, num = linkage_matrix[i, :]
             id0 = int(id0)
             id1 = int(id1)
             new_id = n_observations + i
             
-            if id0 not in G.nodes:
-                G.add_node(id0, counts=0)
+            if id0 not in graph.nodes:
+                graph.add_node(id0, counts=0)
                 c0 = 1
             else:
-                c0 = G.nodes[id0]["counts"]
+                c0 = graph.nodes[id0]["counts"]
             
-            if id1 not in G.nodes:
-                G.add_node(id1, counts=0)
+            if id1 not in graph.nodes:
+                graph.add_node(id1, counts=0)
                 c1 = 1
             else:
-                c1 = G.nodes[id1]["counts"]
+                c1 = graph.nodes[id1]["counts"]
             
-            G.add_node(new_id, counts=c0 + c1)
-            G.add_edge(new_id, id0, weight=distance)
-            G.add_edge(new_id, id1, weight=distance)
+            graph.add_node(new_id, counts=c0 + c1)
+            graph.add_edge(new_id, id0, weight=distance)
+            graph.add_edge(new_id, id1, weight=distance)
         
-        return G, new_id
+        return graph, new_id
     
     def get_descendant_count(self, node):
+        """Gets the count of descendant nodes for a given node.
+
+        Args:
+            node: The node to get the descendant count for.
+
+        Returns:
+            The count of descendant nodes.
+        """
         return self.graph.nodes[node]["counts"]
     
     def get_clusters_by_descendant_count(self, max_leaves: int, min_leaves: int = 1, root_node=None):
-        """Recursive function to get clusters by the number of descendant nodes in a NetworkX directed graph.
+        """Recursive function to get clusters by the number of descendant nodes in the graph.
 
         Args:
-            graph: The NetworkX directed graph.
-            root_node: Node to start searching for clusters.
             max_leaves: Maximum number of descendant nodes below each cluster node.
             min_leaves: Minimum number of descendant nodes below each cluster node.
+            root_node: Node to start searching for clusters. Defaults to the root node.
 
         Returns:
             List of clusters where each cluster is represented by the root node of the subgraph.
         """
-        
         if root_node is None:
             root_node = self.root_node
         
@@ -3149,7 +3202,14 @@ class LinkageGraph:
         return recursive_cluster(root_node)
     
     def get_children(self, node):
-        
+        """Gets all child nodes (leaf nodes) for a given node.
+
+        Args:
+            node: The node to get the child nodes for.
+
+        Returns:
+            List of child nodes.
+        """
         if self.get_descendant_count(node) == 0:
             return [node]
         else:
@@ -3159,9 +3219,17 @@ class LinkageGraph:
             return children
     
     def get_clusters(self, max_leaves: int, min_leaves: int = 1, root_node: int = None, default_value=-1):
-        
-        from collections import defaultdict
-        
+        """Gets the clusters from the graph.
+
+        Args:
+            max_leaves: Maximum number of descendant nodes below each cluster node.
+            min_leaves: Minimum number of descendant nodes below each cluster node.
+            root_node: Node to start searching for clusters. Defaults to the root node.
+            default_value: Default value for nodes not assigned to any cluster.
+
+        Returns:
+            A dictionary mapping each node to its cluster ID.
+        """
         if root_node is None:
             root_node = self.root_node
         
@@ -3172,7 +3240,6 @@ class LinkageGraph:
             min_leaves = int(min_leaves * self.get_descendant_count(root_node))
         
         cluster_nodes = self.get_clusters_by_descendant_count(max_leaves=max_leaves, min_leaves=min_leaves)
-        
         mapping = defaultdict(lambda: default_value)
         
         cluster_id = 0
@@ -3180,7 +3247,6 @@ class LinkageGraph:
             children = self.get_children(cn)
             for child in children:
                 mapping[child] = cluster_id
-            
             cluster_id += 1
         
         return mapping
