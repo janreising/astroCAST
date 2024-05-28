@@ -271,6 +271,9 @@ def wrapper_local_cache(f):
         logger.debug(f"args: {args}")
         logger.debug(f"kwargs: {kwargs}")
         
+        if "use_cache" in list[kwargs.keys()] and not kwargs["use_cache"]:
+            return f(*args, **kwargs)
+        
         if isinstance(f, types.FunctionType) and "cache_path" in list(kwargs.keys()):
             cache_path = kwargs["cache_path"]
         
@@ -1952,7 +1955,7 @@ class CachedClass:
 
             """
         
-        if level > self.logging_level:
+        if level >= self.logging_level:
             
             t1 = time.time()
             msg = f"{humanize.naturaldelta(t1 - self.last_msg_t0)}: {msg}"
