@@ -2971,12 +2971,12 @@ class TeraHAC(CachedClass):
             
             counter += 1
             if counter % 10 == 0:
-                logging.info(f"#{counter}: {humanize.naturaldelta(time.time() - start_time)}")
+                self.log(f"#{counter}: {[(k, np.round(avg_metrics[k], 3)) for k in required_metrics.keys()]}")
         
-        logging.info(
+        self.log(
                 f"Number of iterations: {counter}. Final sample size: {sample_size}. "
                 f"Time {humanize.naturaldelta(time.time() - start_time)}. "
-                f"Final metrics: {metrics}")
+                f"Final metrics: {[(k, np.round(i, 3)) for k, i in metrics.items()]}")
         
         return {
             'optimal_sigma':     sigma,
