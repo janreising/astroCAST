@@ -2556,163 +2556,170 @@ class TeraHAC(CachedClass):
         counter = 0
         linkage_matrix = []
         pruned = []
-        while graph.number_of_edges() > 0 and counter < stop_after:
+        
+        with tqdm(total=graph.number_of_nodes(), desc="Nodes remaining") as pbar:
+            while graph.number_of_edges() > 0 and counter < stop_after:
+                num_nodes = len(graph.nodes)
+                num_edges = len(graph.edges)
+                pbar.n = num_nodes
+                pbar.refresh()
+                
+                tqdm.write(f"#nodes: {num_nodes:,d} #edges: {num_edges:,d}")
+                
+                ax0, ax1, ax2 = None, None, None
+                if plot_intermediate:
+                    fig, (ax0, ax1, ax2) = plt.subplots(1, 3, figsize=(12, 3))
+                    node_color = next(palette)
+                    self.plot_graph(graph, title=f"full", ax=[ax0], iteration=counter, color=node_color)
+                
+                # Collect sub graphs
+                sub_graphs = self._get_subgraph(graph, method=subgraph_approach)
+                tqdm.write(f"#{counter}: Collected {len(sub_graphs)} sub graphs.")
+                
+                if plot_intermediate:
+                    self.plot_graph(sub_graphs, title=f"SG", color=node_color)
+                
+                # Collect merges in sub graphs
+                merges = []
+                if not parallel:
+                    for subgraph in sub_graphs:
+                        merges.extend(self.subgraph_hac(subgraph))
+                else:
+                    with concurrent.futures.ThreadPoolExecutor() as executor:
+                        futures = [executor.submit(self.subgraph_hac, subgraph) for subgraph in sub_graphs]
+                        for future in tqdm(concurrent.futures.as_completed(futures), total=len(futures)):
+                            merges.extend(future.result())
+                
+                tqdm.write(f"#{counter}: Collected {len(merges)} merges.")
+                
+                # Merge sub graphs
+                for u, v in merges:
+                    if graph.has_edge(u, v):
+                        
+                        n = self.merge_clusters(graph, u, v)
+                        
+                        new_node = graph.nodes[n]
+                        linkage_matrix.append([float(u), float(v), new_node["max_weight"], new_node["cluster_size"]])
+                
+                tqdm.write(f"#{counter}: Updated linkage matrix.")
+                
+                if plot_intermediate:
+                    self.plot_graph(graph, title=f"post merge", ax=[ax1], iteration=counter, color=node_color)
+                
+                # Prune nodes
+                to_prune = []
+                eps_threshold = self.threshold / (1 + self.epsilon)
+                for n in graph.nodes:
+                    node = graph.nodes[n]
+                    edges = graph.edges(n)
+                    
+                    if len(edges) < 1 or node['max_weight'] < eps_threshold:
+                        to_prune.append(n)
+                
+                pruned += to_prune
+                graph.remove_nodes_from(to_prune)
+                
+                if len(to_prune) > 0:
+                    tqdm.write(f"#{counter}: Pruned {len(to_prune)} nodes.")
+                
+                # Break loop
+                
+                if plot_intermediate:
+                    self.plot_graph(graph, title=f"post remove", ax=[ax2], iteration=counter, color=node_color)
+                
+                if len(merges) == 0:
+                    tqdm.write("No more merges are possible.")
+                    break
+                
+                counter += 1
+                pbar.update(-len(to_prune))
             
-            self.log(f"#nodes: {len(graph.nodes):,d} #edges: {len(graph.edges):,d}", level=logging.INFO)
+            if counter >= stop_after:
+                tqdm.write(f"Prematurely stopped run after {counter} iterations.")
             
-            ax0, ax1, ax2 = None, None, None
             if plot_intermediate:
-                fig, (ax0, ax1, ax2) = plt.subplots(1, 3, figsize=(12, 3))
-                node_color = next(palette)
-                self.plot_graph(graph, title=f"full", ax=[ax0], iteration=counter, color=node_color)
+                self.plot_graph(graph, title=f"Final")
             
-            # Collect sub graphs
-            sub_graphs = self._get_subgraph(graph, method=subgraph_approach)
-            self.log(f"#{counter}: Collected {len(sub_graphs)} sub graphs.")
+            # convert linkage_matrix and remove zero values
+            linkage_matrix = np.array(linkage_matrix, dtype=float)
             
-            if plot_intermediate:
-                self.plot_graph(sub_graphs, title=f"SG", color=node_color)
-            
-            # Collect merges in sub graphs
-            merges = []
-            if not parallel:
-                for subgraph in tqdm(sub_graphs):
-                    merges.extend(self.subgraph_hac(subgraph))
+            if zero_similarity_decrease is not None:
+                distances = linkage_matrix[:, 2]
+                mask = np.ones(distances.shape, dtype=bool)
+                zero_entries = np.where(distances == 0)[0]
+                mask[zero_entries] = 0
+                
+                new_min = np.min(linkage_matrix[mask, 2]) / 2 * zero_similarity_decrease
+                
+                for ze in zero_entries:
+                    linkage_matrix[ze, 2] = new_min
+                    new_min *= zero_similarity_decrease
             else:
-                with concurrent.futures.ThreadPoolExecutor() as executor:
-                    futures = [executor.submit(self.subgraph_hac, subgraph) for subgraph in sub_graphs]
-                    for future in tqdm(concurrent.futures.as_completed(futures), total=len(futures)):
-                        merges.extend(future.result())
+                new_min = 0
             
-            self.log(f"#{counter}: Collected {len(merges)} merges.")
+            tqdm.write("Fixed '0' distances in linkage matrix.")
             
-            # Merge sub graphs
-            for u, v in merges:
-                if graph.has_edge(u, v):
+            # add pruned
+            skipped = 0
+            if len(pruned) > 0:
+                c_max = len(similarity_matrix) + len(linkage_matrix) - 1
+                for i, pr in enumerate(pruned):
                     
-                    n = self.merge_clusters(graph, u, v)
+                    if np.any(np.isin(linkage_matrix[:, :-2], [pr])):
+                        skipped += 1
+                        continue
                     
-                    new_node = graph.nodes[n]
-                    linkage_matrix.append([float(u), float(v), new_node["max_weight"], new_node["cluster_size"]])
+                    fix = [[pr, c_max + i - skipped, new_min, 0]]
+                    fix = np.array(fix, dtype=float)
+                    linkage_matrix = np.concatenate([linkage_matrix, fix])
+                    new_min *= zero_similarity_decrease
             
-            self.log(f"#{counter}: Updated linkage matrix.")
+            tqdm.write("Added pruned nodes to linkage matrix..")
             
-            if plot_intermediate:
-                self.plot_graph(graph, title=f"post merge", ax=[ax1], iteration=counter, color=node_color)
-            
-            # Prune nodes
-            to_prune = []
-            eps_threshold = self.threshold / (1 + self.epsilon)
-            for n in graph.nodes:
-                node = graph.nodes[n]
-                edges = graph.edges(n)
-                
-                if len(edges) < 1 or node['max_weight'] < eps_threshold:
-                    to_prune.append(n)
-            
-            pruned += to_prune
-            graph.remove_nodes_from(to_prune)
-            
-            if len(to_prune) > 0:
-                self.log(f"#{counter}: Pruned {len(to_prune)} nodes.")
-            
-            # Break loop
-            
-            if plot_intermediate:
-                self.plot_graph(graph, title=f"post remove", ax=[ax2], iteration=counter, color=node_color)
-            
-            if len(merges) == 0:
-                self.log("No more merges are possible.", level=logging.INFO)
-                break
-            
-            counter += 1
-        
-        if counter >= stop_after:
-            self.log(f"Prematurely stopped run after {counter} iterations.", level=logging.WARNING)
-        
-        if plot_intermediate:
-            self.plot_graph(graph, title=f"Final")
-        
-        # convert linkage_matrix and remove zero values
-        linkage_matrix = np.array(linkage_matrix, dtype=float)
-        
-        if zero_similarity_decrease is not None:
-            distances = linkage_matrix[:, 2]
-            mask = np.ones(distances.shape, dtype=bool)
-            zero_entries = np.where(distances == 0)[0]
-            mask[zero_entries] = 0
-            
-            new_min = np.min(linkage_matrix[mask, 2]) / 2 * zero_similarity_decrease
-            
-            for ze in zero_entries:
-                linkage_matrix[ze, 2] = new_min
-                new_min *= zero_similarity_decrease
-        else:
-            new_min = 0
-        
-        self.log(f"Fixed '0' distances in linkage matrix.")
-        
-        # add pruned
-        skipped = 0
-        if len(pruned) > 0:
+            # add missing
+            all_clusters = np.unique(linkage_matrix[:, 0:2])
             c_max = len(similarity_matrix) + len(linkage_matrix) - 1
-            for i, pr in enumerate(pruned):
-                
-                if np.any(np.isin(linkage_matrix[:, :-2], [pr])):
-                    skipped += 1
-                    continue
-                
-                fix = [[pr, c_max + i - skipped, new_min, 0]]
-                fix = np.array(fix, dtype=float)
-                linkage_matrix = np.concatenate([linkage_matrix, fix])
-                new_min *= zero_similarity_decrease
-        
-        self.log(f"Added pruned nodes to linkage matrix..")
-        
-        # add missing
-        all_clusters = np.unique(linkage_matrix[:, 0:2])
-        c_max = len(similarity_matrix) + len(linkage_matrix) - 1
-        should_exist = np.arange(0, c_max)
-        
-        missing_indices = np.isin(should_exist, all_clusters, invert=True)
-        missing = should_exist[missing_indices]
-        skipped = 0
-        link = Linkage(events=None)
-        if len(missing) > 0:
-            for i, m in enumerate(missing):
-                
-                if np.any(np.isin(linkage_matrix[:, :-2], [m])):
-                    skipped += 1
-                    continue
-                
-                cluster_0 = m
-                cluster_1 = c_max + i - skipped
-                cluster_count = link.get_cluster_sum(linkage_matrix, cluster_0, cluster_1, len(similarity_matrix))
-                
-                fix = [[cluster_0, cluster_1, new_min, cluster_count]]
-                fix = np.array(fix, dtype=float)
-                linkage_matrix = np.concatenate([linkage_matrix, fix])
-                new_min *= zero_similarity_decrease
-        
-        self.log(f"Added missing clusters to linkage matrix.")
-        
-        # convert to distance
-        if distance_conversion == "inverse":
-            linkage_matrix[:, 2] = 1 - linkage_matrix[:, 2]
-        elif distance_conversion == "reciprocal":
-            linkage_matrix[:, 2] = 1 / linkage_matrix[:, 2]
-        elif distance_conversion == "inverse_logarithmic":
-            linkage_matrix[:, 2] = - np.log(linkage_matrix[:, 2])
-        elif distance_conversion is None:
-            pass
-        else:
-            self.log(f"Incorrect 'distance_conversion' input ({distance_conversion}. Must be one of "
-                     f"inverse, reciprocal, inverse_logarithmic")
-        
-        if distance_conversion is not None:
-            self.log(f"Similarity converted to distances.")
-        
-        return graph, linkage_matrix
+            should_exist = np.arange(0, c_max)
+            
+            missing_indices = np.isin(should_exist, all_clusters, invert=True)
+            missing = should_exist[missing_indices]
+            skipped = 0
+            link = Linkage(events=None)
+            if len(missing) > 0:
+                for i, m in enumerate(missing):
+                    
+                    if np.any(np.isin(linkage_matrix[:, :-2], [m])):
+                        skipped += 1
+                        continue
+                    
+                    cluster_0 = m
+                    cluster_1 = c_max + i - skipped
+                    cluster_count = link.get_cluster_sum(linkage_matrix, cluster_0, cluster_1, len(similarity_matrix))
+                    
+                    fix = [[cluster_0, cluster_1, new_min, cluster_count]]
+                    fix = np.array(fix, dtype=float)
+                    linkage_matrix = np.concatenate([linkage_matrix, fix])
+                    new_min *= zero_similarity_decrease
+            
+            tqdm.write("Added missing clusters to linkage matrix.")
+            
+            # convert to distance
+            if distance_conversion == "inverse":
+                linkage_matrix[:, 2] = 1 - linkage_matrix[:, 2]
+            elif distance_conversion == "reciprocal":
+                linkage_matrix[:, 2] = 1 / linkage_matrix[:, 2]
+            elif distance_conversion == "inverse_logarithmic":
+                linkage_matrix[:, 2] = - np.log(linkage_matrix[:, 2])
+            elif distance_conversion is None:
+                pass
+            else:
+                tqdm.write(f"Incorrect 'distance_conversion' input ({distance_conversion}. Must be one of "
+                           f"inverse, reciprocal, inverse_logarithmic")
+            
+            if distance_conversion is not None:
+                tqdm.write("Similarity converted to distances.")
+            
+            return graph, linkage_matrix
     
     @wrapper_local_cache
     def distance_to_similarity(self, distance_matrix, method: Literal['inverse', 'gaussian'] = 'gaussian', sigma=1.0,
