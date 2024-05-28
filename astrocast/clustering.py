@@ -12,7 +12,6 @@ from heapq import heappop, heappush
 from pathlib import Path
 from typing import List, Literal, Tuple, Union
 
-import community as community_louvain
 import dask
 import fastcluster
 import hdbscan
@@ -25,7 +24,6 @@ from dask import array as da
 from dask.diagnostics import ProgressBar
 from dask.distributed import Client
 from dtaidistance import dtw, dtw_barycenter
-from infomap import Infomap
 from matplotlib import pyplot as plt
 from matplotlib.colors import LinearSegmentedColormap
 from networkx.algorithms import community as nx_community
@@ -2387,6 +2385,7 @@ class TeraHAC(CachedClass):
         sub_graphs = []
         
         if method == "louvain":
+            import community as community_louvain
             partition = community_louvain.best_partition(graph)
             for community_ in set(partition.values()):
                 nodes = [node for node in partition.keys() if partition[node] == community_]
@@ -2402,6 +2401,7 @@ class TeraHAC(CachedClass):
                 sub_graphs.append(graph.subgraph(community_).copy())
         
         elif method == "metis":
+            import metis
             _, parts = metis.part_graph(graph, nparts=len(graph))
             for community_ in set(parts):
                 nodes = [node for node, part in enumerate(parts) if part == community_]
@@ -2413,6 +2413,8 @@ class TeraHAC(CachedClass):
                 sub_graphs.append(graph.subgraph(community_).copy())
         
         elif method == "infomap":
+            
+            from infomap import Infomap
             im = Infomap()
             for edge in graph.edges():
                 im.addLink(*edge)
