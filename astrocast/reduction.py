@@ -600,10 +600,10 @@ class ClusterTree:
         
         if isinstance(Z, np.ndarray):
             self.tree = hierarchy.to_tree(Z)
+            self.root_id = np.max(Z[:, :2]) + 1
         else:
             self.tree = Z
-        
-        self.root_id = np.max(Z[:, :2]) + 1
+            self.root_id = max(Z.nodes)
     
     def get_root(self):
         return self.get_node(self.root_id)
