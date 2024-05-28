@@ -3,16 +3,20 @@ import inspect
 import itertools
 import logging
 import pickle
+import random
 import tempfile
+import time
 import traceback
 from collections import defaultdict
 from heapq import heappop, heappush
 from pathlib import Path
 from typing import List, Literal, Tuple, Union
 
+import community as community_louvain
 import dask
 import fastcluster
 import hdbscan
+import humanize
 import networkx as nx
 import numpy as np
 import pandas as pd
@@ -23,7 +27,7 @@ from dask.distributed import Client
 from dtaidistance import dtw, dtw_barycenter
 from matplotlib import pyplot as plt
 from matplotlib.colors import LinearSegmentedColormap
-from networkx.algorithms import community
+from networkx.algorithms import community as nx_community
 from scipy.cluster.hierarchy import fcluster
 from scipy.spatial import KDTree
 from sklearn import cluster, ensemble, gaussian_process, linear_model, neighbors, neural_network, tree
@@ -34,7 +38,7 @@ from tqdm import tqdm
 
 from astrocast import helper
 from astrocast.analysis import Events, MultiEvents
-from astrocast.helper import CachedClass, MiniLogger, Normalization, is_ragged, wrapper_local_cache
+from astrocast.helper import CachedClass, Normalization, is_ragged, wrapper_local_cache
 
 
 # from tqdm.auto import tqdm
@@ -123,13 +127,17 @@ class KMeansClustering(CachedClass):
 
 class Linkage(CachedClass):
     
-    def __init__(self, events: Union[Events, MultiEvents], cache_path=None, logging_level=logging.INFO):
+    def __init__(self, events: Union[Events, MultiEvents] = None, cache_path=None, logging_level=logging.INFO):
         super().__init__(logging_level=logging_level, cache_path=cache_path, logger_name="Linkage")
         
         self.n_centroids = None
         self.pre_cluster_labels = None
         self.events = events
-        self.my_hash = hash(events) if cache_path is not None else None
+        
+        if cache_path is None or events is None:
+            self.my_hash = None
+        else:
+            self.my_hash = hash(events)
         
         self.Z = None
     
@@ -560,6 +568,156 @@ class Linkage(CachedClass):
                 fig.savefig(save_path.as_posix())
             
             return fig
+    
+    @staticmethod
+    def print_link_row(linkage_matrix: np.ndarray, row_idx: Union[int, float]):
+        """
+            Prints a specific row from a linkage matrix.
+
+            If the row index is None, it indicates the original observation. Otherwise,
+            it prints the details of the linkage matrix row including the IDs, distance,
+            and number of original observations in the cluster.
+
+            Args:
+                linkage_matrix: The linkage matrix containing hierarchical clustering information.
+                row_idx: The index of the row to be printed. Can be an integer or float.
+
+            Example::
+
+                Linkage matrix row 5 with IDs 2 and 3, distance 0.5, and 4 observations:
+                #5: 2 + 3 (0.50) #4
+            """
+        if row_idx is None:
+            print(f"#{row_idx}: original observation")
+        
+        else:
+            id0, id1, dist, num = linkage_matrix[row_idx, :]
+            print(f"#{row_idx}: {int(id0)} + {int(id1)} ({dist:.2f}) #{num}")
+    
+    @staticmethod
+    def get_row_by_cluster(cluster_id: Union[int, float], n_observations: int):
+        """
+            Returns the row index in the linkage matrix for a given cluster ID.
+
+            If the cluster ID is less than or equal to the number of original observations,
+            it returns None indicating an original observation. Otherwise, it calculates the
+            corresponding row index in the linkage matrix.
+
+            Args:
+                cluster_id: The cluster ID for which the row index is to be determined.
+                n_observations: The total number of original observations.
+
+            Returns:
+                The row index in the linkage matrix or None if it is an original observation.
+
+            Example::
+
+                get_row_by_cluster(5, 4) returns 1
+                get_row_by_cluster(3, 4) returns None
+            """
+        if cluster_id <= n_observations:
+            return None
+        
+        else:
+            return int(cluster_id - n_observations)
+    
+    def get_cluster_count(self, linkage_matrix: np.ndarray, cluster_id: Union[int, float], n_observations: int):
+        """
+            Gets the number of original observations in a cluster.
+
+            For a given cluster ID, it determines the count of original observations that
+            make up the cluster. If it is an original observation, the count is 1.
+
+            Args:
+                linkage_matrix: The linkage matrix containing hierarchical clustering information.
+                cluster_id: The cluster ID for which the count is to be determined.
+                n_observations: The total number of original observations.
+
+            Returns:
+                The count of original observations in the cluster.
+
+            Example::
+
+                get_cluster_count(linkage_matrix, 5, 4) returns 3
+            """
+        line_0 = self.get_row_by_cluster(cluster_id, n_observations)
+        
+        if line_0 is None:
+            return 1
+        
+        else:
+            line_0 = linkage_matrix[line_0]
+            return line_0[3]
+    
+    def get_cluster_sum(self, linkage_matrix: np.ndarray,
+                        cluster_id_0: Union[int, float], cluster_id_1: Union[int, float], n_observations: int):
+        """
+        Computes the sum of the counts of original observations in two clusters.
+
+        For two given cluster IDs, it calculates the sum of the counts of original observations
+        in both clusters.
+
+        Args:
+            linkage_matrix: The linkage matrix containing hierarchical clustering information.
+            cluster_id_0: The first cluster ID.
+            cluster_id_1: The second cluster ID.
+            n_observations: The total number of original observations.
+
+        Returns:
+            The sum of the counts of original observations in the two clusters.
+
+        Example::
+
+            get_cluster_sum(linkage_matrix, 5, 6, 4) returns 7
+        """
+        c0 = self.get_cluster_count(linkage_matrix, cluster_id_0, n_observations)
+        c1 = self.get_cluster_count(linkage_matrix, cluster_id_1, n_observations)
+        
+        return c0 + c1
+    
+    def fix_count(self, linkage_matrix: np.ndarray, row_id: int, n_observations: int):
+        """
+        Updates the count of original observations for a specific row in the linkage matrix.
+
+        For a given row in the linkage matrix, it calculates and updates the count of original
+        observations that make up the cluster.
+
+        Args:
+            linkage_matrix: The linkage matrix containing hierarchical clustering information.
+            row_id: The row index in the linkage matrix to be updated.
+            n_observations: The total number of original observations.
+
+        Example::
+
+            fix_count(linkage_matrix, 5, 4) updates row 5's count to the correct sum
+        """
+        id0, id1, dist, num = linkage_matrix[row_id, :]
+        sum_ = self.get_cluster_sum(linkage_matrix, id0, id1, n_observations)
+        linkage_matrix[row_id, 3] = sum_
+    
+    def fix_all_counts(self, linkage_matrix: np.ndarray, n_observations: int,
+                       indices: Union[List[int], np.ndarray] = None):
+        """
+        Updates the counts of original observations for all specified rows in the linkage matrix.
+
+        For all rows in the linkage matrix or a specified subset, it calculates and updates
+        the counts of original observations that make up each cluster.
+
+        Args:
+            linkage_matrix: The linkage matrix containing hierarchical clustering information.
+            n_observations: The total number of original observations.
+            indices: A list or array of row indices to be updated. If None, all rows are updated.
+
+        Example::
+
+            fix_all_counts(linkage_matrix, 4) updates counts for all rows
+            fix_all_counts(linkage_matrix, 4, [1, 3, 5]) updates counts for rows 1, 3, and 5
+        """
+        if indices is None:
+            indices = range(len(linkage_matrix))
+        
+        for idx in indices:
+            self.fix_count(linkage_matrix, idx, n_observations)
 
 
 class Distance(CachedClass):
@@ -1571,7 +1729,7 @@ class Modules(CachedClass):
             G.add_edge(*edge)
         
         # calculate modularity
-        communities = community.greedy_modularity_communities(G)
+        communities = nx_community.greedy_modularity_communities(G)
         
         # assign modules
         nodes["module"] = -1
@@ -2117,15 +2275,68 @@ class CoincidenceDetection:
         return clf, score
 
 
-class TeraHAC:
+class TeraHAC(CachedClass):
+    """ TeraHAC class for performing hierarchical agglomerative clustering with caching and logging. """
     
-    def __init__(self, epsilon, threshold, logging_level=logging.INFO):
+    def __init__(self, epsilon, threshold,
+                 cache_path: Path = None, logging_level=logging.INFO):
+        """
+        Initialize the TeraHAC instance with specified parameters.
+
+        This constructor sets up the TeraHAC instance by initializing the epsilon and threshold parameters, and configuring the caching and logging functionalities.
+
+        Args:
+            epsilon: The threshold for goodness measure in hierarchical agglomerative clustering.
+            threshold: The similarity threshold for merging clusters.
+            cache_path (Path, optional): The path where cache files will be stored. Default is None.
+            logging_level (int, optional): The logging level for the logger. Default is logging.INFO.
+
+        Notes:
+            - The constructor calls the parent class CachedClass's initializer to set up caching and logging.
+            - The logger name is set to "TeraHAC".
+
+        Example:
+            >>> th = TeraHAC(epsilon=0.1, threshold=0.5, cache_path=Path('/path/to/cache'), logging_level=logging.DEBUG)
+        """
+        
+        super().__init__(cache_path=cache_path, logging_level=logging_level,
+                         logger_name="TeraHAC")
         self.epsilon = epsilon
         self.threshold = threshold
-        
-        self.log = MiniLogger(logger_name="TeraHAC", level=logging_level)
     
-    def initialize_graph(self, graph):
+    def __hash__(self):
+        import xxhash
+        return xxhash.xxh32(np.array([self.epsilon, self.threshold])).intdigest()
+    
+    @staticmethod
+    def initialize_graph(graph):
+        """
+        Initialize the graph with required node attributes for clustering.
+
+        This method sets up initial attributes for each node in the graph, preparing it for hierarchical agglomerative clustering. Each node is initialized with cluster size, minimum and maximum merge similarities, and maximum weight.
+
+        Args:
+            graph: The networkx graph to be initialized.
+
+        Returns:
+            networkx.Graph: The graph with initialized node attributes.
+
+        Node Attributes:
+            - 'cluster_size': Initialized to 1 for all nodes.
+            - 'min_merge_similarity': Initialized to infinity for all nodes.
+            - 'max_merge_similarity': Initialized to 0 for all nodes.
+            - 'max_weight': Initialized to 0 for all nodes, then updated based on edge weights.
+
+        Example:
+            >>> import networkx as nx
+            >>> G = nx.Graph()
+            >>> G.add_edge(1, 2, weight=0.5)
+            >>> G.add_edge(2, 3, weight=0.3)
+            >>> th = TeraHAC()
+            >>> initialized_graph = th.initialize_graph(G)
+            >>> print(initialized_graph.nodes(data=True))
+        """
+        
         for node in graph.nodes:
             graph.nodes[node]['cluster_size'] = 1
             graph.nodes[node]['min_merge_similarity'] = float('inf')
@@ -2137,31 +2348,89 @@ class TeraHAC:
             graph.nodes[v]['max_weight'] = max(graph.nodes[v]['max_weight'], weight)
         
         return graph
+    
+    @staticmethod
+    def _get_subgraph(graph,
+                      method: Literal["connected_components", "louvain", "label_propagation"] = "label_propagation"):
+        """
+        Generate subgraphs from the given graph using a specified community detection method.
 
-    def _get_subgraph(self, G, method: Literal["connected_components", "louvain", "label_propagation"] = "louvain"):
-        subgraphs = []
-    
+        This method divides the input graph into subgraphs based on the specified community detection method. It supports three methods: connected components, Louvain method, and label propagation.
+
+        Args:
+            graph: The networkx graph to be divided into subgraphs.
+            method The method for community detection.
+                - "connected_components": Divides the graph based on its connected components.
+                - "louvain": Uses the Louvain method for community detection.
+                - "label_propagation": Uses the label propagation algorithm for community detection.
+
+        Returns:
+            list: A list of networkx subgraphs generated based on the selected method.
+
+        Raises:
+            ValueError: If an unknown method is specified.
+
+        Example:
+            >>> import networkx as nx
+            >>> G = nx.karate_club_graph()
+            >>> th = TeraHAC()
+            >>> sub_graphs_ = th._get_subgraph(G, method="louvain")
+            >>> for subgraph in sub_graphs_:
+            >>>     print(subgraph.nodes)
+        """
+        
+        sub_graphs = []
+        
         if method == "louvain":
-            import community as community_louvain
-            partition = community_louvain.best_partition(G)
-    
+            partition = community_louvain.best_partition(graph)
+            
             for community_ in set(partition.values()):
                 nodes = [node for node in partition.keys() if partition[node] == community_]
-                subgraphs.append(G.subgraph(nodes).copy())
-    
-        elif method == "connected_components":
-            for c in nx.connected_components(G):
-                subgraphs.append(G.subgraph(c).copy())
-
-        elif method == "label_propagation":
-            communities = nx.algorithms.community.label_propagation_communities(G)
-
-            for community in communities:
-                subgraphs.append(G.subgraph(community).copy())
+                sub_graphs.append(graph.subgraph(nodes).copy())
         
-        return subgraphs
+        elif method == "connected_components":
+            for c in nx.connected_components(graph):
+                sub_graphs.append(graph.subgraph(c).copy())
+        
+        elif method == "label_propagation":
+            communities = nx.algorithms.community.label_propagation_communities(graph)
+            
+            for community_ in communities:
+                sub_graphs.append(graph.subgraph(community_).copy())
+        
+        return sub_graphs
     
     def subgraph_hac(self, subgraph):
+        """
+        Perform hierarchical agglomerative clustering (HAC) on a subgraph.
+
+        This method applies the hierarchical agglomerative clustering algorithm on the given subgraph. It uses a priority queue to manage potential merges based on edge weights and node properties, performing merges while the goodness measure is within a specified threshold.
+
+        Args:
+            subgraph: A networkx subgraph on which HAC is to be performed.
+
+        Returns:
+            list: A list of tuples representing the merged node pairs (u, v).
+
+        Notes:
+            - The priority queue (pq) is initialized with edges sorted by their goodness measure.
+            - The goodness measure is calculated as the ratio of the maximum weight of the nodes to the edge weight.
+            - Merges are performed while the top of the queue has a goodness measure within `1 + self.epsilon`.
+
+        Example:
+            >>> import networkx as nx
+            >>> G = nx.Graph()
+            >>> G.add_edge(1, 2, weight=0.5)
+            >>> G.add_edge(2, 3, weight=0.3)
+            >>> G.add_node(1, max_weight=0.5)
+            >>> G.add_node(2, max_weight=0.5)
+            >>> G.add_node(3, max_weight=0.3)
+            >>> th = TeraHAC(epsilon=0.1)
+            >>> merges = th.subgraph_hac(G)
+            >>> print(merges)
+            [(1, 2)]
+        """
+        
         pq = []
         for u, v, data in subgraph.edges(data=True):
             weight = data['weight']
@@ -2172,17 +2441,40 @@ class TeraHAC:
         while pq and pq[0][0] <= 1 + self.epsilon:
             _, u, v = heappop(pq)
             if subgraph.has_edge(u, v):
-                # new_node, merge_distance, new_cluster_size = self.merge_clusters(subgraph, u, v)
-                # merges.append((u, v, merge_distance))  # Include merge distance
                 
                 self.merge_clusters(subgraph, u, v)
                 merges.append((u, v))
         
-        self.log.log(f"Merges performed: {merges}", level=logging.DEBUG)
+        self.log(f"Merges performed: {merges}", level=logging.DEBUG)
         return merges
     
     @staticmethod
     def merge_clusters(graph, u, v):
+        """
+        Merge two clusters in a graph by combining nodes u and v into a new node.
+
+        This function merges two specified nodes in a networkx graph into a new node. It updates cluster size, merge similarities, and edges accordingly.
+
+        Args:
+            graph: The networkx graph containing the clusters to be merged.
+            u: The first node to be merged.
+            v: The second node to be merged.
+
+        Returns:
+            The new node created by merging nodes u and v.
+
+        Example:
+            >>> import networkx as nx
+            >>> G = nx.Graph()
+            >>> G.add_node(1, cluster_size=5, min_merge_similarity=0.2, max_merge_similarity=0.8)
+            >>> G.add_node(2, cluster_size=3, min_merge_similarity=0.1, max_merge_similarity=0.9)
+            >>> G.add_edge(1, 2, weight=0.5)
+            >>> terahac = TeraHAC()
+            >>> new_node = terahac.merge_clusters(G, 1, 2)
+            >>> print(new_node)
+            3
+        """
+        
         new_node = max(graph.nodes) + 1  # Ensure new_node is an integer
         graph.add_node(new_node)
         
@@ -2197,7 +2489,6 @@ class TeraHAC:
         # Calculate max weight
         max_weight = 0
         for neighbor in list(graph.neighbors(u)) + list(graph.neighbors(v)):
-            # if neighbor not in {u, v} and graph.has_edge(u, neighbor) and graph.has_edge(v, neighbor):
             if neighbor not in {u, v}:
                 
                 weight = 0
@@ -2211,47 +2502,53 @@ class TeraHAC:
         
         graph.nodes[new_node]['max_weight'] = max_weight  # Update max_weight for new_node
         
-        # # Calculate the average linkage distance
-        # total_weight = graph.edges[u, v]['weight']
-        # count = 1
-        #
-        # for neighbor in list(graph.neighbors(u)) + list(graph.neighbors(v)):
-        #     if neighbor not in {u, v}:
-        #         if graph.has_edge(u, neighbor):
-        #             weight = graph[u][neighbor]['weight']
-        #             total_weight += weight
-        #             count += 1
-        #         if graph.has_edge(v, neighbor):
-        #             weight = graph[v][neighbor]['weight']
-        #             total_weight += weight
-        #             count += 1
-        #         graph.add_edge(new_node, neighbor, weight=weight)
-        #
-        # # Update the distance for the new cluster
-        # merge_distance = total_weight / count
-        #
-        # graph.nodes[new_node]['max_weight'] = merge_distance  # This is now the merge distance
-        
         graph.remove_node(u)
         graph.remove_node(v)
         
         return new_node
-        
-        # return new_node, merge_distance, new_cluster_size
     
+    @wrapper_local_cache
     def run_terahac(self, similarity_matrix: np.ndarray, similarity_threshold: float = 0.5,
                     stop_after=10e6, parallel: bool = False,
                     zero_similarity_decrease: float = 0.9,
-                    subgraph_approach: Literal["connected_components", "louvain", "label_propagation"] = "label_propagation",
+                    subgraph_approach: Literal[
+                        "connected_components", "louvain", "label_propagation"] = "label_propagation",
                     distance_conversion: Literal["inverse", "reciprocal", "inverse_logarithmic"] = None,
                     plot_intermediate: bool = False, n_colors=10, color_palette="pastel"):
-                        
+        """
+        Run the TeraHAC algorithm on a similarity matrix to perform hierarchical agglomerative clustering.
+
+        This method applies the TeraHAC algorithm to the given similarity matrix, iteratively merging clusters based on the specified criteria and parameters. It supports plotting intermediate steps, handling zero similarities, and converting similarities to distances.
+
+        Args:
+            similarity_matrix (np.ndarray): The input similarity matrix.
+            similarity_threshold (float, optional): The threshold for creating edges in the similarity graph. Default is 0.5.
+            stop_after (int, optional): The maximum number of iterations before stopping. Default is 10e6.
+            parallel (bool, optional): Whether to run the subgraph HAC in parallel. Default is False.
+            zero_similarity_decrease (float, optional): Factor to decrease zero similarities by. Default is 0.9.
+            subgraph_approach (Literal["connected_components", "louvain", "label_propagation"], optional): The method for generating subgraphs. Default is "label_propagation".
+            distance_conversion (Literal["inverse", "reciprocal", "inverse_logarithmic"], optional): Method to convert similarities to distances. Default is None.
+            plot_intermediate (bool, optional): Whether to plot intermediate graphs. Default is False.
+            n_colors (int, optional): Number of colors to use in the color palette for plotting. Default is 10.
+            color_palette (str, optional): The color palette to use for plotting. Default is "pastel".
+
+        Returns:
+            tuple: A tuple containing the final graph and the linkage matrix.
+
+        Example:
+            >>> similarity_matrix = np.random.rand(10, 10)
+            >>> th = TeraHAC(epsilon=0.1, threshold=0.5)
+            >>> graph, linkage_matrix = th.run_terahac(similarity_matrix, plot_intermediate=True)
+        """
+        
         graph = self.create_similarity_graph(similarity_matrix, threshold=similarity_threshold)
-        self.log.log(f"Created graph from similarity matrix.")
+        self.log(f"Created graph from similarity matrix.")
         
         graph = self.initialize_graph(graph)
-        self.log.log(f"Initialized graph.")
+        self.log(f"Initialized graph.")
         
+        palette = None
+        node_color = None
         if plot_intermediate:
             color_palette = sns.color_palette(color_palette, n_colors)
             palette = itertools.cycle(color_palette)
@@ -2259,38 +2556,37 @@ class TeraHAC:
         counter = 0
         linkage_matrix = []
         pruned = []
-        # dendrogram_nodes = []
-        # last_merge_distance = 0
         while graph.number_of_edges() > 0 and counter < stop_after:
             
-            self.log.log(f"#nodes: {len(graph.nodes):,d} #edges: {len(graph.edges):,d}", level=logging.INFO)
+            self.log(f"#nodes: {len(graph.nodes):,d} #edges: {len(graph.edges):,d}", level=logging.INFO)
             
+            ax0, ax1, ax2 = None, None, None
             if plot_intermediate:
                 fig, (ax0, ax1, ax2) = plt.subplots(1, 3, figsize=(12, 3))
                 node_color = next(palette)
                 self.plot_graph(graph, title=f"full", ax=[ax0], iteration=counter, color=node_color)
             
-            # todo: replace by Bateni et al. affinity clustering algorithm
-            subgraphs = self._get_subgraph(graph, method = subgraph_approach)
-            self.log.log(f"#{counter}: Collected {len(subgraphs)} sub graphs.")
+            # Collect sub graphs
+            sub_graphs = self._get_subgraph(graph, method=subgraph_approach)
+            self.log(f"#{counter}: Collected {len(sub_graphs)} sub graphs.")
             
             if plot_intermediate:
-                self.plot_graph(subgraphs, title=f"SG", color=node_color)
+                self.plot_graph(sub_graphs, title=f"SG", color=node_color)
             
-            # Merge sub graphs
+            # Collect merges in sub graphs
             merges = []
             if not parallel:
-                for subgraph in tqdm(subgraphs):
+                for subgraph in tqdm(sub_graphs):
                     merges.extend(self.subgraph_hac(subgraph))
             else:
                 with concurrent.futures.ThreadPoolExecutor() as executor:
-                    futures = [executor.submit(self.subgraph_hac, subgraph) for subgraph in subgraphs]
+                    futures = [executor.submit(self.subgraph_hac, subgraph) for subgraph in sub_graphs]
                     for future in tqdm(concurrent.futures.as_completed(futures), total=len(futures)):
                         merges.extend(future.result())
             
-            self.log.log(f"#{counter}: Performed {len(merges)} merges.")
+            self.log(f"#{counter}: Collected {len(merges)} merges.")
             
-            # for u, v, merge_distance in merges:
+            # Merge sub graphs
             for u, v in merges:
                 if graph.has_edge(u, v):
                     
@@ -2298,6 +2594,8 @@ class TeraHAC:
                     
                     new_node = graph.nodes[n]
                     linkage_matrix.append([float(u), float(v), new_node["max_weight"], new_node["cluster_size"]])
+            
+            self.log(f"#{counter}: Updated linkage matrix.")
             
             if plot_intermediate:
                 self.plot_graph(graph, title=f"post merge", ax=[ax1], iteration=counter, color=node_color)
@@ -2316,7 +2614,7 @@ class TeraHAC:
             graph.remove_nodes_from(to_prune)
             
             if len(to_prune) > 0:
-                self.log.log(f"#{counter}: Pruned {len(to_prune)} nodes.")
+                self.log(f"#{counter}: Pruned {len(to_prune)} nodes.")
             
             # Break loop
             
@@ -2324,34 +2622,13 @@ class TeraHAC:
                 self.plot_graph(graph, title=f"post remove", ax=[ax2], iteration=counter, color=node_color)
             
             if len(merges) == 0:
-                self.log.log("No more merges are possible.", level=logging.INFO)
+                self.log("No more merges are possible.", level=logging.INFO)
                 break
             
             counter += 1
         
         if counter >= stop_after:
-            self.log.log(f"Prematurely stopped run after {counter} iterations.", level=logging.WARNING)
-        
-        # Final merge step to ensure all nodes are merged
-        # remaining_nodes = list(graph.nodes)
-        # while len(remaining_nodes) > 1:
-        #     new_node, merge_distance, new_cluster_size = self.merge_clusters(graph, remaining_nodes[0],
-        #                                                                      remaining_nodes[1])
-        #
-        #     # %todo -->
-        #
-        #     merge_distance += last_merge_distance
-        #
-        #     # % todo <--
-        #
-        #     dendrogram_nodes.append((remaining_nodes[0], remaining_nodes[1], merge_distance, new_cluster_size))
-        #     remaining_nodes = list(graph.nodes)
-        #
-        #     # %todo -->
-        #
-        #     last_merge_distance = merge_distance
-        #
-        #     # % todo <--
+            self.log(f"Prematurely stopped run after {counter} iterations.", level=logging.WARNING)
         
         if plot_intermediate:
             self.plot_graph(graph, title=f"Final")
@@ -2373,6 +2650,8 @@ class TeraHAC:
         else:
             new_min = 0
         
+        self.log(f"Fixed '0' distances in linkage matrix.")
+        
         # add pruned
         skipped = 0
         if len(pruned) > 0:
@@ -2388,6 +2667,8 @@ class TeraHAC:
                 linkage_matrix = np.concatenate([linkage_matrix, fix])
                 new_min *= zero_similarity_decrease
         
+        self.log(f"Added pruned nodes to linkage matrix..")
+        
         # add missing
         all_clusters = np.unique(linkage_matrix[:, 0:2])
         c_max = len(similarity_matrix) + len(linkage_matrix) - 1
@@ -2396,6 +2677,7 @@ class TeraHAC:
         missing_indices = np.isin(should_exist, all_clusters, invert=True)
         missing = should_exist[missing_indices]
         skipped = 0
+        link = Linkage(events=None)
         if len(missing) > 0:
             for i, m in enumerate(missing):
                 
@@ -2403,10 +2685,16 @@ class TeraHAC:
                     skipped += 1
                     continue
                 
-                fix = [[m, c_max + i - skipped, new_min, 0]]
+                cluster_0 = m
+                cluster_1 = c_max + i - skipped
+                cluster_count = link.get_cluster_sum(linkage_matrix, cluster_0, cluster_1, len(similarity_matrix))
+                
+                fix = [[cluster_0, cluster_1, new_min, cluster_count]]
                 fix = np.array(fix, dtype=float)
                 linkage_matrix = np.concatenate([linkage_matrix, fix])
                 new_min *= zero_similarity_decrease
+        
+        self.log(f"Added missing clusters to linkage matrix.")
         
         # convert to distance
         if distance_conversion == "inverse":
@@ -2418,36 +2706,40 @@ class TeraHAC:
         elif distance_conversion is None:
             pass
         else:
-            self.log.log(f"Incorrect 'distance_conversion' input ({distance_conversion}. Must be one of "
-                         f"inverse, reciprocal, inverse_logarithmic")
+            self.log(f"Incorrect 'distance_conversion' input ({distance_conversion}. Must be one of "
+                     f"inverse, reciprocal, inverse_logarithmic")
         
-        # linkage_matrix = np.array(linkage_matrix, dtype=float)
-        # # eps_threshold = self.threshold / (1 + self.epsilon)
-        # # max_dist = similarity_threshold + eps_threshold
-        # print(f"pruned: {pruned}")
-        # for pr in pruned:
-        #
-        #     u = pr
-        #     v = np.max(linkage_matrix[:, 0:2]) + 1
-        #     sim = 0
-        #     cluster_size = 0
-        #
-        #     row = np.array([[u, v, -1, sim, cluster_size]])
-        #
-        #     linkage_matrix = np.concatenate((linkage_matrix, row), axis=0)
-        #     # max_dist += eps_threshold
-        #
+        if distance_conversion is not None:
+            self.log(f"Similarity converted to distances.")
+        
         return graph, linkage_matrix
-        
-        # self.log.log(f"Final dendrogram nodes: {dendrogram_nodes}", level=logging.DEBUG)
-        #
-        # # Convert dendrogram nodes to linkage matrix
-        # linkage_matrix = self.convert_to_linkage_matrix(dendrogram_nodes, len(graph.nodes))
-        #
-        # return linkage_matrix
     
     @staticmethod
-    def distance_to_similarity(distance_matrix, method='inverse', sigma=1.0):
+    @wrapper_local_cache
+    def distance_to_similarity(distance_matrix, method: Literal['inverse', 'gaussian'] = 'gaussian', sigma=1.0):
+        """
+        Convert a distance matrix to a similarity matrix using the specified method.
+
+        This static method transforms a given distance matrix into a similarity matrix using either the inverse distance or Gaussian function.
+
+        Args:
+            distance_matrix (np.ndarray): An NxN matrix representing distances.
+            method (Literal['inverse', 'gaussian'], optional): The method to convert distances to similarities. Default is 'gaussian'.
+                - 'inverse': Uses the inverse of the distance.
+                - 'gaussian': Uses a Gaussian function to convert distances to similarities.
+            sigma (float, optional): The sigma parameter for the Gaussian function. Default is 1.0.
+
+        Returns:
+            np.ndarray: An NxN similarity matrix.
+
+        Raises:
+            ValueError: If the specified method is not 'inverse' or 'gaussian'.
+
+        Example:
+            >>> distance_matrix = np.array([[0, 1, 2], [1, 0, 1], [2, 1, 0]])
+            >>> similarity_matrix = TeraHAC.distance_to_similarity(distance_matrix, method='gaussian', sigma=1.0)
+        """
+        
         if method == 'inverse':
             similarity_matrix = 1 / distance_matrix
         elif method == 'gaussian':
@@ -2456,25 +2748,50 @@ class TeraHAC:
             raise ValueError("Unknown method: choose 'inverse' or 'gaussian'")
         return similarity_matrix
     
+    @wrapper_local_cache
     def create_similarity_graph(self, similarity_matrix, threshold=None, k=None):
+        """
+        Create a similarity graph from a similarity matrix.
+
+        This method constructs a graph from the given similarity matrix by adding edges between nodes based on a specified threshold or the top-k most similar nodes.
+
+        Args:
+            similarity_matrix (np.ndarray): An NxN matrix representing similarities between nodes.
+            threshold (float, optional): A threshold value for adding edges. Only pairs with similarity above this threshold will be connected. Default is None.
+            k (int, optional): The number of top similar nodes to connect for each node. If specified, the threshold parameter is ignored. Default is None.
+
+        Returns:
+            networkx.Graph: A graph where nodes are connected based on the similarity criteria.
+
+        Notes:
+            - If both threshold and k are None, no edges will be added to the graph.
+            - The method logs the percentage of retained edges compared to the total possible edges.
+
+        Example:
+            >>> similarity_matrix = np.random.rand(10, 10)
+            >>> th = TeraHAC(epsilon=0.1, threshold=0.5)
+            >>> graph = th.create_similarity_graph(similarity_matrix, threshold=0.7)
+            >>> print(graph.edges(data=True))
+        """
+        
         n = similarity_matrix.shape[0]
-        G = nx.Graph()
+        graph = nx.Graph()
         
         for i in range(n):
             for j in range(i + 1, n):
                 similarity = similarity_matrix[i, j]
                 if threshold is not None and similarity >= threshold:
-                    G.add_edge(i, j, weight=similarity)
+                    graph.add_edge(i, j, weight=similarity)
                 elif k is not None:
                     sorted_indices = np.argsort(similarity_matrix[i])[::-1]
                     for idx in sorted_indices[:k]:
                         if idx != i:
-                            G.add_edge(i, idx, weight=similarity_matrix[i, idx])
+                            graph.add_edge(i, idx, weight=similarity_matrix[i, idx])
         
         total_edges = (n ** 2 - n) / 2
-        self.log.log(f"retained edges: {len(G.edges) / total_edges * 100:.1f}%")
+        self.log(f"retained edges: {len(graph.edges) / total_edges * 100:.1f}%")
         
-        return G
+        return graph
     
     @staticmethod
     def convert_to_linkage_matrix(dendrogram_nodes, num_points):
@@ -2498,20 +2815,210 @@ class TeraHAC:
         return np.array(linkage_matrix, dtype=np.double)
     
     @staticmethod
-    def plot_graph(G, ax=None, title: str = None, iteration: int = None, color="#1f78b4"):
+    def compute_graph_metrics(similarity_matrix, similarity_threshold):
+        """Compute metrics for gauging the sparsity of a graph based on the similarity matrix."""
+        adjacency_matrix = similarity_matrix >= similarity_threshold
+        adjacency_matrix = adjacency_matrix.astype(int)
         
-        if not isinstance(G, list):
-            G = [G]
+        graph = nx.from_numpy_array(adjacency_matrix)
+        
+        num_nodes = len(graph.nodes)
+        num_edges = len(graph.edges)
+        
+        density = nx.density(graph)
+        average_degree = sum(dict(graph.degree()).values()) / num_nodes
+        sparsity = 1 - (num_edges * 2 / (num_nodes * (num_nodes - 1)))
+        num_connected_components = nx.number_connected_components(graph)
+        clustering_coefficient = nx.average_clustering(graph)
+        
+        metrics = {
+            "density":                  density,
+            "average_degree":           average_degree,
+            "sparsity":                 sparsity,
+            "num_connected_components": num_connected_components,
+            "clustering_coefficient":   clustering_coefficient
+            }
+        
+        return metrics
+    
+    @wrapper_local_cache
+    def approximate_optimal_value(self, distance_matrix: np.ndarray, required_metrics: dict = None,
+                                  method: Literal['inverse', 'gaussian'] = 'gaussian',
+                                  sigma_0: float = 0.01, similarity_threshold_0: float = 0.99,
+                                  max_time: float = 60, sample_size_0: int = 25,
+                                  num_samples: int = 3):
+        """
+        Approximate the optimal value of parameters for a sparsely connected graph from a distance matrix.
+        
+        This method computes optimal values for parameters that define the sparsity of a graph derived from the input distance matrix. It iteratively adjusts parameters to meet the required metrics.
+        
+        Args:
+            distance_matrix (np.ndarray): An NxN distance matrix.
+            required_metrics (dict, optional): A dictionary specifying the required range for certain metrics. For example, {"sparsity": (0.4, 0.6)}. Default is None, which sets it to {"sparsity": (0.4, 0.6)}.            sigma_0 (float, optional): Starting value for sigma used in the Gaussian conversion. Default is 0.01.
+            method: Method to convert distance matrix to similarity matrix.
+            sigma_0 (float, optional): Starting value for sigma used in the Gaussian conversion. Default is 0.01.
+            similarity_threshold_0 (float, optional): Starting value for the threshold in the sparsity operation. Default is 0.99.
+            max_time (float, optional): Maximum time in seconds that a run is allowed to take; the process will break if it takes longer. Default is 60.
+            sample_size_0 (int, optional): Starting sample size of observations. Default is 25.
+            num_samples (int, optional): Number of random samples drawn. Default is 3.
+        
+        Returns:
+            dict: A dictionary containing the optimal sigma, threshold, and the final metrics.
+        
+        Possible metrics include:
+            - "density": Density of the graph.
+            - "average_degree": Average degree of the nodes.
+            - "sparsity": Sparsity of the graph.
+            - "num_connected_components": Number of connected components in the graph.
+            - "clustering_coefficient": Clustering coefficient of the graph.
+        
+        Example:
+            >>> distance_matrix = np.random.rand(10, 10)
+            >>> required_metrics = {"sparsity": (0.4, 0.6)}
+            >>> terahac = TeraHAC()
+            >>> result = terahac.approximate_optimal_value(distance_matrix, required_metrics)
+        """
+        start_time = time.time()
+        sigma = sigma_0
+        similarity_threshold = similarity_threshold_0
+        
+        if required_metrics is None:
+            required_metrics = {"sparsity": (0.4, 0.6)}
+        
+        if isinstance(sample_size_0, float):
+            sample_size = int(len(distance_matrix) * sample_size_0)
+        else:
+            sample_size = sample_size_0
+        
+        def check_metrics(ref_metrics, res_metrics):
+            
+            if res_metrics is None:
+                return False
+            
+            for key, (min_val_, max_val_) in ref_metrics.items():
+                if res_metrics[key] < min_val_ or res_metrics[key] > max_val_:
+                    return False
+            
+            return True
+        
+        def adjustment_value(high_or_low: str, value: str, metric: str,
+                             current: float):
+            
+            ref = {
+                ("high", "sigma", "density"):                    0.9,
+                ("high", "sigma", "average_degree"):             0.9,
+                ("high", "sigma", "sparsity"):                   1.1,
+                ("high", "sigma", "clustering_coefficient"):     0.9,
+                ("low", "sigma", "density"):                     1.1,
+                ("low", "sigma", "average_degree"):              1.1,
+                ("low", "sigma", "sparsity"):                    0.9,
+                ("low", "sigma", "clustering_coefficient"):      1.1,
+                
+                ("high", "threshold", "density"):                1.1,
+                ("high", "threshold", "average_degree"):         1.1,
+                ("high", "threshold", "sparsity"):               0.9,
+                ("high", "threshold", "clustering_coefficient"): 1.1,
+                ("low", "threshold", "density"):                 0.9,
+                ("low", "threshold", "average_degree"):          0.9,
+                ("low", "threshold", "sparsity"):                1.1,
+                ("low", "threshold", "clustering_coefficient"):  0.9,
+                }
+            
+            new = current * ref[(high_or_low, value, metric)]
+            
+            self.log(f"{metric} too {high_or_low}! {value} {current:.4f} -> {new:.4f}", logging.DEBUG)
+            
+            return new
+        
+        avg_metrics = None
+        counter = 0
+        metrics = None
+        while time.time() - start_time < max_time and not check_metrics(required_metrics, avg_metrics):
+            
+            metrics_ = []
+            for _ in range(num_samples):
+                # Randomly sample the distance matrix
+                indices = random.sample(range(len(distance_matrix)), sample_size)
+                sampled_matrix = distance_matrix[np.ix_(indices, indices)]
+                
+                # Apply Gaussian conversion
+                similarity_matrix = self.distance_to_similarity(sampled_matrix, method=method, sigma=sigma)
+                
+                # Apply thresholding
+                metrics = self.compute_graph_metrics(similarity_matrix, similarity_threshold)
+                metrics_.append(metrics)
+            
+            # Calculate the average metric and variability
+            avg_metrics = {key: np.mean([m[key] for m in metrics_]) for key in metrics_[0]}
+            
+            # Check against user-defined values
+            if required_metrics:
+                for key, (min_val, max_val) in required_metrics.items():
+                    if avg_metrics[key] < min_val:
+                        
+                        if random.choice([True, False]):
+                            sigma = adjustment_value("low", "sigma", key, sigma)
+                        else:
+                            similarity_threshold *= adjustment_value("low", "threshold", key, similarity_threshold)
+                    
+                    elif avg_metrics[key] > max_val:
+                        
+                        if random.choice([True, False]):
+                            sigma = adjustment_value("high", "sigma", key, sigma)
+                        else:
+                            similarity_threshold = adjustment_value("high", "threshold", key, similarity_threshold)
+            
+            counter += 1
+            if counter % 10 == 0:
+                logging.info(f"#{counter}: {humanize.naturaldelta(time.time() - start_time)}")
+        
+        logging.info(
+                f"Number of iterations: {counter}. Final sample size: {sample_size}. "
+                f"Time {humanize.naturaldelta(time.time() - start_time)}")
+        
+        return {
+            'optimal_sigma':     sigma,
+            'optimal_threshold': similarity_threshold,
+            'final_metrics':     metrics
+            }
+    
+    @staticmethod
+    def plot_graph(graph, ax=None, title: str = None, iteration: int = None, color="#1f78b4"):
+        """
+        Plot a networkx graph with specified parameters.
+
+        This function plots one or more networkx graphs using matplotlib, with optional customization for axes, titles, iteration labels, and node colors.
+
+        Args:
+            graph: A networkx graph or a list of networkx graphs to be plotted.
+            ax: Matplotlib axes object or a list of axes objects. If None, a new figure and axes are created.
+            title: Optional title for the plot. If provided, it will be used as a prefix for the title of each subplot.
+            iteration: Optional iteration number to be included in the subplot titles.
+            color: Color of the graph nodes. Default is "#1f78b4".
+
+        Returns:
+            None
+
+        Example:
+            >>> import networkx as nx
+            >>> import matplotlib.pyplot as plt
+            >>> G = nx.karate_club_graph()
+            >>> terahac = TeraHAC()
+            >>> terahac.plot_graph(G, title="Karate Club Graph", color="red")
+        """
+        
+        if not isinstance(graph, list):
+            graph = [graph]
         
         if ax is None:
-            fig, axx = plt.subplots(1, len(G), figsize=(3 * len(G), 3))
+            fig, axx = plt.subplots(1, len(graph), figsize=(3 * len(graph), 3))
         else:
             axx = ax
         
         if not isinstance(axx, (np.ndarray, list)):
             axx = [axx]
         
-        for i, g in enumerate(G):
+        for i, g in enumerate(graph):
             
             ax = axx[i]
             
