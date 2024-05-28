@@ -271,7 +271,7 @@ def wrapper_local_cache(f):
         logger.debug(f"args: {args}")
         logger.debug(f"kwargs: {kwargs}")
         
-        if "ignore_cache" in list(kwargs.keys()) and kwargs["ignore_cache"]:
+        if isinstance(f, types.FunctionType) and "ignore_cache" in list(kwargs.keys()) and kwargs["ignore_cache"]:
             return f(*args, **kwargs)
         
         if isinstance(f, types.FunctionType) and "cache_path" in list(kwargs.keys()):
