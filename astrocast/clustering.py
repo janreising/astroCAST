@@ -25,6 +25,7 @@ from dask import array as da
 from dask.diagnostics import ProgressBar
 from dask.distributed import Client
 from dtaidistance import dtw, dtw_barycenter
+from infomap import Infomap
 from matplotlib import pyplot as plt
 from matplotlib.colors import LinearSegmentedColormap
 from networkx.algorithms import community as nx_community
@@ -2351,11 +2352,12 @@ class TeraHAC(CachedClass):
     
     @staticmethod
     def _get_subgraph(graph,
-                      method: Literal["connected_components", "louvain", "label_propagation"] = "label_propagation"):
+                      method: Literal[
+                          "connected_components", "louvain", "label_propagation", "metis", "greedy_modularity", "infomap"] = "label_propagation"):
         """
         Generate subgraphs from the given graph using a specified community detection method.
 
-        This method divides the input graph into subgraphs based on the specified community detection method. It supports three methods: connected components, Louvain method, and label propagation.
+        This method divides the input graph into subgraphs based on the specified community detection method. It supports several methods: connected components, Louvain method, label propagation, Metis, Greedy Modularity, and Infomap.
 
         Args:
             graph: The networkx graph to be divided into subgraphs.
@@ -2363,6 +2365,9 @@ class TeraHAC(CachedClass):
                 - "connected_components": Divides the graph based on its connected components.
                 - "louvain": Uses the Louvain method for community detection.
                 - "label_propagation": Uses the label propagation algorithm for community detection.
+                - "metis": Uses the Metis algorithm for community detection.
+                - "greedy_modularity": Uses the Greedy Modularity algorithm for community detection.
+                - "infomap": Uses the Infomap algorithm for community detection.
 
         Returns:
             list: A list of networkx subgraphs generated based on the selected method.
@@ -2383,7 +2388,6 @@ class TeraHAC(CachedClass):
         
         if method == "louvain":
             partition = community_louvain.best_partition(graph)
-            
             for community_ in set(partition.values()):
                 nodes = [node for node in partition.keys() if partition[node] == community_]
                 sub_graphs.append(graph.subgraph(nodes).copy())
@@ -2394,9 +2398,32 @@ class TeraHAC(CachedClass):
         
         elif method == "label_propagation":
             communities = nx.algorithms.community.label_propagation_communities(graph)
-            
             for community_ in communities:
                 sub_graphs.append(graph.subgraph(community_).copy())
+        
+        elif method == "metis":
+            _, parts = metis.part_graph(graph, nparts=len(graph))
+            for community_ in set(parts):
+                nodes = [node for node, part in enumerate(parts) if part == community_]
+                sub_graphs.append(graph.subgraph(nodes).copy())
+        
+        elif method == "greedy_modularity":
+            communities = nx.algorithms.community.greedy_modularity_communities(graph)
+            for community_ in communities:
+                sub_graphs.append(graph.subgraph(community_).copy())
+        
+        elif method == "infomap":
+            im = Infomap()
+            for edge in graph.edges():
+                im.addLink(*edge)
+            im.run()
+            communities = im.getModules()
+            for community_ in set(communities.values()):
+                nodes = [node for node in communities if communities[node] == community_]
+                sub_graphs.append(graph.subgraph(nodes).copy())
+        
+        else:
+            raise ValueError(f"Unknown method: {method}")
         
         return sub_graphs
     
@@ -2512,7 +2539,7 @@ class TeraHAC(CachedClass):
                     stop_after=10e6, parallel: bool = False,
                     zero_similarity_decrease: float = 0.9,
                     subgraph_approach: Literal[
-                        "connected_components", "louvain", "label_propagation"] = "label_propagation",
+                        "connected_components", "louvain", "label_propagation", "metis", "greedy_modularity", "infomap"] = "label_propagation",
                     distance_conversion: Literal["inverse", "reciprocal", "inverse_logarithmic"] = None,
                     plot_intermediate: bool = False, n_colors=10, color_palette="pastel"):
         """
@@ -2543,9 +2570,6 @@ class TeraHAC(CachedClass):
         
         graph = self.create_similarity_graph(similarity_matrix, threshold=similarity_threshold)
         self.log(f"Created graph from similarity matrix.")
-        
-        graph = self.initialize_graph(graph)
-        self.log(f"Initialized graph.")
         
         palette = None
         node_color = None
@@ -2798,6 +2822,9 @@ class TeraHAC(CachedClass):
         
         total_edges = (n ** 2 - n) / 2
         self.log(f"retained edges: {len(graph.edges) / total_edges * 100:.1f}%")
+        
+        graph = self.initialize_graph(graph)
+        self.log(f"Initialized graph.")
         
         return graph
     

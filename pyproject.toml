@@ -76,6 +76,8 @@ tensorflow-io-gcs-filesystem = { version = "0.31.0", platform = "windows" }
 pyqt5-qt5 = { version = "5.15.2", optional = true }
 build = "0.10.0"
 python-louvain = "*"
+metis = "*"
+infomap = "*"
 
 [tool.poetry.scripts]
 astrocast = 'astrocast.cli_interfaces:cli'
