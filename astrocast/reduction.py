@@ -4,8 +4,9 @@ import logging
 import pickle
 from collections import defaultdict
 from pathlib import Path
-from typing import Literal, Tuple
+from typing import Literal, Tuple, Union
 
+import networkx as nx
 import numpy as np
 import pandas as pd
 import pyinform.shannon
@@ -595,8 +596,13 @@ class UMAP:
 class ClusterTree:
     """ converts linkage matrix to searchable tree"""
     
-    def __init__(self, Z):
-        self.tree = hierarchy.to_tree(Z)
+    def __init__(self, Z: Union[np.ndarray, nx.Graph]):
+        
+        if isinstance(Z, np.ndarray):
+            self.tree = hierarchy.to_tree(Z)
+        else:
+            self.tree = Z
+        
         self.root_id = np.max(Z[:, :2]) + 1
     
     def get_root(self):
