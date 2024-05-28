@@ -2714,9 +2714,8 @@ class TeraHAC(CachedClass):
         
         return graph, linkage_matrix
     
-    @staticmethod
     @wrapper_local_cache
-    def distance_to_similarity(distance_matrix, method: Literal['inverse', 'gaussian'] = 'gaussian', sigma=1.0):
+    def distance_to_similarity(self, distance_matrix, method: Literal['inverse', 'gaussian'] = 'gaussian', sigma=1.0):
         """
         Convert a distance matrix to a similarity matrix using the specified method.
 
@@ -2974,7 +2973,8 @@ class TeraHAC(CachedClass):
         
         logging.info(
                 f"Number of iterations: {counter}. Final sample size: {sample_size}. "
-                f"Time {humanize.naturaldelta(time.time() - start_time)}")
+                f"Time {humanize.naturaldelta(time.time() - start_time)}. "
+                f"Final metrics: {metrics}")
         
         return {
             'optimal_sigma':     sigma,
