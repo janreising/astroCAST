@@ -2825,7 +2825,7 @@ class TeraHAC(CachedClass):
     
     @wrapper_local_cache
     def distance_to_similarity(self, distance_matrix, method: Literal['inverse', 'gaussian'] = 'gaussian', sigma=1.0,
-                               ignore_cache: bool = False):
+                               inplace=False, ignore_cache: bool = False):
         """
         Convert a distance matrix to a similarity matrix using the specified method.
 
@@ -2849,12 +2849,31 @@ class TeraHAC(CachedClass):
             >>> similarity_matrix = TeraHAC.distance_to_similarity(distance_matrix, method='gaussian', sigma=1.0)
         """
         
-        if method == 'inverse':
-            similarity_matrix = 1 / distance_matrix
-        elif method == 'gaussian':
-            similarity_matrix = np.exp(-distance_matrix ** 2 / (2.0 * sigma ** 2))
+        if inplace:
+            
+            similarity_matrix = distance_matrix
+            
+            if method == 'inverse':
+                np.reciprocal(similarity_matrix, out=similarity_matrix)
+            
+            elif method == 'gaussian':
+                np.square(similarity_matrix, out=similarity_matrix)
+                np.divide(similarity_matrix, -2.0 * sigma ** 2, out=similarity_matrix)
+                np.exp(similarity_matrix, out=similarity_matrix)
+            
+            else:
+                raise ValueError("Unknown method: choose 'inverse' or 'gaussian'")
         else:
-            raise ValueError("Unknown method: choose 'inverse' or 'gaussian'")
+            
+            if method == 'inverse':
+                similarity_matrix = 1 / distance_matrix
+            
+            elif method == 'gaussian':
+                similarity_matrix = np.exp(-distance_matrix ** 2 / (2.0 * sigma ** 2))
+            
+            else:
+                raise ValueError("Unknown method: choose 'inverse' or 'gaussian'")
+        
         return similarity_matrix
     
     @staticmethod
