@@ -2307,6 +2307,58 @@ class TeraHAC(CachedClass):
         import xxhash
         return xxhash.xxh32(np.array([self.epsilon, self.threshold])).intdigest()
     
+    @wrapper_local_cache
+    def create_similarity_graph(self, similarity_matrix, threshold=None, k=None):
+        """
+        Create a similarity graph from a similarity matrix.
+
+        This method constructs a graph from the given similarity matrix by adding edges between nodes based on a specified threshold and/or the top-k most similar nodes.
+
+        Args:
+            similarity_matrix (np.ndarray): An NxN matrix representing similarities between nodes.
+            threshold (float, optional): A threshold value for adding edges. Only pairs with similarity above this threshold will be connected. Default is None.
+            k (int, optional): The number of top similar nodes to connect for each node. If specified, the threshold parameter is also considered. Default is None.
+
+        Returns:
+            networkx.Graph: A graph where nodes are connected based on the similarity criteria.
+
+        Notes:
+            - If both threshold and k are None, no edges will be added to the graph.
+            - The method logs the percentage of retained edges compared to the total possible edges.
+
+        Example:
+            >>> similarity_matrix = np.random.rand(10, 10)
+            >>> th = TeraHAC(epsilon=0.1, threshold=0.5)
+            >>> graph = th.create_similarity_graph(similarity_matrix, threshold=0.7, k=3)
+            >>> print(graph.edges(data=True))
+        """
+        
+        n = similarity_matrix.shape[0]
+        graph = nx.Graph()
+        
+        if threshold is not None:
+            # Add edges based on the threshold
+            rows, cols = np.where(np.triu(similarity_matrix, k=1) >= threshold)
+            for i, j in tqdm(zip(rows, cols), total=len(rows), desc="Adding threshold-based edges"):
+                graph.add_edge(i, j, weight=similarity_matrix[i, j])
+        
+        if k is not None:
+            # Add edges based on the top-k similar nodes
+            for i in tqdm(range(n), desc="Adding top-k based edges"):
+                sorted_indices = np.argsort(similarity_matrix[i])[::-1][
+                                 :k + 1]  # include self in top-k, will exclude later
+                for idx in sorted_indices:
+                    if idx != i and not graph.has_edge(i, idx):
+                        graph.add_edge(i, idx, weight=similarity_matrix[i, idx])
+        
+        total_edges = (n ** 2 - n) / 2
+        self.log(f"retained edges: {len(graph.edges) / total_edges * 100:.1f}%")
+        
+        graph = self.initialize_graph(graph)
+        self.log(f"Initialized graph.")
+        
+        return graph
+    
     @staticmethod
     def initialize_graph(graph):
         """
@@ -2336,12 +2388,15 @@ class TeraHAC(CachedClass):
             >>> print(initialized_graph.nodes(data=True))
         """
         
-        for node in graph.nodes:
+        # Initialize node attributes with a progress bar
+        for node in tqdm(graph.nodes, desc="Initializing node attributes"):
             graph.nodes[node]['cluster_size'] = 1
             graph.nodes[node]['min_merge_similarity'] = float('inf')
             graph.nodes[node]['max_merge_similarity'] = 0
             graph.nodes[node]['max_weight'] = 0  # Initialize max_weight
-        for u, v, data in graph.edges(data=True):
+        
+        # Update max_weight attribute based on edge weights with a progress bar
+        for u, v, data in tqdm(graph.edges(data=True), desc="Updating max weights"):
             weight = data['weight']
             graph.nodes[u]['max_weight'] = max(graph.nodes[u]['max_weight'], weight)
             graph.nodes[v]['max_weight'] = max(graph.nodes[v]['max_weight'], weight)
@@ -2537,7 +2592,8 @@ class TeraHAC(CachedClass):
         return new_node
     
     @wrapper_local_cache
-    def run_terahac(self, similarity_matrix: np.ndarray, similarity_threshold: float = 0.5,
+    def run_terahac(self, similarity_matrix: np.ndarray,
+                    similarity_threshold: float = 0.5, retain_top_n_nodes: int = None,
                     stop_after=10e6, parallel: bool = False,
                     zero_similarity_decrease: float = 0.9,
                     subgraph_approach: Literal[
@@ -2551,7 +2607,8 @@ class TeraHAC(CachedClass):
 
         Args:
             similarity_matrix (np.ndarray): The input similarity matrix.
-            similarity_threshold (float, optional): The threshold for creating edges in the similarity graph. Default is 0.5.
+            similarity_threshold (float, optional): A threshold value for adding edges. Only pairs with similarity above this threshold will be connected. Default is None.
+            retain_top_n_nodes (int, optional): The number of top similar nodes to connect for each node. If specified, the threshold parameter is also considered. Default is None.
             stop_after (int, optional): The maximum number of iterations before stopping. Default is 10e6.
             parallel (bool, optional): Whether to run the subgraph HAC in parallel. Default is False.
             zero_similarity_decrease (float, optional): Factor to decrease zero similarities by. Default is 0.9.
@@ -2570,7 +2627,7 @@ class TeraHAC(CachedClass):
             >>> graph, linkage_matrix = th.run_terahac(similarity_matrix, plot_intermediate=True)
         """
         
-        graph = self.create_similarity_graph(similarity_matrix, threshold=similarity_threshold)
+        graph = self.create_similarity_graph(similarity_matrix, threshold=similarity_threshold, k=retain_top_n_nodes)
         self.log(f"Created graph from similarity matrix.")
         
         palette = None
@@ -2781,54 +2838,6 @@ class TeraHAC(CachedClass):
         else:
             raise ValueError("Unknown method: choose 'inverse' or 'gaussian'")
         return similarity_matrix
-    
-    @wrapper_local_cache
-    def create_similarity_graph(self, similarity_matrix, threshold=None, k=None):
-        """
-        Create a similarity graph from a similarity matrix.
-
-        This method constructs a graph from the given similarity matrix by adding edges between nodes based on a specified threshold or the top-k most similar nodes.
-
-        Args:
-            similarity_matrix (np.ndarray): An NxN matrix representing similarities between nodes.
-            threshold (float, optional): A threshold value for adding edges. Only pairs with similarity above this threshold will be connected. Default is None.
-            k (int, optional): The number of top similar nodes to connect for each node. If specified, the threshold parameter is ignored. Default is None.
-
-        Returns:
-            networkx.Graph: A graph where nodes are connected based on the similarity criteria.
-
-        Notes:
-            - If both threshold and k are None, no edges will be added to the graph.
-            - The method logs the percentage of retained edges compared to the total possible edges.
-
-        Example:
-            >>> similarity_matrix = np.random.rand(10, 10)
-            >>> th = TeraHAC(epsilon=0.1, threshold=0.5)
-            >>> graph = th.create_similarity_graph(similarity_matrix, threshold=0.7)
-            >>> print(graph.edges(data=True))
-        """
-        
-        n = similarity_matrix.shape[0]
-        graph = nx.Graph()
-        
-        for i in range(n):
-            for j in range(i + 1, n):
-                similarity = similarity_matrix[i, j]
-                if threshold is not None and similarity >= threshold:
-                    graph.add_edge(i, j, weight=similarity)
-                elif k is not None:
-                    sorted_indices = np.argsort(similarity_matrix[i])[::-1]
-                    for idx in sorted_indices[:k]:
-                        if idx != i:
-                            graph.add_edge(i, idx, weight=similarity_matrix[i, idx])
-        
-        total_edges = (n ** 2 - n) / 2
-        self.log(f"retained edges: {len(graph.edges) / total_edges * 100:.1f}%")
-        
-        graph = self.initialize_graph(graph)
-        self.log(f"Initialized graph.")
-        
-        return graph
     
     @staticmethod
     def convert_to_linkage_matrix(dendrogram_nodes, num_points):
