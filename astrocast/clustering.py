@@ -2339,7 +2339,10 @@ class TeraHAC(CachedClass):
         if threshold is not None:
             similarity_matrix = ma.masked_where(similarity_matrix < threshold, similarity_matrix, copy=False)
         
-        for i in tqdm(range(n), desc="Adding edges"):
+        total_edges = (n ** 2 - n) / 2
+        progress_bar = tqdm(total=total_edges, desc="Collecting edges")
+        
+        for i in range(n):
             
             edges = []
             if k is not None:
@@ -2354,8 +2357,10 @@ class TeraHAC(CachedClass):
                     edges.append((i, j, similarity_matrix[i, j]))
             
             graph.add_weighted_edges_from(edges)
+            progress_bar.update(n - i + 1)
         
-        total_edges = (n ** 2 - n) / 2
+        progress_bar.close()
+        
         self.log(f"retained edges: {len(graph.edges) / total_edges * 100:.1f}%")
         
         graph = self.initialize_graph(graph)
