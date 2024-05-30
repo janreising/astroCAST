@@ -14,6 +14,7 @@ from typing import List, Literal, Tuple, Union
 import awkward as ak
 import dask.array as da
 import h5py
+import humanize
 import numpy as np
 import pandas as pd
 import py.path
@@ -269,6 +270,9 @@ def wrapper_local_cache(f):
         logger.debug(f"function: {f.__name__}")
         logger.debug(f"args: {args}")
         logger.debug(f"kwargs: {kwargs}")
+        
+        if isinstance(f, types.FunctionType) and "ignore_cache" in list(kwargs.keys()) and kwargs["ignore_cache"]:
+            return f(*args, **kwargs)
         
         if isinstance(f, types.FunctionType) and "cache_path" in list(kwargs.keys()):
             cache_path = kwargs["cache_path"]
@@ -1875,8 +1879,35 @@ class Normalization:
 
 class CachedClass:
     
-    def __init__(self, cache_path=None, logging_level=logging.INFO, logger_name: str = "CachedClass"):
-        
+    def __init__(self, cache_path: Union[Path, str] = None,
+                 logging_level=logging.INFO, logger_name: str = "CachedClass"):
+        """
+        Initializes the CachedClass instance.
+
+        This constructor sets up the cache path and initializes the logging configuration
+        with the specified logging level and logger name. It also initializes time tracking
+        for logging purposes.
+
+        Args:
+            cache_path (str or Path, optional): The path where cache files will be stored.
+                If not specified, caching is disabled. If the path does not exist, it will be created.
+            logging_level (int, optional): The logging level for the logger. Default is logging.INFO.
+            logger_name (str, optional): The name of the logger. Default is "CachedClass".
+
+        .. note::
+            - If a string is provided for `cache_path`, it will be converted to a Path object.
+            - The logging format includes the time, logger name, logging level, and message.
+            - Time tracking variables `t0` and `last_msg_t0` are initialized for use in logging.
+
+        .. caution::
+            - Ensure the provided cache path is a valid directory or can be created.
+
+        Raises:
+            AssertionError: If the cache path cannot be created.
+
+        Example:
+            >>> cc = CachedClass(cache_path='/path/to/cache', logging_level=logging.DEBUG, logger_name='MyLogger')
+        """
         if cache_path is not None:
             
             if isinstance(cache_path, str):
@@ -1890,9 +1921,60 @@ class CachedClass:
         self.cache_path = cache_path
         
         # set logging level
-        logging.basicConfig()
+        logging.basicConfig(format='%(asctime)s:%(name)s:%(levelname)s: %(message)s', datefmt='%H:%M:%S')
         self.logger = logging.getLogger(logger_name)
         self.logger.setLevel(logging_level)
+        self.logging_level = logging_level
+        
+        self.t0 = time.time()
+        self.last_msg_t0 = self.t0
+    
+    def log(self, msg: str, level=logging.INFO):
+        """Logs a message with a specified logging level.
+
+            This method logs a message along with the time elapsed since the last log
+            message and since the logger was initialized. It formats the message to include
+            human-readable time deltas and logs it using the appropriate logging level.
+
+            Args:
+                msg (str): The message to be logged.
+                level (int): The logging level at which the message should be logged. Default is logging.INFO.
+
+            .. note::
+                - The method uses the `humanize` library to convert time deltas into a natural language format.
+                - The method updates `self.last_msg_t0` to the current time after logging the message.
+
+            .. caution::
+                - Make sure the `humanize` library is installed to avoid import errors.
+                - The `logging.basicConfig()` should be called before using this method to ensure the logging configuration is set up properly.
+
+            Example:
+                >>> logger_instance = CachedClass()
+                >>> logger_instance.log("This is an info message.")
+                >>> logger_instance.log("This is a warning message.", level=logging.WARNING)
+
+            """
+        
+        if level >= self.logging_level:
+            
+            t1 = time.time()
+            msg = f"{humanize.naturaldelta(t1 - self.last_msg_t0)}: {msg}"
+            
+            if level == logging.INFO:
+                self.logger.info(msg)
+            elif level == logging.WARNING:
+                self.logger.warning(msg)
+            elif level == logging.DEBUG:
+                self.logger.debug(msg)
+            elif level == logging.ERROR:
+                self.logger.error(msg)
+            else:
+                self.logger.info(msg)
+            
+            self.last_msg_t0 = t1
+    
+    def __hash__(self):
+        return 1
     
     @wrapper_local_cache
     def print_cache_path(self):
@@ -1951,37 +2033,3 @@ def download_pretrained_models(save_path):
             )
     
     logging.info(f"Downloaded sample datasets to: {save_path}")
-
-
-class MiniLogger():
-    
-    def __init__(self, logger_name="ML", level=logging.INFO):
-        import time
-        import logging
-        
-        logging.basicConfig()
-        self.logger = logging.getLogger(logger_name)
-        self.logger.setLevel(level)
-        
-        self.t0 = time.time()
-        self.last_msg_t0 = self.t0
-    
-    def log(self, msg: str, level=logging.INFO):
-        
-        import humanize
-        
-        t1 = time.time()
-        msg = f"{humanize.naturaldelta(t1 - self.last_msg_t0)} ({humanize.naturaldelta(t1 - self.t0)}): {msg}"
-        
-        if level == logging.INFO:
-            self.logger.info(msg)
-        elif level == logging.WARNING:
-            self.logger.warning(msg)
-        elif level == logging.DEBUG:
-            self.logger.debug(msg)
-        elif level == logging.ERROR:
-            self.logger.error(msg)
-        else:
-            self.logger.info(msg)
-        
-        self.last_msg_t0 = t1
