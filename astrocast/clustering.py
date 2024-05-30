@@ -26,6 +26,7 @@ from dtaidistance import dtw, dtw_barycenter
 from matplotlib import pyplot as plt
 from matplotlib.colors import LinearSegmentedColormap
 from networkx.algorithms import community as nx_community
+from numpy import ma
 from scipy.cluster.hierarchy import fcluster
 from scipy.spatial import KDTree
 from sklearn import cluster, ensemble, gaussian_process, linear_model, neighbors, neural_network, tree
@@ -2336,19 +2337,19 @@ class TeraHAC(CachedClass):
         graph = nx.Graph()
         
         if threshold is not None:
-            # Add edges based on the threshold
-            rows, cols = np.where(np.triu(similarity_matrix, k=1) >= threshold)
-            for i, j in tqdm(zip(rows, cols), total=len(rows), desc="Adding threshold-based edges"):
-                graph.add_edge(i, j, weight=similarity_matrix[i, j])
+            similarity_matrix = ma.masked_where(similarity_matrix < threshold, similarity_matrix, copy=False)
         
-        if k is not None:
-            # Add edges based on the top-k similar nodes
-            for i in tqdm(range(n), desc="Adding top-k based edges"):
-                sorted_indices = np.argsort(similarity_matrix[i])[::-1][
-                                 :k + 1]  # include self in top-k, will exclude later
-                for idx in sorted_indices:
-                    if idx != i and not graph.has_edge(i, idx):
-                        graph.add_edge(i, idx, weight=similarity_matrix[i, idx])
+        for i in tqdm(range(n), desc="Adding edges"):
+            if k is not None:
+                # Get top-k indices from the upper triangle only, excluding the diagonal
+                sorted_indices = similarity_matrix[i, i + 1:].argsort()[::-1][:k]
+                top_k_indices = sorted_indices + i + 1
+            else:
+                top_k_indices = range(i + 1, n)
+            
+            for j in top_k_indices:
+                if not ma.is_masked(similarity_matrix[i, j]):
+                    graph.add_edge(i, j, weight=similarity_matrix[i, j])
         
         total_edges = (n ** 2 - n) / 2
         self.log(f"retained edges: {len(graph.edges) / total_edges * 100:.1f}%")
