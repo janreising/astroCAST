@@ -2347,7 +2347,12 @@ class TeraHAC(CachedClass):
             edges = []
             if k is not None:
                 # Get top-k indices from the upper triangle only, excluding the diagonal
-                sorted_indices = similarity_matrix[i, i + 1:].argsort()[::-1][:k]
+                
+                if threshold is not None:
+                    sorted_indices = similarity_matrix[i, i + 1:].argsort(fill_value=0)[::-1][:k]
+                else:
+                    sorted_indices = similarity_matrix[i, i + 1:].argsort()[::-1][:k]
+                
                 top_k_indices = sorted_indices + i + 1
             else:
                 top_k_indices = range(i + 1, n)
