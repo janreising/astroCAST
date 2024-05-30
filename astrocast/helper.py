@@ -320,8 +320,8 @@ def wrapper_local_cache(f):
                     logger.info(f"multiple saves found. files should be deleted: {files}")
                 
                 # save result
-                logger.info(f"saving to: {cache_path.name}")
                 save_value(cache_path, result)
+                logger.info(f"saved to: {cache_path.name}")
         
         else:
             
