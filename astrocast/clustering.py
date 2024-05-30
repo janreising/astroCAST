@@ -2970,11 +2970,10 @@ class TeraHAC(CachedClass):
         
         best_score = float('inf')
         best_params = None
-        n_calls = initial_n_calls
         
         with tqdm(total=max_time, desc="Optimizing parameters") as pbar:
             while time.time() - start_time < max_time:
-                res = gp_minimize(objective, space, n_calls=n_calls, random_state=0, verbose=False)
+                res = gp_minimize(objective, space, n_calls=10, random_state=0, verbose=False)
                 if res.fun < best_score:
                     best_score = res.fun
                     best_params = res.x
@@ -2986,12 +2985,6 @@ class TeraHAC(CachedClass):
                 
                 sample_size += sample_increment
                 pbar.update(min(10, int(max_time - (time.time() - start_time))))
-                
-                # Optionally adjust n_calls based on progress and remaining time
-                elapsed_time = time.time() - start_time
-                remaining_time = max_time - elapsed_time
-                if remaining_time < max_time / 2:
-                    n_calls = max(5, int(n_calls / 2))  # Reduce n_calls as time runs out to refine more frequently
         
         optimal_sigma = best_params[0]
         optimal_threshold = best_params[1]
