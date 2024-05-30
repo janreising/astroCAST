@@ -2340,6 +2340,8 @@ class TeraHAC(CachedClass):
             similarity_matrix = ma.masked_where(similarity_matrix < threshold, similarity_matrix, copy=False)
         
         for i in tqdm(range(n), desc="Adding edges"):
+            
+            edges = []
             if k is not None:
                 # Get top-k indices from the upper triangle only, excluding the diagonal
                 sorted_indices = similarity_matrix[i, i + 1:].argsort()[::-1][:k]
@@ -2349,7 +2351,9 @@ class TeraHAC(CachedClass):
             
             for j in top_k_indices:
                 if not ma.is_masked(similarity_matrix[i, j]):
-                    graph.add_edge(i, j, weight=similarity_matrix[i, j])
+                    edges.append((i, j, similarity_matrix[i, j]))
+            
+            graph.add_weighted_edges_from(edges)
         
         total_edges = (n ** 2 - n) / 2
         self.log(f"retained edges: {len(graph.edges) / total_edges * 100:.1f}%")
