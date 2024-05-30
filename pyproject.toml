@@ -75,9 +75,10 @@ tensorflow = "*"
 tensorflow-io-gcs-filesystem = { version = "0.31.0", platform = "windows" }
 pyqt5-qt5 = { version = "5.15.2", optional = true }
 build = "0.10.0"
-python-louvain = "*"
-metis = "*"
-infomap = "*"
+python-louvain = { version = "*", optional = true }
+metis = { version = "*", optional = true }
+infomap = { version = "*", optional = true }
+scikit-optimize = "*"
 
 [tool.poetry.scripts]
 astrocast = 'astrocast.cli_interfaces:cli'
@@ -86,7 +87,8 @@ astrocast = 'astrocast.cli_interfaces:cli'
 video_player = ["napari", "pyqt5-qt5", "napari-plot", "napari-time-series-plotter", "pydantic"]
 testing = ["pytest", "pytest-cov", "pytest-xdist", "pytest-rerunfailures"]
 doc = ["sphinx", "sphinx-rtd-theme", "sphinx-autodoc-typehints"]
-all = ["pytest-rerunfailures", "pyqt5-qt5", "napari", "napari-plot", "napari-time-series-plotter", "pydantic", "pytest", "pytest-cov", "pytest-xdist", "sphinx", "sphinx-rtd-theme", "sphinx-autodoc-typehints"]
+graph = ["python-louvain", "metis", "infomap"]
+all = ["pytest-rerunfailures", "pyqt5-qt5", "napari", "napari-plot", "napari-time-series-plotter", "pydantic", "pytest", "pytest-cov", "pytest-xdist", "sphinx", "sphinx-rtd-theme", "sphinx-autodoc-typehints", "python-louvain", "metis", "infomap"]
 
 [tool.pytest.ini_options]
 markers = [
