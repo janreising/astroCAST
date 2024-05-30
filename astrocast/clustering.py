@@ -15,7 +15,6 @@ from typing import List, Literal, Tuple, Union
 import dask
 import fastcluster
 import hdbscan
-import humanize
 import networkx as nx
 import numpy as np
 import pandas as pd
@@ -2889,44 +2888,33 @@ class TeraHAC(CachedClass):
     
     @wrapper_local_cache
     def approximate_optimal_value(self, distance_matrix: np.ndarray, required_metrics: dict = None,
-                                  method: Literal['inverse', 'gaussian'] = 'gaussian',
-                                  sigma_0: float = 0.01, similarity_threshold_0: float = 0.99,
-                                  max_time: float = 60, sample_size_0: int = 25,
-                                  num_samples: int = 3):
+                                  method: Literal['inverse', 'gaussian'] = 'gaussian', max_time: float = 60,
+                                  sample_size_0: int = 25, num_samples: int = 3,
+                                  sample_increment: int = 5, tolerance: float = 0.01):
         """
         Approximate the optimal value of parameters for a sparsely connected graph from a distance matrix.
-        
+
         This method computes optimal values for parameters that define the sparsity of a graph derived from the input distance matrix. It iteratively adjusts parameters to meet the required metrics.
-        
+
         Args:
             distance_matrix (np.ndarray): An NxN distance matrix.
-            required_metrics (dict, optional): A dictionary specifying the required range for certain metrics. For example, {"sparsity": (0.4, 0.6)}. Default is None, which sets it to {"sparsity": (0.4, 0.6)}.            sigma_0 (float, optional): Starting value for sigma used in the Gaussian conversion. Default is 0.01.
-            method: Method to convert distance matrix to similarity matrix.
-            sigma_0 (float, optional): Starting value for sigma used in the Gaussian conversion. Default is 0.01.
-            similarity_threshold_0 (float, optional): Starting value for the threshold in the sparsity operation. Default is 0.99.
+            required_metrics (dict, optional): A dictionary specifying the required range for certain metrics. For example, {"sparsity": (0.4, 0.6)}. Default is None.
+            method (str, optional): Method to convert distance matrix to similarity matrix. Default is 'gaussian'.
             max_time (float, optional): Maximum time in seconds that a run is allowed to take; the process will break if it takes longer. Default is 60.
             sample_size_0 (int, optional): Starting sample size of observations. Default is 25.
             num_samples (int, optional): Number of random samples drawn. Default is 3.
-        
+            sample_increment (int, optional): Increment of sample size in each iteration. Default is 5.
+            tolerance (float, optional): Tolerance for early stopping. Default is 0.01.
+
         Returns:
             dict: A dictionary containing the optimal sigma, threshold, and the final metrics.
-        
-        Possible metrics include:
-            - "density": Density of the graph.
-            - "average_degree": Average degree of the nodes.
-            - "sparsity": Sparsity of the graph.
-            - "num_connected_components": Number of connected components in the graph.
-            - "clustering_coefficient": Clustering coefficient of the graph.
-        
-        Example:
-            >>> distance_matrix = np.random.rand(10, 10)
-            >>> required_metrics = {"sparsity": (0.4, 0.6)}
-            >>> terahac = TeraHAC()
-            >>> result = terahac.approximate_optimal_value(distance_matrix, required_metrics)
         """
+        
+        from skopt import gp_minimize
+        from skopt.space import Real
+        from skopt.utils import use_named_args
+        
         start_time = time.time()
-        sigma = sigma_0
-        similarity_threshold = similarity_threshold_0
         
         if required_metrics is None:
             required_metrics = {"sparsity": (0.4, 0.6)}
@@ -2936,98 +2924,78 @@ class TeraHAC(CachedClass):
         else:
             sample_size = sample_size_0
         
-        def check_metrics(ref_metrics, res_metrics):
-            
-            if res_metrics is None:
-                return False
-            
-            for key, (min_val_, max_val_) in ref_metrics.items():
-                if res_metrics[key] < min_val_ or res_metrics[key] > max_val_:
-                    return False
-            
-            return True
+        # Define the search space for sigma and similarity_threshold
+        space = [
+            Real(0.001, 1.0, name='sigma'),
+            Real(0.01, 1.0, name='similarity_threshold')
+            ]
         
-        def adjustment_value(high_or_low: str, value: str, metric: str,
-                             current: float):
-            
-            ref = {
-                ("high", "sigma", "density"):                    0.9,
-                ("high", "sigma", "average_degree"):             0.9,
-                ("high", "sigma", "sparsity"):                   1.1,
-                ("high", "sigma", "clustering_coefficient"):     0.9,
-                ("low", "sigma", "density"):                     1.1,
-                ("low", "sigma", "average_degree"):              1.1,
-                ("low", "sigma", "sparsity"):                    0.9,
-                ("low", "sigma", "clustering_coefficient"):      1.1,
-                
-                ("high", "threshold", "density"):                1.1,
-                ("high", "threshold", "average_degree"):         1.1,
-                ("high", "threshold", "sparsity"):               0.9,
-                ("high", "threshold", "clustering_coefficient"): 1.1,
-                ("low", "threshold", "density"):                 0.9,
-                ("low", "threshold", "average_degree"):          0.9,
-                ("low", "threshold", "sparsity"):                1.1,
-                ("low", "threshold", "clustering_coefficient"):  0.9,
-                }
-            
-            new = current * ref[(high_or_low, value, metric)]
-            
-            self.log(f"{metric} too {high_or_low}! {value} {current:.4f} -> {new:.4f}", logging.DEBUG)
-            
-            return new
-        
-        avg_metrics = None
-        counter = 0
-        metrics = None
-        while time.time() - start_time < max_time and not check_metrics(required_metrics, avg_metrics):
+        @use_named_args(space)
+        def objective(**params):
+            sigma = params['sigma']
+            similarity_threshold = params['similarity_threshold']
             
             metrics_ = []
             for _ in range(num_samples):
-                # Randomly sample the distance matrix
-                indices = random.sample(range(len(distance_matrix)), sample_size)
-                sampled_matrix = distance_matrix[np.ix_(indices, indices)]
-                
-                # Apply Gaussian conversion
-                similarity_matrix = self.distance_to_similarity(sampled_matrix, method=method, sigma=sigma,
-                                                                ignore_cache=True)
-                
-                # Apply thresholding
-                metrics = self.compute_graph_metrics(similarity_matrix, similarity_threshold)
-                metrics_.append(metrics)
+                indices_ = random.sample(range(len(distance_matrix)), sample_size)
+                sampled_matrix_ = distance_matrix[np.ix_(indices_, indices_)]
+                similarity_matrix_ = self.distance_to_similarity(sampled_matrix_, method=method, sigma=sigma,
+                                                                 ignore_cache=True)
+                metric = self.compute_graph_metrics(similarity_matrix_, similarity_threshold)
+                metrics_.append(metric)
             
-            # Calculate the average metric and variability
             avg_metrics = {key: np.mean([m[key] for m in metrics_]) for key in metrics_[0]}
+            score = 0
+            for key, (min_val, max_val) in required_metrics.items():
+                if avg_metrics[key] < min_val:
+                    score += (min_val - avg_metrics[key]) ** 2
+                elif avg_metrics[key] > max_val:
+                    score += (avg_metrics[key] - max_val) ** 2
             
-            # Check against user-defined values
-            if required_metrics:
-                for key, (min_val, max_val) in required_metrics.items():
-                    if avg_metrics[key] < min_val:
-                        
-                        if random.choice([True, False]):
-                            sigma = adjustment_value("low", "sigma", key, sigma)
-                        else:
-                            similarity_threshold *= adjustment_value("low", "threshold", key, similarity_threshold)
-                    
-                    elif avg_metrics[key] > max_val:
-                        
-                        if random.choice([True, False]):
-                            sigma = adjustment_value("high", "sigma", key, sigma)
-                        else:
-                            similarity_threshold = adjustment_value("high", "threshold", key, similarity_threshold)
-            
-            counter += 1
-            if counter % 10 == 0:
-                self.log(f"#{counter}: {[(k, np.round(avg_metrics[k], 3)) for k in required_metrics.keys()]}")
+            return score
+        
+        best_score = float('inf')
+        best_params = None
+        
+        with tqdm(total=max_time, desc="Optimizing parameters") as pbar:
+            while time.time() - start_time < max_time:
+                res = gp_minimize(objective, space, n_calls=10, random_state=0, verbose=False)
+                if res.fun < best_score:
+                    best_score = res.fun
+                    best_params = res.x
+                
+                # Check early stopping condition
+                if best_score <= tolerance:
+                    self.log(f"Early stopping as tolerance reached. Best score: {best_score:.4f}")
+                    break
+                
+                sample_size += sample_increment
+                pbar.update(min(10, int(max_time - (time.time() - start_time))))
+        
+        optimal_sigma = best_params[0]
+        optimal_threshold = best_params[1]
+        
+        final_metrics_ = []
+        for _ in range(num_samples):
+            indices = random.sample(range(len(distance_matrix)), sample_size)
+            sampled_matrix = distance_matrix[np.ix_(indices, indices)]
+            similarity_matrix = self.distance_to_similarity(sampled_matrix, method=method, sigma=optimal_sigma,
+                                                            ignore_cache=True)
+            metrics = self.compute_graph_metrics(similarity_matrix, optimal_threshold)
+            final_metrics_.append(metrics)
+        
+        final_avg_metrics = {key: np.mean([m[key] for m in final_metrics_]) for key in final_metrics_[0]}
         
         self.log(
-                f"Number of iterations: {counter}. Final sample size: {sample_size}. "
-                f"Time {humanize.naturaldelta(time.time() - start_time)}. "
-                f"Final metrics: {[(k, np.round(i, 3)) for k, i in metrics.items()]}")
+                f"Optimization completed in {time.time() - start_time:.2f} seconds. "
+                f"Optimal sigma: {optimal_sigma:.4f}, optimal threshold: {optimal_threshold:.4f}. "
+                f"Final metrics: {[(k, np.round(v, 3)) for k, v in final_avg_metrics.items()]}"
+                )
         
         return {
-            'optimal_sigma':     sigma,
-            'optimal_threshold': similarity_threshold,
-            'final_metrics':     metrics
+            'optimal_sigma':     optimal_sigma,
+            'optimal_threshold': optimal_threshold,
+            'final_metrics':     final_avg_metrics
             }
     
     @staticmethod
