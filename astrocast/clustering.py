@@ -32,7 +32,7 @@ from sklearn import cluster, ensemble, gaussian_process, linear_model, neighbors
 from sklearn.cluster import KMeans
 from sklearn.decomposition import PCA
 from sklearn.metrics import confusion_matrix
-from tqdm import tqdm
+from tqdm.auto import tqdm
 
 from astrocast import helper
 from astrocast.analysis import Events, MultiEvents
