@@ -2671,7 +2671,9 @@ class TeraHAC(CachedClass):
                 
                 # Collect sub graphs
                 sub_graphs = self._get_subgraph(graph, method=subgraph_approach)
-                tqdm.write(f"#{counter}: Collected {len(sub_graphs)} sub graphs.")
+                
+                if len(sub_graphs) > 1:
+                    tqdm.write(f"#{counter}: Collected {len(sub_graphs)} sub graphs.")
                 
                 if plot_intermediate:
                     self.plot_graph(sub_graphs, title=f"SG", color=node_color)
@@ -2687,7 +2689,8 @@ class TeraHAC(CachedClass):
                         for future in tqdm(concurrent.futures.as_completed(futures), total=len(futures)):
                             merges.extend(future.result())
                 
-                tqdm.write(f"#{counter}: Collected {len(merges)} merges.")
+                if len(merges) > 1:
+                    tqdm.write(f"#{counter}: Collected {len(merges)} merges.")
                 
                 # Merge sub graphs
                 for u, v in merges:
@@ -2698,7 +2701,8 @@ class TeraHAC(CachedClass):
                         new_node = graph.nodes[n]
                         linkage_matrix.append([float(u), float(v), new_node["max_weight"], new_node["cluster_size"]])
                 
-                tqdm.write(f"#{counter}: Updated linkage matrix.")
+                if len(merges) > 1:
+                    tqdm.write(f"#{counter}: Updated linkage matrix.")
                 
                 if plot_intermediate:
                     self.plot_graph(graph, title=f"post merge", ax=[ax1], iteration=counter, color=node_color)
@@ -2729,7 +2733,7 @@ class TeraHAC(CachedClass):
                     break
                 
                 counter += 1
-                pbar.update(-len(to_prune))
+                pbar.update(-len(to_prune) - len(merges))
             
             if counter >= stop_after:
                 tqdm.write(f"Prematurely stopped run after {counter} iterations.")
