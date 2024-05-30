@@ -2890,7 +2890,8 @@ class TeraHAC(CachedClass):
     def approximate_optimal_value(self, distance_matrix: np.ndarray, required_metrics: dict = None,
                                   method: Literal['inverse', 'gaussian'] = 'gaussian', max_time: float = 60,
                                   sample_size_0: int = 25, num_samples: int = 3,
-                                  sample_increment: int = 5, tolerance: float = 0.01):
+                                  sample_increment: int = 5, tolerance: float = 0.01,
+                                  initial_n_calls: int = 10):
         """
         Approximate the optimal value of parameters for a sparsely connected graph from a distance matrix.
 
@@ -2900,11 +2901,14 @@ class TeraHAC(CachedClass):
             distance_matrix (np.ndarray): An NxN distance matrix.
             required_metrics (dict, optional): A dictionary specifying the required range for certain metrics. For example, {"sparsity": (0.4, 0.6)}. Default is None.
             method (str, optional): Method to convert distance matrix to similarity matrix. Default is 'gaussian'.
+            sigma_0 (float, optional): Starting value for sigma used in the Gaussian conversion. Default is 0.01.
+            similarity_threshold_0 (float, optional): Starting value for the threshold in the sparsity operation. Default is 0.99.
             max_time (float, optional): Maximum time in seconds that a run is allowed to take; the process will break if it takes longer. Default is 60.
             sample_size_0 (int, optional): Starting sample size of observations. Default is 25.
             num_samples (int, optional): Number of random samples drawn. Default is 3.
             sample_increment (int, optional): Increment of sample size in each iteration. Default is 5.
             tolerance (float, optional): Tolerance for early stopping. Default is 0.01.
+            initial_n_calls (int, optional): Initial number of evaluations per iteration. Default is 10.
 
         Returns:
             dict: A dictionary containing the optimal sigma, threshold, and the final metrics.
@@ -2956,10 +2960,11 @@ class TeraHAC(CachedClass):
         
         best_score = float('inf')
         best_params = None
+        n_calls = initial_n_calls
         
         with tqdm(total=max_time, desc="Optimizing parameters") as pbar:
             while time.time() - start_time < max_time:
-                res = gp_minimize(objective, space, n_calls=10, random_state=0, verbose=False)
+                res = gp_minimize(objective, space, n_calls=n_calls, random_state=0, verbose=False)
                 if res.fun < best_score:
                     best_score = res.fun
                     best_params = res.x
@@ -2971,6 +2976,12 @@ class TeraHAC(CachedClass):
                 
                 sample_size += sample_increment
                 pbar.update(min(10, int(max_time - (time.time() - start_time))))
+                
+                # Optionally adjust n_calls based on progress and remaining time
+                elapsed_time = time.time() - start_time
+                remaining_time = max_time - elapsed_time
+                if remaining_time < max_time / 2:
+                    n_calls = max(5, int(n_calls / 2))  # Reduce n_calls as time runs out to refine more frequently
         
         optimal_sigma = best_params[0]
         optimal_threshold = best_params[1]
