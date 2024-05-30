@@ -2849,7 +2849,7 @@ class TeraHAC(CachedClass):
             >>> similarity_matrix = TeraHAC.distance_to_similarity(distance_matrix, method='gaussian', sigma=1.0)
         """
         
-        if return_same is not None:
+        if return_same:
             
             similarity_matrix = distance_matrix
             
