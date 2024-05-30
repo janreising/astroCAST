@@ -2680,7 +2680,7 @@ class TeraHAC(CachedClass):
                 
                 # Collect merges in sub graphs
                 merges = []
-                if not parallel:
+                if not parallel or len(sub_graphs) < 2:
                     for subgraph in sub_graphs:
                         merges.extend(self.subgraph_hac(subgraph))
                 else:
@@ -2733,7 +2733,7 @@ class TeraHAC(CachedClass):
                     break
                 
                 counter += 1
-                pbar.update(-len(to_prune) - len(merges))
+                pbar.update(len(to_prune) + len(merges))
             
             if counter >= stop_after:
                 tqdm.write(f"Prematurely stopped run after {counter} iterations.")
