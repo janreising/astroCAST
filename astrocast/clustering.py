@@ -2277,7 +2277,9 @@ class CoincidenceDetection:
 class TeraHAC(CachedClass):
     """ TeraHAC class for performing hierarchical agglomerative clustering with caching and logging. """
     
-    def __init__(self, epsilon, threshold,
+    def __init__(self, matrix: np.ndarray,
+                 epsilon: float = 0.1, threshold: float = 0.5,
+                 convert_to_similarity: bool = False,
                  cache_path: Path = None, logging_level=logging.INFO):
         """
         Initialize the TeraHAC instance with specified parameters.
@@ -2285,6 +2287,8 @@ class TeraHAC(CachedClass):
         This constructor sets up the TeraHAC instance by initializing the epsilon and threshold parameters, and configuring the caching and logging functionalities.
 
         Args:
+            matrix: Array containing NxN distances or similarities
+            convert_to_similarity: Flag to indicate if matrix contains similarity values already
             epsilon: The threshold for goodness measure in hierarchical agglomerative clustering.
             threshold: The similarity threshold for merging clusters.
             cache_path (Path, optional): The path where cache files will be stored. Default is None.
@@ -2295,30 +2299,55 @@ class TeraHAC(CachedClass):
             - The logger name is set to "TeraHAC".
 
         Example:
-            >>> th = TeraHAC(epsilon=0.1, threshold=0.5, cache_path=Path('/path/to/cache'), logging_level=logging.DEBUG)
+            >>> matrix = np.random.normal(loc=0.5, scale=0.2, size=(10, 10))
+            >>> th = TeraHAC(matrix, epsilon=0.1, threshold=0.5)
         """
         
         super().__init__(cache_path=cache_path, logging_level=logging_level,
                          logger_name="TeraHAC")
+        self.matrix = matrix
+        self.convert_to_similarity = convert_to_similarity
         self.epsilon = epsilon
         self.threshold = threshold
+        self.hash_value = None
     
     def __hash__(self):
+        
+        if self.hash_value is not None:
+            return self.hash_value
+        
         import xxhash
-        return xxhash.xxh32(np.array([self.epsilon, self.threshold])).intdigest()
+        
+        matrix_hash = xxhash.xxh32(self.matrix).intdigest()
+        final_hash = xxhash.xxh32(np.array(
+                [matrix_hash, self.convert_to_similarity, self.epsilon, self.threshold]
+                )).intdigest()
+        
+        self.hash_value = final_hash
+        return final_hash
     
     @wrapper_local_cache
-    def create_similarity_graph(self, similarity_matrix, threshold=None, k=None):
+    def create_similarity_graph(self,
+                                similarity_threshold: float = 0.5, retain_top_n_nodes: int = None,
+                                sigma: float = None, required_metrics: dict = None,
+                                conversion_method: Literal['inverse', 'gaussian'] = 'gaussian',
+                                modify_matrix: bool = False):
         """
         Create a similarity graph from a similarity matrix.
 
-        This method constructs a graph from the given similarity matrix by adding edges between nodes based on a specified threshold and/or the top-k most similar nodes.
+        This method constructs a graph from the given similarity matrix by adding edges between nodes based on a
+        specified threshold and/or the top-k most similar nodes.
 
         Args:
-            similarity_matrix (np.ndarray): An NxN matrix representing similarities between nodes.
-            threshold (float, optional): A threshold value for adding edges. Only pairs with similarity above this threshold will be connected. Default is None.
-            k (int, optional): The number of top similar nodes to connect for each node. If specified, the threshold parameter is also considered. Default is None.
-
+            similarity_threshold (float, optional): A threshold value for adding edges. Only pairs with similarity above this threshold will be connected. Default is None.
+            retain_top_n_nodes (int, optional): The number of top similar nodes to connect for each node. If specified, the threshold parameter is also considered. Default is None.
+            sigma (float, optional): The sigma parameter for the Gaussian function. Default is 1.0.
+            required_metrics: A dictionary specifying the required range for certain metrics. For example, {"sparsity": (0.4, 0.6)}. Default is None.
+            conversion_method (Literal['inverse', 'gaussian'], optional): The method to convert distances to similarities. Default is 'gaussian'.
+                - 'inverse': Uses the inverse of the distance.
+                - 'gaussian': Uses a Gaussian function to convert distances to similarities.
+            modify_matrix: Switch between modifying matrix in place or create a copy
+            
         Returns:
             networkx.Graph: A graph where nodes are connected based on the similarity criteria.
 
@@ -2333,12 +2362,33 @@ class TeraHAC(CachedClass):
             >>> print(graph.edges(data=True))
         """
         
+        if self.convert_to_similarity:
+            
+            self.log(f"Converting distance matrix to similarity.")
+            if sigma is None:
+                if similarity_threshold is not None:
+                    self.log(f"Sigma not defined, but threshold is. Overwriting threshold.")
+                
+                self.log(f"Approximating optimal sigma and threshold.")
+                opt = self.approximate_optimal_value(self.matrix, required_metrics=required_metrics,
+                                                     method=conversion_method)
+                
+                sigma = opt["optimal_sigma"]
+                similarity_threshold = opt["optimal_threshold"]
+            
+            self.log(f"Starting conversion ...")
+            self.matrix = self.distance_to_similarity(self.matrix, method=conversion_method,
+                                                      sigma=sigma, return_same=modify_matrix)
+            self.hash_value = None
+        
+        similarity_matrix = self.matrix
+        
         n = similarity_matrix.shape[0]
         graph = nx.Graph()
         
-        if threshold is not None:
+        if similarity_threshold is not None:
             self.log(f"Thresholding similarity matrix.")
-            similarity_matrix = ma.masked_where(similarity_matrix < threshold, similarity_matrix, copy=False)
+            similarity_matrix = ma.masked_where(similarity_matrix < similarity_threshold, similarity_matrix, copy=False)
         
         total_edges = (n ** 2 - n) / 2
         progress_bar = tqdm(total=total_edges, desc="Collecting edges")
@@ -2346,13 +2396,13 @@ class TeraHAC(CachedClass):
         for i in range(n):
             
             edges = []
-            if k is not None:
+            if retain_top_n_nodes is not None:
                 # Get top-k indices from the upper triangle only, excluding the diagonal
                 
-                if threshold is not None:
-                    sorted_indices = similarity_matrix[i, i + 1:].argsort(fill_value=0)[::-1][:k]
+                if similarity_threshold is not None:
+                    sorted_indices = similarity_matrix[i, i + 1:].argsort(fill_value=0)[::-1][:retain_top_n_nodes]
                 else:
-                    sorted_indices = similarity_matrix[i, i + 1:].argsort()[::-1][:k]
+                    sorted_indices = similarity_matrix[i, i + 1:].argsort()[::-1][:retain_top_n_nodes]
                 
                 top_k_indices = sorted_indices + i + 1
             else:
@@ -2607,8 +2657,7 @@ class TeraHAC(CachedClass):
         return new_node
     
     @wrapper_local_cache
-    def run_terahac(self, similarity_matrix: np.ndarray,
-                    similarity_threshold: float = 0.5, retain_top_n_nodes: int = None,
+    def run_terahac(self, graph: nx.Graph,
                     stop_after=10e6, parallel: bool = False,
                     zero_similarity_decrease: float = 0.9,
                     subgraph_approach: Literal[
@@ -2621,9 +2670,7 @@ class TeraHAC(CachedClass):
         This method applies the TeraHAC algorithm to the given similarity matrix, iteratively merging clusters based on the specified criteria and parameters. It supports plotting intermediate steps, handling zero similarities, and converting similarities to distances.
 
         Args:
-            similarity_matrix (np.ndarray): The input similarity matrix.
-            similarity_threshold (float, optional): A threshold value for adding edges. Only pairs with similarity above this threshold will be connected. Default is None.
-            retain_top_n_nodes (int, optional): The number of top similar nodes to connect for each node. If specified, the threshold parameter is also considered. Default is None.
+            graph: A graph where nodes are connected based on the similarity criteria.
             stop_after (int, optional): The maximum number of iterations before stopping. Default is 10e6.
             parallel (bool, optional): Whether to run the subgraph HAC in parallel. Default is False.
             zero_similarity_decrease (float, optional): Factor to decrease zero similarities by. Default is 0.9.
@@ -2638,12 +2685,12 @@ class TeraHAC(CachedClass):
 
         Example:
             >>> similarity_matrix = np.random.rand(10, 10)
-            >>> th = TeraHAC(epsilon=0.1, threshold=0.5)
-            >>> graph, linkage_matrix = th.run_terahac(similarity_matrix, plot_intermediate=True)
+            >>> th = TeraHAC(similarity_matrix, epsilon=0.1, threshold=0.5)
+            >>> G = th.create_similarity_graph()
+            >>> graph, linkage_matrix = th.run_terahac(G, plot_intermediate=True)
         """
         
-        graph = self.create_similarity_graph(similarity_matrix, threshold=similarity_threshold, k=retain_top_n_nodes)
-        self.log(f"Created graph from similarity matrix.")
+        similarity_matrix = self.matrix
         
         palette = None
         node_color = None
@@ -2838,6 +2885,7 @@ class TeraHAC(CachedClass):
                 - 'inverse': Uses the inverse of the distance.
                 - 'gaussian': Uses a Gaussian function to convert distances to similarities.
             sigma (float, optional): The sigma parameter for the Gaussian function. Default is 1.0.
+            return_same: Switch between modifying matrix in place or create a copy
 
         Returns:
             np.ndarray: An NxN similarity matrix.
@@ -2927,10 +2975,9 @@ class TeraHAC(CachedClass):
     
     @wrapper_local_cache
     def approximate_optimal_value(self, distance_matrix: np.ndarray, required_metrics: dict = None,
-                                  method: Literal['inverse', 'gaussian'] = 'gaussian', max_time: float = 60,
-                                  sample_size_0: int = 25, num_samples: int = 3,
-                                  sample_increment: int = 5, tolerance: float = 0.01,
-                                  initial_n_calls: int = 10):
+                                  method: Literal['inverse', 'gaussian'] = 'gaussian', max_time: float = 600,
+                                  sample_size_0: int = 100, num_samples: int = 3,
+                                  sample_increment: int = 5, tolerance: float = 0.01):
         """
         Approximate the optimal value of parameters for a sparsely connected graph from a distance matrix.
 
@@ -2940,14 +2987,11 @@ class TeraHAC(CachedClass):
             distance_matrix (np.ndarray): An NxN distance matrix.
             required_metrics (dict, optional): A dictionary specifying the required range for certain metrics. For example, {"sparsity": (0.4, 0.6)}. Default is None.
             method (str, optional): Method to convert distance matrix to similarity matrix. Default is 'gaussian'.
-            sigma_0 (float, optional): Starting value for sigma used in the Gaussian conversion. Default is 0.01.
-            similarity_threshold_0 (float, optional): Starting value for the threshold in the sparsity operation. Default is 0.99.
             max_time (float, optional): Maximum time in seconds that a run is allowed to take; the process will break if it takes longer. Default is 60.
             sample_size_0 (int, optional): Starting sample size of observations. Default is 25.
             num_samples (int, optional): Number of random samples drawn. Default is 3.
             sample_increment (int, optional): Increment of sample size in each iteration. Default is 5.
             tolerance (float, optional): Tolerance for early stopping. Default is 0.01.
-            initial_n_calls (int, optional): Initial number of evaluations per iteration. Default is 10.
 
         Returns:
             dict: A dictionary containing the optimal sigma, threshold, and the final metrics.
