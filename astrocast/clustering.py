@@ -2691,6 +2691,7 @@ class TeraHAC(CachedClass):
         """
         
         similarity_matrix = self.matrix
+        tqdm.write(f"#nodes: {len(graph.nodes):,d} #edges: {len(graph.edges):,d}")
         
         palette = None
         node_color = None
@@ -2705,11 +2706,9 @@ class TeraHAC(CachedClass):
         with tqdm(total=graph.number_of_nodes(), desc="Nodes remaining") as pbar:
             while graph.number_of_edges() > 0 and counter < stop_after:
                 num_nodes = len(graph.nodes)
-                num_edges = len(graph.edges)
+                
                 pbar.n = num_nodes
                 pbar.refresh()
-                
-                tqdm.write(f"#nodes: {num_nodes:,d} #edges: {num_edges:,d}")
                 
                 ax0, ax1, ax2 = None, None, None
                 if plot_intermediate:
@@ -2781,7 +2780,7 @@ class TeraHAC(CachedClass):
                     break
                 
                 counter += 1
-                pbar.update(len(to_prune) + len(merges))
+                # pbar.update(len(to_prune) + len(merges))
             
             if counter >= stop_after:
                 tqdm.write(f"Prematurely stopped run after {counter} iterations.")
