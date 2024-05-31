@@ -2337,6 +2337,7 @@ class TeraHAC(CachedClass):
         graph = nx.Graph()
         
         if threshold is not None:
+            self.log(f"Thresholding similarity matrix.")
             similarity_matrix = ma.masked_where(similarity_matrix < threshold, similarity_matrix, copy=False)
         
         total_edges = (n ** 2 - n) / 2

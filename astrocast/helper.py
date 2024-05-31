@@ -104,7 +104,7 @@ def wrapper_local_cache(f):
     seed = 1
     
     def hash_from_ndarray(v):
-        return xxhash.xxh64(v.flatten(), seed=1).intdigest()
+        return xxhash.xxh64(v, seed=1).intdigest()
     
     def hash_arg(arg):
         
