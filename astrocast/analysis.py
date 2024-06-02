@@ -631,7 +631,9 @@ class Events(CachedClass):
             counts = pd.DataFrame(data=counts, index=unique_clusters, columns=unique_groups)
         
         if relative:
-            counts /= counts.sum()
+            rel_counts = counts / counts.sum()
+            
+            counts = pd.concat([counts, rel_counts], axis=1)
         
         if transpose:
             counts = counts.transpose()
