@@ -2720,7 +2720,7 @@ class TeraHAC(CachedClass):
                 sub_graphs = self._get_subgraph(graph, method=subgraph_approach)
                 
                 if len(sub_graphs) > 1:
-                    tqdm.write(f"#{counter}: Collected {len(sub_graphs)} sub graphs.")
+                    self.log(f"#{counter}: Collected {len(sub_graphs)} sub graphs.", level=logging.DEBUG)
                 
                 if plot_intermediate:
                     self.plot_graph(sub_graphs, title=f"SG", color=node_color)
@@ -2733,11 +2733,17 @@ class TeraHAC(CachedClass):
                 else:
                     with concurrent.futures.ThreadPoolExecutor() as executor:
                         futures = [executor.submit(self.subgraph_hac, subgraph) for subgraph in sub_graphs]
-                        for future in tqdm(concurrent.futures.as_completed(futures), total=len(futures)):
+                        
+                        if self.logging_level < logging.INFO:
+                            iterator = tqdm(concurrent.futures.as_completed(futures), total=len(futures))
+                        else:
+                            iterator = futures
+                        
+                        for future in iterator:
                             merges.extend(future.result())
                 
                 if len(merges) > 1:
-                    tqdm.write(f"#{counter}: Collected {len(merges)} merges.")
+                    self.log(f"#{counter}: Collected {len(merges)} merges.", level=logging.DEBUG)
                 
                 # Merge sub graphs
                 for u, v in merges:
@@ -2749,7 +2755,7 @@ class TeraHAC(CachedClass):
                         linkage_matrix.append([float(u), float(v), new_node["max_weight"], new_node["cluster_size"]])
                 
                 if len(merges) > 1:
-                    tqdm.write(f"#{counter}: Updated linkage matrix.")
+                    self.log(f"#{counter}: Updated linkage matrix.", level=logging.DEBUG)
                 
                 if plot_intermediate:
                     self.plot_graph(graph, title=f"post merge", ax=[ax1], iteration=counter, color=node_color)
@@ -2768,7 +2774,7 @@ class TeraHAC(CachedClass):
                 graph.remove_nodes_from(to_prune)
                 
                 if len(to_prune) > 0:
-                    tqdm.write(f"#{counter}: Pruned {len(to_prune)} nodes.")
+                    self.log(f"#{counter}: Pruned {len(to_prune)} nodes.", level=logging.DEBUG)
                 
                 # Break loop
                 
@@ -2776,14 +2782,14 @@ class TeraHAC(CachedClass):
                     self.plot_graph(graph, title=f"post remove", ax=[ax2], iteration=counter, color=node_color)
                 
                 if len(merges) == 0:
-                    tqdm.write("No more merges are possible.")
+                    self.log("No more merges are possible.")
                     break
                 
                 counter += 1
                 # pbar.update(len(to_prune) + len(merges))
             
             if counter >= stop_after:
-                tqdm.write(f"Prematurely stopped run after {counter} iterations.")
+                self.log(f"Prematurely stopped run after {counter} iterations.", level=logging.WARNING)
             
             if plot_intermediate:
                 self.plot_graph(graph, title=f"Final")
@@ -2805,7 +2811,7 @@ class TeraHAC(CachedClass):
             else:
                 new_min = 0
             
-            tqdm.write("Fixed '0' distances in linkage matrix.")
+            self.log("Fixed '0' distances in linkage matrix.")
             
             # add pruned
             skipped = 0
@@ -2822,7 +2828,7 @@ class TeraHAC(CachedClass):
                     linkage_matrix = np.concatenate([linkage_matrix, fix])
                     new_min *= zero_similarity_decrease
             
-            tqdm.write("Added pruned nodes to linkage matrix..")
+            self.log("Added pruned nodes to linkage matrix..")
             
             # add missing
             all_clusters = np.unique(linkage_matrix[:, 0:2])
@@ -2850,7 +2856,7 @@ class TeraHAC(CachedClass):
                     linkage_matrix = np.concatenate([linkage_matrix, fix])
                     new_min *= zero_similarity_decrease
             
-            tqdm.write("Added missing clusters to linkage matrix.")
+            self.log("Added missing clusters to linkage matrix.")
             
             # convert to distance
             if distance_conversion == "inverse":
@@ -2862,11 +2868,11 @@ class TeraHAC(CachedClass):
             elif distance_conversion is None:
                 pass
             else:
-                tqdm.write(f"Incorrect 'distance_conversion' input ({distance_conversion}. Must be one of "
-                           f"inverse, reciprocal, inverse_logarithmic")
+                self.log(f"Incorrect 'distance_conversion' input ({distance_conversion}. Must be one of "
+                         f"inverse, reciprocal, inverse_logarithmic")
             
             if distance_conversion is not None:
-                tqdm.write("Similarity converted to distances.")
+                self.log("Similarity converted to distances.")
             
             return graph, linkage_matrix
     
