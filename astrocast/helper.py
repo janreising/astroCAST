@@ -110,7 +110,10 @@ def wrapper_local_cache(f):
         
         from astrocast.analysis import Events, Video
         from astrocast.reduction import FeatureExtraction
-        custom_classes = [Events, Video, FeatureExtraction]
+        from astrocast.clustering import TeraHAC
+        import networkx as nx
+        
+        custom_classes = [Events, Video, FeatureExtraction, TeraHAC]
         
         try:
             from astrocast.denoising import SubFrameDataset
@@ -135,6 +138,9 @@ def wrapper_local_cache(f):
         
         elif isinstance(arg, (bool, int, tuple)):
             hashed_value = str(arg)
+        
+        elif isinstance(arg, nx.Graph):
+            hashed_value = nx.weisfeiler_lehman_graph_hash(arg)
         
         elif isinstance(arg, str):
             
