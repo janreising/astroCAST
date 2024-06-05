@@ -2312,7 +2312,7 @@ class TeraHAC(CachedClass):
         self.threshold = threshold
         self.hash_value = None
         
-        self.teraGraph = nx.DiGraph()
+        self.teraGraph = LinkageGraph()
     
     def __hash__(self):
         
@@ -2472,9 +2472,8 @@ class TeraHAC(CachedClass):
         return graph
     
     @staticmethod
-    def _get_subgraph(graph,
-                      method: Literal[
-                          "connected_components", "louvain", "label_propagation", "metis", "greedy_modularity", "infomap"] = "label_propagation"):
+    def _get_subgraph(graph, method: Literal["connected_components", "louvain", "label_propagation", "metis",
+    "greedy_modularity", "infomap"] = "label_propagation"):
         """
         Generate subgraphs from the given graph using a specified community detection method.
 
@@ -2600,8 +2599,7 @@ class TeraHAC(CachedClass):
         self.log(f"Merges performed: {merges}", level=logging.DEBUG)
         return merges
     
-    @staticmethod
-    def merge_clusters(graph, u, v):
+    def merge_clusters(self, graph, u, v):
         """
         Merge two clusters in a graph by combining nodes u and v into a new node.
 
@@ -2630,7 +2628,9 @@ class TeraHAC(CachedClass):
         new_node = max(graph.nodes) + 1  # Ensure new_node is an integer
         graph.add_node(new_node)
         
-        graph.nodes[new_node]['cluster_size'] = graph.nodes[u]['cluster_size'] + graph.nodes[v]['cluster_size']
+        cluster_size = graph.nodes[u]['cluster_size'] + graph.nodes[v]['cluster_size']
+        graph.nodes[new_node]['cluster_size'] = cluster_size
+        self.teraGraph.add_node(new_node, counts=cluster_size)
         graph.nodes[new_node]['min_merge_similarity'] = min(graph.nodes[u]['min_merge_similarity'],
                                                             graph.nodes[v]['min_merge_similarity'],
                                                             graph.edges[u, v]['weight'])
@@ -2752,12 +2752,20 @@ class TeraHAC(CachedClass):
                     if graph.has_edge(u, v):
                         
                         n = self.merge_clusters(graph, u, v)
-                        
                         new_node = graph.nodes[n]
                         
                         # todo
-                        self.teraGraph.add_edge(n, u, weight=new_node['max_weight'])
-                        self.teraGraph.add_edge(n, v, weight=new_node['max_weight'])
+                        
+                        weight = new_node['max_weight']
+                        min_merge_similarity = new_node['min_merge_similarity']
+                        max_merge_similarity = new_node['max_merge_similarity']
+                        
+                        self.teraGraph.add_edge(n, u, weight=weight,
+                                                min_merge_similarity=min_merge_similarity,
+                                                max_merge_similarity=max_merge_similarity)
+                        self.teraGraph.add_edge(n, v, weight=weight,
+                                                min_merge_similarity=min_merge_similarity,
+                                                max_merge_similarity=max_merge_similarity)
                         # todo
                         
                         linkage_matrix.append([float(u), float(v), new_node["max_weight"], new_node["cluster_size"]])
@@ -2882,7 +2890,7 @@ class TeraHAC(CachedClass):
             if distance_conversion is not None:
                 self.log("Similarity converted to distances.")
             
-            return graph, linkage_matrix
+            return self.teraGraph, linkage_matrix
     
     @wrapper_local_cache
     def distance_to_similarity(self, distance_matrix, method: Literal['inverse', 'gaussian'] = 'gaussian', sigma=1.0,
@@ -3189,7 +3197,7 @@ class LinkageGraph:
                 Gets the clusters from the graph and returns a mapping of nodes to cluster IDs.
         """
     
-    def __init__(self, linkage_matrix: np.ndarray, n_observations: int):
+    def __init__(self, linkage_matrix: np.ndarray = None, n_observations: int = None):
         """Initializes the LinkageGraph with a linkage matrix and number of observations.
 
         Args:
@@ -3199,7 +3207,7 @@ class LinkageGraph:
         self.graph, self.root_node = self.create_graph(linkage_matrix, n_observations)
     
     @staticmethod
-    def create_graph(linkage_matrix: np.ndarray, n_observations: int):
+    def create_graph(linkage_matrix: np.ndarray = None, n_observations: int = None):
         """Creates a directed graph from the linkage matrix.
 
         Args:
@@ -3210,31 +3218,40 @@ class LinkageGraph:
             A tuple containing the created graph and the root node.
         """
         graph = nx.DiGraph()
-        new_id = None
+        new_id = 0
         
-        for i in tqdm(range(len(linkage_matrix))):
-            id0, id1, distance, num = linkage_matrix[i, :]
-            id0 = int(id0)
-            id1 = int(id1)
-            new_id = n_observations + i
+        if linkage_matrix is not None:
             
-            if id0 not in graph.nodes:
-                graph.add_node(id0, counts=0)
-                c0 = 1
-            else:
-                c0 = graph.nodes[id0]["counts"]
-            
-            if id1 not in graph.nodes:
-                graph.add_node(id1, counts=0)
-                c1 = 1
-            else:
-                c1 = graph.nodes[id1]["counts"]
-            
-            graph.add_node(new_id, counts=c0 + c1)
-            graph.add_edge(new_id, id0, weight=distance)
-            graph.add_edge(new_id, id1, weight=distance)
+            for i in tqdm(range(len(linkage_matrix))):
+                id0, id1, distance, num = linkage_matrix[i, :]
+                id0 = int(id0)
+                id1 = int(id1)
+                new_id = n_observations + i
+                
+                if id0 not in graph.nodes:
+                    graph.add_node(id0, counts=0)
+                    c0 = 1
+                else:
+                    c0 = graph.nodes[id0]["counts"]
+                
+                if id1 not in graph.nodes:
+                    graph.add_node(id1, counts=0)
+                    c1 = 1
+                else:
+                    c1 = graph.nodes[id1]["counts"]
+                
+                graph.add_node(new_id, counts=c0 + c1)
+                graph.add_edge(new_id, id0, weight=distance)
+                graph.add_edge(new_id, id1, weight=distance)
         
         return graph, new_id
+    
+    def add_node(self, id_: int, **kwargs):
+        self.graph.add_node(id_, **kwargs)
+        self.root_node = np.max(self.graph.nodes)
+    
+    def add_edge(self, id0: int, id1: int, **kwargs):
+        self.graph.add_edge(id0, id1, **kwargs)
     
     def get_descendant_count(self, node):
         """Gets the count of descendant nodes for a given node.
