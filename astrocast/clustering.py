@@ -2712,8 +2712,6 @@ class TeraHAC(CachedClass):
                 pbar.n = num_nodes
                 pbar.refresh()
                 
-                tqdm.write(f"#nodes: {num_nodes:,d} #edges: {num_edges:,d}")
-                
                 ax0, ax1, ax2 = None, None, None
                 if plot_intermediate:
                     fig, (ax0, ax1, ax2) = plt.subplots(1, 3, figsize=(12, 3))
