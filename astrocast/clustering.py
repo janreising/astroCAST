@@ -2305,11 +2305,14 @@ class TeraHAC(CachedClass):
         
         super().__init__(cache_path=cache_path, logging_level=logging_level,
                          logger_name="TeraHAC")
+        
         self.matrix = matrix
         self.convert_to_similarity = convert_to_similarity
         self.epsilon = epsilon
         self.threshold = threshold
         self.hash_value = None
+        
+        self.teraGraph = nx.DiGraph()
     
     def __hash__(self):
         
@@ -2691,7 +2694,6 @@ class TeraHAC(CachedClass):
         """
         
         similarity_matrix = self.matrix
-        tqdm.write(f"#nodes: {len(graph.nodes):,d} #edges: {len(graph.edges):,d}")
         
         palette = None
         node_color = None
@@ -2709,6 +2711,8 @@ class TeraHAC(CachedClass):
                 
                 pbar.n = num_nodes
                 pbar.refresh()
+                
+                tqdm.write(f"#nodes: {num_nodes:,d} #edges: {num_edges:,d}")
                 
                 ax0, ax1, ax2 = None, None, None
                 if plot_intermediate:
@@ -2752,6 +2756,12 @@ class TeraHAC(CachedClass):
                         n = self.merge_clusters(graph, u, v)
                         
                         new_node = graph.nodes[n]
+                        
+                        # todo
+                        self.teraGraph.add_edge(n, u, weight=new_node['max_weight'])
+                        self.teraGraph.add_edge(n, v, weight=new_node['max_weight'])
+                        # todo
+                        
                         linkage_matrix.append([float(u), float(v), new_node["max_weight"], new_node["cluster_size"]])
                 
                 if len(merges) > 1:
