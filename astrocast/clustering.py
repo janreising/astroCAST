@@ -3206,6 +3206,11 @@ class LinkageGraph:
         """
         self.graph, self.root_node = self.create_graph(linkage_matrix, n_observations)
     
+    def __copy__(self):
+        lg = LinkageGraph()
+        lg.graph = self.graph
+        lg.root_node = self.root_node
+    
     @staticmethod
     def create_graph(linkage_matrix: np.ndarray = None, n_observations: int = None):
         """Creates a directed graph from the linkage matrix.
@@ -3262,7 +3267,15 @@ class LinkageGraph:
         Returns:
             The count of descendant nodes.
         """
-        return self.graph.nodes[node]["counts"]
+        
+        try:
+            count = self.graph.nodes[node]["counts"]
+        
+        except KeyError:
+            count = len(nx.descendants(self.graph, node))
+            nx.set_node_attributes(self.graph, {node: {"counts": count}})
+        
+        return count
     
     def get_clusters_by_descendant_count(self, max_leaves: int, min_leaves: int = 1, root_node=None):
         """Recursive function to get clusters by the number of descendant nodes in the graph.
