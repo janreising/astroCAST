@@ -27,6 +27,7 @@ from matplotlib import pyplot as plt
 from matplotlib.colors import LinearSegmentedColormap
 from networkx.algorithms import community as nx_community
 from numpy import ma
+from scipy.cluster import hierarchy
 from scipy.cluster.hierarchy import fcluster
 from scipy.spatial import KDTree
 from sklearn import cluster, ensemble, gaussian_process, linear_model, neighbors, neural_network, tree
@@ -3357,3 +3358,184 @@ class LinkageGraph:
             cluster_id += 1
         
         return mapping
+    
+    def get_distance_between_nodes(self, node_1: int, node_2: int):
+        """
+        Calculate the distance between two nodes in a graph.
+
+        This function finds the shortest path from the root node to each of the
+        given nodes, identifies the lowest common node, and retrieves the weight
+        of the edge from the lowest common node to its connected node.
+
+        Args:
+            node_1: The first node for which to calculate the distance.
+            node_2: The second node for which to calculate the distance.
+
+        Returns:
+            The weight of the edge between the lowest common node and one of its
+            connected nodes.
+        """
+        # Find the shortest path from the root node to each node
+        p1 = nx.shortest_path(self.graph, self.root_node, node_1)
+        p2 = nx.shortest_path(self.graph, self.root_node, node_2)
+        
+        # Convert paths to sets
+        p1 = set(p1)
+        p2 = set(p2)
+        
+        # Find the lowest common node (ancestor)
+        lcn = min(p1.intersection(p2))
+        
+        # Retrieve the weight of the edge from the lowest common node to one of its connected nodes
+        for k, w in self.graph[lcn].items():
+            w = w["weight"]
+        
+        return w
+    
+    def get_distance_matrix_from_nodes(self, nodes: List[int]):
+        """
+        Generate a distance matrix for a list of nodes in a graph.
+
+        This function calculates the pairwise distances between nodes using
+        `get_distance_between_nodes` and fills a symmetric matrix with these distances.
+
+        Args:
+            nodes: A list of nodes for which to calculate the distance matrix.
+
+        Returns:
+            A symmetric distance matrix where each element (i, j) represents the distance
+            between nodes[i] and nodes[j].
+        """
+        N = len(nodes)
+        matrix = np.zeros((N, N), dtype=float)
+        
+        # Iterate over all pairs of nodes
+        for n1 in range(N):
+            for n2 in range(N):
+                # Set diagonal elements to 1 (distance to self)
+                if n1 == n2:
+                    matrix[n1, n2] = 1
+                    matrix[n2, n1] = 1
+                
+                # Skip if the distance is already calculated
+                if matrix[n1, n2] != 0:
+                    continue
+                
+                # Calculate and assign distance
+                w = self.get_distance_between_nodes(nodes[n1], nodes[n2])
+                matrix[n1, n2] = w
+                matrix[n2, n1] = w
+        
+        return matrix
+    
+    def get_barycenter(self, events: Union[Events, MultiEvents], node: int, repeats: int = 1,
+                       initial_sample_fraction: float = 0.1, max_it: int = 500, thr: float = 1e-5,
+                       penalty: float = 0.1, psi: float = None):
+        """
+        Calculate the barycenter (average sequence) of event traces for the children of a given node.
+
+        Args:
+            events: The events object.
+            node: The node for which to calculate the barycenter of its children's traces.
+            repeats: Number of repetitions for the DBA algorithm.
+            initial_sample_fraction: Fraction of initial samples to use in the DBA algorithm.
+            max_it: Maximum number of iterations for the DBA algorithm.
+            thr: Convergence threshold for the DBA algorithm.
+            penalty: Penalty term for the DBA algorithm.
+            psi: Psi parameter for the DBA algorithm.
+
+        Returns:
+            A tuple (bcs, Nc) where bcs is the barycenter sequence and Nc is the number of children.
+        """
+        # Get all leaf node children
+        children = [c for c in self.get_children(node) if self.get_descendant_count(c) == 0]
+        Nc = len(children)
+        
+        # Collect traces of children
+        traces = [events.events.iloc[child].trace for child in children]
+        
+        # Calculate barycenter sequences
+        bcs = []
+        nb_initial_samples = min(1, int(initial_sample_fraction * len(children)))
+        for _ in range(repeats):
+            bc = dtw_barycenter.dba_loop(traces, c=None, nb_initial_samples=nb_initial_samples, max_it=max_it, thr=thr,
+                                         use_c=True, penalty=penalty, psi=psi)
+            bcs.append(bc)
+        
+        if len(bcs) == 1:
+            bcs = bcs[0]
+        
+        return bcs, Nc
+    
+    def plot_cluster_dendrogram(self, events: Union[Events, MultiEvents], matrix: np.ndarray, nodes: List[int],
+                                gap: float = 0.1,
+                                axx: Tuple[plt.axis, plt.axis] = None, figsize: Tuple[int, int] = (7, 10),
+                                x_axis_compression: float = 1,
+                                width_ratios: Tuple[float, float] = (0.75, 0.25)):
+        """
+        Plot a dendrogram with cluster barycenters.
+
+        This function creates a dendrogram from a given distance matrix and plots the
+        barycenters of clusters on a separate axis.
+
+        Args:
+            events: The events object.
+            nodes: List of nodes that were clustered.
+            matrix: A distance matrix to be used for clustering.
+            gap: Gap between clusters in the plot.
+            axx: Axes for plotting, if None, new axes are created.
+            figsize: Size of the figure.
+            x_axis_compression: Factor by which the distance or similarity is compressed. eg., x**(1/2)
+            width_ratios: Width ratios for the dendrogram and barycenter plots.
+
+        Returns:
+            The axes used for plotting the dendrogram and barycenters.
+        """
+        if axx is None:
+            fig, (ax0, ax1) = plt.subplots(1, 2, figsize=figsize, sharey=True, width_ratios=width_ratios)
+        else:
+            ax0, ax1 = axx
+        
+        # Generate dendrogram
+        dn = hierarchy.dendrogram(matrix, orientation="left", color_threshold=0.005, ax=ax0)
+        
+        leaves_color_list = dn['leaves_color_list']
+        
+        # Get positions and ids of leaves
+        temp = [(tick.get_position()[1], int(tick.get_text())) for tick in ax0.yaxis.get_ticklabels()]
+        
+        # Plot barycenters for each cluster
+        for i, (y0, id_) in enumerate(temp):
+            try:
+                bc, n_cn = self.get_barycenter(events, nodes[id_])
+                
+                # Normalize and scale barycenter
+                bc -= bc.min()
+                bc /= bc.max()
+                
+                y1 = temp[i + 1][0] if i + 1 < len(temp) else y0
+                dy = y1 - y0
+                
+                ymin = y0 - dy / 2 + gap * dy
+                ymax = y0 + dy / 2 - gap * dy
+                
+                bc *= (ymax - ymin)
+                bc += ymin
+                
+                ax1.plot(bc, lw=1, color=leaves_color_list[i])
+            
+            except IndexError:
+                print(f"IndexError in step {i} (cluster {id_})")
+        
+        if x_axis_compression != 1:
+            
+            # Define custom scale for x-axis
+            def forward(x):
+                return x ** (1 / x_axis_compression)
+            
+            def inverse(x):
+                return x ** x_axis_compression
+            
+            ax0.set_xscale('function', functions=(forward, inverse))
+        
+        return ax0, ax1
