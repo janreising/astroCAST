@@ -3338,6 +3338,31 @@ class LinkageGraph:
         Returns:
             A dictionary mapping each node to its cluster ID.
         """
+        
+        cluster_nodes = self.get_reverse_dendrogram(max_leaves=max_leaves, min_leaves=min_leaves,
+                                                    root_node=root_node)
+        
+        mapping = defaultdict(lambda: default_value)
+        cluster_id = 0
+        for cn in cluster_nodes:
+            children = self.get_children(cn)
+            for child in children:
+                mapping[child] = cluster_id
+            cluster_id += 1
+        
+        return mapping
+    
+    def get_reverse_dendrogram(self, max_leaves: int, min_leaves: int = 1, root_node: int = None):
+        """Gets the clusters from the graph.
+
+        Args:
+            max_leaves: Maximum number of descendant nodes below each cluster node.
+            min_leaves: Minimum number of descendant nodes below each cluster node.
+            root_node: Node to start searching for clusters. Defaults to the root node.
+
+        Returns:
+            A dictionary mapping each node to its cluster ID.
+        """
         if root_node is None:
             root_node = self.root_node
         
@@ -3348,16 +3373,8 @@ class LinkageGraph:
             min_leaves = int(min_leaves * self.get_descendant_count(root_node))
         
         cluster_nodes = self.get_clusters_by_descendant_count(max_leaves=max_leaves, min_leaves=min_leaves)
-        mapping = defaultdict(lambda: default_value)
         
-        cluster_id = 0
-        for cn in cluster_nodes:
-            children = self.get_children(cn)
-            for child in children:
-                mapping[child] = cluster_id
-            cluster_id += 1
-        
-        return mapping
+        return cluster_nodes
     
     def get_distance_between_nodes(self, node_1: int, node_2: int):
         """
@@ -3495,6 +3512,10 @@ class LinkageGraph:
             fig, (ax0, ax1) = plt.subplots(1, 2, figsize=figsize, sharey=True, width_ratios=width_ratios)
         else:
             ax0, ax1 = axx
+        
+        if matrix.shape[1] != 4:
+            logging.info(f"Matrix does not have 4 columns. Assuming distance matrix provided.")
+            matrix = hierarchy.linkage(matrix)
         
         # Generate dendrogram
         dn = hierarchy.dendrogram(matrix, orientation="left", color_threshold=0.005, ax=ax0)
