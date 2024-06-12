@@ -3560,3 +3560,107 @@ class LinkageGraph:
             ax0.set_xscale('function', functions=(forward, inverse))
         
         return ax0, ax1
+    
+    def plot_node_dendrogram(self, nodes: Union[int, List[int]], depth: int = 1, branch_distance=1,
+                             palette: str = "Set2", ax: plt.axis = None, figsize=(10, 5)):
+        """
+        Plots a dendrogram for the specified nodes in a graph, illustrating the hierarchical
+        relationships up to a specified depth.
+
+        This function creates a dendrogram visualization for the nodes in the provided graph,
+        displaying their hierarchical structure up to a specified depth. Each branch's color
+        is determined by the given palette, and the plot is created on the provided or a new axis.
+
+        Args:
+            nodes (Union[int, List[int]]): Node or list of nodes for which to plot the dendrogram.
+            depth (int, optional): Depth of the dendrogram. Default is 1.
+            branch_distance (int, optional): Distance between branches. Default is 1.
+            palette (str, optional): Color palette to use for the branches. Default is "Set2".
+            ax (plt.axis, optional): Matplotlib axis to plot on. If None, a new axis is created. Default is None.
+            figsize (tuple, optional): Figure size for the plot. Default is (10, 5).
+
+        Example:
+            >>> graph = nx.DiGraph()  # assume graph is populated with nodes and edges
+            >>> plot_node_dendrogram(graph, nodes=0, depth=2, branch_distance=1.5)
+        """
+        
+        # Reference to the graph
+        graph = self.graph
+        
+        # Create a color palette iterator
+        palette = itertools.cycle(sns.color_palette(palette))
+        
+        # If no axis is provided, create a new figure and axis
+        if ax is None:
+            fig, ax = plt.subplots(1, 1, figsize=figsize)
+        
+        def plot_children(n, center_point: float = 0, distance: float = 1,
+                          start_level=0, color="black", alpha=1):
+            """
+            Recursive function to plot the children of a node.
+
+            Args:
+                n (int): The current node.
+                center_point (float, optional): The x-coordinate for the current node. Default is 0.
+                distance (float, optional): Distance between child nodes. Default is 1.
+                start_level (int, optional): Current level in the hierarchy. Default is 0.
+                color (str, optional): Color for the current branch. Default is "black".
+                alpha (float, optional): Transparency level for the plot lines. Default is 1.
+            """
+            
+            # Get the predecessor of the current node
+            pred = list(graph.predecessors(n))[0]
+            pred = graph[pred]
+            prev_weight = pred[n]["weight"]
+            
+            # Get the count of descendants or use the node's count attribute
+            try:
+                n_counts = graph.nodes[n]["counts"]
+            except KeyError:
+                n_counts = len(nx.descendants(graph, n))
+            
+            # Base case: if no weight or not enough descendants or depth exceeded, return
+            if prev_weight == 0 or n_counts < 2 or start_level > depth:
+                return center_point
+            
+            # Get the two children of the current node
+            c0, c1 = [(k, w["weight"]) for k, w in graph[n].items()]
+            
+            # Plot the current node if at root level
+            if start_level == 0:
+                ax.scatter(center_point, prev_weight, color=color, marker="o")
+            
+            # Plot the leaf nodes if at the specified depth
+            if start_level == depth:
+                ax.scatter(center_point - distance, c0[1], color=color, marker="<", s=10)
+                ax.scatter(center_point + distance, c1[1], color=color, marker=">", s=10)
+            
+            # Draw horizontal line connecting child nodes
+            ax.hlines(y=prev_weight, xmin=center_point - distance, xmax=center_point + distance, color=color,
+                      alpha=alpha)
+            
+            # Draw vertical lines connecting to the child nodes
+            ax.vlines(x=center_point - distance, ymin=c0[1], ymax=prev_weight, color=color, alpha=alpha)
+            ax.vlines(x=center_point + distance, ymin=c1[1], ymax=prev_weight, color=color, alpha=alpha)
+            
+            # Recursive calls to plot children if not at max depth
+            if distance < depth:
+                plot_children(c0[0], center_point=center_point - distance, distance=distance / 2.1,
+                              start_level=start_level + 1, color=color)
+                plot_children(c1[0], center_point=center_point + distance, distance=distance / 2.1,
+                              start_level=start_level + 1, color=color)
+            
+            return center_point + distance
+        
+        # Ensure nodes is a list
+        if isinstance(nodes, int):
+            nodes = [nodes]
+        
+        new_center = 0
+        for i, cn in tqdm(enumerate(nodes)):
+            # Get the next color from the palette
+            c = next(palette)
+            # Plot the children for the current node
+            new_center = plot_children(cn, center_point=new_center, distance=branch_distance / 2, color=c)
+            # Increment the center point for the next node
+            new_center += branch_distance + 0.5
