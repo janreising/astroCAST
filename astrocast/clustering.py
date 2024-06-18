@@ -3485,7 +3485,7 @@ class LinkageGraph:
         return bcs, Nc
     
     def plot_cluster_dendrogram(self, events: Union[Events, MultiEvents], matrix: np.ndarray, nodes: List[int],
-                                gap: float = 0.1,
+                                gap: float = 0.1, color_threshold: float = 0.005,
                                 axx: Tuple[plt.axis, plt.axis] = None, figsize: Tuple[int, int] = (7, 10),
                                 x_axis_compression: float = 1,
                                 width_ratios: Tuple[float, float] = (0.75, 0.25)):
@@ -3500,6 +3500,7 @@ class LinkageGraph:
             nodes: List of nodes that were clustered.
             matrix: A distance matrix to be used for clustering.
             gap: Gap between clusters in the plot.
+            color_threshold: Distance threshold at which to color nodes in different colors.
             axx: Axes for plotting, if None, new axes are created.
             figsize: Size of the figure.
             x_axis_compression: Factor by which the distance or similarity is compressed. eg., x**(1/2)
@@ -3518,7 +3519,7 @@ class LinkageGraph:
             matrix = hierarchy.linkage(matrix)
         
         # Generate dendrogram
-        dn = hierarchy.dendrogram(matrix, orientation="left", color_threshold=0.005, ax=ax0)
+        dn = hierarchy.dendrogram(matrix, orientation="left", color_threshold=color_threshold, ax=ax0)
         
         leaves_color_list = dn['leaves_color_list']
         
